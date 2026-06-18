@@ -32,6 +32,7 @@ REST_BASE = "https://api.derivws.com"
 PING_INTERVAL = 25          # seconds
 RECONNECT_DELAY = 10        # seconds (increased to avoid rate limits)
 MAX_RECONNECT_DELAY = 120   # seconds (increased maximum delay)
+DEFAULT_APP_ID = "33ABvw2NXwok58OBM2al0"
 
 
 class DerivClient:
@@ -51,7 +52,7 @@ class DerivClient:
     def __init__(
         self,
         token: str,
-        app_id: str = "33AsK8F3vLO1plM4tD2Wj",
+        app_id: str = DEFAULT_APP_ID,
         account_id: str = "",
         on_tick: Optional[Callable] = None,
         on_contract_result: Optional[Callable] = None,
