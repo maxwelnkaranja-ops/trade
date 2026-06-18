@@ -3,9 +3,9 @@ import asyncio
 import aiohttp
 
 # Your PAT token
-PAT_TOKEN = "pat_96066bf3fedb597c29f5774111b5c696d9930ed11de9147e6f7858ff19abe459"
+PAT_TOKEN = "pat_2ce0c945f675cd335a9cdff70c45929e7f7f30394147e61e7b1d91dd8e227917"
 # Current App ID
-APP_ID = "33AsK8F3vLO1plM4tD2Wj"
+APP_ID = "33ABvw2NXwok58OBM2al0"
 REST_BASE = "https://api.derivws.com"
 
 async def test_api():

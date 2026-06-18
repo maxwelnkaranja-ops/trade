@@ -93,7 +93,8 @@ class DerivClient:
         auth_event = asyncio.Event()
         self._auth_event = auth_event
         self._loop_task = asyncio.create_task(self._run_loop())
-        await asyncio.wait_for(auth_event.wait(), timeout=30)
+        # No timeout because rate limits can take minutes
+        await auth_event.wait()
 
     async def disconnect(self):
         """Gracefully stop everything."""
