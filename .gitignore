@@ -1,0 +1,12 @@
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+logs/
+data/
+config/bots.json
+.env
+.venv/
+venv/
+*.log
