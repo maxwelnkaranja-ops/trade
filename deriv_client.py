@@ -32,7 +32,7 @@ REST_BASE = "https://api.derivws.com"
 PING_INTERVAL = 25          # seconds
 RECONNECT_DELAY = 10        # seconds (increased to avoid rate limits)
 MAX_RECONNECT_DELAY = 120   # seconds (increased maximum delay)
-DEFAULT_APP_ID = "33ABvw2NXwok58OBM2al0"
+DEFAULT_APP_ID = "33ADPhDZXR2F60qhPudXB"
 
 
 class DerivClient:

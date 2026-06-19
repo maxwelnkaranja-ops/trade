@@ -72,7 +72,7 @@ DEFAULTS = {
     "alternatingRecovery": False,
     "alternatingRecoveryB": False,
     "tickPeriod": 50,
-    "appId": "33ABvw2NXwok58OBM2al0",
+    "appId": "33ADPhDZXR2F60qhPudXB",
 }
 
 app = FastAPI(title="Benz Club Control API")
@@ -231,7 +231,7 @@ def stop_bot(bot_id: str):
 @app.post("/api/token")
 def set_token(body: dict[str, Any]):
     token = str(body.get("token", "")).strip()
-    app_id = str(body.get("appId", "33ABvw2NXwok58OBM2al0")).strip()
+    app_id = str(body.get("appId", "33ADPhDZXR2F60qhPudXB")).strip()
 
     def _apply(raw: dict):
         for bid in BOT_IDS:
