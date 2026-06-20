@@ -131,6 +131,19 @@
               <button type="button" class="toggle" id="settings-tg-toggle"></button>
             </div>
           </div>
+          <div class="settings-section">
+            <label class="settings-label font-display">System Sound</label>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-row-label">
+                <div class="label-title font-display" style="display:flex;align-items:center;gap:8px;">
+                  <span id="mute-icon" style="font-size:18px;">🔊</span>
+                  <span id="mute-label">Sound On</span>
+                </div>
+                <div class="label-sub">Mutes all audio across every tab instantly</div>
+              </div>
+              <button type="button" class="toggle" id="settings-mute-toggle"></button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -6066,6 +6079,57 @@ window.NexusStrategies=exports;
     if (tgToggle) tgToggle.onclick = () => window.HubStore.setTelegramEnabled(!window.HubStore.getState().telegramEnabled);
     refreshTg();
     if (window.HubStore) window.HubStore.subscribe(refreshTg);
+
+    // ── System Mute Toggle ──────────────────────────────────────────
+    const muteToggleBtn = document.getElementById('settings-mute-toggle');
+    const muteIcon      = document.getElementById('mute-icon');
+    const muteLabel     = document.getElementById('mute-label');
+
+    // BroadcastChannel syncs mute state across all open tabs instantly
+    const _muteChannel = (typeof BroadcastChannel !== 'undefined')
+      ? new BroadcastChannel('benz_club_mute') : null;
+
+    function applyMuteState(muted) {
+      // Mute/unmute every HTMLMediaElement on the page
+      document.querySelectorAll('audio, video').forEach(el => { el.muted = muted; });
+      // Suspend/resume the shared AudioContext used by engines (if any)
+      if (window._benzAudioCtx) {
+        if (muted && window._benzAudioCtx.state === 'running')   window._benzAudioCtx.suspend();
+        if (!muted && window._benzAudioCtx.state === 'suspended') window._benzAudioCtx.resume();
+      }
+      // Persist across page reloads
+      try { localStorage.setItem('benz_muted', muted ? '1' : '0'); } catch(_) {}
+      // Update UI
+      if (muteToggleBtn) muteToggleBtn.classList.toggle('on', muted);
+      if (muteIcon)  muteIcon.textContent  = muted ? '🔇' : '🔊';
+      if (muteLabel) muteLabel.textContent = muted ? 'Muted'    : 'Sound On';
+      // Expose globally so engines can check before playing sounds
+      window._benzMuted = muted;
+    }
+
+    function toggleMute() {
+      const nowMuted = !window._benzMuted;
+      applyMuteState(nowMuted);
+      // Broadcast to other tabs
+      if (_muteChannel) _muteChannel.postMessage({ muted: nowMuted });
+    }
+
+    // Listen for cross-tab mute events
+    if (_muteChannel) {
+      _muteChannel.onmessage = (e) => {
+        if (typeof e.data?.muted === 'boolean') applyMuteState(e.data.muted);
+      };
+    }
+
+    // Init from localStorage
+    (function initMute() {
+      let saved = false;
+      try { saved = localStorage.getItem('benz_muted') === '1'; } catch(_) {}
+      applyMuteState(saved);
+    })();
+
+    if (muteToggleBtn) muteToggleBtn.onclick = toggleMute;
+    // ── End System Mute Toggle ─────────────────────────────────────
   }
 
   function refreshTopbar() {
