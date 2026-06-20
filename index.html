@@ -87,16 +87,15 @@
         <div class="modal-body">
           <div class="settings-section">
             <label class="settings-label font-display">Deriv App ID</label>
-            <p class="settings-hint">Must be a <strong>numeric</strong> ID (e.g. 1089) registered at <strong>api.deriv.com</strong>. The public demo app (1089) works for tick data and analysis. If trading fails, register your own at api.deriv.com → Dashboard → Applications. ⚠️ Do NOT use IDs from developers.deriv.com — those are for Deriv's separate Options platform and will not work here.</p>
+            <p class="settings-hint">Your alphanumeric App ID from <strong>developers.deriv.com</strong> → Dashboard → Applications (e.g. <code>33ADPhDZXR2F60qhPudXB</code>). Required for all connections. Register a PAT-type app if you don't have one.</p>
             <div class="settings-row">
-              <input type="text" inputmode="numeric" class="input-field font-mono" id="settings-appid" placeholder="1089">
+              <input type="text" class="input-field font-mono" id="settings-appid" placeholder="e.g. 33ADPhDZXR2F60qhPudXB">
               <button type="button" class="btn-primary font-display" id="settings-appid-save">Save</button>
             </div>
-            <p class="settings-status" id="settings-appid-status" style="display:none"></p>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">Deriv API Token</label>
-            <p class="settings-hint">Needed only for placing trades and viewing your account balance. Live tick data, digit analysis, and market scanning work without it.</p>
+            <p class="settings-hint">Your Personal Access Token (PAT) from <strong>developers.deriv.com</strong> → Dashboard → API tokens. Create a PAT with <em>trade</em> and <em>account_manage</em> scopes. This is used as a Bearer token to authenticate all REST and WebSocket calls.</p>
             <div class="settings-row">
               <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token…">
               <button type="button" class="btn-primary font-display" id="settings-save">Save &amp; Connect</button>
@@ -1095,7 +1094,7 @@ html.light .hub-shell { background: hsl(var(--bg)); }
   const state = {
     apiToken: load('hub_api_token', ''),
     accountType: load('hub_account_type', 'demo'), // 'demo' or 'real'
-    appId: (() => { const v = load('hub_app_id', '1089'); return v || '1089'; })(), // Deriv app ID — defaults to public demo app (1089). Legacy WebSocket API requires a numeric ID registered at api.deriv.com. Do NOT use IDs from developers.deriv.com — those are for the separate Options REST API.
+    appId: (() => { const v = load('hub_app_id', ''); return v || ''; })(), // Alphanumeric App ID from developers.deriv.com
     accountId: '',
     balanceUSD: 0,
     currency: 'USD',
@@ -1109,8 +1108,54 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     derivHistory: [], // past trades fetched from Deriv on connect
   };
 
-  function getWsUrl() {
-    return `wss://ws.derivws.com/websockets/v3?app_id=${state.appId}`;
+  // New Deriv API: REST to fetch account ID, then OTP to get authenticated WS URL.
+  // App IDs from developers.deriv.com are alphanumeric (e.g. "33ADPhDZXR2F60qhPudXB").
+  // PAT is used as Bearer token in REST headers.
+  const API_BASE = 'https://api.derivws.com';
+
+  function getAuthHeaders() {
+    return {
+      'Authorization': `Bearer ${state.apiToken}`,
+      'Deriv-App-ID': state.appId,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  // Fetches accounts list, picks demo or real, then calls OTP to get authenticated WS URL.
+  async function getAuthenticatedWsUrl() {
+    const accountsResp = await fetch(`${API_BASE}/trading/v1/options/accounts`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+    if (!accountsResp.ok) {
+      const err = await accountsResp.json().catch(() => ({}));
+      throw new Error(err.errors?.[0]?.message || `Accounts fetch failed: ${accountsResp.status}`);
+    }
+    const accountsData = await accountsResp.json();
+    // accountsData.data is array of accounts; pick demo or real based on accountType
+    const accounts = accountsData.data || accountsData.accounts || accountsData || [];
+    const accountList = Array.isArray(accounts) ? accounts : [];
+    const wantReal = state.accountType === 'real';
+    const picked = accountList.find(a => wantReal ? !a.is_virtual : a.is_virtual) || accountList[0];
+    if (!picked) throw new Error('No accounts found — check your PAT scopes');
+    const accountId = picked.account_id || picked.id || picked.loginid;
+    state.accountId = accountId;
+    state.currency = picked.currency || 'USD';
+    state.balanceUSD = parseFloat(picked.balance) || 0;
+
+    // OTP call — returns authenticated WebSocket URL
+    const otpResp = await fetch(`${API_BASE}/trading/v1/options/accounts/${accountId}/otp`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!otpResp.ok) {
+      const err = await otpResp.json().catch(() => ({}));
+      throw new Error(err.errors?.[0]?.message || `OTP failed: ${otpResp.status}`);
+    }
+    const otpData = await otpResp.json();
+    const wsUrl = otpData.data?.url || otpData.url;
+    if (!wsUrl) throw new Error('OTP response did not return a WebSocket URL');
+    return wsUrl;
   }
 
   function emit() { listeners.forEach((cb) => { try { cb(state); } catch (e) { /* */ } }); }
@@ -1142,19 +1187,6 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     global.dispatchEvent(new CustomEvent('hub:account-type-changed', { detail: { accountType, appId: state.appId } }));
   }
 
-  function setAppId(appId) {
-    appId = (appId || '').trim();
-    if (!appId) appId = '1089';
-    // The legacy Deriv WebSocket API (ws.derivws.com) requires a numeric App ID
-    // registered at api.deriv.com. Alphanumeric IDs are for the separate Options REST API
-    // at developers.deriv.com and will NOT work here. We store whatever the user enters
-    // so they can see what's saved, but warn clearly if it looks wrong.
-    state.appId = appId;
-    localStorage.setItem('hub_app_id', appId);
-    emit();
-    connectAccount(); // re-authorize the status socket against the new app_id
-    global.dispatchEvent(new CustomEvent('hub:appid-changed', { detail: { appId } }));
-  }
 
   async function notifyTelegram(message) {
     if (!state.telegramEnabled || !state.telegramToken || !state.telegramChatId) return;
@@ -1166,11 +1198,6 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     } catch (e) { /* */ }
   }
 
-  // Standalone, no-backend account check: opens a short-lived WebSocket
-  // straight to Deriv just to confirm the saved PAT is valid and read the
-  // balance/account id for the topbar. The four trading engines each open
-  // their own authenticated socket independently (using this same token)
-  // when they actually need to place trades — this one is just for status.
   let statusSocket = null;
   let reconnectTimer = null;
 
@@ -1187,56 +1214,43 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     state.connectionStatus = 'connecting';
     state.connectionError = '';
     emit();
-    const ws = new WebSocket(getWsUrl());
-    statusSocket = ws;
-    let gotResponse = false;
-    ws.onopen = () => { try { ws.send(JSON.stringify({ authorize: state.apiToken })); } catch (e) { /* */ } };
-    ws.onerror = () => {
-      state.connectionError = window.location.protocol === 'file:'
-        ? 'Connection blocked — Deriv rejects WebSocket connections from local files. Host this page (e.g. via a local server or upload it online) instead of opening it directly.'
-        : 'Could not reach Deriv\u2019s servers — check your internet connection.';
-    };
-    ws.onmessage = (m) => {
-      try {
-        const d = JSON.parse(m.data);
-        if (d.msg_type === 'authorize') {
-          gotResponse = true;
-          if (d.error) {
-            state.isAuthenticated = false;
-            state.connectionStatus = 'disconnected';
-            state.connectionError = d.error.message || 'Token rejected by Deriv.';
-            emit();
-            return;
+
+    getAuthenticatedWsUrl().then((wsUrl) => {
+      const ws = new WebSocket(wsUrl);
+      statusSocket = ws;
+      ws.onopen = () => {
+        // Already authenticated via OTP URL — just subscribe to balance
+        state.isAuthenticated = true;
+        state.connectionStatus = 'connected';
+        state.connectionError = '';
+        emit();
+        try { ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
+      };
+      ws.onerror = () => {
+        state.connectionError = 'WebSocket connection failed — check your internet connection.';
+      };
+      ws.onmessage = (m) => {
+        try {
+          const d = JSON.parse(m.data);
+          if (d.msg_type === 'balance' && d.balance) {
+            const bal = parseFloat(d.balance.balance);
+            if (!isNaN(bal)) { state.balanceUSD = bal; emit(); }
           }
-          if (d.authorize) {
-            const bal = parseFloat(d.authorize.balance);
-            state.isAuthenticated = true;
-            state.connectionStatus = 'connected';
-            state.connectionError = '';
-            state.accountId = d.authorize.loginid || '';
-            state.currency = d.authorize.currency || 'USD';
-            state.balanceUSD = isNaN(bal) ? 0 : bal;
-            ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-            emit();
-          }
-        }
-        if (d.msg_type === 'balance' && d.balance) {
-          const bal = parseFloat(d.balance.balance);
-          if (!isNaN(bal)) { state.balanceUSD = bal; emit(); }
-        }
-      } catch (e) { /* */ }
-    };
-    ws.onclose = () => {
-      state.connectionStatus = 'disconnected';
+        } catch (e) { /* */ }
+      };
+      ws.onclose = () => {
+        state.connectionStatus = 'disconnected';
+        state.isAuthenticated = false;
+        emit();
+        if (state.apiToken) reconnectTimer = setTimeout(connectAccount, 8000);
+      };
+    }).catch((err) => {
       state.isAuthenticated = false;
-      if (!gotResponse && !state.connectionError) {
-        state.connectionError = window.location.protocol === 'file:'
-          ? 'Connection blocked — Deriv rejects WebSocket connections from local files. Host this page instead of opening it directly.'
-          : 'Connection closed before authorizing — check your token and app id.';
-      }
+      state.connectionStatus = 'disconnected';
+      state.connectionError = err.message || 'Connection failed — check your PAT and App ID';
       emit();
-      if (state.apiToken) reconnectTimer = setTimeout(connectAccount, 5000);
-    };
+      if (state.apiToken) reconnectTimer = setTimeout(connectAccount, 8000);
+    });
   }
 
   function setToken(token) {
@@ -1247,8 +1261,17 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     global.dispatchEvent(new CustomEvent('hub:token-changed', { detail: { token } }));
   }
 
+  function setAppId(appId) {
+    appId = (appId || '').trim() || '33ADPhDZXR2F60qhPudXB'; // new alphanumeric format from developers.deriv.com
+    state.appId = appId;
+    localStorage.setItem('hub_app_id', appId);
+    emit();
+    connectAccount();
+    global.dispatchEvent(new CustomEvent('hub:appid-changed', { detail: { appId } }));
+  }
+
   global.HubStore = {
-    getWsUrl,
+    getAuthenticatedWsUrl,
     getState: () => state,
     subscribe(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     setToken, setTheme, setTelegram, setTelegramEnabled, setAccountType, setAppId, notifyTelegram, connectAccount,
@@ -2880,7 +2903,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().appId) || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
+  function getWsUrl() { return 'wss://ws.binaryws.com/websockets/v3'; }
 
   class GlobalSocketManager {
     constructor() {
@@ -3759,7 +3782,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  function getAppId() { return (window.HubStore && window.HubStore.getState().appId) || '1089'; }
+  function getPublicWsUrl() { return 'wss://ws.binaryws.com/websockets/v3'; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -4062,7 +4085,7 @@ window.NexusStrategies=exports;
       } catch (e) { /* */ }
       this.tickIndex = 0;
       const createSocket = (market, type) => {
-        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${getAppId()}`);
+        const ws = new WebSocket(`wss://ws.binaryws.com/websockets/v3`);
         ws.onopen = () => { try { ws.send(JSON.stringify({ ticks: market, subscribe: 1 })); } catch (e) { /* */ } };
         ws.onmessage = (m) => {
           try {
@@ -4089,76 +4112,75 @@ window.NexusStrategies=exports;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
       try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) { /* */ }
-      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${getAppId()}`);
-      this.socketT = ws;
-      let gotResponse = false;
-      ws.onerror = () => {
-        const reason = window.location.protocol === 'file:'
-          ? 'Deriv blocks connections from local files — host this page instead of opening it directly from disk.'
-          : 'Could not reach Deriv\u2019s servers.';
-        this.dispatch({ type: 'NOTIFY', message: reason, ntype: 'loss' });
-      };
-      ws.onopen = () => { try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ } };
-      ws.onmessage = (m) => {
-        try {
-          const d = JSON.parse(m.data);
-          if (d.msg_type === 'authorize') {
-            gotResponse = true;
-            if (d.error) { this.dispatch({ type: 'NOTIFY', message: `Auth failed: ${d.error.message}`, ntype: 'loss' }); this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); return; }
-            if (d.authorize) {
-              const bal = parseFloat(d.authorize.balance);
-              this.dispatch({ type: 'AUTHENTICATED', balance: isNaN(bal) ? 0 : bal });
-              this.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
-              ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
-              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+
+      window.HubStore.getAuthenticatedWsUrl().then((wsUrl) => {
+        const ws = new WebSocket(wsUrl);
+        this.socketT = ws;
+        ws.onerror = () => {
+          this.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
+        };
+        ws.onopen = () => {
+          // Already authenticated via OTP URL
+          const hub = window.HubStore.getState();
+          const bal = hub.balanceUSD || 0;
+          this.dispatch({ type: 'AUTHENTICATED', balance: bal });
+          this.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
+          try {
+            ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
+            ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+          } catch (e) { /* */ }
+        };
+        ws.onmessage = (m) => {
+          try {
+            const d = JSON.parse(m.data);
+            if (d.msg_type === 'balance' && d.balance) {
+              const bal = parseFloat(d.balance.balance);
+              if (!isNaN(bal)) this.dispatch({ type: 'UPDATE_BALANCE', balance: bal });
             }
-          }
-          if (d.msg_type === 'balance' && d.balance) {
-            const bal = parseFloat(d.balance.balance);
-            if (!isNaN(bal)) this.dispatch({ type: 'UPDATE_BALANCE', balance: bal });
-          }
-          if (d.msg_type === 'proposal_open_contract') {
-            const c = d.proposal_open_contract;
-            if (c && c.is_sold) {
-              const balAfter = parseFloat(c.balance_after);
-              if (!isNaN(balAfter)) this.dispatch({ type: 'UPDATE_BALANCE', balance: balAfter });
-              const isWin = c.status === 'won';
-              const profit = parseFloat(c.profit) || 0;
-              const exit = c.exit_tick_display_value?.toString().slice(-1) || '?';
-              this.dispatch({
-                type: 'ADD_JOURNAL',
-                entry: {
-                  id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
-                  time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'differ',
-                  barrier: c.barrier ?? 0, exitDigit: parseInt(exit) || 0, profit,
-                  market: c.underlying || this.state.primaryMarket, stake: parseFloat(c.buy_price) || this.state.stake,
-                },
-              });
-              const tradeMsg = `${isWin ? '✓ WIN' : '✗ LOSS'} | B:${c.barrier} E:${exit} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}`;
-              this.dispatch({ type: 'NOTIFY', message: tradeMsg, ntype: isWin ? 'win' : 'loss' });
-              const cs = this.state;
-              const tgMsg = `${isWin ? '✅' : '❌'} ${tradeMsg}\n💰 Balance: ${(isNaN(balAfter) ? cs.balanceUSD : balAfter).toFixed(2)} | Net P/L: ${cs.totalProfit.toFixed(2)}`;
-              window.HubStore.notifyTelegram(tgMsg);
-              if (isWin) audio.win();
-              else {
-                audio.loss();
-                if (this.state.abortOnLoss && this.state.isRunning) {
-                  this.abortFlag = true; audio.abort();
-                  this.dispatch({ type: 'NOTIFY', message: '⛔ ABORT triggered — loss detected', ntype: 'loss' });
+            if (d.msg_type === 'proposal_open_contract') {
+              const c = d.proposal_open_contract;
+              if (c && c.is_sold) {
+                const balAfter = parseFloat(c.balance_after);
+                if (!isNaN(balAfter)) this.dispatch({ type: 'UPDATE_BALANCE', balance: balAfter });
+                const isWin = c.status === 'won';
+                const profit = parseFloat(c.profit) || 0;
+                const exit = c.exit_tick_display_value?.toString().slice(-1) || '?';
+                this.dispatch({
+                  type: 'ADD_JOURNAL',
+                  entry: {
+                    id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
+                    time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'differ',
+                    barrier: c.barrier ?? 0, exitDigit: parseInt(exit) || 0, profit,
+                    market: c.underlying || this.state.primaryMarket, stake: parseFloat(c.buy_price) || this.state.stake,
+                  },
+                });
+                const tradeMsg = `${isWin ? '✓ WIN' : '✗ LOSS'} | B:${c.barrier} E:${exit} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}`;
+                this.dispatch({ type: 'NOTIFY', message: tradeMsg, ntype: isWin ? 'win' : 'loss' });
+                const cs = this.state;
+                const tgMsg = `${isWin ? '✅' : '❌'} ${tradeMsg}\n💰 Balance: ${(isNaN(balAfter) ? cs.balanceUSD : balAfter).toFixed(2)} | Net P/L: ${cs.totalProfit.toFixed(2)}`;
+                window.HubStore.notifyTelegram(tgMsg);
+                if (isWin) audio.win();
+                else {
+                  audio.loss();
+                  if (this.state.abortOnLoss && this.state.isRunning) {
+                    this.abortFlag = true; audio.abort();
+                    this.dispatch({ type: 'NOTIFY', message: '⛔ ABORT triggered — loss detected', ntype: 'loss' });
+                  }
                 }
               }
             }
-          }
-          if (d.msg_type === 'buy' && d.error) this.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message}`, ntype: 'loss' });
-        } catch (e) { /* */ }
-      };
-      ws.onclose = () => {
+            if (d.msg_type === 'buy' && d.error) this.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message}`, ntype: 'loss' });
+          } catch (e) { /* */ }
+        };
+        ws.onclose = () => {
+          this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+          setTimeout(() => { if (window.HubStore.getState().apiToken) this.authenticate(); }, 8000);
+        };
+      }).catch((err) => {
         this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-        if (!gotResponse) {
-          this.dispatch({ type: 'NOTIFY', message: 'Connection closed before authorizing — check your token and internet connection.', ntype: 'loss' });
-        }
-        setTimeout(() => { if (window.HubStore.getState().apiToken) this.authenticate(); }, 5000);
-      };
+        this.dispatch({ type: 'NOTIFY', message: `Auth failed: ${err.message}`, ntype: 'loss' });
+        setTimeout(() => { if (window.HubStore.getState().apiToken) this.authenticate(); }, 8000);
+      });
     }
 
     armSystem() {
@@ -4183,12 +4205,12 @@ window.NexusStrategies=exports;
   }
 
   window.BenzEngine = BenzEngine;
-  window.BenzConstants = { MARKETS, get APP_ID() { return getAppId(); }, getGlobalMarket };
+  window.BenzConstants = { MARKETS, getGlobalMarket };
 })();
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().appId) || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
+  function getWsUrl() { return 'wss://ws.binaryws.com/websockets/v3'; }
   const ANALYSIS_HOLD = 20;
 
   class TitanEngine {
@@ -4536,44 +4558,44 @@ window.NexusStrategies=exports;
       token = (token || '').trim();
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
       if (this.tradingSocket) this.tradingSocket.close();
-      this.tradingSocket = new WebSocket(getWsUrl());
-      let gotResponse = false;
-      this.tradingSocket.onerror = () => {
-        const reason = window.location.protocol === 'file:'
-          ? 'Deriv blocks connections from local files — host this page instead of opening it directly from disk.'
-          : 'Could not reach Deriv\u2019s servers.';
-        this.addLog('error', 'NETWORK', reason);
-      };
-      this.tradingSocket.onopen = () => {
-        this.tradingSocket.send(JSON.stringify({ authorize: token }));
-        this.addLog('system', 'NETWORK', 'Trading pipe established');
-      };
-      this.tradingSocket.onmessage = (msg) => {
-        const data = JSON.parse(msg.data);
-        if (data.msg_type === 'authorize') {
-          gotResponse = true;
-          if (data.error) { this.addLog('error', 'AUTH', data.error.message); this.state.connected = false; }
-          else {
-            this.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-            this.state.connected = true; this.sound.playConnect();
-            this.addLog('win', 'AUTH', 'Ready to trade');
-          }
-        }
-        if (data.msg_type === 'balance') this.state.balance = data.balance.balance;
-        if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract?.is_sold) this.handleContractResult(data.proposal_open_contract);
-        if (data.msg_type === 'buy' && data.error) { this.addLog('error', 'TRADE', data.error.message); this.pendingTrade = null; }
-        this.emit();
-      };
-      this.tradingSocket.onclose = () => {
+
+      window.HubStore.getAuthenticatedWsUrl().then((wsUrl) => {
+        this.tradingSocket = new WebSocket(wsUrl);
+        this.tradingSocket.onerror = () => {
+          this.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
+          this.state.connected = false;
+        };
+        this.tradingSocket.onopen = () => {
+          // Already authenticated via OTP URL
+          const hub = window.HubStore.getState();
+          this.state.balance = hub.balanceUSD || 0;
+          this.state.connected = true;
+          this.sound.playConnect();
+          this.addLog('win', 'AUTH', 'Ready to trade');
+          try { this.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
+          this.addLog('system', 'NETWORK', 'Trading pipe established');
+        };
+        this.tradingSocket.onmessage = (msg) => {
+          const data = JSON.parse(msg.data);
+          if (data.msg_type === 'balance') this.state.balance = data.balance.balance;
+          if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract?.is_sold) this.handleContractResult(data.proposal_open_contract);
+          if (data.msg_type === 'buy' && data.error) { this.addLog('error', 'TRADE', data.error.message); this.pendingTrade = null; }
+          this.emit();
+        };
+        this.tradingSocket.onclose = () => {
+          this.state.connected = false;
+          this.emit();
+        };
+        if (this.pingInterval) clearInterval(this.pingInterval);
+        this.pingInterval = setInterval(() => {
+          if (this.tradingSocket?.readyState === WebSocket.OPEN) this.tradingSocket.send(JSON.stringify({ ping: 1 }));
+        }, 25000);
+        this.connectRef = this.connect.bind(this);
+      }).catch((err) => {
+        this.addLog('error', 'AUTH', `Connection failed: ${err.message}`);
         this.state.connected = false;
-        if (!gotResponse) this.addLog('error', 'NETWORK', 'Connection closed before authorizing — check your token and internet connection.');
         this.emit();
-      };
-      if (this.pingInterval) clearInterval(this.pingInterval);
-      this.pingInterval = setInterval(() => {
-        if (this.tradingSocket?.readyState === WebSocket.OPEN) this.tradingSocket.send(JSON.stringify({ ping: 1 }));
-      }, 25000);
-      this.connectRef = this.connect.bind(this);
+      });
     }
 
     toggleEngine() {
@@ -5742,38 +5764,9 @@ window.NexusStrategies=exports;
     function refreshAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
       if (appIdInput && hub.appId) appIdInput.value = hub.appId;
-      const statusEl2 = document.getElementById('settings-appid-status');
-      if (statusEl2 && hub.appId && !/^\d+$/.test(hub.appId)) {
-        statusEl2.style.display = '';
-        statusEl2.style.color = 'hsl(var(--loss))';
-        statusEl2.textContent = `⚠️ Stored App ID "${hub.appId}" is non-numeric. The Deriv WebSocket API only accepts numeric IDs from api.deriv.com. Connection will fail until you replace this with a valid numeric ID (try 1089 for the public demo app).`;
-      } else if (statusEl2) {
-        statusEl2.style.display = 'none';
-      }
     }
     if (appIdSaveBtn) appIdSaveBtn.onclick = () => {
       const v = (appIdInput && appIdInput.value || '').trim();
-      const statusEl2 = document.getElementById('settings-appid-status');
-      if (!v) {
-        if (window.HubStore) window.HubStore.setAppId('1089');
-        appIdSaveBtn.textContent = 'Reset to 1089 ✓';
-        setTimeout(() => { appIdSaveBtn.textContent = 'Save'; }, 2000);
-        return;
-      }
-      if (!/^\d+$/.test(v)) {
-        // Non-numeric — this looks like a token or an OAuth client ID from developers.deriv.com
-        if (statusEl2) {
-          statusEl2.style.display = '';
-          statusEl2.style.color = 'hsl(var(--loss))';
-          statusEl2.textContent = '⚠️ This looks non-numeric. Deriv\'s legacy WebSocket API requires a numeric App ID from api.deriv.com. If you pasted a token, use the API Token field below instead. If you have an ID from developers.deriv.com, that platform uses a different API incompatible with this app — use api.deriv.com to register for the WebSocket API.';
-        }
-        // Still save it so the user can see what's stored; connection will fail and show an error
-        if (window.HubStore) window.HubStore.setAppId(v);
-        appIdSaveBtn.textContent = 'Saved (⚠️ non-numeric)';
-        setTimeout(() => { appIdSaveBtn.textContent = 'Save'; }, 3000);
-        return;
-      }
-      if (statusEl2) statusEl2.style.display = 'none';
       if (window.HubStore) window.HubStore.setAppId(v);
       appIdSaveBtn.textContent = 'Saved ✓';
       setTimeout(() => { appIdSaveBtn.textContent = 'Save'; }, 2000);
