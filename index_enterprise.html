@@ -6,6 +6,18 @@
   <title>Benz Club — Unified Trading Hub</title>
   </head>
 <body>
+  <div id="file-protocol-banner" style="display:none;background:#7a1f1f;color:#fff;padding:10px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;text-align:center;line-height:1.5">
+    ⚠️ You opened this file directly from disk (file://). Deriv's servers reject WebSocket connections from local files, so trading and account login will always fail here.
+    Host this page — e.g. run a local server (<code>python3 -m http.server</code> in its folder, then open <code>http://localhost:8000/...</code>) or upload it to any static host — and reload it from that URL instead.
+  </div>
+  <script>
+    if (window.location.protocol === 'file:') {
+      document.addEventListener('DOMContentLoaded', () => {
+        const b = document.getElementById('file-protocol-banner');
+        if (b) b.style.display = 'block';
+      });
+    }
+  </script>
   <div class="hub-shell">
     <header class="hub-topbar">
       <div class="hub-brand">
@@ -51,7 +63,7 @@
     </section>
 
     <section id="panel-differ" class="app-panel" aria-label="Differ terminal">
-      <div id="benz-root" class="app-root"></div>
+      <div id="differ-root" class="app-root"></div>
     </section>
 
     <section id="panel-even" class="app-panel" aria-label="Even dashboard">
@@ -74,13 +86,22 @@
         </div>
         <div class="modal-body">
           <div class="settings-section">
+            <label class="settings-label font-display">Deriv App ID</label>
+            <p class="settings-hint">Must be a <strong>numeric</strong> ID (e.g. 1089) registered at <strong>api.deriv.com</strong>. The public demo app (1089) works for tick data and analysis. If trading fails, register your own at api.deriv.com → Dashboard → Applications. ⚠️ Do NOT use IDs from developers.deriv.com — those are for Deriv's separate Options platform and will not work here.</p>
+            <div class="settings-row">
+              <input type="text" inputmode="numeric" class="input-field font-mono" id="settings-appid" placeholder="1089">
+              <button type="button" class="btn-primary font-display" id="settings-appid-save">Save</button>
+            </div>
+            <p class="settings-status" id="settings-appid-status" style="display:none"></p>
+          </div>
+          <div class="settings-section">
             <label class="settings-label font-display">Deriv API Token</label>
-            <p class="settings-hint">One token powers the whole site — Dashboard, Differ, Even, Odd and Over/Under all share this connection.</p>
+            <p class="settings-hint">Needed only for placing trades and viewing your account balance. Live tick data, digit analysis, and market scanning work without it.</p>
             <div class="settings-row">
               <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token…">
               <button type="button" class="btn-primary font-display" id="settings-save">Save &amp; Connect</button>
             </div>
-            <p class="settings-status" id="settings-status">Not connected.</p>
+            <p class="settings-status" id="settings-status">Checking…</p>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">Account Type</label>
@@ -119,539 +140,924 @@
   <!-- Shared libs -->
   <!-- App engines -->
   <style>
-/* ============================================================
-   BENZ CLUB — Unified Glass Trading Hub
-   One design system shared by Dashboard, Differ, Even, Odd
-   and Over/Under. All panels read these same tokens.
-   ============================================================ */
+/* ════════════════════════════════════════════════════════════════
+   BENZ CLUB — Enterprise Trading Terminal  ·  v4
+   Full rebuild. Pure black command-deck aesthetic, indigo/violet
+   primary, amber automation accent, tabular green/red P&L.
+   Every class referenced by markup or JS is defined below —
+   nothing left unstyled.
+   ════════════════════════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;800;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-/* ── OBSIDIAN (default) — true black with electric purple ── */
+/* ──────────────────────────────────────────────────────────────
+   THEME TOKENS — five palettes, one variable contract
+   ────────────────────────────────────────────────────────────── */
 :root, .dark {
-  --bg: 0 0% 4%;
-  --bg-soft: 0 0% 7%;
-  --card: 270 8% 10%;
-  --card-2: 270 6% 13%;
-  --foreground: 270 10% 92%;
-  --muted: 270 6% 14%;
-  --muted-foreground: 270 5% 50%;
-  --border: 270 8% 18%;
+  --bg: 0 0% 0%;
+  --bg-soft: 270 10% 3%;
+  --card: 270 9% 6.5%;
+  --card-2: 270 7% 9.5%;
+  --foreground: 270 12% 93%;
+  --muted: 270 7% 9%;
+  --muted-foreground: 270 6% 52%;
+  --border: 270 9% 15%;
 
-  --primary: 270 80% 65%;      /* electric purple */
-  --primary-2: 290 70% 60%;    /* violet */
-  --secondary: 290 70% 60%;
-  --accent: 38 92% 58%;        /* amber */
+  --primary: 257 85% 66%;     /* indigo-violet — command accent */
+  --primary-2: 285 72% 62%;   /* magenta-violet */
+  --secondary: 285 72% 62%;
+  --accent: 38 95% 58%;       /* amber — automation / warnings */
 
-  --win: 142 64% 48%;
-  --loss: 5 74% 56%;
-  --success: 142 64% 48%;
-  --destructive: 5 74% 56%;
+  --win: 152 68% 45%;
+  --loss: 354 78% 58%;
+  --success: 152 68% 45%;
+  --destructive: 354 78% 58%;
 
   --radius: 12px;
   --radius-sm: 8px;
   --radius-lg: 18px;
+  --topbar-h: 58px;
+  --tabs-h: 50px;
 }
 
-/* ── VOID — absolute black with white/cyan ── */
 html.midnight {
-  --bg: 0 0% 2%;
-  --bg-soft: 0 0% 5%;
-  --card: 0 0% 8%;
-  --card-2: 0 0% 11%;
-  --foreground: 0 0% 94%;
-  --muted: 0 0% 12%;
-  --muted-foreground: 0 0% 48%;
-  --border: 0 0% 16%;
-  --primary: 186 100% 60%;   /* cyan */
-  --primary-2: 200 90% 55%;
-  --secondary: 200 90% 55%;
-  --accent: 45 95% 58%;
-  --win: 144 62% 46%;
-  --loss: 6 70% 54%;
-  --success: 144 62% 46%;
-  --destructive: 6 70% 54%;
-
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-lg: 18px;
+  --bg: 0 0% 0%;
+  --bg-soft: 200 30% 3%;
+  --card: 200 22% 6.5%;
+  --card-2: 200 18% 9.5%;
+  --foreground: 195 18% 93%;
+  --muted: 200 16% 9%;
+  --muted-foreground: 200 10% 50%;
+  --border: 200 16% 14%;
+  --primary: 191 100% 56%;    /* cyan */
+  --primary-2: 205 92% 56%;
+  --secondary: 205 92% 56%;
+  --accent: 44 96% 58%;
+  --win: 156 64% 44%;
+  --loss: 354 74% 56%;
+  --success: 156 64% 44%;
+  --destructive: 354 74% 56%;
 }
 
-/* ── NEBULA — deep purple galaxy theme ── */
 html.slate {
-  --bg: 250 35% 5%;
-  --bg-soft: 250 30% 8%;
-  --card: 250 25% 11%;
-  --card-2: 250 22% 15%;
-  --foreground: 250 15% 92%;
-  --muted: 250 20% 15%;
-  --muted-foreground: 250 10% 52%;
-  --border: 250 18% 20%;
-  --primary: 265 100% 70%;
-  --primary-2: 285 80% 65%;
-  --secondary: 285 80% 65%;
-  --accent: 36 90% 56%;
-  --win: 140 58% 46%;
-  --loss: 4 72% 54%;
-  --success: 140 58% 46%;
-  --destructive: 4 72% 54%;
-
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-lg: 18px;
+  --bg: 0 0% 0%;
+  --bg-soft: 252 34% 4%;
+  --card: 252 26% 7.5%;
+  --card-2: 252 22% 10.5%;
+  --foreground: 252 16% 93%;
+  --muted: 252 20% 10%;
+  --muted-foreground: 252 10% 52%;
+  --border: 252 18% 16%;
+  --primary: 268 95% 70%;     /* deep electric violet */
+  --primary-2: 292 80% 65%;
+  --secondary: 292 80% 65%;
+  --accent: 35 92% 56%;
+  --win: 148 60% 45%;
+  --loss: 350 76% 58%;
+  --success: 148 60% 45%;
+  --destructive: 350 76% 58%;
 }
 
-/* ── CHARCOAL — dark neutral with teal accent ── */
 html.charcoal {
-  --bg: 210 14% 6%;
-  --bg-soft: 210 12% 9%;
-  --card: 210 10% 12%;
-  --card-2: 210 8% 16%;
-  --foreground: 200 10% 88%;
-  --muted: 210 8% 18%;
-  --muted-foreground: 210 6% 48%;
-  --border: 210 8% 22%;
-  --primary: 180 80% 50%;
-  --primary-2: 195 74% 52%;
-  --secondary: 195 74% 52%;
-  --accent: 40 86% 56%;
-  --win: 145 60% 46%;
-  --loss: 4 70% 54%;
-  --success: 145 60% 46%;
-  --destructive: 4 70% 54%;
-
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-lg: 18px;
+  --bg: 0 0% 0%;
+  --bg-soft: 212 14% 4%;
+  --card: 212 11% 7.5%;
+  --card-2: 212 9% 10.5%;
+  --foreground: 205 10% 90%;
+  --muted: 212 9% 10%;
+  --muted-foreground: 212 6% 48%;
+  --border: 212 9% 15%;
+  --primary: 178 78% 48%;     /* teal */
+  --primary-2: 198 70% 52%;
+  --secondary: 198 70% 52%;
+  --accent: 41 88% 56%;
+  --win: 150 58% 44%;
+  --loss: 352 72% 56%;
+  --success: 150 58% 44%;
+  --destructive: 352 72% 56%;
 }
 
-/* ── ARCTIC — clean white with purple accent ── */
 html.light {
-  --bg: 250 20% 97%;
+  --bg: 248 24% 97%;
   --bg-soft: 0 0% 100%;
   --card: 0 0% 100%;
-  --card-2: 250 15% 96%;
-  --foreground: 250 30% 12%;
-  --muted: 250 15% 92%;
-  --muted-foreground: 250 10% 44%;
-  --border: 250 12% 84%;
-  --primary: 265 80% 52%;
-  --primary-2: 280 68% 55%;
-  --secondary: 280 68% 55%;
-  --accent: 36 86% 46%;
-  --win: 142 50% 38%;
-  --loss: 4 62% 46%;
-  --success: 142 50% 38%;
-  --destructive: 4 62% 46%;
-
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-lg: 18px;
+  --card-2: 248 18% 96%;
+  --foreground: 250 32% 13%;
+  --muted: 248 18% 93%;
+  --muted-foreground: 250 10% 45%;
+  --border: 250 14% 84%;
+  --primary: 257 75% 54%;
+  --primary-2: 285 60% 53%;
+  --secondary: 285 60% 53%;
+  --accent: 36 88% 46%;
+  --win: 152 56% 36%;
+  --loss: 354 64% 47%;
+  --success: 152 56% 36%;
+  --destructive: 354 64% 47%;
 }
 
+:root, .dark, html.midnight, html.slate, html.charcoal, html.light {
+  --radius: 12px; --radius-sm: 8px; --radius-lg: 18px;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   KEYFRAMES
+   ────────────────────────────────────────────────────────────── */
+@keyframes cooldown-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.8); } }
+@keyframes glow-flicker {
+  0%, 100% { box-shadow: 0 0 8px hsl(var(--primary) / 0.4), 0 0 22px hsl(var(--primary) / 0.18); }
+  50%       { box-shadow: 0 0 18px hsl(var(--primary) / 0.65), 0 0 44px hsl(var(--primary) / 0.3); }
+}
+@keyframes accent-cooldown { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes panel-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slide-in-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes logo-pulse {
+  0%, 100% { box-shadow: 0 0 12px hsl(var(--primary) / 0.5), 0 0 32px hsl(var(--primary) / 0.18); }
+  50%       { box-shadow: 0 0 22px hsl(var(--primary) / 0.85), 0 0 58px hsl(var(--primary) / 0.32); }
+}
+@keyframes neon-flicker {
+  0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% { opacity: 1; }
+  20%, 24%, 55% { opacity: 0.55; }
+}
+@keyframes topbar-glow { 0%, 100% { border-bottom-color: hsl(var(--border)); } 50% { border-bottom-color: hsl(var(--primary) / 0.4); } }
+@keyframes status-glow { 0%, 100% { text-shadow: 0 0 8px hsl(var(--win) / 0.55); } 50% { text-shadow: 0 0 18px hsl(var(--win) / 0.95); } }
+@keyframes tab-active-glow {
+  0%, 100% { box-shadow: 0 0 12px hsl(var(--primary) / 0.18), inset 0 0 10px hsl(var(--primary) / 0.05); }
+  50%       { box-shadow: 0 0 26px hsl(var(--primary) / 0.32), inset 0 0 16px hsl(var(--primary) / 0.1); }
+}
+@keyframes modal-enter { from { opacity: 0; transform: scale(0.94) translateY(14px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes win-flash {
+  0%   { box-shadow: 0 0 0 hsl(var(--win) / 0); border-color: hsl(var(--border)); }
+  28%  { box-shadow: 0 0 56px hsl(var(--win) / 0.55); border-color: hsl(var(--win)); }
+  100% { box-shadow: 0 0 0 hsl(var(--win) / 0); border-color: hsl(var(--border)); }
+}
+@keyframes loss-flash {
+  0%   { box-shadow: 0 0 0 hsl(var(--loss) / 0); border-color: hsl(var(--border)); }
+  28%  { box-shadow: 0 0 56px hsl(var(--loss) / 0.55); border-color: hsl(var(--loss)); }
+  100% { box-shadow: 0 0 0 hsl(var(--loss) / 0); border-color: hsl(var(--border)); }
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes number-pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ──────────────────────────────────────────────────────────────
+   BASE / RESET
+   ────────────────────────────────────────────────────────────── */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body {
   font-family: 'Rajdhani', sans-serif;
-  background: hsl(var(--bg));
+  background: #000;
   color: hsl(var(--foreground));
   font-size: 15px;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Scrollbars */
-*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar { width: 5px; height: 5px; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 8px; }
-*::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary) / 0.45); }
+*::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 6px; transition: background 0.2s; }
+*::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary) / 0.55); }
 
-/* ---------------------------------------------------------- */
-/* Shell + ambient background glow                              */
-/* ---------------------------------------------------------- */
-.hub-shell { display: flex; flex-direction: column; height: 100vh; position: relative; isolation: isolate; }
+/* ──────────────────────────────────────────────────────────────
+   SHELL + AMBIENT ATMOSPHERE
+   ────────────────────────────────────────────────────────────── */
+.hub-shell {
+  display: flex; flex-direction: column; height: 100vh;
+  position: relative; isolation: isolate;
+  background: #000; overflow: hidden;
+}
+
+/* CRT scanline texture */
+.hub-shell::after {
+  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    hsl(0 0% 0% / 0.035) 2px, hsl(0 0% 0% / 0.035) 4px
+  );
+}
+
+/* Ambient corner glow blobs */
 .hub-shell::before {
   content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background:
-    radial-gradient(circle at 12% 8%, hsl(var(--primary) / 0.18) 0%, transparent 42%),
-    radial-gradient(circle at 88% 18%, hsl(var(--primary-2) / 0.14) 0%, transparent 45%),
-    radial-gradient(circle at 50% 105%, hsl(var(--primary) / 0.10) 0%, transparent 55%);
+    radial-gradient(ellipse 60% 38% at 12% 0%,  hsl(var(--primary) / 0.13) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 32% at 90% 8%,  hsl(var(--primary-2) / 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 22% at 50% 100%, hsl(var(--primary) / 0.06) 0%, transparent 55%);
 }
+html.light .hub-shell::before, html.light .hub-shell::after { display: none; }
+
 .hub-topbar, .hub-tabs, .app-panel, .modal-overlay { position: relative; z-index: 1; }
 
-/* ---------------------------------------------------------- */
-/* Top bar — global account / clock / settings                  */
-/* ---------------------------------------------------------- */
+/* ──────────────────────────────────────────────────────────────
+   TOP BAR
+   ────────────────────────────────────────────────────────────── */
 .hub-topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 12px 18px;
-  background: linear-gradient(180deg, hsl(var(--primary) / 0.10), hsl(var(--bg) / 0.4));
-  border-bottom: 1px solid hsl(var(--border) / 0.6);
-  flex-shrink: 0;
+  padding: 0 18px; height: var(--topbar-h); flex-shrink: 0;
+  background: hsl(var(--bg-soft));
+  border-bottom: 1px solid hsl(var(--border));
+  animation: topbar-glow 4.5s ease-in-out infinite;
 }
+html.light .hub-topbar { background: #fff; }
+
 .hub-brand { display: flex; align-items: center; gap: 12px; }
 .hub-brand-avatar {
-  width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 900; color: #fff;
+  width: 40px; height: 40px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; font-weight: 900; color: #fff; flex-shrink: 0;
   background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)));
-  box-shadow: 0 6px 18px hsl(var(--primary) / 0.35);
+  animation: logo-pulse 3.5s ease-in-out infinite;
 }
-.hub-brand-name { font-size: 1rem; letter-spacing: 4px; color: hsl(var(--foreground)); }
-.hub-brand-name span { color: hsl(var(--primary)); }
-.hub-brand-sub { font-size: 10px; letter-spacing: 1px; color: hsl(var(--muted-foreground)); margin-top: 2px; }
-.hub-topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hub-brand-text { display: flex; flex-direction: column; gap: 1px; }
+.hub-brand-name { font-size: 0.98rem; font-weight: 900; letter-spacing: 5px; color: hsl(var(--foreground)); }
+.hub-brand-name span { color: hsl(var(--primary)); animation: neon-flicker 8s infinite; }
+.hub-brand-sub { font-size: 9.5px; letter-spacing: 1.5px; color: hsl(var(--muted-foreground)); text-transform: uppercase; margin-top: 2px; }
+
+.hub-topbar-right { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+
 .glass-pill {
   padding: 7px 14px; border-radius: 999px; font-size: 12px;
-  background: hsl(var(--card) / 0.6); border: 1px solid hsl(var(--border) / 0.6);
+  background: hsl(var(--card)); border: 1px solid hsl(var(--border));
   backdrop-filter: blur(12px);
 }
-.hub-balance-pill { color: hsl(var(--win)); }
+.hub-balance-pill {
+  color: hsl(var(--win)); text-shadow: 0 0 10px hsl(var(--win) / 0.5);
+  border-color: hsl(var(--win) / 0.32);
+  box-shadow: 0 0 16px hsl(var(--win) / 0.1);
+}
 .hub-clock {
-  font-size: 12px; padding: 7px 12px; border-radius: 999px; letter-spacing: 1px;
-  background: hsl(var(--bg-soft) / 0.7); border: 1px solid hsl(var(--border) / 0.5); color: hsl(var(--muted-foreground));
+  font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 1.5px;
+  padding: 7px 12px; border-radius: 999px;
+  background: hsl(var(--bg)); border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
 }
+html.light .hub-clock { background: hsl(var(--bg)); }
+
 .hub-live-badge {
-  display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; font-size: 11px;
-  letter-spacing: 2px; text-transform: uppercase; font-family: Orbitron, sans-serif;
-  background: hsl(var(--card) / 0.6); border: 1px solid hsl(var(--border) / 0.6); color: hsl(var(--muted-foreground));
+  display: flex; align-items: center; gap: 7px; padding: 7px 14px; border-radius: 999px;
+  font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 2.2px; text-transform: uppercase;
+  background: hsl(var(--bg)); border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
+  transition: all 0.3s;
 }
-.hub-live-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--loss) / 0.6); transition: .2s; }
-.hub-live-badge.connected { color: hsl(var(--win)); border-color: hsl(var(--win) / 0.35); }
-.hub-live-badge.connected .dot { background: hsl(var(--win)); box-shadow: 0 0 8px hsl(var(--win)); }
-.hub-live-badge.connecting .dot { background: hsl(var(--accent)); box-shadow: 0 0 8px hsl(var(--accent)); animation: cooldown-pulse 1s infinite; }
+html.light .hub-live-badge { background: hsl(var(--muted)); }
+.hub-live-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--loss) / 0.55); flex-shrink: 0; transition: 0.3s; }
+.hub-live-badge.connected { color: hsl(var(--win)); border-color: hsl(var(--win) / 0.4); background: hsl(var(--win) / 0.06); animation: status-glow 2.4s ease-in-out infinite; }
+.hub-live-badge.connected .dot { background: hsl(var(--win)); box-shadow: 0 0 9px hsl(var(--win)), 0 0 20px hsl(var(--win) / 0.4); animation: cooldown-pulse 1.6s infinite; }
+.hub-live-badge.connecting .dot { background: hsl(var(--accent)); box-shadow: 0 0 8px hsl(var(--accent)); animation: cooldown-pulse 0.9s infinite; }
+
 .hub-theme-pills { display: flex; gap: 4px; }
-.hub-theme-pills button, .theme-pill-row button {
-  width: 32px; height: 32px; border-radius: 10px; border: 1px solid hsl(var(--border) / 0.6);
-  background: hsl(var(--card) / 0.6); cursor: pointer; font-size: 14px; transition: .15s;
+.hub-theme-pills button, .theme-pill-row button, .theme-pill-btn {
+  width: 32px; height: 32px; border-radius: 10px;
+  border: 1px solid hsl(var(--border)); background: hsl(var(--card));
+  cursor: pointer; font-size: 14px; transition: all 0.18s;
   display: flex; align-items: center; justify-content: center;
 }
-.hub-theme-pills button.active, .theme-pill-row button.active {
-  border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary) / 0.14); box-shadow: 0 0 12px hsl(var(--primary) / 0.2);
+.hub-theme-pills button:hover, .theme-pill-row button:hover, .theme-pill-btn:hover {
+  border-color: hsl(var(--primary) / 0.55);
+  box-shadow: 0 0 14px hsl(var(--primary) / 0.25);
+  transform: translateY(-1px) scale(1.05);
 }
+.hub-theme-pills button.active, .theme-pill-row button.active, .theme-pill-btn.active {
+  border-color: hsl(var(--primary) / 0.7);
+  background: hsl(var(--primary) / 0.16);
+  box-shadow: 0 0 18px hsl(var(--primary) / 0.32);
+}
+
 .hub-settings-btn {
-  display: flex; align-items: center; gap: 7px; padding: 8px 16px; border-radius: 999px;
-  font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
-  border: 1px solid hsl(var(--primary) / 0.4); background: hsl(var(--primary) / 0.10); color: hsl(var(--primary));
-  cursor: pointer; transition: .2s;
-}
-.hub-settings-btn:hover { background: hsl(var(--primary) / 0.18); box-shadow: 0 0 16px hsl(var(--primary) / 0.2); }
-
-/* ---------------------------------------------------------- */
-/* Tab nav                                                       */
-/* ---------------------------------------------------------- */
-.hub-tabs {
-  display: flex; align-items: center; gap: 6px; padding: 10px 18px; flex-wrap: wrap;
-  border-bottom: 1px solid hsl(var(--border) / 0.5); flex-shrink: 0;
-  background: hsl(var(--bg-soft) / 0.5);
-}
-.hub-tab {
+  display: flex; align-items: center; gap: 7px; padding: 8px 17px; border-radius: 999px;
   font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
-  padding: 10px 18px; border: 1px solid transparent; border-radius: 999px;
-  background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer; transition: all .2s;
+  border: 1px solid hsl(var(--primary) / 0.4); background: hsl(var(--primary) / 0.08);
+  color: hsl(var(--primary)); cursor: pointer; transition: all 0.2s;
 }
-.hub-tab:hover { color: hsl(var(--foreground)); border-color: hsl(var(--border)); background: hsl(var(--card) / 0.4); }
+.hub-settings-btn:hover {
+  background: hsl(var(--primary) / 0.18);
+  border-color: hsl(var(--primary) / 0.7);
+  box-shadow: 0 0 22px hsl(var(--primary) / 0.28);
+  transform: translateY(-1px);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   TAB NAV  (Dashboard · Differ · Even · Odd · Over/Under)
+   ────────────────────────────────────────────────────────────── */
+.hub-tabs {
+  display: flex; gap: 4px; align-items: center; overflow-x: auto;
+  background: hsl(var(--bg-soft));
+  border-bottom: 1px solid hsl(var(--border));
+  padding: 6px 16px; height: var(--tabs-h); flex-shrink: 0;
+  scrollbar-width: none;
+}
+.hub-tabs::-webkit-scrollbar { display: none; }
+html.light .hub-tabs { background: hsl(var(--bg)); }
+
+.hub-tab {
+  display: flex; align-items: center; gap: 7px;
+  font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 2.2px; text-transform: uppercase;
+  padding: 8px 18px; border: 1px solid transparent; border-radius: 999px;
+  background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer;
+  transition: all 0.2s; white-space: nowrap; flex-shrink: 0;
+}
+.hub-tab:hover:not(.active) {
+  background: hsl(var(--muted) / 0.55);
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground));
+  transform: translateY(-1px);
+}
 .hub-tab.active {
-  color: hsl(var(--primary)); border-color: hsl(var(--primary) / 0.45);
-  background: hsl(var(--primary) / 0.12); box-shadow: 0 0 20px hsl(var(--primary) / 0.15);
+  background: hsl(var(--primary) / 0.12);
+  border-color: hsl(var(--primary) / 0.5);
+  color: hsl(var(--primary));
+  animation: tab-active-glow 3s ease-in-out infinite;
 }
-.hub-tab .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: hsl(var(--border)); }
-.hub-tab.active .dot.live, .hub-tab:hover .dot.live { background: hsl(var(--win)); box-shadow: 0 0 6px hsl(var(--win)); }
+.hub-tab .dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--border)); flex-shrink: 0; transition: 0.3s; }
+.hub-tab .dot.live { background: hsl(var(--win)); box-shadow: 0 0 8px hsl(var(--win)); animation: cooldown-pulse 2s infinite; }
+.hub-tab.active .dot.live { box-shadow: 0 0 12px hsl(var(--win)), 0 0 22px hsl(var(--win) / 0.4); }
 
-/* ---------------------------------------------------------- */
-/* App panels                                                    */
-/* ---------------------------------------------------------- */
-.app-panel { display: none; flex: 1; overflow: hidden; min-height: 0; }
-.app-panel.active { display: flex; flex-direction: column; }
-.app-root { display: flex; flex-direction: column; height: 100%; overflow: hidden; min-height: 0; }
+/* ──────────────────────────────────────────────────────────────
+   APP PANELS
+   ────────────────────────────────────────────────────────────── */
+.app-panel { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.app-panel.active { display: flex; flex-direction: column; animation: panel-in 0.22s ease; }
+.app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
-/* ---------------------------------------------------------- */
-/* Core glass surfaces — shared by every panel                  */
-/* ---------------------------------------------------------- */
-.glass-panel, .panel, .glass-card {
-  background: linear-gradient(160deg, hsl(var(--card) / 0.78), hsl(var(--bg) / 0.55));
-  border: 1px solid hsl(var(--border) / 0.55);
-  border-radius: var(--radius);
-  backdrop-filter: blur(20px) saturate(140%);
-  box-shadow: 0 10px 30px hsl(0 0% 0% / 0.30), inset 0 1px 0 hsl(0 0% 100% / 0.03);
-}
-.glass-panel-glow, .glass-card-glow {
-  background: linear-gradient(160deg, hsl(var(--primary) / 0.10), hsl(var(--bg) / 0.6));
-  border: 1px solid hsl(var(--primary) / 0.22);
-  border-radius: var(--radius);
-  backdrop-filter: blur(20px) saturate(140%);
-  box-shadow: 0 10px 36px hsl(var(--primary) / 0.10), inset 0 1px 0 hsl(0 0% 100% / 0.03);
-}
-.glass-panel-cyan {
-  background: linear-gradient(160deg, hsl(var(--primary-2) / 0.10), hsl(var(--bg) / 0.6));
-  border: 1px solid hsl(var(--primary-2) / 0.22);
-  border-radius: var(--radius);
-  backdrop-filter: blur(20px) saturate(140%);
-}
-.glass-monitor {
-  background: hsl(var(--bg) / 0.55);
-  border: 1px solid hsl(var(--border) / 0.5);
-  border-radius: var(--radius-sm);
-}
-
-/* Typography helpers */
-.font-display { font-family: Orbitron, sans-serif; }
-.font-orbitron { font-family: Orbitron, sans-serif; }
-.font-mono, .font-mono-data, .font-fira { font-family: 'JetBrains Mono', monospace; font-feature-settings: "tnum" 1; }
-
-.neon-primary, .neon-text-primary, .text-primary { color: hsl(var(--primary)); text-shadow: 0 0 10px hsl(var(--primary) / 0.35); }
-.neon-secondary, .neon-text-secondary { color: hsl(var(--primary-2)); text-shadow: 0 0 10px hsl(var(--primary-2) / 0.35); }
-.neon-accent, .neon-text-accent, .text-accent { color: hsl(var(--accent)); }
-.neon-win, .neon-text-win, .text-success { color: hsl(var(--win)); text-shadow: 0 0 8px hsl(var(--win) / 0.35); }
-.neon-loss, .neon-text-loss, .text-destructive { color: hsl(var(--loss)); text-shadow: 0 0 8px hsl(var(--loss) / 0.35); }
-.text-muted { color: hsl(var(--muted-foreground)); }
-
-.section-divider {
-  font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 3px;
-  text-transform: uppercase; display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
-  color: hsl(var(--muted-foreground));
-}
-.section-divider::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, hsl(var(--border)), transparent); }
-
-/* ---------------------------------------------------------- */
-/* Form controls — shared                                        */
-/* ---------------------------------------------------------- */
-.terminal-input, .terminal-select, .titan-input, .input-field {
-  width: 100%; background: hsl(var(--bg) / 0.65); border: 1px solid hsl(var(--border));
-  padding: 10px 12px; font-size: 12px; font-family: 'JetBrains Mono', monospace;
-  color: hsl(var(--foreground)); border-radius: var(--radius-sm); outline: none; transition: border-color .15s;
-}
-.terminal-input:focus, .terminal-select:focus, .titan-input:focus, .input-field:focus { border-color: hsl(var(--primary) / 0.6); box-shadow: 0 0 0 3px hsl(var(--primary) / 0.10); }
-label, .settings-label { font-family: Orbitron, sans-serif; }
-
-/* Buttons */
-.btn-glow { font-family: Orbitron, sans-serif; cursor: pointer; border-radius: var(--radius-sm); transition: all .2s; background: transparent; }
-.btn-primary {
-  border: none; color: #fff; padding: 12px 20px; font-weight: 700; letter-spacing: 3px;
-  border-radius: var(--radius-sm); cursor: pointer; font-family: Orbitron, sans-serif; font-size: 11px;
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)));
-  box-shadow: 0 6px 18px hsl(var(--primary) / 0.3); transition: .2s; white-space: nowrap;
-}
-.btn-primary:hover { box-shadow: 0 8px 24px hsl(var(--primary) / 0.4); transform: translateY(-1px); }
-.btn-danger { border: 1px solid hsl(var(--loss) / 0.5); color: hsl(var(--loss)); padding: 10px; border-radius: var(--radius-sm); background: transparent; cursor: pointer; font-family: Orbitron, sans-serif; }
-
-/* Engage / Omega action buttons — unified look */
-.btn-engage, .btn-omega {
-  width: 100%; padding: 16px; font-family: Orbitron, sans-serif; font-weight: 800;
-  letter-spacing: 4px; text-transform: uppercase; border-radius: var(--radius);
-  cursor: pointer; transition: all .25s; text-align: center; border: 2px solid transparent;
-}
-.btn-engage {
-  background: hsl(var(--primary) / 0.08); border-color: hsl(var(--primary) / 0.4); color: hsl(var(--primary));
-}
-.btn-engage:hover { background: hsl(var(--primary) / 0.14); }
-.btn-engage.armed { border-color: hsl(var(--primary)); background: hsl(var(--primary) / 0.14); box-shadow: 0 0 24px hsl(var(--primary) / 0.25); animation: benz-pulse 2.5s infinite; }
-.btn-engage.firing { border-color: hsl(var(--win) / 0.6); color: hsl(var(--win)); background: hsl(var(--win) / 0.08); }
-.btn-engage.cooldown { border-color: hsl(var(--accent) / 0.6); color: hsl(var(--accent)); animation: benz-cooldown 1.2s infinite; }
-@keyframes benz-pulse { 0%,100% { box-shadow: 0 0 6px hsl(var(--primary) / 0.18); } 50% { box-shadow: 0 0 32px hsl(var(--primary) / 0.4); } }
-@keyframes benz-cooldown { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
-@keyframes cooldown-pulse { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
-
-.btn-omega {
-  border: none; color: #fff; letter-spacing: 3px;
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)));
-  box-shadow: 0 8px 24px hsl(var(--primary) / 0.28);
-}
-.btn-omega:hover { box-shadow: 0 10px 30px hsl(var(--primary) / 0.38); }
-.btn-omega.stop { background: linear-gradient(135deg, hsl(var(--loss)), hsl(0 70% 42%)); box-shadow: 0 8px 24px hsl(var(--loss) / 0.28); }
-.btn-omega:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
-
-/* Toggles — unified pill switch */
-.toggle, .toggle-pill, .titan-toggle {
-  width: 46px; height: 26px; border-radius: 14px; background: hsl(var(--muted)); border: none;
-  cursor: pointer; position: relative; transition: background .2s; flex-shrink: 0;
-}
-.toggle::after, .toggle-pill::after, .titan-toggle::after {
-  content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
-  background: hsl(var(--muted-foreground)); transition: left .2s, background .2s;
-}
-.toggle.on, .toggle-pill.on, .titan-toggle.on { background: hsl(var(--primary) / 0.32); box-shadow: 0 0 12px hsl(var(--primary) / 0.25); }
-.toggle.on::after, .toggle-pill.on::after, .titan-toggle.on::after { left: 23px; background: hsl(var(--primary)); }
-
-/* Pills / list buttons — strategy, barrier, sub-tabs */
-.strategy-btn, .barrier-btn, .benz-subtab {
-  border: 1px solid hsl(var(--border) / 0.6); border-radius: var(--radius-sm);
-  background: hsl(var(--card) / 0.35); color: hsl(var(--foreground)); cursor: pointer;
-  transition: all .15s; padding: 9px 11px; font-size: 11px;
-}
-.strategy-btn { width: 100%; text-align: left; margin: 3px 0; }
-.strategy-btn.active, .barrier-btn.selected {
-  border-color: hsl(var(--primary) / 0.7); background: hsl(var(--primary) / 0.12); color: hsl(var(--primary));
-}
-.barrier-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; }
-.barrier-btn { text-align: center; font-family: Orbitron, sans-serif; font-weight: 700; padding: 9px 4px; }
-
-.benz-subtab { border: none; border-radius: 0; background: transparent; flex: 1; padding: 10px; font-size: 10px; letter-spacing: 2px; text-align: center; }
-.benz-subtab.active { color: hsl(var(--primary)); border-bottom: 2px solid hsl(var(--primary)); }
-
-/* Bars */
-.bar-track { height: 5px; background: hsl(var(--muted) / 0.7); border-radius: 6px; overflow: hidden; }
-.bar-fill-primary { height: 100%; background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--primary) / 0.5)); transition: width .4s; }
-.bar-fill-cyan { height: 100%; background: linear-gradient(90deg, hsl(var(--primary-2)), hsl(var(--primary-2) / 0.5)); transition: width .4s; }
-.bar-fill-win { height: 100%; background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--win) / 0.5)); transition: width .4s; }
-.bar-fill-accent { height: 100%; background: linear-gradient(90deg, hsl(var(--accent)), hsl(var(--accent) / 0.5)); transition: width .4s; }
-.bar-fill-loss { height: 100%; background: linear-gradient(90deg, hsl(var(--loss)), hsl(var(--loss) / 0.5)); transition: width .4s; }
-
-/* Digit displays */
-.digit-cell {
-  text-align: center; padding: 8px 4px; border-radius: var(--radius-sm);
-  background: hsl(var(--bg) / 0.6); border: 1px solid hsl(var(--border) / 0.6); transition: all .25s;
-}
-.digit-cell.cold, .digit-cell.is-cold { border-color: hsl(var(--primary) / 0.45); background: hsl(var(--primary) / 0.10); box-shadow: 0 0 18px hsl(var(--primary) / 0.12); }
-.digit-cell.is-zero { opacity: .35; }
-.digit-pad {
-  font-size: 84px; font-weight: 900; font-family: Orbitron, sans-serif;
-  text-align: center; padding: 22px; border-radius: var(--radius);
-  background: linear-gradient(160deg, hsl(var(--card) / 0.75), hsl(var(--bg) / 0.6));
-  border: 2px solid hsl(var(--border)); text-shadow: 0 0 30px hsl(var(--primary) / 0.4);
-  transition: border-color .15s, box-shadow .15s;
-}
-.digit-pad.win-flash { border-color: hsl(var(--win)); box-shadow: 0 0 40px hsl(var(--win) / 0.3); }
-.digit-pad.loss-flash { border-color: hsl(var(--loss)); box-shadow: 0 0 40px hsl(var(--loss) / 0.3); }
-
-/* Flow / log entries */
-.flow-track { display: flex; gap: 5px; margin: 8px 0; }
-.flow-step {
-  flex: 1; text-align: center; padding: 7px; font-size: 9px; font-family: Orbitron, sans-serif;
-  letter-spacing: 1px; border-radius: var(--radius-sm); background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
-}
-.flow-step.active { background: hsl(var(--primary) / 0.18); color: hsl(var(--primary)); box-shadow: 0 0 12px hsl(var(--primary) / 0.18); }
-.flow-step.fire { background: hsl(var(--win) / 0.18); color: hsl(var(--win)); }
-
-.log-item, .log-entry {
-  padding: 9px 11px; margin-bottom: 5px; border-radius: var(--radius-sm); font-size: 11px;
-  font-family: 'JetBrains Mono', monospace; border-left: 3px solid hsl(var(--border));
-  background: hsl(var(--card) / 0.35);
-}
-.log-item.win, .log-entry.win { border-left-color: hsl(var(--win)); background: hsl(var(--win) / 0.07); }
-.log-item.loss, .log-entry.loss { border-left-color: hsl(var(--loss)); background: hsl(var(--loss) / 0.07); }
-.log-item.engine, .log-entry.engine, .log-entry.system { border-left-color: hsl(var(--primary)); background: hsl(var(--primary) / 0.05); }
-
-/* Notification toast */
-.notify-toast {
-  position: fixed; top: 70px; right: 16px; z-index: 200; padding: 12px 16px;
-  border-radius: var(--radius-sm); font-size: 11px; font-weight: 600; max-width: 320px;
-  background: hsl(var(--card) / 0.9); border: 1px solid hsl(var(--border)); backdrop-filter: blur(16px);
-  box-shadow: 0 10px 30px hsl(0 0% 0% / 0.4); animation: fadeIn .3s;
-}
-@keyframes fadeIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
-
-/* ---------------------------------------------------------- */
-/* Three-column trading layouts — Differ / Even / Odd / Over-Under */
-/* ---------------------------------------------------------- */
+/* ──────────────────────────────────────────────────────────────
+   THREE-COLUMN TRADING DESK
+   Left = Analysis / Signals · Center = Execution Controls
+   Right = Journal / Live Log
+   THIS is the rule that was missing `display:grid` and broke
+   the whole layout — fixed here.
+   ────────────────────────────────────────────────────────────── */
 .benz-grid, .titan-grid {
-  display: grid; grid-template-columns: 300px 1fr 320px; gap: 12px;
-  flex: 1; min-height: 0; overflow: hidden; padding: 12px;
+  display: grid;
+  grid-template-columns: 300px 1fr 320px;
+  gap: 10px; padding: 10px;
+  flex: 1; min-height: 0; overflow: hidden;
 }
 .benz-col {
-  overflow: hidden; display: flex; flex-direction: column; min-height: 0;
-  background: linear-gradient(160deg, hsl(var(--card) / 0.65), hsl(var(--bg) / 0.45));
-  border: 1px solid hsl(var(--border) / 0.5); border-radius: var(--radius);
-  backdrop-filter: blur(18px) saturate(130%);
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  background: linear-gradient(170deg, hsl(var(--card) / 0.92) 0%, hsl(var(--bg-soft) / 0.85) 100%);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 4px 22px hsl(0 0% 0% / 0.4), inset 0 1px 0 hsl(255 100% 100% / 0.025);
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
-.benz-scroll { flex: 1; overflow-y: auto; padding: 14px; }
-.stat-5xl { font-size: 3rem; font-weight: 900; font-family: Orbitron, sans-serif; line-height: 1; }
+.benz-col:hover {
+  border-color: hsl(var(--primary) / 0.28);
+  box-shadow: 0 6px 30px hsl(0 0% 0% / 0.5), 0 0 0 1px hsl(var(--primary) / 0.05);
+}
+.benz-scroll { flex: 1; overflow-y: auto; padding: 13px; scrollbar-gutter: stable; }
+html.light .benz-col { background: #fff; border-color: hsl(var(--border)); box-shadow: 0 1px 8px hsl(0 0% 0% / 0.08); }
 
-
-
-@media (max-width: 980px) {
+@media (max-width: 1020px) {
   .benz-grid, .titan-grid { grid-template-columns: 1fr; overflow-y: auto; }
+  .benz-col { min-height: 220px; }
 }
 
-/* ---------------------------------------------------------- */
-/* Settings modal                                                */
-/* ---------------------------------------------------------- */
+/* ──────────────────────────────────────────────────────────────
+   GLASS SURFACES
+   ────────────────────────────────────────────────────────────── */
+.glass-panel, .panel, .glass-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 4px 24px hsl(0 0% 0% / 0.4), inset 0 1px 0 hsl(255 100% 100% / 0.03);
+}
+.glass-panel-glow, .glass-card-glow {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--primary) / 0.22);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 24px hsl(0 0% 0% / 0.4), 0 0 44px hsl(var(--primary) / 0.06), inset 0 1px 0 hsl(255 100% 100% / 0.03);
+}
+.glass-panel-cyan { background: hsl(var(--card)); border: 1px solid hsl(var(--primary-2) / 0.22); border-radius: var(--radius); }
+.glass-monitor {
+  background: hsl(var(--bg) / 0.7); border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: var(--radius-sm); transition: border-color 0.2s;
+}
+html.light .glass-panel, html.light .panel { background: #fff; box-shadow: 0 1px 6px hsl(0 0% 0% / 0.08); }
+html.light .glass-panel-glow { background: hsl(var(--primary) / 0.04); }
+html.light .glass-monitor { background: hsl(var(--bg)); }
+html.light .modal-card { background: #fff; }
+
+/* ──────────────────────────────────────────────────────────────
+   TYPOGRAPHY / COLOR UTILITIES
+   These were the missing color classes responsible for every
+   win/loss number rendering with no color at all.
+   ────────────────────────────────────────────────────────────── */
+.font-display { font-family: Orbitron, sans-serif; }
+.font-orbitron { font-family: Orbitron, sans-serif; }
+.font-mono, .font-mono-data, .font-fira {
+  font-family: 'JetBrains Mono', monospace;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+.text-primary, .neon-text-primary { color: hsl(var(--primary)); }
+.text-accent, .neon-text-accent { color: hsl(var(--accent)); }
+.text-muted { color: hsl(var(--muted-foreground)); }
+.text-success, .neon-text-win {
+  color: hsl(var(--win));
+  text-shadow: 0 0 10px hsl(var(--win) / 0.4);
+}
+.text-destructive, .neon-text-loss {
+  color: hsl(var(--loss));
+  text-shadow: 0 0 10px hsl(var(--loss) / 0.4);
+}
+.neon-text-secondary { color: hsl(var(--primary-2)); text-shadow: 0 0 10px hsl(var(--primary-2) / 0.35); }
+.neon-text-primary { text-shadow: 0 0 10px hsl(var(--primary) / 0.35); }
+.neon-text-accent { text-shadow: 0 0 10px hsl(var(--accent) / 0.3); }
+html.light .text-success, html.light .neon-text-win,
+html.light .text-destructive, html.light .neon-text-loss,
+html.light .neon-text-primary, html.light .neon-text-secondary,
+html.light .neon-text-accent { text-shadow: none; }
+
+/* ──────────────────────────────────────────────────────────────
+   APP PANELS
+   ────────────────────────────────────────────────────────────── */
+.section-divider {
+  font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 2.5px;
+  text-transform: uppercase; display: flex; align-items: center; gap: 8px;
+  color: hsl(var(--muted-foreground)); margin-bottom: 8px;
+}
+.section-divider::after { content: ''; flex: 1; height: 1px; background: hsl(var(--border) / 0.7); }
+
+/* ──────────────────────────────────────────────────────────────
+   MODAL  — driven by aria-hidden, not a class toggle
+   ────────────────────────────────────────────────────────────── */
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
-  background: hsl(var(--bg) / 0.65); backdrop-filter: blur(6px);
-  opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; padding: 20px;
+  position: fixed; inset: 0; z-index: 100;
+  background: hsl(0 0% 0% / 0.78); backdrop-filter: blur(9px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  transition: opacity 0.2s;
 }
-.modal-overlay.open { opacity: 1; visibility: visible; }
-.modal-card { width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto; padding: 22px; }
-.modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.modal-header h2 { margin: 0; font-size: 1rem; letter-spacing: 4px; color: hsl(var(--primary)); }
+.modal-overlay[aria-hidden='true'] { display: none; }
+.modal-card {
+  width: 100%; max-width: 540px; max-height: 92vh; overflow-y: auto;
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--primary) / 0.25);
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.1), 0 26px 64px hsl(0 0% 0% / 0.8), 0 0 80px hsl(var(--primary) / 0.08);
+  animation: modal-enter 0.25s ease;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px 16px; border-bottom: 1px solid hsl(var(--border));
+  position: sticky; top: 0; background: hsl(var(--card)); z-index: 1;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.modal-header h2 {
+  margin: 0; font-size: 1.05rem; letter-spacing: 3.5px; text-transform: uppercase;
+  color: hsl(var(--primary)); text-shadow: 0 0 20px hsl(var(--primary) / 0.4);
+}
 .modal-close {
-  width: 32px; height: 32px; border-radius: 10px; border: 1px solid hsl(var(--border));
-  background: hsl(var(--card) / 0.6); color: hsl(var(--foreground)); cursor: pointer; font-size: 13px;
+  width: 32px; height: 32px; border-radius: 8px; border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.5); color: hsl(var(--muted-foreground)); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.2s;
 }
-.modal-body { display: flex; flex-direction: column; gap: 20px; }
-.settings-section { display: flex; flex-direction: column; gap: 8px; }
-.settings-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--primary)); }
-.settings-hint { font-size: 11px; color: hsl(var(--muted-foreground)); margin: 0; line-height: 1.5; }
-.settings-status { font-size: 11px; color: hsl(var(--muted-foreground)); margin: 2px 0 0; }
-.settings-status.ok { color: hsl(var(--win)); }
-.settings-status.err { color: hsl(var(--loss)); }
+.modal-close:hover { background: hsl(var(--destructive) / 0.15); border-color: hsl(var(--destructive) / 0.45); color: hsl(var(--destructive)); box-shadow: 0 0 12px hsl(var(--destructive) / 0.2); }
+.modal-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+
+/* ──────────────────────────────────────────────────────────────
+   SETTINGS
+   ────────────────────────────────────────────────────────────── */
+.settings-section {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 16px; border-radius: var(--radius-sm);
+  background: hsl(var(--bg-soft)); border: 1px solid hsl(var(--border));
+  transition: border-color 0.2s;
+}
+.settings-section:hover { border-color: hsl(var(--primary) / 0.28); }
+html.light .settings-section { background: hsl(var(--bg)); }
+.settings-label { font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 2.5px; text-transform: uppercase; color: hsl(var(--primary)); margin-bottom: 2px; }
+.settings-hint { font-size: 11px; color: hsl(var(--muted-foreground)); line-height: 1.6; }
 .settings-row { display: flex; gap: 8px; }
-.settings-row .input-field { flex: 1; }
 .settings-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.theme-pill-row { display: flex; gap: 6px; flex-wrap: wrap; }
-.theme-pill-row button { display: flex !important; flex-direction: column !important; align-items: center !important; height: auto !important; width: auto !important; padding: 6px 10px !important; }
-.settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: hsl(var(--muted-foreground)); }
-
-/* ============================================================
-   DASHBOARD — account overview / home
-   ============================================================ */
-.dash-shell { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.dash-scroll { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-
-.dash-stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.stat-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
-.stat-card-top { display: flex; align-items: center; justify-content: space-between; }
-.stat-card-label { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
-.stat-card-icon { color: hsl(var(--primary)); opacity: .8; }
-.stat-card-value { font-family: Orbitron, sans-serif; font-size: 1.9rem; font-weight: 800; line-height: 1; }
-.stat-card-sub { font-size: 11px; color: hsl(var(--muted-foreground)); font-family: 'JetBrains Mono', monospace; }
-
-.dash-body { display: grid; grid-template-columns: 1fr 360px; gap: 16px; min-height: 0; flex: 1; }
-.dash-main { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-y: auto; }
-.dash-equity-panel { padding: 16px; }
-.equity-svg { width: 100%; height: 230px; display: block; }
-.dash-perbot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-.bot-card { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.bot-card-head { display: flex; align-items: center; gap: 8px; font-family: Orbitron, sans-serif; font-size: 11px; letter-spacing: 1px; }
-.bot-card-dot { width: 8px; height: 8px; border-radius: 50%; }
-.bot-card-value { font-family: Orbitron, sans-serif; font-size: 1.5rem; font-weight: 800; }
-.bot-card-meta { display: flex; justify-content: space-between; font-size: 11px; color: hsl(var(--muted-foreground)); }
-
-.dash-sidebar { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
-.exec-panel { padding: 14px; flex-shrink: 0; }
-.exec-list { display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; margin-top: 6px; }
-.exec-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 8px 10px; border-radius: var(--radius-sm); background: hsl(var(--bg) / 0.5);
-  border: 1px solid hsl(var(--border) / 0.5); font-size: 11px;
+.settings-status { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: hsl(var(--muted-foreground)); padding: 4px 0; }
+.settings-status:not(:empty) { animation: fade-in 0.3s ease; }
+.settings-toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
 }
-.exec-empty { text-align: center; padding: 22px 10px; font-size: 11px; color: hsl(var(--muted-foreground)); }
+html.light .settings-toggle-row { background: hsl(var(--bg)); }
+.settings-toggle-row-label { display: flex; flex-direction: column; gap: 2px; }
+.settings-toggle-row-label .label-title { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 1.5px; color: hsl(var(--foreground)); }
+.settings-toggle-row-label .label-sub { font-size: 10px; color: hsl(var(--muted-foreground)); }
+
+.labeled-input { display: flex; flex-direction: column; gap: 4px; }
+.labeled-input .input-label { font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: hsl(var(--primary)); }
+.labeled-input .input-hint { font-size: 10px; color: hsl(var(--muted-foreground)); line-height: 1.5; margin-top: 2px; }
+
+/* ──────────────────────────────────────────────────────────────
+   FORM CONTROLS
+   ────────────────────────────────────────────────────────────── */
+.input-field, .titan-input, .terminal-input, .terminal-select {
+  width: 100%; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground)); font-size: 13px; font-family: 'JetBrains Mono', monospace;
+  outline: none; transition: all 0.2s; -webkit-appearance: none;
+}
+.input-field { flex: 1; }
+.input-field:focus, .titan-input:focus, .terminal-input:focus, .terminal-select:focus {
+  border-color: hsl(var(--primary) / 0.7);
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.12), 0 0 18px hsl(var(--primary) / 0.1);
+}
+.input-field::placeholder, .titan-input::placeholder, .terminal-input::placeholder { color: hsl(var(--muted-foreground) / 0.7); }
+html.light .input-field, html.light .titan-input, html.light .terminal-input, html.light .terminal-select { background: #fff; }
+
+select.titan-input, select.terminal-select {
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23718096' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px;
+}
+
+input[type=range] {
+  -webkit-appearance: none; width: 100%; height: 4px;
+  background: hsl(var(--muted)); border-radius: 4px; outline: none; cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: hsl(var(--primary)); border: 2px solid hsl(var(--bg));
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.5); cursor: pointer; transition: 0.15s;
+}
+input[type=range]::-webkit-slider-thumb:hover { box-shadow: 0 0 18px hsl(var(--primary) / 0.75); transform: scale(1.15); }
+
+/* ──────────────────────────────────────────────────────────────
+   BUTTONS
+   ────────────────────────────────────────────────────────────── */
+.btn-primary {
+  border: none; color: #fff; padding: 10px 20px; font-weight: 700; letter-spacing: 2px;
+  border-radius: var(--radius-sm); cursor: pointer; font-family: Orbitron, sans-serif; font-size: 10px;
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)));
+  box-shadow: 0 4px 16px hsl(var(--primary) / 0.32);
+  transition: all 0.2s; white-space: nowrap;
+}
+.btn-primary:hover { filter: brightness(1.12); box-shadow: 0 6px 26px hsl(var(--primary) / 0.5); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+.btn-danger {
+  border: 1px solid hsl(var(--loss) / 0.5); color: hsl(var(--loss)); padding: 10px;
+  border-radius: var(--radius-sm); background: transparent; cursor: pointer;
+  font-family: Orbitron, sans-serif; transition: all 0.2s;
+}
+.btn-danger:hover { background: hsl(var(--loss) / 0.08); border-color: hsl(var(--loss) / 0.8); box-shadow: 0 0 16px hsl(var(--loss) / 0.2); }
+
+.btn-omega {
+  width: 100%; padding: 14px; font-family: Orbitron, sans-serif; font-weight: 800;
+  letter-spacing: 3px; text-transform: uppercase; border-radius: var(--radius);
+  cursor: pointer; transition: all 0.2s; text-align: center; border: none; color: #fff; font-size: 11px;
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)));
+  box-shadow: 0 4px 18px hsl(var(--primary) / 0.3);
+}
+.btn-omega:hover { filter: brightness(1.08); box-shadow: 0 6px 26px hsl(var(--primary) / 0.48); transform: translateY(-1px); }
+.btn-omega.stop { background: linear-gradient(135deg, hsl(var(--loss)), hsl(0 65% 42%)); box-shadow: 0 4px 18px hsl(var(--loss) / 0.32); }
+.btn-omega:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transform: none; filter: none; }
+
+.btn-engage {
+  width: 100%; padding: 15px 18px; font-family: Orbitron, sans-serif; font-weight: 800;
+  letter-spacing: 3px; text-transform: uppercase; border-radius: var(--radius);
+  cursor: pointer; transition: all 0.2s; text-align: center;
+  border: 2px solid hsl(var(--primary) / 0.4);
+  background: hsl(var(--primary) / 0.07); color: hsl(var(--primary)); font-size: 11px;
+}
+.btn-engage:hover { background: hsl(var(--primary) / 0.14); border-color: hsl(var(--primary) / 0.7); box-shadow: 0 0 26px hsl(var(--primary) / 0.22); }
+.btn-engage.armed { border-color: hsl(var(--primary)); background: hsl(var(--primary) / 0.14); animation: glow-flicker 2s ease-in-out infinite; }
+.btn-engage.firing { border-color: hsl(var(--win) / 0.75); color: hsl(var(--win)); background: hsl(var(--win) / 0.09); box-shadow: 0 0 22px hsl(var(--win) / 0.18); }
+.btn-engage.cooldown { border-color: hsl(var(--accent) / 0.65); color: hsl(var(--accent)); background: hsl(var(--accent) / 0.07); animation: accent-cooldown 1.2s infinite; }
+
+/* ──────────────────────────────────────────────────────────────
+   TOGGLES
+   ────────────────────────────────────────────────────────────── */
+.toggle, .toggle-pill, .titan-toggle {
+  width: 48px; height: 26px; border-radius: 13px;
+  background: hsl(var(--muted)); border: 1px solid hsl(var(--border));
+  cursor: pointer; position: relative; transition: all 0.25s;
+  flex-shrink: 0; outline: none;
+}
+.toggle::after, .toggle-pill::after, .titan-toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: hsl(var(--muted-foreground));
+  transition: left 0.25s ease, background 0.25s;
+  box-shadow: 0 1px 4px hsl(0 0% 0% / 0.4);
+}
+.toggle.on, .toggle-pill.on, .titan-toggle.on {
+  background: hsl(var(--primary) / 0.28); border-color: hsl(var(--primary) / 0.6);
+  box-shadow: 0 0 16px hsl(var(--primary) / 0.25);
+}
+.toggle.on::after, .toggle-pill.on::after, .titan-toggle.on::after {
+  left: 24px; background: hsl(var(--primary)); box-shadow: 0 0 8px hsl(var(--primary) / 0.65);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   STRATEGY / BARRIER / SUBTAB BUTTONS
+   ────────────────────────────────────────────────────────────── */
+.strategy-btn {
+  border: 1px solid hsl(var(--border)); border-radius: var(--radius-sm);
+  background: hsl(var(--card)); color: hsl(var(--foreground));
+  cursor: pointer; transition: all 0.15s; padding: 9px 12px; font-size: 11px;
+}
+.strategy-btn.active { border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary) / 0.12); color: hsl(var(--primary)); box-shadow: 0 0 12px hsl(var(--primary) / 0.12); }
+.strategy-btn:hover:not(.active) { background: hsl(var(--muted) / 0.6); border-color: hsl(var(--border)); }
+
+.barrier-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; }
+.barrier-btn {
+  text-align: center; font-family: Orbitron, sans-serif; font-weight: 700;
+  padding: 10px 4px; border-radius: var(--radius-sm);
+  background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground)); cursor: pointer; transition: all 0.15s; font-size: 11px;
+}
+.barrier-btn.selected { border-color: hsl(var(--primary) / 0.8); background: hsl(var(--primary) / 0.12); color: hsl(var(--primary)); box-shadow: 0 0 14px hsl(var(--primary) / 0.2); }
+.barrier-btn:hover:not(.selected) { border-color: hsl(var(--border)); background: hsl(var(--muted) / 0.4); }
+
+.differ-subtab {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: background 0.15s, color 0.15s;
+}
+.differ-subtab:hover { background: hsl(var(--muted) / 0.4) !important; }
+.differ-subtab.active { box-shadow: inset 0 -2px 0 hsl(var(--primary)); }
+
+/* ──────────────────────────────────────────────────────────────
+   BARS
+   ────────────────────────────────────────────────────────────── */
+.bar-track { height: 5px; background: hsl(var(--muted) / 0.8); border-radius: 6px; overflow: hidden; }
+.bar-fill-primary { height: 100%; background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--primary) / 0.6)); background-size: 200% 100%; animation: shimmer 3s linear infinite; transition: width 0.4s ease; }
+.bar-fill-cyan    { height: 100%; background: linear-gradient(90deg, hsl(var(--primary-2)), hsl(var(--primary-2) / 0.55)); transition: width 0.4s ease; }
+.bar-fill-win     { height: 100%; background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--win) / 0.55));         transition: width 0.4s ease; }
+.bar-fill-accent  { height: 100%; background: linear-gradient(90deg, hsl(var(--accent)), hsl(var(--accent) / 0.55));  transition: width 0.4s ease; }
+.bar-fill-loss    { height: 100%; background: linear-gradient(90deg, hsl(var(--loss)), hsl(var(--loss) / 0.55));      transition: width 0.4s ease; }
+
+/* ──────────────────────────────────────────────────────────────
+   DIGIT GRID / PAD  (Differ-style frequency cells)
+   ────────────────────────────────────────────────────────────── */
+.digit-cell {
+  text-align: center; padding: 7px 3px; border-radius: var(--radius-sm);
+  background: hsl(var(--bg) / 0.65); border: 1px solid hsl(var(--border) / 0.7);
+  transition: all 0.25s;
+}
+.digit-cell.is-cold { border-color: hsl(var(--primary) / 0.55); background: hsl(var(--primary) / 0.1); box-shadow: 0 0 18px hsl(var(--primary) / 0.14); }
+.digit-cell.is-zero { opacity: 0.4; }
+html.light .digit-cell { background: hsl(var(--bg)); }
+
+.digit-pad {
+  font-size: 80px; font-weight: 900; font-family: Orbitron, sans-serif;
+  text-align: center; padding: 20px; border-radius: var(--radius);
+  background: hsl(var(--bg)); border: 2px solid hsl(var(--border));
+  text-shadow: 0 0 36px hsl(var(--primary) / 0.42); line-height: 1;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.digit-pad.win-flash { animation: win-flash 0.6s ease; }
+.digit-pad.loss-flash { animation: loss-flash 0.6s ease; }
+html.light .digit-pad { background: hsl(var(--bg)); }
+
+.stat-5xl { font-size: 3rem; font-weight: 900; font-family: Orbitron, sans-serif; line-height: 1; animation: number-pop 0.25s ease; }
+
+/* ──────────────────────────────────────────────────────────────
+   FLOW TRACK (ANALYZE → WAIT → FIRE)
+   ────────────────────────────────────────────────────────────── */
+.flow-track { display: flex; gap: 5px; margin: 8px 0; }
+.flow-step {
+  flex: 1; text-align: center; padding: 7px; font-size: 9px;
+  font-family: Orbitron, sans-serif; letter-spacing: 1px;
+  border-radius: var(--radius-sm); background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
+  transition: all 0.2s;
+}
+.flow-step.active { background: hsl(var(--primary) / 0.18); color: hsl(var(--primary)); box-shadow: 0 0 14px hsl(var(--primary) / 0.16); }
+.flow-step.fire { background: hsl(var(--win) / 0.2); color: hsl(var(--win)); box-shadow: 0 0 14px hsl(var(--win) / 0.18); }
+
+/* ──────────────────────────────────────────────────────────────
+   LOG / JOURNAL ENTRIES
+   ────────────────────────────────────────────────────────────── */
+.log-entry {
+  padding: 8px 10px; margin-bottom: 4px; border-radius: var(--radius-sm);
+  font-size: 10.5px; font-family: 'JetBrains Mono', monospace;
+  border-left: 2px solid hsl(var(--border)); background: hsl(var(--card));
+  animation: fade-in 0.2s ease;
+}
+.log-entry.win { border-left-color: hsl(var(--win)); background: hsl(var(--win) / 0.07); }
+.log-entry.loss { border-left-color: hsl(var(--loss)); background: hsl(var(--loss) / 0.07); }
+.log-entry.engine, .log-entry.system { border-left-color: hsl(var(--primary)); background: hsl(var(--primary) / 0.05); }
+html.light .log-entry { background: hsl(var(--bg)); }
 
 .journal-panel { padding: 14px; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .journal-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
 .journal-tab {
   flex: 1; text-align: center; padding: 9px 6px; font-family: Orbitron, sans-serif; font-size: 9px;
   letter-spacing: 2px; text-transform: uppercase; border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid hsl(var(--border) / 0.6); background: hsl(var(--card) / 0.4); color: hsl(var(--muted-foreground)); transition: .15s;
+  border: 1px solid hsl(var(--border)); background: hsl(var(--card) / 0.5); color: hsl(var(--muted-foreground));
+  transition: all 0.2s;
 }
-.journal-tab.active { color: hsl(var(--primary)); border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary) / 0.12); }
+.journal-tab.active { color: hsl(var(--primary)); border-color: hsl(var(--primary) / 0.5); background: hsl(var(--primary) / 0.1); box-shadow: 0 0 14px hsl(var(--primary) / 0.12); }
 .journal-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .journal-entry {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
-  font-size: 12px; font-family: 'JetBrains Mono', monospace; background: hsl(var(--card) / 0.4);
-  border-left: 3px solid hsl(var(--border));
+  font-size: 12px; font-family: 'JetBrains Mono', monospace;
+  background: hsl(var(--card)); border-left: 3px solid hsl(var(--border));
+  transition: all 0.18s; animation: slide-in-up 0.18s ease;
 }
+.journal-entry:hover { background: hsl(var(--muted) / 0.45); transform: translateX(2px); }
 .journal-entry.win { border-left-color: hsl(var(--win)); background: hsl(var(--win) / 0.06); }
 .journal-entry.loss { border-left-color: hsl(var(--loss)); background: hsl(var(--loss) / 0.06); }
+.journal-entry.history { border-left-color: hsl(var(--primary-2) / 0.6); background: hsl(var(--primary-2) / 0.045); }
 .journal-badge {
   width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center;
   font-family: Orbitron, sans-serif; font-size: 11px; font-weight: 800; flex-shrink: 0;
 }
-.journal-badge.win { background: hsl(var(--win) / 0.18); color: hsl(var(--win)); }
-.journal-badge.loss { background: hsl(var(--loss) / 0.18); color: hsl(var(--loss)); }
+.journal-badge.win { background: hsl(var(--win) / 0.16); color: hsl(var(--win)); }
+.journal-badge.loss { background: hsl(var(--loss) / 0.16); color: hsl(var(--loss)); }
 
-.empty-state {
-  text-align: center; padding: 40px 20px; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.7;
-}
+.empty-state { text-align: center; padding: 40px 20px; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.7; }
 .empty-state .btn-primary { margin-top: 12px; }
+
+/* toast (utility — used if alerts are added later) */
+.notify-toast {
+  position: fixed; top: 70px; right: 16px; z-index: 9000;
+  padding: 12px 18px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600; max-width: 320px;
+  background: hsl(var(--card) / 0.96); border: 1px solid hsl(var(--border));
+  backdrop-filter: blur(20px); box-shadow: 0 12px 36px hsl(0 0% 0% / 0.5), 0 0 0 1px hsl(var(--primary) / 0.08);
+  animation: toast-in 0.3s ease;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   BURST SPEED / SLIDERS
+   ────────────────────────────────────────────────────────────── */
+.burst-speed-row { display: flex; flex-direction: column; gap: 6px; }
+.burst-speed-header { display: flex; justify-content: space-between; align-items: center; font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; font-family: Orbitron, sans-serif; }
+.burst-speed-label {
+  padding: 3px 8px; border-radius: 6px; font-size: 9px; font-family: Orbitron, sans-serif; letter-spacing: 1px;
+  background: hsl(var(--primary) / 0.12); color: hsl(var(--primary)); border: 1px solid hsl(var(--primary) / 0.25);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   AP / AUTOMATION CHECKBOXES
+   ────────────────────────────────────────────────────────────── */
+.ap-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; transition: background 0.15s; border: 1px solid transparent; }
+.ap-row:hover { background: hsl(var(--muted) / 0.5); border-color: hsl(var(--border) / 0.5); }
+.ap-row input[type=checkbox] { display: none; }
+.ap-checkbox {
+  width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0;
+  border: 1.5px solid hsl(var(--border)); background: hsl(var(--bg));
+  display: flex; align-items: center; justify-content: center; transition: 0.15s;
+}
+.ap-row input:checked + .ap-checkbox { background: hsl(var(--primary)); border-color: hsl(var(--primary)); box-shadow: 0 0 8px hsl(var(--primary) / 0.45); }
+.ap-row input:checked + .ap-checkbox::after { content: '✓'; color: #fff; font-size: 10px; font-weight: 700; }
+.ap-label { font-size: 11px; color: hsl(var(--foreground)); flex: 1; }
+.ap-desc { font-size: 9px; color: hsl(var(--muted-foreground)); }
+.ap-section-header { display: flex; align-items: center; gap: 8px; font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 2px; color: hsl(var(--muted-foreground)); margin: 10px 0 6px; text-transform: uppercase; }
+.ap-section-header::before, .ap-section-header::after { content: ''; flex: 1; height: 1px; background: hsl(var(--border) / 0.6); }
+
+.auto-section { border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; margin-bottom: 8px; }
+.auto-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: hsl(var(--card)); transition: background 0.15s; }
+.auto-header:hover { background: hsl(var(--muted) / 0.45); }
+.auto-header-title { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 2px; color: hsl(var(--primary)); }
+.auto-rescan-note { font-size: 9px; color: hsl(var(--muted-foreground)); letter-spacing: 1px; margin-top: 6px; opacity: 0.7; }
+.auto-body { padding: 12px 14px; background: hsl(var(--bg-soft) / 0.7); border-top: 1px solid hsl(var(--border) / 0.5); }
+
+/* ──────────────────────────────────────────────────────────────
+   SILENT TRIGGER
+   ────────────────────────────────────────────────────────────── */
+.silent-count-display { background: hsl(var(--bg)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); padding: 16px; text-align: center; }
+.silent-count-number { font-family: Orbitron, sans-serif; font-size: 3rem; font-weight: 900; line-height: 1; }
+.silent-trigger-bar { height: 5px; background: hsl(var(--muted)); border-radius: 4px; overflow: hidden; margin-top: 10px; }
+html.light .silent-count-display { background: hsl(var(--bg)); }
+
+/* ──────────────────────────────────────────────────────────────
+   ANALYSIS HUB
+   ────────────────────────────────────────────────────────────── */
+.analysis-hub-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); padding: 12px; margin-bottom: 8px; transition: border-color 0.2s; }
+.analysis-hub-card:hover { border-color: hsl(var(--primary) / 0.3); }
+.analysis-hub-title { font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 2.5px; text-transform: uppercase; color: hsl(var(--muted-foreground)); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.analysis-hub-title .dot-indicator { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--primary)); box-shadow: 0 0 8px hsl(var(--primary) / 0.7); flex-shrink: 0; animation: cooldown-pulse 2s infinite; }
+
+.signal-ring-wrap { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
+.signal-ring-labels { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.signal-ring-label { font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 1.5px; color: hsl(var(--muted-foreground)); }
+.signal-ring-value { font-family: Orbitron, sans-serif; font-size: 1.4rem; font-weight: 800; color: hsl(var(--primary)); }
+.signal-ring-rec { font-size: 10px; letter-spacing: 1px; color: hsl(var(--accent)); }
+
+.freq-bar-grid { display: flex; gap: 3px; align-items: flex-end; height: 80px; background: hsl(var(--bg)); border-radius: var(--radius-sm); padding: 8px 6px 4px; }
+.freq-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.freq-bar-pct { font-size: 7px; color: hsl(var(--muted-foreground)); font-family: 'JetBrains Mono', monospace; }
+.freq-bar-fill { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.4s ease; background: hsl(var(--primary)); }
+.freq-bar-digit { font-family: Orbitron, sans-serif; font-size: 9px; font-weight: 700; }
+html.light .freq-bar-grid { background: hsl(var(--bg)); }
+
+.mtf-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; font-family: Orbitron, sans-serif; font-size: 8.5px; letter-spacing: 1.5px; }
+.mtf-badge.aligned { background: hsl(var(--win) / 0.12); color: hsl(var(--win)); border: 1px solid hsl(var(--win) / 0.3); }
+.mtf-badge.divergent { background: hsl(var(--accent) / 0.12); color: hsl(var(--accent)); border: 1px solid hsl(var(--accent) / 0.3); }
+
+.condition-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { padding: 3px 8px; border-radius: 5px; font-size: 9px; font-family: Orbitron, sans-serif; letter-spacing: 1px; }
+.chip.on { background: hsl(var(--win) / 0.12); color: hsl(var(--win)); border: 1px solid hsl(var(--win) / 0.28); }
+.chip.off { background: hsl(var(--muted) / 0.45); color: hsl(var(--muted-foreground)); border: 1px solid hsl(var(--border) / 0.5); }
+
+/* ──────────────────────────────────────────────────────────────
+   MARTINGALE
+   ────────────────────────────────────────────────────────────── */
+.mart-section { border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; margin-bottom: 8px; }
+.mart-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: hsl(var(--card)); cursor: pointer; user-select: none; transition: background 0.15s; }
+.mart-header:hover { background: hsl(var(--muted) / 0.5); }
+.mart-header-left { display: flex; align-items: center; gap: 8px; }
+.mart-header-title { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 2px; color: hsl(var(--accent)); }
+.mart-header-chevron { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; color: hsl(var(--muted-foreground)); transition: transform 0.22s; font-size: 11px; }
+.mart-header-chevron.open { transform: rotate(180deg); }
+.mart-body { padding: 12px 14px; background: hsl(var(--bg-soft) / 0.7); border-top: 1px solid hsl(var(--border) / 0.5); display: none; }
+.mart-body.open { display: block; animation: fade-in 0.2s ease; }
+.mart-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mart-field { display: flex; flex-direction: column; gap: 4px; }
+.mart-field-label { font-family: Orbitron, sans-serif; font-size: 8.5px; letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.mart-field-hint { font-size: 9.5px; color: hsl(var(--muted-foreground)); line-height: 1.5; margin-top: 2px; }
+
+/* ──────────────────────────────────────────────────────────────
+   RECOVERY MODE
+   ────────────────────────────────────────────────────────────── */
+.recovery-mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.recovery-btn {
+  padding: 8px 10px; border-radius: var(--radius-sm); font-family: Orbitron, sans-serif; font-size: 9px;
+  letter-spacing: 1px; text-align: center; cursor: pointer;
+  border: 1px solid hsl(var(--border)); background: hsl(var(--card)); color: hsl(var(--muted-foreground));
+  transition: 0.15s;
+}
+.recovery-btn.active { border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary) / 0.12); color: hsl(var(--primary)); }
+.recovery-mode-card {
+  position: relative; display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px 10px 34px; border-radius: var(--radius-sm);
+  border: 1px solid hsl(var(--border)); background: hsl(var(--card));
+  cursor: pointer; user-select: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.recovery-mode-card::before {
+  content: ''; position: absolute; top: 12px; left: 12px; width: 14px; height: 14px; border-radius: 50%;
+  border: 1.5px solid hsl(var(--border)); background: hsl(var(--bg)); transition: all 0.15s;
+}
+.recovery-mode-card:hover { border-color: hsl(var(--border)); background: hsl(var(--muted) / 0.45); }
+.recovery-mode-card:active { transform: scale(0.99); }
+.recovery-mode-card.selected {
+  border-color: hsl(var(--primary) / 0.7);
+  background: hsl(var(--primary) / 0.1);
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.12) inset, 0 4px 14px hsl(var(--primary) / 0.1);
+}
+.recovery-mode-card.selected::before {
+  border-color: hsl(var(--primary)); background: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.18), inset 0 0 0 2.5px hsl(var(--bg));
+}
+.rec-card-title { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 1px; color: hsl(var(--foreground)); display: flex; align-items: center; gap: 6px; }
+.recovery-mode-card.selected .rec-card-title { color: hsl(var(--primary)); }
+.rec-card-desc { font-size: 10px; line-height: 1.45; color: hsl(var(--muted-foreground)); font-family: 'JetBrains Mono', monospace; }
+
+/* ──────────────────────────────────────────────────────────────
+   TICKER DISPLAY
+   ────────────────────────────────────────────────────────────── */
+.live-tick-display { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.live-tick-cell { border-radius: var(--radius); padding: 18px 12px; text-align: center; background: hsl(var(--bg)); border: 1px solid hsl(var(--border)); transition: border-color 0.3s, box-shadow 0.3s; }
+.live-tick-cell:hover { border-color: hsl(var(--primary) / 0.4); box-shadow: 0 0 18px hsl(var(--primary) / 0.08); }
+.live-tick-cell .cell-label { font-family: Orbitron, sans-serif; font-size: 8px; letter-spacing: 2px; color: hsl(var(--muted-foreground)); margin-bottom: 8px; }
+.live-tick-cell .cell-value { font-family: Orbitron, sans-serif; font-size: 2.2rem; font-weight: 900; }
+html.light .live-tick-cell { background: hsl(var(--bg)); }
+
+/* ──────────────────────────────────────────────────────────────
+   DASHBOARD
+   ────────────────────────────────────────────────────────────── */
+.dash-shell { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.dash-scroll { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+
+.dash-stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 0; }
+.stat-card { padding: 18px 20px; position: relative; overflow: hidden; transition: transform 0.2s, box-shadow 0.2s; }
+.stat-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, hsl(var(--primary) / 0.65), hsl(var(--primary-2) / 0.4));
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 10px 38px hsl(0 0% 0% / 0.5), 0 0 0 1px hsl(var(--primary) / 0.12); }
+.stat-card-top { display: flex; align-items: center; justify-content: space-between; }
+.stat-card-label { font-family: Orbitron, sans-serif; font-size: 8.5px; letter-spacing: 2.5px; text-transform: uppercase; color: hsl(var(--muted-foreground)); margin-bottom: 8px; }
+.stat-card-icon { color: hsl(var(--primary)); opacity: 0.85; }
+.stat-card-value { font-family: Orbitron, sans-serif; font-size: 2rem; font-weight: 800; line-height: 1.1; animation: number-pop 0.25s ease; }
+.stat-card-sub { font-size: 11px; color: hsl(var(--muted-foreground)); font-family: 'JetBrains Mono', monospace; }
+
+.dash-body { display: grid; grid-template-columns: 1fr 360px; gap: 14px; min-height: 0; flex: 1; }
+.dash-main { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; }
+.dash-equity-panel { padding: 16px; }
+.equity-svg { width: 100%; height: 230px; display: block; }
+
+.dash-perbot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.bot-card { padding: 14px; display: flex; flex-direction: column; gap: 10px; transition: transform 0.2s, box-shadow 0.2s; }
+.bot-card:hover { transform: translateY(-2px); box-shadow: 0 8px 30px hsl(0 0% 0% / 0.5), 0 0 0 1px hsl(var(--primary) / 0.1); }
+.bot-card-head { display: flex; align-items: center; gap: 8px; font-family: Orbitron, sans-serif; font-size: 11px; letter-spacing: 1px; }
+.bot-card-dot { width: 8px; height: 8px; border-radius: 50%; }
+.bot-card-value { font-family: Orbitron, sans-serif; font-size: 1.5rem; font-weight: 800; }
+.bot-card-meta { display: flex; justify-content: space-between; font-size: 11px; color: hsl(var(--muted-foreground)); }
+
+.dash-sidebar { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.exec-panel { padding: 14px; flex-shrink: 0; }
+.exec-list { display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; margin-top: 6px; }
+.exec-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-sm); background: hsl(var(--bg));
+  border: 1px solid hsl(var(--border)); font-size: 11px; font-family: 'JetBrains Mono', monospace;
+  transition: background 0.15s;
+}
+.exec-item:hover { background: hsl(var(--muted) / 0.45); }
+.exec-empty { text-align: center; padding: 22px 10px; font-size: 11px; color: hsl(var(--muted-foreground)); }
+html.light .exec-item { background: hsl(var(--bg)); }
 
 @media (max-width: 1100px) {
   .dash-stats-row { grid-template-columns: repeat(2, 1fr); }
@@ -661,500 +1067,15 @@ label, .settings-label { font-family: Orbitron, sans-serif; }
 }
 @media (max-width: 640px) {
   .dash-stats-row { grid-template-columns: 1fr 1fr; }
-  .hub-topbar { flex-wrap: wrap; }
+  .hub-topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; }
+  .hub-brand-name { font-size: 0.85rem; letter-spacing: 3px; }
 }
 
-/* ============================================================
-   ENHANCED STYLES — Applied on top of base tokens
-   Covers: toggles, tabs, Differ panel, Analysis Hub,
-   Martingale, Even/Odd/Nexus, all settings labels
-   ============================================================ */
-
-/* ── Proper toggle switch ── */
-.toggle, .toggle-pill, .titan-toggle {
-  width: 48px; height: 26px; border-radius: 13px;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  cursor: pointer; position: relative; transition: background .2s, border-color .2s;
-  flex-shrink: 0; outline: none;
-}
-.toggle::after, .toggle-pill::after, .titan-toggle::after {
-  content: ''; position: absolute; top: 2px; left: 2px;
-  width: 20px; height: 20px; border-radius: 50%;
-  background: hsl(var(--muted-foreground));
-  transition: left .2s ease, background .2s; box-shadow: 0 1px 3px hsl(0 0% 0% / 0.25);
-}
-.toggle.on, .toggle-pill.on, .titan-toggle.on {
-  background: hsl(var(--primary) / 0.25);
-  border-color: hsl(var(--primary) / 0.6);
-}
-.toggle.on::after, .toggle-pill.on::after, .titan-toggle.on::after {
-  left: 24px; background: hsl(var(--primary));
-}
-
-/* ── Settings toggle row — consistent padding ── */
-.settings-toggle-row {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm);
-  background: hsl(var(--card) / 0.5); border: 1px solid hsl(var(--border) / 0.5);
-}
-.settings-toggle-row-label { display: flex; flex-direction: column; gap: 2px; }
-.settings-toggle-row-label .label-title { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 1.5px; color: hsl(var(--foreground)); }
-.settings-toggle-row-label .label-sub { font-size: 10px; color: hsl(var(--muted-foreground)); }
-
-/* ── Settings labeled inputs ── */
-.labeled-input { display: flex; flex-direction: column; gap: 4px; }
-.labeled-input .input-label {
-  font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 2px;
-  text-transform: uppercase; color: hsl(var(--primary));
-}
-.labeled-input .input-hint {
-  font-size: 10px; color: hsl(var(--muted-foreground)); line-height: 1.5; margin-top: 2px;
-}
-
-/* ── Glass card improvements — proper depth system ── */
-.glass-panel, .panel, .glass-card {
-  background: hsl(var(--card) / 0.80);
-  border: 1px solid hsl(var(--border) / 0.70);
-  border-radius: var(--radius);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 2px 12px hsl(0 0% 0% / 0.18), inset 0 1px 0 hsl(255 100% 100% / 0.04);
-}
-.glass-panel-glow, .glass-card-glow {
-  background: hsl(var(--card) / 0.75);
-  border: 1px solid hsl(var(--primary) / 0.28);
-  border-radius: var(--radius);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 2px 16px hsl(var(--primary) / 0.08), inset 0 1px 0 hsl(255 100% 100% / 0.04);
-}
-.glass-panel-cyan {
-  background: hsl(var(--card) / 0.75);
-  border: 1px solid hsl(var(--primary-2) / 0.28);
-  border-radius: var(--radius);
-  backdrop-filter: blur(16px);
-}
-
-/* ── Ambient background glow — toned down ── */
-.hub-shell::before {
-  background:
-    radial-gradient(ellipse at 15% 0%, hsl(var(--primary) / 0.10) 0%, transparent 55%),
-    radial-gradient(ellipse at 85% 10%, hsl(var(--primary-2) / 0.07) 0%, transparent 50%);
-}
-
-/* ── Topbar ── */
-.hub-topbar {
-  background: hsl(var(--bg-soft));
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-/* ── Tab nav — clean pill tabs ── */
-.hub-tabs {
-  background: hsl(var(--bg-soft));
-  border-bottom: 1px solid hsl(var(--border));
-  padding: 8px 16px; gap: 4px;
-}
-.hub-tab {
-  font-size: 9.5px; letter-spacing: 1.5px; padding: 8px 16px; border-radius: 8px;
-  border: 1px solid transparent; transition: all .15s;
-}
-.hub-tab.active {
-  background: hsl(var(--primary) / 0.12);
-  border-color: hsl(var(--primary) / 0.40);
-  color: hsl(var(--primary));
-  box-shadow: none;
-}
-.hub-tab:hover:not(.active) {
-  background: hsl(var(--muted) / 0.6);
-  border-color: hsl(var(--border));
-  color: hsl(var(--foreground));
-}
-
-/* ── Benz / Differ grid improvements ── */
-.benz-grid {
-  grid-template-columns: 280px 1fr 300px;
-  gap: 10px; padding: 10px;
-}
-.benz-col {
-  background: hsl(var(--card) / 0.75);
-  border: 1px solid hsl(var(--border) / 0.7);
-  border-radius: var(--radius); backdrop-filter: blur(16px);
-  box-shadow: 0 2px 12px hsl(0 0% 0% / 0.15);
-}
-.benz-scroll { padding: 12px; }
-
-/* ── Differ: Burst Speed slider ── */
-.burst-speed-row { display: flex; flex-direction: column; gap: 6px; }
-.burst-speed-header {
-  display: flex; justify-content: space-between; align-items: center; font-size: 9px;
-  letter-spacing: 1.5px; text-transform: uppercase; font-family: Orbitron, sans-serif;
-}
-.burst-speed-label {
-  padding: 3px 8px; border-radius: 6px; font-size: 9px;
-  font-family: Orbitron, sans-serif; letter-spacing: 1px;
-  background: hsl(var(--primary) / 0.12); color: hsl(var(--primary));
-  border: 1px solid hsl(var(--primary) / 0.25);
-}
-input[type=range] {
-  -webkit-appearance: none; width: 100%; height: 4px;
-  background: hsl(var(--muted)); border-radius: 4px; outline: none;
-  cursor: pointer;
-}
-input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
-  background: hsl(var(--primary)); border: 2px solid hsl(var(--bg));
-  box-shadow: 0 0 8px hsl(var(--primary) / 0.4); cursor: pointer; transition: .15s;
-}
-input[type=range]::-webkit-slider-thumb:hover {
-  box-shadow: 0 0 14px hsl(var(--primary) / 0.6);
-  transform: scale(1.1);
-}
-
-/* ── Anti-Prediction checkboxes — styled ── */
-.ap-row {
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  border-radius: var(--radius-sm); cursor: pointer; transition: background .15s;
-  border: 1px solid transparent;
-}
-.ap-row:hover { background: hsl(var(--muted) / 0.5); border-color: hsl(var(--border) / 0.5); }
-.ap-row input[type=checkbox] { display: none; }
-.ap-checkbox {
-  width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0;
-  border: 1.5px solid hsl(var(--border)); background: hsl(var(--bg));
-  display: flex; align-items: center; justify-content: center; transition: .15s;
-}
-.ap-row input:checked + .ap-checkbox {
-  background: hsl(var(--primary)); border-color: hsl(var(--primary));
-}
-.ap-row input:checked + .ap-checkbox::after { content: '✓'; color: #fff; font-size: 10px; font-weight: 700; }
-.ap-label { font-size: 11px; color: hsl(var(--foreground)); flex: 1; }
-.ap-desc { font-size: 9px; color: hsl(var(--muted-foreground)); }
-.ap-section-header {
-  display: flex; align-items: center; gap: 8px; font-family: Orbitron, sans-serif;
-  font-size: 9px; letter-spacing: 2px; color: hsl(var(--muted-foreground)); margin: 10px 0 6px;
-  text-transform: uppercase;
-}
-.ap-section-header::before, .ap-section-header::after {
-  content: ''; flex: 1; height: 1px; background: hsl(var(--border) / 0.6);
-}
-
-/* ── Silent trigger display ── */
-.silent-count-display {
-  background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
-  border-radius: var(--radius); padding: 16px; text-align: center;
-}
-.silent-count-number {
-  font-family: Orbitron, sans-serif; font-size: 3rem; font-weight: 900; line-height: 1;
-}
-.silent-trigger-bar { height: 5px; background: hsl(var(--muted)); border-radius: 4px; overflow: hidden; margin-top: 10px; }
-
-/* ── Analysis Hub (Titan left panel) — improved ── */
-.analysis-hub-card {
-  background: hsl(var(--card)); border: 1px solid hsl(var(--border));
-  border-radius: var(--radius); padding: 12px; margin-bottom: 8px;
-}
-.analysis-hub-title {
-  font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 2.5px;
-  text-transform: uppercase; color: hsl(var(--muted-foreground)); margin-bottom: 8px;
-  display: flex; align-items: center; gap: 8px;
-}
-.analysis-hub-title .dot-indicator {
-  width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--primary));
-  box-shadow: 0 0 6px hsl(var(--primary) / 0.6); flex-shrink: 0;
-}
-.signal-ring-wrap { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
-.signal-ring-labels { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.signal-ring-label { font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 1.5px; color: hsl(var(--muted-foreground)); }
-.signal-ring-value { font-family: Orbitron, sans-serif; font-size: 1.4rem; font-weight: 800; color: hsl(var(--primary)); }
-.signal-ring-rec { font-size: 10px; letter-spacing: 1px; color: hsl(var(--accent)); }
-
-/* Digit frequency bars — improved */
-.freq-bar-grid {
-  display: flex; gap: 3px; align-items: flex-end; height: 80px;
-  background: hsl(var(--bg)); border-radius: var(--radius-sm); padding: 8px 6px 4px;
-}
-.freq-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.freq-bar-pct { font-size: 7px; color: hsl(var(--muted-foreground)); font-family: 'JetBrains Mono', monospace; }
-.freq-bar-fill { width: 100%; border-radius: 3px 3px 0 0; transition: height .3s ease; }
-.freq-bar-digit { font-family: Orbitron, sans-serif; font-size: 9px; font-weight: 700; }
-
-/* MTF alignment badge */
-.mtf-badge {
-  display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px;
-  border-radius: 6px; font-family: Orbitron, sans-serif; font-size: 8.5px; letter-spacing: 1.5px;
-}
-.mtf-badge.aligned { background: hsl(var(--win) / 0.12); color: hsl(var(--win)); border: 1px solid hsl(var(--win) / 0.3); }
-.mtf-badge.divergent { background: hsl(var(--accent) / 0.12); color: hsl(var(--accent)); border: 1px solid hsl(var(--accent) / 0.3); }
-
-/* Condition chips */
-.condition-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.chip {
-  padding: 3px 8px; border-radius: 5px; font-size: 9px;
-  font-family: Orbitron, sans-serif; letter-spacing: 1px;
-}
-.chip.on { background: hsl(var(--win) / 0.12); color: hsl(var(--win)); border: 1px solid hsl(var(--win) / 0.25); }
-.chip.off { background: hsl(var(--muted) / 0.5); color: hsl(var(--muted-foreground)); border: 1px solid hsl(var(--border) / 0.5); }
-
-/* ── Martingale section improvements ── */
-.mart-section {
-  border: 1px solid hsl(var(--border)); border-radius: var(--radius);
-  overflow: hidden; margin-bottom: 8px;
-}
-.mart-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px; background: hsl(var(--card));
-  cursor: pointer; user-select: none;
-  transition: background .15s;
-}
-.mart-header:hover { background: hsl(var(--muted) / 0.5); }
-.mart-header-left { display: flex; align-items: center; gap: 8px; }
-.mart-header-title { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 2px; color: hsl(var(--accent)); }
-.mart-header-chevron {
-  width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
-  color: hsl(var(--muted-foreground)); transition: transform .2s; font-size: 11px;
-}
-.mart-header-chevron.open { transform: rotate(180deg); }
-.mart-body {
-  padding: 12px 14px; background: hsl(var(--bg-soft) / 0.6);
-  border-top: 1px solid hsl(var(--border) / 0.5); display: none;
-}
-.mart-body.open { display: block; }
-.mart-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.mart-field { display: flex; flex-direction: column; gap: 4px; }
-.mart-field-label {
-  font-family: Orbitron, sans-serif; font-size: 8.5px; letter-spacing: 1.5px;
-  text-transform: uppercase; color: hsl(var(--muted-foreground));
-}
-.mart-field-hint { font-size: 9.5px; color: hsl(var(--muted-foreground)); line-height: 1.5; margin-top: 2px; }
-
-/* Recovery mode selector (legacy — unused by current markup, kept for compat) */
-.recovery-mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
-.recovery-btn {
-  padding: 8px 10px; border-radius: var(--radius-sm); font-family: Orbitron, sans-serif;
-  font-size: 9px; letter-spacing: 1px; text-align: center; cursor: pointer;
-  border: 1px solid hsl(var(--border) / 0.6); background: hsl(var(--card) / 0.5);
-  color: hsl(var(--muted-foreground)); transition: .15s;
-}
-.recovery-btn.active { border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary) / 0.12); color: hsl(var(--primary)); }
-
-/* ── Recovery mode cards — toggleable, mutually-exclusive option list ── */
-.recovery-mode-card {
-  position: relative;
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 10px 12px 10px 34px;
-  border-radius: var(--radius-sm);
-  border: 1px solid hsl(var(--border) / 0.6);
-  background: hsl(var(--card) / 0.45);
-  cursor: pointer;
-  user-select: none;
-  transition: border-color .15s, background .15s, box-shadow .15s, transform .1s;
-}
-.recovery-mode-card::before {
-  content: '';
-  position: absolute; top: 12px; left: 12px;
-  width: 14px; height: 14px; border-radius: 50%;
-  border: 1.5px solid hsl(var(--border));
-  background: hsl(var(--bg));
-  transition: border-color .15s, background .15s, box-shadow .15s;
-}
-.recovery-mode-card:hover {
-  border-color: hsl(var(--border));
-  background: hsl(var(--muted) / 0.5);
-}
-.recovery-mode-card:active { transform: scale(0.99); }
-.recovery-mode-card.selected {
-  border-color: hsl(var(--primary) / 0.65);
-  background: hsl(var(--primary) / 0.10);
-  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.18) inset, 0 4px 14px hsl(var(--primary) / 0.10);
-}
-.recovery-mode-card.selected::before {
-  border-color: hsl(var(--primary));
-  background: hsl(var(--primary));
-  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.18), inset 0 0 0 2.5px hsl(var(--bg));
-}
-.recovery-mode-card .rec-card-title {
-  font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 1px;
-  color: hsl(var(--foreground)); display: flex; align-items: center; gap: 6px;
-}
-.recovery-mode-card.selected .rec-card-title { color: hsl(var(--primary)); }
-.recovery-mode-card .rec-card-desc {
-  font-size: 10px; line-height: 1.45; color: hsl(var(--muted-foreground));
-  font-family: 'JetBrains Mono', monospace;
-}
-
-/* ── Auto-rescan note (Full Automation panel) ── */
-.auto-rescan-note {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 10px; padding: 9px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid hsl(var(--primary) / 0.22);
-  background: hsl(var(--primary) / 0.07);
-  color: hsl(var(--muted-foreground));
-  font-size: 10.5px; line-height: 1.4;
-}
-
-/* ── Full automation section ── */
-.auto-section {
-  border: 1px solid hsl(var(--border)); border-radius: var(--radius);
-  overflow: hidden; margin-bottom: 8px;
-}
-.auto-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px; background: hsl(var(--card)); cursor: pointer;
-}
-.auto-header-title { font-family: Orbitron, sans-serif; font-size: 10px; letter-spacing: 2px; color: hsl(var(--primary)); }
-.auto-body {
-  padding: 12px 14px; background: hsl(var(--bg-soft) / 0.6);
-  border-top: 1px solid hsl(var(--border) / 0.5);
-}
-
-/* ── Even/Odd/Nexus center panel ── */
-.titan-grid { grid-template-columns: 270px 1fr 290px; gap: 10px; padding: 10px; }
-.digit-pad {
-  font-size: 80px; font-weight: 900; font-family: Orbitron, sans-serif;
-  text-align: center; padding: 20px 22px; border-radius: var(--radius);
-  background: hsl(var(--bg));
-  border: 2px solid hsl(var(--border));
-  transition: border-color .2s, box-shadow .2s; line-height: 1;
-}
-.digit-pad.win-flash { border-color: hsl(var(--win)); box-shadow: 0 0 28px hsl(var(--win) / 0.25); }
-.digit-pad.loss-flash { border-color: hsl(var(--loss)); box-shadow: 0 0 28px hsl(var(--loss) / 0.25); }
-
-/* ── Strategy dropdown — improved ── */
-.titan-input, .terminal-select, .terminal-input, .input-field {
-  background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
-  padding: 9px 11px; font-size: 12px; font-family: 'JetBrains Mono', monospace;
-  color: hsl(var(--foreground)); border-radius: var(--radius-sm); outline: none;
-  transition: border-color .15s, box-shadow .15s; width: 100%;
-}
-.titan-input:focus, .terminal-select:focus, .terminal-input:focus, .input-field:focus {
-  border-color: hsl(var(--primary) / 0.7);
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.12);
-}
-select.titan-input, select.terminal-select {
-  cursor: pointer; -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23718096' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px;
-}
-
-/* ── Log entries — improved ── */
-.log-entry {
-  padding: 8px 10px; margin-bottom: 4px; border-radius: var(--radius-sm);
-  font-size: 10.5px; font-family: 'JetBrains Mono', monospace;
-  border-left: 2px solid hsl(var(--border));
-  background: hsl(var(--card) / 0.5);
-}
-.log-entry.win { border-left-color: hsl(var(--win)); background: hsl(var(--win) / 0.05); }
-.log-entry.loss { border-left-color: hsl(var(--loss)); background: hsl(var(--loss) / 0.05); }
-.log-entry.engine, .log-entry.system { border-left-color: hsl(var(--primary)); background: hsl(var(--primary) / 0.04); }
-
-/* ── Over/Under barrier grid ── */
-.barrier-btn {
-  text-align: center; font-family: Orbitron, sans-serif; font-weight: 700;
-  padding: 10px 4px; border-radius: var(--radius-sm);
-  background: hsl(var(--card) / 0.5); border: 1px solid hsl(var(--border) / 0.6);
-  color: hsl(var(--foreground)); cursor: pointer; transition: all .15s; font-size: 11px;
-}
-.barrier-btn.selected {
-  border-color: hsl(var(--primary) / 0.8);
-  background: hsl(var(--primary) / 0.14); color: hsl(var(--primary));
-  box-shadow: 0 0 10px hsl(var(--primary) / 0.15);
-}
-.barrier-btn:hover:not(.selected) { border-color: hsl(var(--border)); background: hsl(var(--muted) / 0.5); }
-
-/* ── Dashboard journal entries ── */
-.journal-entry {
-  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
-  border-radius: var(--radius-sm); font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  background: hsl(var(--card) / 0.5); border-left: 2px solid hsl(var(--border));
-  transition: background .15s;
-}
-.journal-entry:hover { background: hsl(var(--muted) / 0.5); }
-.journal-entry.win { border-left-color: hsl(var(--win)); background: hsl(var(--win) / 0.05); }
-.journal-entry.loss { border-left-color: hsl(var(--loss)); background: hsl(var(--loss) / 0.05); }
-.journal-entry.history { border-left-color: hsl(var(--primary-2) / 0.6); background: hsl(var(--primary-2) / 0.04); }
-
-/* ── Stat cards on dashboard ── */
-.stat-card { padding: 18px 20px; }
-.stat-card-value { font-family: Orbitron, sans-serif; font-size: 2rem; font-weight: 800; line-height: 1.1; }
-
-/* ── Section dividers ── */
-.section-divider {
-  font-family: Orbitron, sans-serif; font-size: 9px; letter-spacing: 2.5px;
-  text-transform: uppercase; display: flex; align-items: center; gap: 8px;
-  color: hsl(var(--muted-foreground)); margin-bottom: 8px;
-}
-.section-divider::after { content: ''; flex: 1; height: 1px; background: hsl(var(--border) / 0.7); }
-
-/* ── Ticker display in Differ ── */
-.live-tick-display {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;
-}
-.live-tick-cell {
-  border-radius: var(--radius); padding: 18px 12px; text-align: center;
-  background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
-}
-.live-tick-cell .cell-label { font-family: Orbitron, sans-serif; font-size: 8px; letter-spacing: 2px; color: hsl(var(--muted-foreground)); margin-bottom: 8px; }
-.live-tick-cell .cell-value { font-family: Orbitron, sans-serif; font-size: 2.2rem; font-weight: 900; }
-
-/* ── Button engage ── */
-.btn-engage {
-  width: 100%; padding: 15px 18px; font-family: Orbitron, sans-serif; font-weight: 800;
-  letter-spacing: 3px; text-transform: uppercase; border-radius: var(--radius);
-  cursor: pointer; transition: all .2s; text-align: center; border: 2px solid hsl(var(--primary) / 0.4);
-  background: hsl(var(--primary) / 0.08); color: hsl(var(--primary)); font-size: 11px;
-}
-.btn-engage:hover { background: hsl(var(--primary) / 0.14); border-color: hsl(var(--primary) / 0.6); }
-.btn-engage.armed { border-color: hsl(var(--primary)); background: hsl(var(--primary) / 0.14); }
-.btn-engage.firing { border-color: hsl(var(--win) / 0.6); color: hsl(var(--win)); background: hsl(var(--win) / 0.08); }
-.btn-engage.cooldown { border-color: hsl(var(--accent) / 0.5); color: hsl(var(--accent)); background: hsl(var(--accent) / 0.06); }
-
-/* ── Primary button ── */
-.btn-primary {
-  border: none; color: #fff; padding: 11px 20px; font-weight: 700; letter-spacing: 2px;
-  border-radius: var(--radius-sm); cursor: pointer; font-family: Orbitron, sans-serif; font-size: 10px;
-  background: hsl(var(--primary)); box-shadow: 0 4px 14px hsl(var(--primary) / 0.3); transition: .2s;
-}
-.btn-primary:hover { filter: brightness(1.1); box-shadow: 0 6px 20px hsl(var(--primary) / 0.4); }
-.btn-omega {
-  width: 100%; padding: 14px; font-family: Orbitron, sans-serif; font-weight: 800;
-  letter-spacing: 3px; text-transform: uppercase; border-radius: var(--radius);
-  cursor: pointer; transition: all .2s; text-align: center; border: none; color: #fff; font-size: 11px;
-  background: hsl(var(--primary)); box-shadow: 0 4px 16px hsl(var(--primary) / 0.3);
-}
-.btn-omega:hover { filter: brightness(1.1); }
-.btn-omega.stop { background: hsl(var(--loss)); box-shadow: 0 4px 16px hsl(var(--loss) / 0.3); }
-.btn-omega:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
-
-/* ── Strategy buttons ── */
-.strategy-btn {
-  border: 1px solid hsl(var(--border) / 0.7); border-radius: var(--radius-sm);
-  background: hsl(var(--card) / 0.5); color: hsl(var(--foreground));
-  cursor: pointer; transition: all .15s; padding: 9px 12px; font-size: 11px;
-}
-.strategy-btn.active {
-  border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary) / 0.10);
-  color: hsl(var(--primary));
-}
-.strategy-btn:hover:not(.active) { background: hsl(var(--muted) / 0.6); border-color: hsl(var(--border)); }
-
-/* ── Light theme overrides ── */
-html.light .hub-topbar { background: #fff; border-bottom-color: hsl(var(--border)); }
-html.light .hub-tabs { background: hsl(var(--bg)); }
-html.light .benz-col, html.light .glass-panel, html.light .panel {
-  background: #fff; border-color: hsl(var(--border)); box-shadow: 0 1px 6px hsl(0 0% 0% / 0.08);
-}
-html.light .glass-panel-glow { background: hsl(var(--primary) / 0.04); }
-html.light input, html.light select { background: hsl(var(--bg)); }
-html.light .hub-shell::before { display: none; }
-html.light .digit-pad { background: hsl(var(--bg)); }
-html.light .log-entry { background: hsl(var(--bg)); }
-html.light .benz-col { background: #fff; }
-
-/* ── Scrollbar ── */
-*::-webkit-scrollbar { width: 5px; height: 5px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 6px; }
+/* ──────────────────────────────────────────────────────────────
+   LIGHT THEME — final blanket overrides
+   ────────────────────────────────────────────────────────────── */
+html.light body { background: hsl(var(--bg)); }
+html.light .hub-shell { background: hsl(var(--bg)); }
 </style>
 <script>
 /* ============================================================
@@ -1174,12 +1095,13 @@ html.light .benz-col { background: #fff; }
   const state = {
     apiToken: load('hub_api_token', ''),
     accountType: load('hub_account_type', 'demo'), // 'demo' or 'real'
-    appId: load('hub_app_id', '33AsK8F3vLO1plM4tD2Wj'), // new Deriv app ID
+    appId: (() => { const v = load('hub_app_id', '1089'); return v || '1089'; })(), // Deriv app ID — defaults to public demo app (1089). Legacy WebSocket API requires a numeric ID registered at api.deriv.com. Do NOT use IDs from developers.deriv.com — those are for the separate Options REST API.
     accountId: '',
     balanceUSD: 0,
     currency: 'USD',
     isAuthenticated: false,
     connectionStatus: 'disconnected', // disconnected | connecting | connected
+    connectionError: '',
     theme: load('hub_theme', 'dark'),
     telegramToken: load('hub_tg_token', ''),
     telegramChatId: load('hub_tg_chat', ''),
@@ -1190,9 +1112,6 @@ html.light .benz-col { background: #fff; }
   function getWsUrl() {
     return `wss://ws.derivws.com/websockets/v3?app_id=${state.appId}`;
   }
-
-  let socket = null;
-  let reconnectTimer = null;
 
   function emit() { listeners.forEach((cb) => { try { cb(state); } catch (e) { /* */ } }); }
 
@@ -1218,12 +1137,23 @@ html.light .benz-col { background: #fff; }
 
   function setAccountType(accountType) {
     state.accountType = accountType;
-    state.appId = '33AsK8F3vLO1plM4tD2Wj';
     localStorage.setItem('hub_account_type', accountType);
-    localStorage.setItem('hub_app_id', state.appId);
     emit();
-    connectAccount();
     global.dispatchEvent(new CustomEvent('hub:account-type-changed', { detail: { accountType, appId: state.appId } }));
+  }
+
+  function setAppId(appId) {
+    appId = (appId || '').trim();
+    if (!appId) appId = '1089';
+    // The legacy Deriv WebSocket API (ws.derivws.com) requires a numeric App ID
+    // registered at api.deriv.com. Alphanumeric IDs are for the separate Options REST API
+    // at developers.deriv.com and will NOT work here. We store whatever the user enters
+    // so they can see what's saved, but warn clearly if it looks wrong.
+    state.appId = appId;
+    localStorage.setItem('hub_app_id', appId);
+    emit();
+    connectAccount(); // re-authorize the status socket against the new app_id
+    global.dispatchEvent(new CustomEvent('hub:appid-changed', { detail: { appId } }));
   }
 
   async function notifyTelegram(message) {
@@ -1236,46 +1166,59 @@ html.light .benz-col { background: #fff; }
     } catch (e) { /* */ }
   }
 
+  // Standalone, no-backend account check: opens a short-lived WebSocket
+  // straight to Deriv just to confirm the saved PAT is valid and read the
+  // balance/account id for the topbar. The four trading engines each open
+  // their own authenticated socket independently (using this same token)
+  // when they actually need to place trades — this one is just for status.
+  let statusSocket = null;
+  let reconnectTimer = null;
+
   function connectAccount() {
-    const token = state.apiToken;
-    if (!token) { state.connectionStatus = 'disconnected'; state.isAuthenticated = false; emit(); return; }
-    state.connectionStatus = 'connecting'; emit();
-    try { if (socket) { socket.onclose = null; socket.close(); } } catch (e) { /* */ }
-    socket = new WebSocket(getWsUrl());
-    socket.onopen = () => { try { socket.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ } };
-    socket.onmessage = (m) => {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    if (!state.apiToken) {
+      state.isAuthenticated = false;
+      state.connectionStatus = 'disconnected';
+      state.connectionError = '';
+      emit();
+      return;
+    }
+    try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (e) { /* */ }
+    state.connectionStatus = 'connecting';
+    state.connectionError = '';
+    emit();
+    const ws = new WebSocket(getWsUrl());
+    statusSocket = ws;
+    let gotResponse = false;
+    ws.onopen = () => { try { ws.send(JSON.stringify({ authorize: state.apiToken })); } catch (e) { /* */ } };
+    ws.onerror = () => {
+      state.connectionError = window.location.protocol === 'file:'
+        ? 'Connection blocked — Deriv rejects WebSocket connections from local files. Host this page (e.g. via a local server or upload it online) instead of opening it directly.'
+        : 'Could not reach Deriv\u2019s servers — check your internet connection.';
+    };
+    ws.onmessage = (m) => {
       try {
         const d = JSON.parse(m.data);
         if (d.msg_type === 'authorize') {
+          gotResponse = true;
           if (d.error) {
-            state.isAuthenticated = false; state.connectionStatus = 'disconnected'; emit();
+            state.isAuthenticated = false;
+            state.connectionStatus = 'disconnected';
+            state.connectionError = d.error.message || 'Token rejected by Deriv.';
+            emit();
             return;
           }
           if (d.authorize) {
-            state.isAuthenticated = true; state.connectionStatus = 'connected';
+            const bal = parseFloat(d.authorize.balance);
+            state.isAuthenticated = true;
+            state.connectionStatus = 'connected';
+            state.connectionError = '';
             state.accountId = d.authorize.loginid || '';
             state.currency = d.authorize.currency || 'USD';
-            const bal = parseFloat(d.authorize.balance);
-            if (!isNaN(bal)) state.balanceUSD = bal;
-            state.derivHistory = [];
+            state.balanceUSD = isNaN(bal) ? 0 : bal;
+            ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
             emit();
-            socket.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-            // Fetch past trade history from Deriv to populate dashboard journal
-            try {
-              socket.send(JSON.stringify({ profit_table: 1, description: 1, sort: 'DESC', limit: 100 }));
-            } catch(e) { /* */ }
           }
-        }
-        if (d.msg_type === 'profit_table' && d.profit_table && d.profit_table.transactions) {
-          state.derivHistory = d.profit_table.transactions.map(t => ({
-            botId: 'history',
-            type: parseFloat(t.sell_price) >= parseFloat(t.buy_price) ? 'win' : 'loss',
-            profit: parseFloat(t.sell_price) - parseFloat(t.buy_price),
-            time: new Date(t.sell_time * 1000).toLocaleTimeString(),
-            ts: (t.sell_time || 0) * 1000,
-            shortcode: t.shortcode || '',
-          }));
-          emit();
         }
         if (d.msg_type === 'balance' && d.balance) {
           const bal = parseFloat(d.balance.balance);
@@ -1283,12 +1226,17 @@ html.light .benz-col { background: #fff; }
         }
       } catch (e) { /* */ }
     };
-    socket.onclose = () => {
-      state.isAuthenticated = false; state.connectionStatus = 'disconnected'; emit();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
+    ws.onclose = () => {
+      state.connectionStatus = 'disconnected';
+      state.isAuthenticated = false;
+      if (!gotResponse && !state.connectionError) {
+        state.connectionError = window.location.protocol === 'file:'
+          ? 'Connection blocked — Deriv rejects WebSocket connections from local files. Host this page instead of opening it directly.'
+          : 'Connection closed before authorizing — check your token and app id.';
+      }
+      emit();
       if (state.apiToken) reconnectTimer = setTimeout(connectAccount, 5000);
     };
-    socket.onerror = () => { /* handled by onclose */ };
   }
 
   function setToken(token) {
@@ -1303,11 +1251,11 @@ html.light .benz-col { background: #fff; }
     getWsUrl,
     getState: () => state,
     subscribe(cb) { listeners.add(cb); return () => listeners.delete(cb); },
-    setToken, setTheme, setTelegram, setTelegramEnabled, setAccountType, notifyTelegram, connectAccount,
+    setToken, setTheme, setTelegram, setTelegramEnabled, setAccountType, setAppId, notifyTelegram, connectAccount,
     getDerivHistory: () => state.derivHistory,
   };
 
-  if (state.apiToken) setTimeout(connectAccount, 300);
+  setTimeout(connectAccount, 300);
 })(window);
 
 (function () {
@@ -1724,7 +1672,7 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  const WEBSOCKET_URL = 'wss://ws.derivws.com/websockets/v3?app_id=33AsK8F3vLO1plM4tD2Wj';
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().appId) || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -1755,7 +1703,7 @@ window.EvenTrading = exports;
           return;
         }
         this.isConnecting = true;
-        this.socket = new WebSocket(WEBSOCKET_URL);
+        this.socket = new WebSocket(getWsUrl());
         this.socket.onopen = () => {
           this.isConnecting = false;
           this.reconnectAttempts = 0;
@@ -1978,10 +1926,17 @@ window.EvenTrading = exports;
       notifyUpdate() {
         const markets = Array.from(this.marketData.values());
         const sorted = [...markets].sort((a, b) => b.score - a.score);
+        // Normalise displayed scores relative to the top scorer so markets
+        // don't all appear pinned at 100%.
+        const maxScore = sorted[0] ? sorted[0].score : 1;
+        const normalised = sorted.map((m, i) => ({
+          ...m,
+          score: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
+        }));
         this.onUpdate({
           markets,
           bestMarket: sorted[0] || null,
-          topThree: sorted.slice(0, 3),
+          topThree: normalised.slice(0, 3),
           isScanning: true,
           lastUpdate: Date.now(),
         });
@@ -2925,7 +2880,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  const WEBSOCKET_URL = 'wss://ws.derivws.com/websockets/v3?app_id=33AsK8F3vLO1plM4tD2Wj';
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().appId) || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
 
   class GlobalSocketManager {
     constructor() {
@@ -2946,7 +2901,7 @@ window.NexusTrading = exports;
         if (this.socket && this.socket.readyState === WebSocket.OPEN) { resolve(); return; }
         if (this.isConnecting) { setTimeout(() => resolve(), 500); return; }
         this.isConnecting = true;
-        this.socket = new WebSocket(WEBSOCKET_URL);
+        this.socket = new WebSocket(getWsUrl());
         this.socket.onopen = () => {
           this.isConnecting = false;
           this.reconnectAttempts = 0;
@@ -3155,7 +3110,12 @@ window.NexusTrading = exports;
       notifyUpdate() {
         const markets = Array.from(this.marketData.values());
         const sorted = [...markets].sort((a, b) => b.score - a.score);
-        this.onUpdate({ markets, bestMarket: sorted[0] || null, topThree: sorted.slice(0, 3), isScanning: true, lastUpdate: Date.now() });
+        const maxScore = sorted[0] ? sorted[0].score : 1;
+        const normalised = sorted.map((m, i) => ({
+          ...m,
+          score: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
+        }));
+        this.onUpdate({ markets, bestMarket: sorted[0] || null, topThree: normalised.slice(0, 3), isScanning: true, lastUpdate: Date.now() });
       }
 
       stop() { this.unsubscribes.forEach((u) => u()); this.unsubscribes = []; }
@@ -3799,7 +3759,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const APP_ID = '33AsK8F3vLO1plM4tD2Wj';
+  function getAppId() { return (window.HubStore && window.HubStore.getState().appId) || '1089'; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -3844,7 +3804,6 @@ window.NexusStrategies=exports;
   }
 
   const audio = new AudioEngine();
-  let lastPickedCold = null;
 
   function computeFrequency(history, tickIndex) {
     const freq = Array.from({ length: 10 }, (_, i) => ({ digit: i, count: 0, percentage: 0, lastSeen: -1, coldStreak: 0 }));
@@ -3858,21 +3817,6 @@ window.NexusStrategies=exports;
     const nonZero = freqP.filter((f) => f.digit !== 0);
     const sorted = [...nonZero].sort((a, b) => a.count - b.count);
     return { cold: sorted[0]?.digit ?? 1, third: sorted[1]?.digit ?? null, top3: sorted.slice(0, 3).map((f) => f.digit) };
-  }
-
-  function pickIrregularCold(top3) {
-    if (top3.length === 0) return 1;
-    if (top3.length === 1) return top3[0];
-    const candidates = top3.filter((d) => d !== lastPickedCold);
-    const weights = candidates.map((_, i) => candidates.length - i);
-    const totalWeight = weights.reduce((a, b) => a + b, 0);
-    let r = Math.random() * totalWeight;
-    for (let i = 0; i < candidates.length; i++) {
-      r -= weights[i];
-      if (r <= 0) { lastPickedCold = candidates[i]; return candidates[i]; }
-    }
-    lastPickedCold = candidates[0];
-    return candidates[0];
   }
 
   function determineLuckyNumber(coldStreakHistory) {
@@ -3894,7 +3838,7 @@ window.NexusStrategies=exports;
       this.onUpdate = null;
       this.socketP = null; this.socketG = null; this.socketT = null;
       this.cooldownTimer = null; this.tickIndex = 0; this.abortFlag = false;
-      this.reconnectTimer = null; this.skipCounter = 0;
+      this.reconnectTimer = null;
       this.state = this.loadInitialState();
       this._bindMethods();
       this.connectAnalysis();
@@ -3909,10 +3853,6 @@ window.NexusStrategies=exports;
     }
 
     loadInitialState() {
-      const savedAnti = JSON.parse(localStorage.getItem('benz_anti_prediction') || 'null') || {
-        triggerMode: 'auto', shiftTrigger: true, rotateDigits: false, randomCooldown: true,
-        variableBatch: false, variableBatchMin: 3, variableBatchMax: 7, skipCycles: true,
-      };
       return {
         isAuthenticated: false, balanceUSD: 0,
         primaryMarket: '1HZ100V', globalMarket: getGlobalMarket('1HZ100V'),
@@ -3928,7 +3868,7 @@ window.NexusStrategies=exports;
         notifications: [], firedCount: 0, abortOnLoss: true,
         connectionStatus: 'disconnected', experiment: null,
         experimentHistory: JSON.parse(localStorage.getItem('benz_experiments') || '[]'),
-        plHistory: [], antiPrediction: savedAnti, skippedLast: false,
+        plHistory: [],
       };
     }
 
@@ -4009,8 +3949,6 @@ window.NexusStrategies=exports;
         case 'UPDATE_EXPERIMENT_ELAPSED': if (s.experiment) s.experiment.elapsedMs = action.elapsedMs; break;
         case 'CLEAR_EXPERIMENTS': localStorage.removeItem('benz_experiments'); s.experimentHistory = []; break;
 
-        case 'SET_ANTI_PREDICTION': s.antiPrediction = { ...s.antiPrediction, ...action.settings }; localStorage.setItem('benz_anti_prediction', JSON.stringify(s.antiPrediction)); break;
-        case 'SET_SKIPPED': s.skippedLast = action.value; break;
         default: break;
       }
       this.runAnalysis();
@@ -4037,17 +3975,6 @@ window.NexusStrategies=exports;
       const s = this.state;
       if (!s.isArmed || s.isRunning || s.isCooldown) return;
       if (s.coldDigit !== null && s.silenceCount >= s.silenceTrigger) {
-        if (s.antiPrediction.skipCycles) {
-          this.skipCounter++;
-          const skipAt = Math.floor(Math.random() * 2) + 4;
-          if (this.skipCounter % skipAt === 0) {
-            this.dispatch({ type: 'NOTIFY', message: `⏭️ SKIP CYCLE — Ghost mode (cycle ${this.skipCounter})`, ntype: 'info' });
-            this.dispatch({ type: 'SET_SKIPPED', value: true });
-            this.startCooldown();
-            return;
-          }
-        }
-        this.dispatch({ type: 'SET_SKIPPED', value: false });
         this.executeBurst();
       }
     }
@@ -4063,9 +3990,6 @@ window.NexusStrategies=exports;
       this.abortFlag = false;
       audio.trigger();
       let batch = s.autoMode ? s.autoBatchSize : s.batchSize;
-      if (s.antiPrediction.variableBatch) {
-        batch = Math.floor(Math.random() * (s.antiPrediction.variableBatchMax - s.antiPrediction.variableBatchMin + 1)) + s.antiPrediction.variableBatchMin;
-      }
       const speed = s.speed;
       const stake = s.stake;
       const barrier = s.coldDigit;
@@ -4096,7 +4020,7 @@ window.NexusStrategies=exports;
 
     startCooldown() {
       const s = this.state;
-      const duration = s.antiPrediction.randomCooldown ? Math.floor(Math.random() * 25) + 5 : 15;
+      const duration = 15;
       this.dispatch({ type: 'COOLDOWN_START', duration });
       audio.cooldown();
       if (this.cooldownTimer) clearInterval(this.cooldownTimer);
@@ -4109,17 +4033,9 @@ window.NexusStrategies=exports;
           const cs = this.state;
           if (cs.autoMode) {
             const freqP = computeFrequency(cs.historyP, this.tickIndex);
-            const { cold, third, top3 } = getColdestDigits(freqP);
-            const ap = cs.antiPrediction;
-            let pickedCold = ap.rotateDigits ? pickIrregularCold(top3.slice(0, 2)) : cold;
-            this.dispatch({ type: 'SET_COLD', cold: pickedCold, third: top3.find((d) => d !== pickedCold) ?? third });
+            const { cold, third } = getColdestDigits(freqP);
+            this.dispatch({ type: 'SET_COLD', cold, third });
             this.dispatch({ type: 'SET_LUCKY', value: determineLuckyNumber(cs.coldStreakHistory) });
-            if (ap.triggerMode === 'auto') {
-              const lucky = determineLuckyNumber(cs.coldStreakHistory);
-              const picked = ap.shiftTrigger ? (Math.random() > 0.5 ? 12 : lucky) : lucky;
-              this.dispatch({ type: 'SET_TRIGGER', value: picked });
-              if (ap.shiftTrigger) this.dispatch({ type: 'NOTIFY', message: `🔀 Trigger shift: ${picked} (12 ↔ ${lucky})`, ntype: 'info' });
-            }
             if (cs.totalProfit >= cs.takeProfit) {
               const m = `🏆 TAKE PROFIT reached: ${cs.totalProfit.toFixed(2)}`;
               this.dispatch({ type: 'NOTIFY', message: m, ntype: 'win' });
@@ -4130,7 +4046,7 @@ window.NexusStrategies=exports;
               window.HubStore.notifyTelegram(m);
             } else {
               this.dispatch({ type: 'ARM' });
-              this.dispatch({ type: 'NOTIFY', message: `🔄 Re-armed — Differ ≠${pickedCold} | CD: ${duration}s`, ntype: 'info' });
+              this.dispatch({ type: 'NOTIFY', message: `🔄 Re-armed — Differ ≠${cold} | CD: ${duration}s`, ntype: 'info' });
             }
           }
         } else {
@@ -4146,7 +4062,7 @@ window.NexusStrategies=exports;
       } catch (e) { /* */ }
       this.tickIndex = 0;
       const createSocket = (market, type) => {
-        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`);
+        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${getAppId()}`);
         ws.onopen = () => { try { ws.send(JSON.stringify({ ticks: market, subscribe: 1 })); } catch (e) { /* */ } };
         ws.onmessage = (m) => {
           try {
@@ -4173,13 +4089,21 @@ window.NexusStrategies=exports;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
       try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) { /* */ }
-      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`);
+      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${getAppId()}`);
       this.socketT = ws;
+      let gotResponse = false;
+      ws.onerror = () => {
+        const reason = window.location.protocol === 'file:'
+          ? 'Deriv blocks connections from local files — host this page instead of opening it directly from disk.'
+          : 'Could not reach Deriv\u2019s servers.';
+        this.dispatch({ type: 'NOTIFY', message: reason, ntype: 'loss' });
+      };
       ws.onopen = () => { try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ } };
       ws.onmessage = (m) => {
         try {
           const d = JSON.parse(m.data);
           if (d.msg_type === 'authorize') {
+            gotResponse = true;
             if (d.error) { this.dispatch({ type: 'NOTIFY', message: `Auth failed: ${d.error.message}`, ntype: 'loss' }); this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); return; }
             if (d.authorize) {
               const bal = parseFloat(d.authorize.balance);
@@ -4230,6 +4154,9 @@ window.NexusStrategies=exports;
       };
       ws.onclose = () => {
         this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+        if (!gotResponse) {
+          this.dispatch({ type: 'NOTIFY', message: 'Connection closed before authorizing — check your token and internet connection.', ntype: 'loss' });
+        }
         setTimeout(() => { if (window.HubStore.getState().apiToken) this.authenticate(); }, 5000);
       };
     }
@@ -4256,12 +4183,12 @@ window.NexusStrategies=exports;
   }
 
   window.BenzEngine = BenzEngine;
-  window.BenzConstants = { MARKETS, APP_ID, getGlobalMarket };
+  window.BenzConstants = { MARKETS, get APP_ID() { return getAppId(); }, getGlobalMarket };
 })();
 
 (function () {
   'use strict';
-  const WS = 'wss://ws.derivws.com/websockets/v3?app_id=33AsK8F3vLO1plM4tD2Wj';
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().appId) || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
   const ANALYSIS_HOLD = 20;
 
   class TitanEngine {
@@ -4297,8 +4224,7 @@ window.NexusStrategies=exports;
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
       this.executionGuard = false; this.pendingTrade = null;
-      this.apiKeys = []; this.activeKeyIndex = 0;
-      this.runsSinceShuffle = 0; this.runsSinceRefresh = 0;
+      this.runsSinceRefresh = 0;
       this.lastTickTime = Date.now(); this.lastTradeTime = Date.now();
       this.latestLiveAnalysis = null; this.connectRef = null;
 
@@ -4314,7 +4240,7 @@ window.NexusStrategies=exports;
         martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 2,
         autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         soundEnabled: true, currentStrategy: 1, alternatingRecovery: true, alternatingRecoveryB: false,
-        smartRecovery: false, shuffleApiKeys: false, autoRefresh: true, tradeMode: this.fixedTradeMode || 'odd',
+        smartRecovery: false, autoRefresh: true, tradeMode: this.fixedTradeMode || 'odd',
       };
       const overDefaults = { ...evenDefaults, autoPilot: false, autoRefresh: false, tradeMode: undefined };
       const defaults = this.mode === 'over' ? overDefaults : evenDefaults;
@@ -4447,8 +4373,8 @@ window.NexusStrategies=exports;
       if (!st.active || st.isCooldown) return;
       if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
         this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting...');
-        const key = this.apiKeys[this.activeKeyIndex];
-        if (key) this.connect(key);
+        const token = window.HubStore.getState().apiToken;
+        if (token) this.connect(token);
         return;
       }
       let contractType, barrierValue = 0;
@@ -4508,19 +4434,14 @@ window.NexusStrategies=exports;
     completeSession() {
       this.executionGuard = false; this.pendingTrade = null;
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false };
-      const randomCd = 8 + Math.floor(Math.random() * 18);
-      this.cooldownTime = randomCd;
-      this.addLog('engine', 'SYSTEM', `COOLING DOWN ${randomCd}s...`);
-      this.runsSinceRefresh++; this.runsSinceShuffle++;
-      if (this.config.shuffleApiKeys && this.apiKeys.length > 1 && this.runsSinceShuffle >= 5) {
-        this.activeKeyIndex = (this.activeKeyIndex + 1) % this.apiKeys.length;
-        this.runsSinceShuffle = 0;
-        this.addLog('engine', 'SHUFFLE', `🔀 Rotated to API key #${this.activeKeyIndex + 1}`);
-      }
+      const cd = 15;
+      this.cooldownTime = cd;
+      this.addLog('engine', 'SYSTEM', `COOLING DOWN ${cd}s...`);
+      this.runsSinceRefresh++;
       if (this.config.autoRefresh && this.runsSinceRefresh >= 4) {
         this.runsSinceRefresh = 0;
-        const key = this.apiKeys[this.activeKeyIndex];
-        if (key) this.connect(key);
+        const token = window.HubStore.getState().apiToken;
+        if (token) this.connect(token);
       }
       if (this.cooldownTimer) clearInterval(this.cooldownTimer);
       this.cooldownTimer = setInterval(() => {
@@ -4611,21 +4532,26 @@ window.NexusStrategies=exports;
       this.executeBoltPurchase();
     }
 
-    connect(tokenOrTokens) {
-      const list = Array.isArray(tokenOrTokens) ? tokenOrTokens.filter((t) => t && t.trim()).slice(0, 3) : (tokenOrTokens?.trim() ? [tokenOrTokens.trim()] : []);
-      if (!list.length) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
-      this.apiKeys = list;
-      if (this.activeKeyIndex >= list.length) this.activeKeyIndex = 0;
-      const token = list[this.activeKeyIndex];
+    connect(token) {
+      token = (token || '').trim();
+      if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
       if (this.tradingSocket) this.tradingSocket.close();
-      this.tradingSocket = new WebSocket(WS);
+      this.tradingSocket = new WebSocket(getWsUrl());
+      let gotResponse = false;
+      this.tradingSocket.onerror = () => {
+        const reason = window.location.protocol === 'file:'
+          ? 'Deriv blocks connections from local files — host this page instead of opening it directly from disk.'
+          : 'Could not reach Deriv\u2019s servers.';
+        this.addLog('error', 'NETWORK', reason);
+      };
       this.tradingSocket.onopen = () => {
         this.tradingSocket.send(JSON.stringify({ authorize: token }));
-        this.addLog('system', 'NETWORK', `Trading pipe established (key #${this.activeKeyIndex + 1}/${list.length})`);
+        this.addLog('system', 'NETWORK', 'Trading pipe established');
       };
       this.tradingSocket.onmessage = (msg) => {
         const data = JSON.parse(msg.data);
         if (data.msg_type === 'authorize') {
+          gotResponse = true;
           if (data.error) { this.addLog('error', 'AUTH', data.error.message); this.state.connected = false; }
           else {
             this.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 }));
@@ -4638,7 +4564,11 @@ window.NexusStrategies=exports;
         if (data.msg_type === 'buy' && data.error) { this.addLog('error', 'TRADE', data.error.message); this.pendingTrade = null; }
         this.emit();
       };
-      this.tradingSocket.onclose = () => { this.state.connected = false; this.emit(); };
+      this.tradingSocket.onclose = () => {
+        this.state.connected = false;
+        if (!gotResponse) this.addLog('error', 'NETWORK', 'Connection closed before authorizing — check your token and internet connection.');
+        this.emit();
+      };
       if (this.pingInterval) clearInterval(this.pingInterval);
       this.pingInterval = setInterval(() => {
         if (this.tradingSocket?.readyState === WebSocket.OPEN) this.tradingSocket.send(JSON.stringify({ ping: 1 }));
@@ -4704,8 +4634,8 @@ window.NexusStrategies=exports;
       const tradeStuck = this.state.active && this.state.isLocked && now - this.lastTradeTime > 60000 && !this.pendingTrade;
       if (tickStale || tradeStuck) {
         this.addLog('engine', 'WATCHDOG', `🚨 ${tickStale ? 'No ticks 12s' : 'No trade 60s'} — reconnecting`);
-        const key = this.apiKeys[this.activeKeyIndex];
-        if (key) this.connect(key);
+        const token = window.HubStore.getState().apiToken;
+        if (token) this.connect(token);
         this.subscribeToMarket(this.config.selectedMarket);
         this.lastTickTime = now; this.lastTradeTime = now;
         if (this.state.active && this.config.autoPilot) setTimeout(() => { this.executionGuard = false; }, 2000);
@@ -4733,25 +4663,25 @@ window.NexusStrategies=exports;
           <div style="font-size:8px;letter-spacing:3px;color:hsl(var(--muted-foreground))">ATOMIC BOLT ENGINE · V3.0 SUPERSONIC</div>
         </div>
         <div style="flex:1"></div>
-        <div class="glass-panel" id="benz-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
-        <div id="benz-conn-dot" style="width:10px;height:10px;border-radius:50%"></div>
+        <div class="glass-panel" id="differ-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
+        <div id="differ-conn-dot" style="width:10px;height:10px;border-radius:50%"></div>
       </header>
       <div class="benz-grid">
-        <div class="benz-col"><div class="benz-scroll" id="benz-left"></div></div>
-        <div class="benz-col"><div class="benz-scroll" id="benz-center"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="differ-left"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="differ-center"></div></div>
         <div class="benz-col">
           <div style="display:flex;border-bottom:1px solid hsl(var(--border)/0.4)">
-            <button class="benz-subtab font-display active" data-tab="journal" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;background:none;border:none;color:hsl(var(--primary));cursor:pointer">JOURNAL</button>
-            <button class="benz-subtab font-display" data-tab="lab" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;background:none;border:none;color:hsl(var(--muted-foreground));cursor:pointer">🧪 LAB</button>
+            <button class="differ-subtab font-display active" data-tab="journal" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;background:none;border:none;color:hsl(var(--primary));cursor:pointer">JOURNAL</button>
+            <button class="differ-subtab font-display" data-tab="lab" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;background:none;border:none;color:hsl(var(--muted-foreground));cursor:pointer">🧪 LAB</button>
           </div>
-          <div class="benz-scroll" id="benz-right"></div>
+          <div class="benz-scroll" id="differ-right"></div>
         </div>
       </div>
-      <div class="glass-monitor" id="benz-statusbar" style="text-align:center;padding:10px;font-family:monospace;font-size:13px;border-top:1px solid hsl(var(--border)/0.5);border-radius:0;flex-shrink:0"></div>`;
+      <div class="glass-monitor" id="differ-statusbar" style="text-align:center;padding:10px;font-family:monospace;font-size:13px;border-top:1px solid hsl(var(--border)/0.5);border-radius:0;flex-shrink:0"></div>`;
 
-    root.querySelectorAll('.benz-subtab').forEach((btn) => {
+    root.querySelectorAll('.differ-subtab').forEach((btn) => {
       btn.onclick = () => {
-        root.querySelectorAll('.benz-subtab').forEach((b) => { b.classList.remove('active'); b.style.color = 'hsl(var(--muted-foreground))'; });
+        root.querySelectorAll('.differ-subtab').forEach((b) => { b.classList.remove('active'); b.style.color = 'hsl(var(--muted-foreground))'; });
         btn.classList.add('active'); btn.style.color = 'hsl(var(--primary))';
         renderRight(global.benzEngine.state, btn.dataset.tab);
       };
@@ -4769,7 +4699,7 @@ window.NexusStrategies=exports;
     const silentPct = s.silenceTrigger ? Math.min(100, (s.silenceCount / s.silenceTrigger) * 100) : 0;
     const silentClass = s.silenceCount >= s.silenceTrigger ? 'neon-text-win' : s.silenceCount >= s.silenceTrigger * 0.7 ? 'neon-text-accent' : '';
 
-    el('benz-left').innerHTML = `
+    el('differ-left').innerHTML = `
       <div class="section-divider neon-text-secondary"><span>● Analysis Engine</span></div>
       <div class="glass-panel" style="padding:10px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px"><span class="font-display" style="letter-spacing:2px">CONFIDENCE</span><span class="neon-text-secondary">${s.analysisConfidence}%</span></div>
@@ -4809,48 +4739,47 @@ window.NexusStrategies=exports;
     const markets = MARKETS.map((m) => `<option value="${m.value}" ${m.value === s.primaryMarket ? 'selected' : ''}>${m.label}</option>`).join('');
     const speedLabel = s.speed <= 100 ? 'SUPERSONIC' : s.speed <= 300 ? 'FAST' : s.speed <= 600 ? 'NORMAL' : 'SLOW';
     const batchPayout = (s.autoMode ? s.autoBatchSize : s.batchSize) * s.stake * 1.95;
-    const ap = s.antiPrediction;
 
-    el('benz-center').innerHTML = `
+    el('differ-center').innerHTML = `
       <div class="section-divider">Priority Monitor</div>
       <div class="live-tick-display">
         <div class="live-tick-cell">
           <div class="cell-label">Current Tick</div>
-          <div id="benz-live-tick" class="cell-value text-primary">${s.currentTick ?? '—'}</div>
+          <div id="differ-live-tick" class="cell-value text-primary">${s.currentTick ?? '—'}</div>
         </div>
         <div class="live-tick-cell" style="border-color:hsl(var(--primary)/0.3)">
           <div class="cell-label">Differ Digit</div>
-          <div id="benz-live-cold" class="cell-value neon-text-primary">${s.coldDigit ?? '—'}</div>
+          <div id="differ-live-cold" class="cell-value neon-text-primary">${s.coldDigit ?? '—'}</div>
         </div>
       </div>
       <div class="section-divider">Configuration</div>
       <div class="glass-panel" style="padding:12px">
         <div class="labeled-input" style="margin-bottom:10px">
           <span class="input-label">Market Index</span>
-          <select class="terminal-select" id="benz-market">${markets}</select>
+          <select class="terminal-select" id="differ-market">${markets}</select>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
           <div class="labeled-input">
             <span class="input-label">Stake ($)</span>
-            <input type="number" step="0.01" class="terminal-input" id="benz-stake" value="${s.stake}">
+            <input type="number" step="0.01" class="terminal-input" id="differ-stake" value="${s.stake}">
           </div>
           <div class="labeled-input">
             <span class="input-label">Batch Size</span>
-            <input type="number" class="terminal-input" id="benz-batch" value="${s.batchSize}">
+            <input type="number" class="terminal-input" id="differ-batch" value="${s.batchSize}">
           </div>
         </div>
         <div class="glass-monitor" style="padding:8px;text-align:center;margin:0 0 10px;font-size:11px">BATCH PAYOUT (ALL WIN) <span class="neon-text-win font-mono-data">${batchPayout.toFixed(2)}</span></div>
         <div class="burst-speed-row" style="margin-bottom:10px">
           <div class="burst-speed-header">
             <span>Burst Speed</span>
-            <span class="burst-speed-label" id="benz-speed-label">${speedLabel} · ${s.speed}ms</span>
+            <span class="burst-speed-label" id="differ-speed-label">${speedLabel} · ${s.speed}ms</span>
           </div>
-          <input type="range" id="benz-speed" min="50" max="1000" step="50" value="${s.speed}">
+          <input type="range" id="differ-speed" min="50" max="1000" step="50" value="${s.speed}">
           <div style="display:flex;justify-content:space-between;font-size:9px;color:hsl(var(--muted-foreground));margin-top:2px"><span>50ms (Fast)</span><span>1000ms (Slow)</span></div>
         </div>
         <div class="labeled-input">
           <span class="input-label">Silence Trigger · Lucky: ${s.luckyNumber}</span>
-          <input type="number" class="terminal-input" id="benz-trigger" value="${s.silenceTrigger}" min="5" max="30">
+          <input type="number" class="terminal-input" id="differ-trigger" value="${s.silenceTrigger}" min="5" max="30">
           <span class="input-hint">Number of ticks the target digit must be silent before firing</span>
         </div>
       </div>
@@ -4860,108 +4789,65 @@ window.NexusStrategies=exports;
             <span class="label-title" style="color:hsl(var(--loss))">Abort on Loss</span>
             <span class="label-sub">Stop all remaining contracts after first loss</span>
           </div>
-          <button class="toggle-pill ${s.abortOnLoss ? 'on' : ''}" id="benz-abortonloss"></button>
+          <button class="toggle-pill ${s.abortOnLoss ? 'on' : ''}" id="differ-abortonloss"></button>
         </div>
       </div>
       <div class="auto-section" style="margin-top:8px">
-        <div class="auto-header" id="benz-auto-header">
+        <div class="auto-header" id="differ-auto-header">
           <span class="auto-header-title">⚙ Full Automation</span>
-          <button class="toggle-pill ${s.autoMode ? 'on' : ''}" id="benz-auto"></button>
+          <button class="toggle-pill ${s.autoMode ? 'on' : ''}" id="differ-auto"></button>
         </div>
-        <div id="benz-auto-panel" style="${s.autoMode ? '' : 'display:none'};padding:12px;background:hsl(var(--bg-soft)/0.6);border-top:1px solid hsl(var(--border)/0.5)">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div id="differ-auto-panel" style="${s.autoMode ? '' : 'display:none'};padding:12px;background:hsl(var(--bg-soft)/0.6);border-top:1px solid hsl(var(--border)/0.5)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
             <div class="labeled-input">
               <span class="input-label">Take Profit ($)</span>
-              <input type="number" class="terminal-input" id="benz-tp" value="${s.takeProfit}">
+              <input type="number" class="terminal-input" id="differ-tp" value="${s.takeProfit}">
             </div>
             <div class="labeled-input">
               <span class="input-label">Stop Loss ($)</span>
-              <input type="number" class="terminal-input" id="benz-sl" value="${s.stopLoss}">
+              <input type="number" class="terminal-input" id="differ-sl" value="${s.stopLoss}">
             </div>
             <div class="labeled-input" style="grid-column:1/-1">
               <span class="input-label">Auto Batch Size</span>
-              <input type="number" class="terminal-input" id="benz-autobatch" value="${s.autoBatchSize}">
+              <input type="number" class="terminal-input" id="differ-autobatch" value="${s.autoBatchSize}">
               <span class="input-hint">Number of contracts to fire per auto-trigger cycle</span>
             </div>
           </div>
-          <div class="ap-section-header">🛡️ Anti-Prediction</div>
-          <div style="display:flex;flex-direction:column;gap:2px">
-            <label class="ap-row">
-              <input type="checkbox" id="ap-shift" ${ap.shiftTrigger ? 'checked' : ''}>
-              <span class="ap-checkbox"></span>
-              <span class="ap-label">Shift 12 ↔ Predict
-                <span class="ap-desc"> — Randomly alternate between lucky #12 and cold digit</span>
-              </span>
-            </label>
-            <label class="ap-row">
-              <input type="checkbox" id="ap-rotate" ${ap.rotateDigits ? 'checked' : ''}>
-              <span class="ap-checkbox"></span>
-              <span class="ap-label">Rotate Top 2 Cold Digits
-                <span class="ap-desc"> — Alternate between the two coldest digits per cycle</span>
-              </span>
-            </label>
-            <label class="ap-row">
-              <input type="checkbox" id="ap-randcd" ${ap.randomCooldown ? 'checked' : ''}>
-              <span class="ap-checkbox"></span>
-              <span class="ap-label">Random Cooldown 5–30s
-                <span class="ap-desc"> — Randomize cooldown to break predictable re-entry timing</span>
-              </span>
-            </label>
-            <label class="ap-row">
-              <input type="checkbox" id="ap-varbatch" ${ap.variableBatch ? 'checked' : ''}>
-              <span class="ap-checkbox"></span>
-              <span class="ap-label">Variable Batch Size
-                <span class="ap-desc"> — Randomly vary batch between min/max per cycle</span>
-              </span>
-            </label>
-            <label class="ap-row">
-              <input type="checkbox" id="ap-skip" ${ap.skipCycles ? 'checked' : ''}>
-              <span class="ap-checkbox"></span>
-              <span class="ap-label">👻 Skip Cycles
-                <span class="ap-desc"> — Randomly skip eligible trigger cycles to avoid patterns</span>
-              </span>
-            </label>
-          </div>
         </div>
       </div>
-      <button class="btn-engage ${s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : ''}" id="benz-engage" style="margin-top:12px">
+      <button class="btn-engage ${s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : ''}" id="differ-engage" style="margin-top:12px">
         ${s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT'}
       </button>
-      <button id="benz-abort" style="display:${s.isArmed || s.isRunning ? 'block' : 'none'};width:100%;margin-top:6px;padding:12px;border:1px solid hsl(var(--loss)/0.5);border-radius:10px;background:transparent;color:hsl(var(--loss));font-family:Orbitron,sans-serif;cursor:pointer">⛔ ABORT TRADES</button>`;
+      <button id="differ-abort" style="display:${s.isArmed || s.isRunning ? 'block' : 'none'};width:100%;margin-top:6px;padding:12px;border:1px solid hsl(var(--loss)/0.5);border-radius:10px;background:transparent;color:hsl(var(--loss));font-family:Orbitron,sans-serif;cursor:pointer">⛔ ABORT TRADES</button>`;
 
     const eng = global.benzEngine;
-    el('benz-market').onchange = (e) => { eng.dispatch({ type: 'SET_MARKET', market: e.target.value }); setTimeout(() => eng.connectAnalysis(), 100); };
-    el('benz-stake').onchange = (e) => eng.dispatch({ type: 'SET_STAKE', value: parseFloat(e.target.value) || 1 });
-    el('benz-batch').onchange = (e) => eng.dispatch({ type: 'SET_BATCH', value: parseInt(e.target.value) || 1 });
-    el('benz-speed').oninput = (e) => { eng.dispatch({ type: 'SET_SPEED', value: parseInt(e.target.value) }); const sl = el('benz-speed-label'); if (sl) { const v = parseInt(e.target.value); sl.textContent = (v <= 100 ? 'SUPERSONIC' : v <= 300 ? 'FAST' : v <= 600 ? 'NORMAL' : 'SLOW') + ` (${v}ms)`; } };
-    el('benz-trigger').onchange = (e) => eng.dispatch({ type: 'SET_TRIGGER', value: parseInt(e.target.value) || 12 });
-    el('benz-abortonloss').onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' });
-    el('benz-auto').onclick = () => { eng.dispatch({ type: 'TOGGLE_AUTO' }); renderCenterConfig(eng.state); };
-    el('benz-tp') && (el('benz-tp').onchange = (e) => eng.dispatch({ type: 'SET_TP', value: parseFloat(e.target.value) }));
-    el('benz-sl') && (el('benz-sl').onchange = (e) => eng.dispatch({ type: 'SET_SL', value: parseFloat(e.target.value) }));
-    el('benz-autobatch') && (el('benz-autobatch').onchange = (e) => eng.dispatch({ type: 'SET_AUTO_BATCH', value: parseInt(e.target.value) }));
-    ['shift', 'rotate', 'randcd', 'varbatch', 'skip'].forEach((k) => {
-      const map = { shift: 'shiftTrigger', rotate: 'rotateDigits', randcd: 'randomCooldown', varbatch: 'variableBatch', skip: 'skipCycles' };
-      const node = el('ap-' + k);
-      if (node) node.onchange = () => eng.dispatch({ type: 'SET_ANTI_PREDICTION', settings: { [map[k]]: node.checked } });
-    });
-    el('benz-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
-    el('benz-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
+    el('differ-market').onchange = (e) => { eng.dispatch({ type: 'SET_MARKET', market: e.target.value }); setTimeout(() => eng.connectAnalysis(), 100); };
+    el('differ-stake').onchange = (e) => eng.dispatch({ type: 'SET_STAKE', value: parseFloat(e.target.value) || 1 });
+    el('differ-batch').onchange = (e) => eng.dispatch({ type: 'SET_BATCH', value: parseInt(e.target.value) || 1 });
+    el('differ-speed').oninput = (e) => { eng.dispatch({ type: 'SET_SPEED', value: parseInt(e.target.value) }); const sl = el('differ-speed-label'); if (sl) { const v = parseInt(e.target.value); sl.textContent = (v <= 100 ? 'SUPERSONIC' : v <= 300 ? 'FAST' : v <= 600 ? 'NORMAL' : 'SLOW') + ` (${v}ms)`; } };
+    el('differ-trigger').onchange = (e) => eng.dispatch({ type: 'SET_TRIGGER', value: parseInt(e.target.value) || 12 });
+    el('differ-abortonloss').onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' });
+    el('differ-auto').onclick = () => { eng.dispatch({ type: 'TOGGLE_AUTO' }); renderCenterConfig(eng.state); };
+    el('differ-tp') && (el('differ-tp').onchange = (e) => eng.dispatch({ type: 'SET_TP', value: parseFloat(e.target.value) }));
+    el('differ-sl') && (el('differ-sl').onchange = (e) => eng.dispatch({ type: 'SET_SL', value: parseFloat(e.target.value) }));
+    el('differ-autobatch') && (el('differ-autobatch').onchange = (e) => eng.dispatch({ type: 'SET_AUTO_BATCH', value: parseInt(e.target.value) }));
+    el('differ-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
+    el('differ-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
   }
 
   function renderRight(s, tab) {
     if (tab === 'lab') {
-      el('benz-right').innerHTML = `<div class="section-divider neon-text-accent">🧪 Experiment Lab</div>
+      el('differ-right').innerHTML = `<div class="section-divider neon-text-accent">🧪 Experiment Lab</div>
         <div class="glass-panel" style="padding:12px"><p style="font-size:11px;color:hsl(var(--muted-foreground))">Start a timed experiment from the original Lab tab. Net P/L chart uses ${s.plHistory.length} data points.</p>
         <div style="display:flex;gap:6px;margin-top:8px">${[15, 30, 60].map((d) => `<button class="glass-monitor" style="flex:1;padding:8px;cursor:pointer" data-exp="${d}">${d}m</button>`).join('')}</div>
-        <button id="benz-stop-exp" style="margin-top:8px;width:100%;padding:8px;cursor:pointer">Stop Experiment</button></div>`;
-      el('benz-right').querySelectorAll('[data-exp]').forEach((b) => b.onclick = () => global.benzEngine.dispatch({ type: 'START_EXPERIMENT', durationMinutes: parseInt(b.dataset.exp) }));
-      el('benz-stop-exp').onclick = () => global.benzEngine.dispatch({ type: 'STOP_EXPERIMENT' });
+        <button id="differ-stop-exp" style="margin-top:8px;width:100%;padding:8px;cursor:pointer">Stop Experiment</button></div>`;
+      el('differ-right').querySelectorAll('[data-exp]').forEach((b) => b.onclick = () => global.benzEngine.dispatch({ type: 'START_EXPERIMENT', durationMinutes: parseInt(b.dataset.exp) }));
+      el('differ-stop-exp').onclick = () => global.benzEngine.dispatch({ type: 'STOP_EXPERIMENT' });
       return;
     }
     const total = s.totalWins + s.totalLoss;
     const wr = total ? ((s.totalWins / total) * 100).toFixed(1) : '0.0';
-    el('benz-right').innerHTML = `
+    el('differ-right').innerHTML = `
       <div style="text-align:center;padding:12px" class="glass-panel-glow">
         <div style="font-size:10px;letter-spacing:3px">NET PROFIT</div>
         <div class="stat-5xl ${s.totalProfit >= 0 ? 'neon-text-win' : 'neon-text-loss'}" style="font-size:2.5rem">${s.totalProfit >= 0 ? '+' : ''}${s.totalProfit.toFixed(2)}</div>
@@ -4972,49 +4858,49 @@ window.NexusStrategies=exports;
         </div>
       </div>
       <div style="margin-top:8px">${s.journal.slice(0, 60).map((j) => `<div style="display:flex;gap:8px;padding:10px;margin-bottom:4px;border-radius:10px;font-size:12px;font-family:monospace;background:hsl(var(--${j.type === 'win' ? 'win' : 'loss'})/0.06);border-left:3px solid hsl(var(--${j.type === 'win' ? 'win' : 'loss'})/0.5)"><b class="neon-text-${j.type === 'win' ? 'win' : 'loss'}">${j.type === 'win' ? 'W' : 'L'}</b><span style="color:hsl(var(--muted-foreground))">${j.time}</span><span>B:${j.barrier}</span><span class="neon-text-secondary">→${j.exitDigit}</span><span style="margin-left:auto" class="neon-text-${j.type === 'win' ? 'win' : 'loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span></div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
-      <button id="benz-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
-    el('benz-reset').onclick = () => global.benzEngine.dispatch({ type: 'RESET_JOURNAL' });
+      <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
+    el('differ-reset').onclick = () => global.benzEngine.dispatch({ type: 'RESET_JOURNAL' });
   }
 
   function updateStatusBar(s) {
-    const bar = el('benz-statusbar');
+    const bar = el('differ-statusbar');
     if (!bar) return;
     const txt = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s — Re-analyzing...` : s.isRunning ? `⚡ FIRING BATCH...` : s.isArmed ? `🔋 ARMED — Silence: ${s.silenceCount}/${s.silenceTrigger}` : s.isAuthenticated ? '✓ READY — Press ENGAGE' : 'OFFLINE — Add API Token in Settings';
     bar.textContent = txt;
     bar.className = 'glass-monitor ' + (s.isCooldown ? 'neon-text-accent' : s.isRunning ? 'neon-text-win' : s.isArmed ? 'neon-text-primary' : '');
     bar.style.cssText = 'text-align:center;padding:10px;font-family:monospace;font-size:13px;border-top:1px solid hsl(var(--border)/0.5)';
 
-    const tick = el('benz-live-tick');
+    const tick = el('differ-live-tick');
     if (tick) tick.textContent = s.currentTick ?? '—';
-    const cold = el('benz-live-cold');
+    const cold = el('differ-live-cold');
     if (cold) cold.textContent = s.coldDigit ?? '—';
 
-    const bal = el('benz-balance');
+    const bal = el('differ-balance');
     if (bal && s.isAuthenticated) {
       bal.style.display = 'block';
       bal.innerHTML = `USD <span class="neon-text-win font-mono-data">${s.balanceUSD.toFixed(2)}</span> · KSH <span class="neon-text-accent font-mono-data">${(s.balanceUSD * 129.5).toFixed(2)}</span>`;
     }
-    const dot = el('benz-conn-dot');
+    const dot = el('differ-conn-dot');
     if (dot) dot.style.background = s.connectionStatus === 'connected' ? 'hsl(var(--win))' : s.connectionStatus === 'connecting' ? 'hsl(var(--accent))' : 'hsl(var(--loss)/0.5)';
 
-    const engage = el('benz-engage');
+    const engage = el('differ-engage');
     if (engage) {
       engage.className = 'btn-engage ' + (s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : '');
       engage.textContent = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT';
     }
-    const abort = el('benz-abort');
+    const abort = el('differ-abort');
     if (abort) abort.style.display = s.isArmed || s.isRunning ? 'block' : 'none';
   }
 
   let lastTab = 'journal';
   global.BenzUI = {
     render(s) {
-      const root = el('benz-root');
+      const root = el('differ-root');
       if (!root) return;
       buildShell(root);
       renderLeft(s);
       updateStatusBar(s);
-      const activeSub = document.querySelector('#panel-benz .benz-subtab.active');
+      const activeSub = document.querySelector('#panel-differ .differ-subtab.active');
       lastTab = activeSub ? activeSub.dataset.tab : lastTab;
       renderRight(s, lastTab);
     },
@@ -5152,11 +5038,14 @@ window.NexusStrategies=exports;
       </div>
 
       <div class="analysis-hub-card">
-        <div class="analysis-hub-title">Top Markets</div>
+        <div class="analysis-hub-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Top Markets</span>
+          ${scannerState.topThree && scannerState.topThree[0] ? `<button class="strategy-btn" title="Jump to best market" data-mkt="${scannerState.topThree[0].symbol}" style="padding:3px 8px;font-size:9px;letter-spacing:0.5px;width:auto">⚡ BEST</button>` : ''}
+        </div>
         ${(scannerState.topThree || []).map((m) => `<button class="strategy-btn ${m.symbol === c.selectedMarket ? 'active' : ''}" data-mkt="${m.symbol}" style="width:100%;text-align:left;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between">
           <div>
             <div style="font-size:11px">${m.name}</div>
-            <div class="text-muted" style="font-size:8.5px;margin-top:2px">${m.health || m.longTerm || '—'} · ${m.trend || '—'}</div>
+            <div class="text-muted" style="font-size:8.5px;margin-top:2px">${(m.health && m.health.longTerm) || m.longTerm || '—'} · ${(m.health && m.health.trend) || m.trend || '—'}</div>
           </div>
           <b class="text-accent" style="font-family:Orbitron,sans-serif;font-size:11px">${m.score}%</b>
         </button>`).join('') || '<div class="text-muted" style="font-size:10px;padding:8px 0">Scanning markets…</div>'}
@@ -5167,7 +5056,12 @@ window.NexusStrategies=exports;
     el(`${rootId}-left`).querySelectorAll('[data-period]').forEach((b) => {
       b.onclick = () => { engine.setConfig({ tickPeriod: parseInt(b.dataset.period) }); engine.scanner && engine.scanner.setTickPeriod(parseInt(b.dataset.period)); };
     });
-    el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => engine.changeMarket(b.dataset.mkt));
+    el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
+      engine.changeMarket(b.dataset.mkt);
+      const centerCol = document.getElementById(`${rootId}-center`);
+      const centerScroll = centerCol && centerCol.closest('.benz-col');
+      if (centerScroll) { centerScroll.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); centerScroll.scrollTop = 0; }
+    });
   }
 
   function renderCenterConfig(engine, rootId, snap) {
@@ -5329,13 +5223,6 @@ window.NexusStrategies=exports;
           <div style="display:flex;flex-direction:column;gap:6px">
             <div class="settings-toggle-row">
               <div class="settings-toggle-row-label">
-                <span class="label-title">🔀 Shuffle API Keys</span>
-                <span class="label-sub">Rotate between saved keys every 5 runs (unpredictable)</span>
-              </div>
-              <button class="titan-toggle ${c.shuffleApiKeys ? 'on' : ''}" id="${rootId}-shuffle"></button>
-            </div>
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-row-label">
                 <span class="label-title">♻️ Auto-Refresh</span>
                 <span class="label-sub">Reconnects every 4 runs + on stuck-detection</span>
               </div>
@@ -5368,7 +5255,6 @@ window.NexusStrategies=exports;
     el(`${rootId}-mult`) && (el(`${rootId}-mult`).onchange = (e) => engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) }));
     el(`${rootId}-tp`) && (el(`${rootId}-tp`).onchange = (e) => engine.setConfig({ takeProfit: parseFloat(e.target.value) }));
     el(`${rootId}-sl`) && (el(`${rootId}-sl`).onchange = (e) => engine.setConfig({ stopLoss: parseFloat(e.target.value) }));
-    el(`${rootId}-shuffle`) && (el(`${rootId}-shuffle`).onclick = () => { engine.setConfig({ shuffleApiKeys: !c.shuffleApiKeys }); renderCenterConfig(engine, rootId, engine.getSnapshot()); });
     el(`${rootId}-autorefresh`) && (el(`${rootId}-autorefresh`).onclick = () => { engine.setConfig({ autoRefresh: !c.autoRefresh }); renderCenterConfig(engine, rootId, engine.getSnapshot()); });
     // Stop step dropdown
     const stopSel = el(`${rootId}-stop-select`);
@@ -5549,6 +5435,13 @@ window.NexusStrategies=exports;
   function buildShell(root) {
     root.innerHTML = `
       <div class="dash-scroll">
+        <div class="glass-panel-glow" id="dash-master-panel" style="padding:14px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+          <div style="flex:1;min-width:180px">
+            <div class="font-orbitron text-primary" style="font-size:11px;letter-spacing:3px">MASTER CONTROL</div>
+            <div class="text-muted" style="font-size:10px;margin-top:2px" id="dash-master-status">0/4 bots engaged</div>
+          </div>
+          <button id="dash-master-toggle" style="margin-top:0;padding:8px 18px;font-size:11px;letter-spacing:1.5px;border-radius:8px;border:1px solid hsl(0 0% 30%);background:hsl(0 0% 16%);color:hsl(0 0% 80%);font-family:Orbitron,sans-serif;cursor:pointer;transition:background .15s,color .15s">ENGAGE NOW</button>
+        </div>
         <div class="dash-stats-row">
           <div class="glass-panel stat-card">
             <div class="stat-card-top"><span class="stat-card-label">Net P&amp;L</span><span class="stat-card-icon">📈</span></div>
@@ -5720,22 +5613,87 @@ window.NexusStrategies=exports;
   global.DashboardUI = { render };
 })(window);
 
+
+</script>
+
+<script>
 (function () {
   'use strict';
 
-  let activeApp = localStorage.getItem('hub_active_app') || 'dashboard';
-  let benzEngine, evenEngine, oddEngine, nexusEngine;
-  let benzShellReady = false;
-  let dashboardEl = null;
-  let dashRenderQueued = false;
+  const BOT_IDS = ['differ', 'even', 'odd', 'nexus'];
 
   const THEMES = [
-    { v: 'dark', i: '🟣', label: 'Obsidian' },
-    { v: 'midnight', i: '🔵', label: 'Void' },
-    { v: 'slate', i: '🌌', label: 'Nebula' },
+    { v: 'dark',     i: '🟣', label: 'Obsidian' },
+    { v: 'midnight', i: '🔵', label: 'Void'     },
+    { v: 'slate',    i: '🌌', label: 'Nebula'   },
     { v: 'charcoal', i: '⬛', label: 'Charcoal' },
-    { v: 'light', i: '⚪', label: 'Arctic' },
+    { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
+
+  let activeApp = localStorage.getItem('hub_active_app') || 'dashboard';
+  let dashboardEl = null;
+  let dashRenderQueued = false;
+  const engines = { differ: null, even: null, odd: null, nexus: null };
+  const titanBuilt = { even: false, odd: false, nexus: false };
+
+  function queueDashboardRender() {
+    if (dashRenderQueued) return;
+    dashRenderQueued = true;
+    requestAnimationFrame(() => { dashRenderQueued = false; renderDashboard(); });
+  }
+
+  function renderDashboard() {
+    if (!dashboardEl || !window.DashboardUI) return;
+    window.DashboardUI.render(dashboardEl, engines);
+  }
+
+  function ensureDifferEngine() {
+    if (engines.differ) return engines.differ;
+    const eng = new window.BenzEngine();
+    eng.onUpdate = function (s) {
+      if (window.BenzUI) window.BenzUI.render(s);
+      if (activeApp === 'dashboard') queueDashboardRender();
+    };
+    engines.differ = eng;
+    window.benzEngine = eng; // back-compat for code/snippets that reach for this directly
+    return eng;
+  }
+
+  function ensureTitanEngine(id) {
+    if (engines[id]) return engines[id];
+    const isOver = id === 'nexus';
+    const opts = isOver
+      ? {
+          id, mode: 'over', fixedTradeMode: null, botLabel: 'Over/Under Bot',
+          trading: window.NexusTrading, socket: window.NexusSocket, scanner: window.NexusScanner,
+          strategies: window.NexusStrategies, sounds: window.Sounds, storagePrefix: 'nexus',
+        }
+      : {
+          id, mode: 'evenodd', fixedTradeMode: id, botLabel: id === 'even' ? 'Even Bot' : 'Odd Bot',
+          trading: window.EvenTrading, socket: window.EvenSocket, scanner: window.EvenScanner,
+          strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
+        };
+    const eng = new window.TitanEngine(opts);
+    eng.onUpdate = function () {
+      const rootId = id + '-root';
+      if (activeApp === id && titanBuilt[id] && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
+      if (activeApp === 'dashboard') queueDashboardRender();
+    };
+    engines[id] = eng;
+    return eng;
+  }
+
+  function initBotTab(id) {
+    if (id === 'differ') {
+      const eng = ensureDifferEngine();
+      if (window.BenzUI) window.BenzUI.renderFull(eng.state);
+      return;
+    }
+    const eng = ensureTitanEngine(id);
+    const label = id === 'even' ? 'EVEN OMEGA' : id === 'odd' ? 'ODD OMEGA' : 'NEXUS PROFIT FINDER';
+    if (window.TitanUI) window.TitanUI.render(eng, id + '-root', label);
+    titanBuilt[id] = true;
+  }
 
   function switchApp(id) {
     activeApp = id;
@@ -5743,261 +5701,217 @@ window.NexusStrategies=exports;
     document.querySelectorAll('.hub-tab').forEach((t) => t.classList.toggle('active', t.dataset.app === id));
     document.querySelectorAll('.app-panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + id));
     if (id === 'dashboard') queueDashboardRender();
+    else initBotTab(id);
   }
 
   function bindHubTabs() {
-    document.querySelectorAll('.hub-tab').forEach((btn) => {
-      btn.addEventListener('click', () => switchApp(btn.dataset.app));
-    });
+    document.querySelectorAll('.hub-tab').forEach((btn) => btn.addEventListener('click', () => switchApp(btn.dataset.app)));
     switchApp(activeApp);
   }
 
-  function showBenzNotify(s) {
-    const n = s.notifications[s.notifications.length - 1];
-    if (!n) return;
-    let t = document.getElementById('benz-toast');
-    if (!t) {
-      t = document.createElement('div');
-      t.id = 'benz-toast';
-      t.className = 'notify-toast';
-      document.body.appendChild(t);
-    }
-    t.className = 'notify-toast ' + (n.type === 'win' ? 'neon-text-win' : n.type === 'loss' ? 'neon-text-loss' : 'neon-text-accent');
-    t.textContent = n.message;
-    clearTimeout(t._hide);
-    t._hide = setTimeout(() => { t.style.opacity = '0'; }, 4000);
-    t.style.opacity = '1';
-  }
-
-  function queueDashboardRender() {
-    if (dashRenderQueued) return;
-    dashRenderQueued = true;
-    requestAnimationFrame(() => {
-      dashRenderQueued = false;
-      if (dashboardEl) window.DashboardUI.render(dashboardEl, { differ: benzEngine, even: evenEngine, odd: oddEngine, nexus: nexusEngine });
-    });
-  }
-
-  /* -------------------- Global top bar -------------------- */
-  function renderThemePills(container, onPick) {
-    container.innerHTML = '';
-    const isTopbar = container.id === 'hub-theme-pills';
-    THEMES.forEach((t) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      if (isTopbar) {
-        b.textContent = t.i;
-        b.title = t.label;
-        b.style.cssText = 'width:28px;height:28px;border-radius:8px;font-size:13px';
-      } else {
-        b.innerHTML = `<span style="font-size:14px">${t.i}</span><span style="font-size:9px;display:block;font-family:Orbitron,sans-serif;letter-spacing:1px;margin-top:1px">${t.label}</span>`;
-        b.style.cssText = 'flex-direction:column;padding:6px 10px;height:auto;width:auto;border-radius:8px;gap:0';
-      }
-      b.className = window.HubStore.getState().theme === t.v ? 'active' : '';
-      b.onclick = () => onPick(t.v);
-      container.appendChild(b);
-    });
-  }
-
-  function refreshThemePills() {
-    document.querySelectorAll('.hub-theme-pills button, .theme-pill-row button').forEach((b) => b.classList.remove('active'));
-    const theme = window.HubStore.getState().theme;
-    const idx = THEMES.findIndex((t) => t.v === theme);
-    [document.querySelectorAll('#hub-theme-pills button')[idx], document.querySelectorAll('#settings-theme-pills button')[idx]]
-      .forEach((b) => b && b.classList.add('active'));
-    const defThemeSel = document.getElementById('settings-default-theme');
-    if (defThemeSel) {
-      defThemeSel.value = theme;
-      defThemeSel.onchange = (e) => window.HubStore.setTheme(e.target.value);
-    }
-  }
-
-  function renderTopbar(hub) {
-    const accountEl = document.getElementById('hub-account-id');
-    accountEl.textContent = hub.accountId 
-      ? `Account ${hub.accountId} · ${hub.currency} · ${hub.accountType.toUpperCase()}` 
-      : 'No account linked — open Settings';
-
-    const balancePill = document.getElementById('hub-balance-pill');
-    if (hub.isAuthenticated) {
-      balancePill.style.display = 'inline-flex';
-      balancePill.textContent = `${hub.currency} ${hub.balanceUSD.toFixed(2)}`;
-    } else {
-      balancePill.style.display = 'none';
-    }
-
-    const badge = document.getElementById('hub-live-badge');
-    const liveText = document.getElementById('hub-live-text');
-    badge.className = 'hub-live-badge ' + (hub.connectionStatus === 'connected' ? 'connected' : hub.connectionStatus === 'connecting' ? 'connecting' : '');
-    liveText.textContent = hub.connectionStatus === 'connected' ? 'Live' : hub.connectionStatus === 'connecting' ? 'Connecting' : 'Offline';
-
-    const status = document.getElementById('settings-status');
-    if (status) {
-      if (hub.connectionStatus === 'connected') { status.textContent = `Connected — account ${hub.accountId} (${hub.currency} ${hub.balanceUSD.toFixed(2)}) · ${hub.accountType.toUpperCase()}`; status.className = 'settings-status ok'; }
-      else if (hub.connectionStatus === 'connecting') { status.textContent = 'Connecting…'; status.className = 'settings-status'; }
-      else if (hub.apiToken) { status.textContent = 'Could not connect — check the token and try again.'; status.className = 'settings-status err'; }
-      else { status.textContent = 'Not connected.'; status.className = 'settings-status'; }
-    }
-    queueDashboardRender();
-  }
-
+  /* ── Topbar + Settings ── */
   function bindTopbarAndSettings() {
-    renderThemePills(document.getElementById('hub-theme-pills'), (v) => window.HubStore.setTheme(v));
-    renderThemePills(document.getElementById('settings-theme-pills'), (v) => window.HubStore.setTheme(v));
-    window.HubStore.subscribe(() => { renderTopbar(window.HubStore.getState()); refreshThemePills(); });
+    function renderThemePills(container, cb) {
+      if (!container) return;
+      container.innerHTML = THEMES.map((t) => `<button class="theme-pill-btn" data-tv="${t.v}" title="${t.label}">${t.i}</button>`).join('');
+      container.querySelectorAll('.theme-pill-btn').forEach((b) => (b.onclick = () => cb(b.dataset.tv)));
+    }
+    function refreshThemePills() {
+      const s = window.HubStore ? window.HubStore.getState() : {};
+      document.querySelectorAll('.theme-pill-btn').forEach((b) => b.classList.toggle('active', b.dataset.tv === s.theme));
+    }
+    if (window.HubStore) {
+      window.HubStore.subscribe(() => { refreshThemePills(); refreshTopbar(); if (activeApp === 'dashboard') queueDashboardRender(); });
+      document.documentElement.className = window.HubStore.getState().theme;
+    }
+    renderThemePills(document.getElementById('hub-theme-pills'), (v) => window.HubStore && window.HubStore.setTheme(v));
+    renderThemePills(document.getElementById('settings-theme-pills'), (v) => window.HubStore && window.HubStore.setTheme(v));
+    refreshThemePills();
+    setInterval(() => { const c = document.getElementById('hub-clock'); if (c) c.textContent = new Date().toLocaleTimeString('en-US', { hour12: false }); }, 1000);
 
     const modal = document.getElementById('settings-modal');
-    const openModal = () => {
-      const hub = window.HubStore.getState();
-      document.getElementById('settings-token').value = hub.apiToken;
-      document.getElementById('settings-tg-token').value = hub.telegramToken;
-      document.getElementById('settings-tg-chat').value = hub.telegramChatId;
-      document.getElementById('settings-tg-toggle').classList.toggle('on', hub.telegramEnabled);
-      document.getElementById('settings-account-type').classList.toggle('on', hub.accountType === 'real');
-      renderTopbar(hub);
-      modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false');
-    };
-    const closeModal = () => { modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true'); };
+    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'false')));
+    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => modal && modal.setAttribute('aria-hidden', 'false'));
+    document.querySelectorAll('[data-close-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'true')));
+    document.getElementById('settings-close') && (document.getElementById('settings-close').onclick = () => modal && modal.setAttribute('aria-hidden', 'true'));
+    if (modal) modal.onclick = (e) => { if (e.target === modal) modal.setAttribute('aria-hidden', 'true'); };
 
-    document.getElementById('hub-settings-btn').onclick = openModal;
-    document.getElementById('settings-close').onclick = closeModal;
-    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    // Single PAT auth — saved once here, shared by every engine via HubStore.
+    const appIdInput = document.getElementById('settings-appid');
+    const appIdSaveBtn = document.getElementById('settings-appid-save');
+    function refreshAppId() {
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (appIdInput && hub.appId) appIdInput.value = hub.appId;
+      const statusEl2 = document.getElementById('settings-appid-status');
+      if (statusEl2 && hub.appId && !/^\d+$/.test(hub.appId)) {
+        statusEl2.style.display = '';
+        statusEl2.style.color = 'hsl(var(--loss))';
+        statusEl2.textContent = `⚠️ Stored App ID "${hub.appId}" is non-numeric. The Deriv WebSocket API only accepts numeric IDs from api.deriv.com. Connection will fail until you replace this with a valid numeric ID (try 1089 for the public demo app).`;
+      } else if (statusEl2) {
+        statusEl2.style.display = 'none';
+      }
+    }
+    if (appIdSaveBtn) appIdSaveBtn.onclick = () => {
+      const v = (appIdInput && appIdInput.value || '').trim();
+      const statusEl2 = document.getElementById('settings-appid-status');
+      if (!v) {
+        if (window.HubStore) window.HubStore.setAppId('1089');
+        appIdSaveBtn.textContent = 'Reset to 1089 ✓';
+        setTimeout(() => { appIdSaveBtn.textContent = 'Save'; }, 2000);
+        return;
+      }
+      if (!/^\d+$/.test(v)) {
+        // Non-numeric — this looks like a token or an OAuth client ID from developers.deriv.com
+        if (statusEl2) {
+          statusEl2.style.display = '';
+          statusEl2.style.color = 'hsl(var(--loss))';
+          statusEl2.textContent = '⚠️ This looks non-numeric. Deriv\'s legacy WebSocket API requires a numeric App ID from api.deriv.com. If you pasted a token, use the API Token field below instead. If you have an ID from developers.deriv.com, that platform uses a different API incompatible with this app — use api.deriv.com to register for the WebSocket API.';
+        }
+        // Still save it so the user can see what's stored; connection will fail and show an error
+        if (window.HubStore) window.HubStore.setAppId(v);
+        appIdSaveBtn.textContent = 'Saved (⚠️ non-numeric)';
+        setTimeout(() => { appIdSaveBtn.textContent = 'Save'; }, 3000);
+        return;
+      }
+      if (statusEl2) statusEl2.style.display = 'none';
+      if (window.HubStore) window.HubStore.setAppId(v);
+      appIdSaveBtn.textContent = 'Saved ✓';
+      setTimeout(() => { appIdSaveBtn.textContent = 'Save'; }, 2000);
+    };
+    refreshAppId();
+    if (window.HubStore) window.HubStore.subscribe(refreshAppId);
 
-    document.getElementById('settings-save').onclick = async () => {
-      const token = document.getElementById('settings-token').value.trim();
-      const hub = window.HubStore.getState();
-      const appId = hub.appId;
-      window.HubStore.setToken(token);
-      try {
-        await fetch('/api/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, appId })
-        });
-      } catch (e) {
-        console.error('Failed to save token to server', e);
+    const tokenInput = document.getElementById('settings-token');
+    const statusEl = document.getElementById('settings-status');
+    const saveBtn = document.getElementById('settings-save');
+    function refreshAuthStatus() {
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (tokenInput && hub.apiToken) tokenInput.value = hub.apiToken;
+      if (statusEl) {
+        statusEl.textContent = hub.connectionStatus === 'connected' ? `✓ Connected${hub.accountId ? ' — ' + hub.accountId : ''}`
+          : hub.connectionStatus === 'connecting' ? '⏳ Connecting…'
+          : hub.apiToken ? `✗ ${hub.connectionError || 'Not connected — check your token'}` : 'No token set — paste your Deriv API token to trade';
       }
+    }
+    if (saveBtn) saveBtn.onclick = () => {
+      const v = (tokenInput && tokenInput.value || '').trim();
+      if (v && window.HubStore) window.HubStore.setToken(v);
     };
-    document.getElementById('settings-tg-toggle').onclick = (e) => {
-      const on = !e.currentTarget.classList.contains('on');
-      window.HubStore.setTelegramEnabled(on);
-      e.currentTarget.classList.toggle('on', on);
-    };
-    document.getElementById('settings-account-type').onclick = async (e) => {
-      const isReal = !e.currentTarget.classList.contains('on');
-      window.HubStore.setAccountType(isReal ? 'real' : 'demo');
-      e.currentTarget.classList.toggle('on', isReal);
+    refreshAuthStatus();
+    if (window.HubStore) window.HubStore.subscribe(refreshAuthStatus);
+
+    const accTypeBtn = document.getElementById('settings-account-type');
+    function refreshAccType() {
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (accTypeBtn) accTypeBtn.classList.toggle('on', hub.accountType === 'real');
+    }
+    if (accTypeBtn) accTypeBtn.onclick = () => {
       const hub = window.HubStore.getState();
-      try {
-        await fetch('/api/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: hub.apiToken, appId: hub.appId })
-        });
-      } catch (e) {
-        console.error('Failed to save appId to server', e);
-      }
+      window.HubStore.setAccountType(hub.accountType === 'real' ? 'demo' : 'real');
     };
+    refreshAccType();
+    if (window.HubStore) window.HubStore.subscribe(refreshAccType);
+
     ['settings-tg-token', 'settings-tg-chat'].forEach((id) => {
-      document.getElementById(id).onchange = () => {
-        window.HubStore.setTelegram(document.getElementById('settings-tg-token').value.trim(), document.getElementById('settings-tg-chat').value.trim());
-      };
+      const node = document.getElementById(id);
+      if (node && window.HubStore) node.onchange = () => window.HubStore.setTelegram(
+        document.getElementById('settings-tg-token').value.trim(),
+        document.getElementById('settings-tg-chat').value.trim()
+      );
     });
+    const tgToggle = document.getElementById('settings-tg-toggle');
+    function refreshTg() {
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (tgToggle) tgToggle.classList.toggle('on', !!hub.telegramEnabled);
+      const tt = document.getElementById('settings-tg-token'), tc = document.getElementById('settings-tg-chat');
+      if (tt) tt.value = hub.telegramToken || '';
+      if (tc) tc.value = hub.telegramChatId || '';
+    }
+    if (tgToggle) tgToggle.onclick = () => window.HubStore.setTelegramEnabled(!window.HubStore.getState().telegramEnabled);
+    refreshTg();
+    if (window.HubStore) window.HubStore.subscribe(refreshTg);
+  }
 
-    document.documentElement.className = window.HubStore.getState().theme;
-    renderTopbar(window.HubStore.getState());
-    refreshThemePills();
+  function refreshTopbar() {
+    const hub = window.HubStore ? window.HubStore.getState() : {};
+    const idEl = document.getElementById('hub-account-id');
+    if (idEl) idEl.textContent = hub.accountId ? `${hub.accountType === 'real' ? 'REAL' : 'DEMO'} · ${hub.accountId}` : 'No account linked';
+    const balPill = document.getElementById('hub-balance-pill');
+    if (balPill) {
+      if (hub.isAuthenticated) { balPill.style.display = ''; balPill.textContent = `${hub.currency || 'USD'} ${hub.balanceUSD.toFixed(2)}`; }
+      else balPill.style.display = 'none';
+    }
+    const liveBadge = document.getElementById('hub-live-badge');
+    const liveText = document.getElementById('hub-live-text');
+    if (liveBadge && liveText) {
+      liveBadge.classList.toggle('connected', hub.connectionStatus === 'connected');
+      liveBadge.classList.toggle('connecting', hub.connectionStatus === 'connecting');
+      liveText.textContent = hub.connectionStatus === 'connected' ? 'Connected' : hub.connectionStatus === 'connecting' ? 'Connecting…' : 'Offline';
+    }
+  }
 
-    setInterval(() => {
-      const c = document.getElementById('hub-clock');
-      if (c) c.textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
-    }, 1000);
+  function bindMasterControl() {
+    // Delegated so it works once DashboardUI builds the shell (and rebuilds it).
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('#dash-master-toggle');
+      if (!btn) return;
+      const engagedCount = BOT_IDS.filter((id) => {
+        const eng = engines[id];
+        if (!eng) return false;
+        return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+      }).length;
+      const turnOn = engagedCount < BOT_IDS.length;
+      BOT_IDS.forEach((id) => {
+        const eng = ensureTitanOrDifferForControl(id);
+        if (!eng) return;
+        if (id === 'differ') {
+          if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) eng.armSystem();
+          if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
+        } else {
+          const isOn = eng.state.active || eng.state.isLocked;
+          if (turnOn && !isOn) eng.toggleEngine();
+          if (!turnOn && isOn) eng.toggleEngine();
+        }
+      });
+      queueDashboardRender();
+    });
+  }
+
+  function ensureTitanOrDifferForControl(id) {
+    return id === 'differ' ? ensureDifferEngine() : ensureTitanEngine(id);
+  }
+
+  function refreshTabDots() {
+    BOT_IDS.forEach((id) => {
+      const dot = document.querySelector(`.hub-tab[data-app="${id}"] .dot`);
+      if (!dot) return;
+      const eng = engines[id];
+      const active = eng && (id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
+      dot.classList.toggle('live', !!active);
+    });
   }
 
   function init() {
-    bindHubTabs();
     bindTopbarAndSettings();
+    refreshTopbar();
     dashboardEl = document.getElementById('dashboard-root');
+    bindMasterControl();
+    // Start all four engines' public analysis sockets immediately, regardless
+    // of which tab is active — ticks/digits should be live the moment the
+    // page loads, not only after a tab is opened. Trading sockets inside
+    // each engine still only open once a token is set in Settings.
+    ensureDifferEngine();
+    ['even', 'odd', 'nexus'].forEach(ensureTitanEngine);
+    bindHubTabs();
     queueDashboardRender();
-
-    try {
-      benzEngine = new window.BenzEngine();
-      window.benzEngine = benzEngine;
-      benzEngine.onUpdate = (s) => {
-        if (!benzShellReady) {
-          window.BenzUI.renderFull(s);
-          benzShellReady = true;
-        } else {
-          window.BenzUI.render(s);
-        }
-        showBenzNotify(s);
-        queueDashboardRender();
-      };
-      window.BenzUI.renderFull(benzEngine.state);
-      benzShellReady = true;
-    } catch (e) {
-      console.error('Differ init failed', e);
-      document.getElementById('benz-root').innerHTML = '<div style="padding:20px;color:red">Differ engine failed: ' + e.message + '</div>';
-    }
-
-    try {
-      evenEngine = new window.TitanEngine({
-        id: 'even', mode: 'evenodd', fixedTradeMode: 'even', botLabel: 'Even Bot', storagePrefix: 'even_hub',
-        trading: window.EvenTrading, socket: window.EvenSocket, scanner: window.EvenScanner,
-        strategies: window.EvenStrategies, sounds: window.Sounds,
-      });
-      window.evenEngine = evenEngine;
-      evenEngine.onUpdate = () => { window.TitanUI.renderLive(evenEngine, 'even-root', 'EVEN OMEGA'); queueDashboardRender(); };
-      window.TitanUI.render(evenEngine, 'even-root', 'EVEN OMEGA');
-    } catch (e) {
-      console.error('Even init failed', e);
-      const r = document.getElementById('even-root');
-      if (r) r.innerHTML = '<div style="padding:20px;color:red">Even engine failed: ' + e.message + '</div>';
-    }
-
-    try {
-      oddEngine = new window.TitanEngine({
-        id: 'odd', mode: 'evenodd', fixedTradeMode: 'odd', botLabel: 'Odd Bot', storagePrefix: 'odd_hub',
-        trading: window.EvenTrading, socket: window.EvenSocket, scanner: window.EvenScanner,
-        strategies: window.EvenStrategies, sounds: window.Sounds,
-      });
-      window.oddEngine = oddEngine;
-      oddEngine.onUpdate = () => { window.TitanUI.renderLive(oddEngine, 'odd-root', 'ODD OMEGA'); queueDashboardRender(); };
-      window.TitanUI.render(oddEngine, 'odd-root', 'ODD OMEGA');
-    } catch (e) {
-      console.error('Odd init failed', e);
-      const r = document.getElementById('odd-root');
-      if (r) r.innerHTML = '<div style="padding:20px;color:red">Odd engine failed: ' + e.message + '</div>';
-    }
-
-    try {
-      nexusEngine = new window.TitanEngine({
-        id: 'nexus', mode: 'over', botLabel: 'Over/Under Bot', storagePrefix: 'nexus_hub',
-        trading: window.NexusTrading, socket: window.NexusSocket, scanner: window.NexusScanner,
-        strategies: window.NexusStrategies, sounds: window.Sounds,
-      });
-      window.nexusEngine = nexusEngine;
-      nexusEngine.onUpdate = () => { window.TitanUI.renderLive(nexusEngine, 'nexus-root', 'NEXUS PROFIT FINDER'); queueDashboardRender(); };
-      window.TitanUI.render(nexusEngine, 'nexus-root', 'NEXUS PROFIT FINDER');
-    } catch (e) {
-      console.error('Nexus init failed', e);
-      const r = document.getElementById('nexus-root');
-      if (r) r.innerHTML = '<div style="padding:20px;color:red">Nexus engine failed: ' + e.message + '</div>';
-    }
+    setInterval(() => { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
-  window.UnifiedHub = {
-    switchApp,
-    benzEngine: () => benzEngine,
-    evenEngine: () => evenEngine,
-    oddEngine: () => oddEngine,
-    nexusEngine: () => nexusEngine,
-  };
+  window.UnifiedHub = { switchApp };
 })();
-
 </script>
 </body>
 </html>
