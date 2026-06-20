@@ -153,13 +153,13 @@
    ────────────────────────────────────────────────────────────── */
 :root, .dark {
   --bg: 0 0% 0%;
-  --bg-soft: 270 10% 3%;
-  --card: 270 9% 6.5%;
-  --card-2: 270 7% 9.5%;
+  --bg-soft: 270 12% 2%;
+  --card: 270 11% 4.5%;
+  --card-2: 270 9% 7%;
   --foreground: 270 12% 93%;
-  --muted: 270 7% 9%;
-  --muted-foreground: 270 6% 52%;
-  --border: 270 9% 15%;
+  --muted: 270 9% 6.5%;
+  --muted-foreground: 270 6% 48%;
+  --border: 270 10% 11%;
 
   --primary: 257 85% 66%;     /* indigo-violet — command accent */
   --primary-2: 285 72% 62%;   /* magenta-violet */
@@ -180,13 +180,13 @@
 
 html.midnight {
   --bg: 0 0% 0%;
-  --bg-soft: 200 30% 3%;
-  --card: 200 22% 6.5%;
-  --card-2: 200 18% 9.5%;
+  --bg-soft: 200 34% 2%;
+  --card: 200 26% 4.5%;
+  --card-2: 200 21% 7%;
   --foreground: 195 18% 93%;
-  --muted: 200 16% 9%;
-  --muted-foreground: 200 10% 50%;
-  --border: 200 16% 14%;
+  --muted: 200 19% 6.5%;
+  --muted-foreground: 200 10% 46%;
+  --border: 200 18% 10.5%;
   --primary: 191 100% 56%;    /* cyan */
   --primary-2: 205 92% 56%;
   --secondary: 205 92% 56%;
@@ -199,13 +199,13 @@ html.midnight {
 
 html.slate {
   --bg: 0 0% 0%;
-  --bg-soft: 252 34% 4%;
-  --card: 252 26% 7.5%;
-  --card-2: 252 22% 10.5%;
+  --bg-soft: 252 38% 3%;
+  --card: 252 30% 5.5%;
+  --card-2: 252 25% 8%;
   --foreground: 252 16% 93%;
-  --muted: 252 20% 10%;
-  --muted-foreground: 252 10% 52%;
-  --border: 252 18% 16%;
+  --muted: 252 23% 7.5%;
+  --muted-foreground: 252 10% 48%;
+  --border: 252 20% 12%;
   --primary: 268 95% 70%;     /* deep electric violet */
   --primary-2: 292 80% 65%;
   --secondary: 292 80% 65%;
@@ -218,13 +218,13 @@ html.slate {
 
 html.charcoal {
   --bg: 0 0% 0%;
-  --bg-soft: 212 14% 4%;
-  --card: 212 11% 7.5%;
-  --card-2: 212 9% 10.5%;
+  --bg-soft: 212 16% 2.5%;
+  --card: 212 13% 5%;
+  --card-2: 212 11% 7.5%;
   --foreground: 205 10% 90%;
-  --muted: 212 9% 10%;
-  --muted-foreground: 212 6% 48%;
-  --border: 212 9% 15%;
+  --muted: 212 11% 7%;
+  --muted-foreground: 212 6% 44%;
+  --border: 212 11% 11%;
   --primary: 178 78% 48%;     /* teal */
   --primary-2: 198 70% 52%;
   --secondary: 198 70% 52%;
@@ -341,9 +341,9 @@ body {
 .hub-shell::before {
   content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background:
-    radial-gradient(ellipse 60% 38% at 12% 0%,  hsl(var(--primary) / 0.13) 0%, transparent 55%),
-    radial-gradient(ellipse 50% 32% at 90% 8%,  hsl(var(--primary-2) / 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse 70% 22% at 50% 100%, hsl(var(--primary) / 0.06) 0%, transparent 55%);
+    radial-gradient(ellipse 60% 38% at 12% 0%,  hsl(var(--primary) / 0.08) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 32% at 90% 8%,  hsl(var(--primary-2) / 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 22% at 50% 100%, hsl(var(--primary) / 0.04) 0%, transparent 55%);
 }
 html.light .hub-shell::before, html.light .hub-shell::after { display: none; }
 
@@ -853,8 +853,8 @@ html.light .log-entry { background: hsl(var(--bg)); }
   transition: all 0.18s; animation: slide-in-up 0.18s ease;
 }
 .journal-entry:hover { background: hsl(var(--muted) / 0.45); transform: translateX(2px); }
-.journal-entry.win { border-left-color: hsl(var(--win)); background: hsl(var(--win) / 0.06); }
-.journal-entry.loss { border-left-color: hsl(var(--loss)); background: hsl(var(--loss) / 0.06); }
+.journal-entry.win { border-left-color: hsl(var(--win)); background: hsl(var(--win) / 0.08); box-shadow: 0 0 14px hsl(var(--win) / 0.16), inset 0 0 0 1px hsl(var(--win) / 0.12); }
+.journal-entry.loss { border-left-color: hsl(var(--loss)); background: hsl(var(--loss) / 0.08); box-shadow: 0 0 14px hsl(var(--loss) / 0.16), inset 0 0 0 1px hsl(var(--loss) / 0.12); }
 .journal-entry.history { border-left-color: hsl(var(--primary-2) / 0.6); background: hsl(var(--primary-2) / 0.045); }
 .journal-badge {
   width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center;
@@ -862,6 +862,10 @@ html.light .log-entry { background: hsl(var(--bg)); }
 }
 .journal-badge.win { background: hsl(var(--win) / 0.16); color: hsl(var(--win)); }
 .journal-badge.loss { background: hsl(var(--loss) / 0.16); color: hsl(var(--loss)); }
+.journal-digits { display: flex; align-items: center; gap: 4px; font-size: 11px; color: hsl(var(--muted-foreground)); white-space: nowrap; }
+.journal-digits b { color: hsl(var(--foreground)); font-weight: 700; }
+.journal-digits .arrow { opacity: 0.5; font-size: 10px; }
+.journal-net { margin-left: auto; font-weight: 700; white-space: nowrap; }
 
 .empty-state { text-align: center; padding: 40px 20px; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.7; }
 .empty-state .btn-primary { margin-top: 12px; }
@@ -1047,7 +1051,7 @@ html.light .live-tick-cell { background: hsl(var(--bg)); }
 
 .dash-sidebar { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .exec-panel { padding: 14px; flex-shrink: 0; }
-.exec-list { display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; margin-top: 6px; }
+.exec-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 6px; }
 .exec-item {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 8px 10px; border-radius: var(--radius-sm); background: hsl(var(--bg));
@@ -1057,6 +1061,35 @@ html.light .live-tick-cell { background: hsl(var(--bg)); }
 .exec-item:hover { background: hsl(var(--muted) / 0.45); }
 .exec-empty { text-align: center; padding: 22px 10px; font-size: 11px; color: hsl(var(--muted-foreground)); }
 html.light .exec-item { background: hsl(var(--bg)); }
+
+.exec-row { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border-radius: var(--radius-sm); background: hsl(var(--bg)); border: 1px solid hsl(var(--border)); }
+.exec-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+.exec-row-head .exec-status-tag { font-size: 9px; letter-spacing: 1px; padding: 2px 6px; border-radius: 999px; background: hsl(var(--muted) / 0.5); color: hsl(var(--muted-foreground)); }
+.exec-row-head .exec-status-tag.is-on { background: hsl(var(--win) / 0.15); color: hsl(var(--win)); }
+.exec-flow { display: flex; align-items: center; gap: 4px; }
+.exec-flow-box {
+  flex: 1; text-align: center; padding: 5px 2px; border-radius: 6px; font-size: 8.5px; letter-spacing: 0.5px;
+  font-family: 'JetBrains Mono', monospace; color: hsl(var(--muted-foreground)); background: hsl(var(--muted) / 0.25);
+  border: 1px solid hsl(var(--border)); transition: all 0.25s ease; text-transform: uppercase;
+}
+.exec-flow-arrow { font-size: 9px; color: hsl(var(--muted-foreground) / 0.5); flex-shrink: 0; }
+.exec-flow-box.glow-analysis { background: hsl(var(--primary) / 0.18); border-color: hsl(var(--primary) / 0.5); color: hsl(var(--primary)); box-shadow: 0 0 10px hsl(var(--primary) / 0.25); animation: execPulse 1.6s ease-in-out infinite; }
+.exec-flow-box.glow-trading { background: hsl(var(--accent) / 0.18); border-color: hsl(var(--accent) / 0.5); color: hsl(var(--accent)); box-shadow: 0 0 10px hsl(var(--accent) / 0.3); animation: execPulse 1s ease-in-out infinite; }
+.exec-flow-box.glow-win { background: hsl(var(--win) / 0.18); border-color: hsl(var(--win) / 0.55); color: hsl(var(--win)); box-shadow: 0 0 10px hsl(var(--win) / 0.3); }
+.exec-flow-box.glow-loss { background: hsl(var(--loss) / 0.18); border-color: hsl(var(--loss) / 0.55); color: hsl(var(--loss)); box-shadow: 0 0 10px hsl(var(--loss) / 0.3); }
+.exec-flow-box.glow-recovery { background: hsl(var(--primary-2) / 0.18); border-color: hsl(var(--primary-2) / 0.55); color: hsl(var(--primary-2)); box-shadow: 0 0 10px hsl(var(--primary-2) / 0.3); animation: execPulse 1.3s ease-in-out infinite; }
+@keyframes execPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
+
+.bot-toggles { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+.bot-toggle-chip {
+  display: flex; align-items: center; gap: 6px; padding: 5px 9px 5px 7px; border-radius: 999px;
+  background: hsl(var(--bg)); border: 1px solid hsl(var(--border)); font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace; cursor: pointer; user-select: none; transition: all 0.15s;
+  color: hsl(var(--muted-foreground));
+}
+.bot-toggle-chip.on { color: hsl(var(--foreground)); border-color: hsl(var(--win) / 0.4); background: hsl(var(--win) / 0.07); }
+.bot-toggle-chip input { accent-color: hsl(var(--win)); width: 13px; height: 13px; cursor: pointer; }
+.bot-toggles-hint { font-size: 9.5px; color: hsl(var(--muted-foreground)); margin-bottom: 2px; letter-spacing: 0.3px; }
 
 @media (max-width: 1100px) {
   .dash-stats-row { grid-template-columns: repeat(2, 1fr); }
@@ -1106,6 +1139,16 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     telegramChatId: load('hub_tg_chat', ''),
     telegramEnabled: load('hub_tg_enabled', 'false') === 'true',
     derivHistory: [], // past trades fetched from Deriv on connect
+    // Per-bot "allowed to engage" switch. Defaults to all enabled.
+    // A bot can still be armed/configured when disabled, but its engage
+    // action is blocked until this is checked again.
+    botEnabled: (() => {
+      const defaults = { differ: true, even: true, odd: true, nexus: true };
+      try {
+        const saved = JSON.parse(load('hub_bot_enabled', 'null'));
+        return saved ? { ...defaults, ...saved } : defaults;
+      } catch (e) { return defaults; }
+    })(),
   };
 
   // New Deriv API: REST to fetch account ID, then OTP to get authenticated WS URL.
@@ -1287,12 +1330,23 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     global.dispatchEvent(new CustomEvent('hub:appid-changed', { detail: { appId } }));
   }
 
+  function setBotEnabled(botId, enabled) {
+    state.botEnabled = { ...state.botEnabled, [botId]: enabled };
+    localStorage.setItem('hub_bot_enabled', JSON.stringify(state.botEnabled));
+    emit();
+  }
+
+  function isBotEnabled(botId) {
+    return state.botEnabled[botId] !== false;
+  }
+
   global.HubStore = {
     getAuthenticatedWsUrl,
     getState: () => state,
     subscribe(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     setToken, setTheme, setTelegram, setTelegramEnabled, setAccountType, setAppId, notifyTelegram, connectAccount,
     getDerivHistory: () => state.derivHistory,
+    setBotEnabled, isBotEnabled,
   };
 
   setTimeout(connectAccount, 300);
@@ -3904,6 +3958,13 @@ window.NexusStrategies=exports;
       this.socketP = null; this.socketG = null; this.socketT = null;
       this.cooldownTimer = null; this.tickIndex = 0; this.abortFlag = false;
       this.reconnectTimer = null;
+      // Contracts fired by THIS engine instance. proposal_open_contract is an
+      // account-wide stream (no per-contract scoping is possible without a
+      // contract_id), so without this filter results from other bots — or
+      // from manual trades on the Deriv platform — would leak into this
+      // engine's journal. Every contract_id is added on buy confirmation and
+      // removed once its result has been recorded.
+      this.ownContractIds = new Set();
       this.state = this.loadInitialState();
       this._bindMethods();
       this.connectAnalysis();
@@ -4185,15 +4246,22 @@ window.NexusStrategies=exports;
               if (c && c.is_sold) {
                 const balAfter = parseFloat(c.balance_after);
                 if (!isNaN(balAfter)) this.dispatch({ type: 'UPDATE_BALANCE', balance: balAfter });
+                // Only journal contracts THIS Differ instance actually fired —
+                // proposal_open_contract is account-wide, so without this check
+                // trades from other bots (or manual trades) would show up here.
+                if (!c.contract_id || !this.ownContractIds.has(c.contract_id)) return;
+                this.ownContractIds.delete(c.contract_id);
                 const isWin = c.status === 'won';
                 const profit = parseFloat(c.profit) || 0;
                 const exit = c.exit_tick_display_value?.toString().slice(-1) || '?';
+                const entryRaw = c.entry_tick_display_value?.toString().slice(-1);
+                const entryDigit = entryRaw !== undefined ? (parseInt(entryRaw) || 0) : null;
                 this.dispatch({
                   type: 'ADD_JOURNAL',
                   entry: {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
                     time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'differ',
-                    barrier: c.barrier ?? 0, exitDigit: parseInt(exit) || 0, profit,
+                    barrier: c.barrier ?? 0, exitDigit: parseInt(exit) || 0, profit, entryDigit,
                     market: c.underlying || this.state.primaryMarket, stake: parseFloat(c.buy_price) || this.state.stake,
                   },
                 });
@@ -4212,7 +4280,10 @@ window.NexusStrategies=exports;
                 }
               }
             }
-            if (d.msg_type === 'buy' && d.error) this.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message}`, ntype: 'loss' });
+            if (d.msg_type === 'buy') {
+              if (d.error) this.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message}`, ntype: 'loss' });
+              else if (d.buy && d.buy.contract_id) this.ownContractIds.add(d.buy.contract_id);
+            }
           } catch (e) { /* */ }
         };
         ws.onclose = () => {
@@ -4228,6 +4299,7 @@ window.NexusStrategies=exports;
 
     armSystem() {
       const s = this.state;
+      if (!window.HubStore.isBotEnabled('differ')) { this.dispatch({ type: 'NOTIFY', message: 'Differ bot is disabled — enable it from the Dashboard first', ntype: 'loss' }); return; }
       if (!s.isAuthenticated) { this.dispatch({ type: 'NOTIFY', message: 'Add your API token in Settings first', ntype: 'loss' }); return; }
       if (s.coldDigit === null) { this.dispatch({ type: 'NOTIFY', message: 'Waiting for analysis — cold digit not yet determined', ntype: 'info' }); return; }
       this.dispatch({ type: 'ARM' });
@@ -4545,6 +4617,7 @@ window.NexusStrategies=exports;
       const win = contract.status === 'won';
       const profit = parseFloat(contract.profit);
       const exitDigit = contract.exit_tick_display_value?.slice(-1) || '?';
+      const entryDigit = contract.entry_tick_display_value?.slice(-1) ?? null;
       this.pendingTrade = null;
       if (win) this.sound.playWin(); else this.sound.playLoss();
       this.addLog(win ? 'win' : 'loss', 'BOLT', `Exit: ${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
@@ -4552,7 +4625,8 @@ window.NexusStrategies=exports;
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
         market: contract.underlying || this.config.selectedMarket, barrier: contract.barrier ?? 0,
-        exitDigit: parseInt(exitDigit) || 0, profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
+        exitDigit: parseInt(exitDigit) || 0, entryDigit: entryDigit !== null ? (parseInt(entryDigit) || 0) : null,
+        profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
       }, ...this.journal].slice(0, 500);
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
       const cfg = this.config;
@@ -4659,6 +4733,10 @@ window.NexusStrategies=exports;
     toggleEngine() {
       if (this.state.isCooldown) return;
       const newActive = !this.state.active;
+      if (newActive && !window.HubStore.isBotEnabled(this.id)) {
+        this.addLog('error', 'ENGINE', `${this.botLabel} is disabled — enable it from the Dashboard first`);
+        return;
+      }
       if (newActive) { this.sound.playEngineStart(); this.executionGuard = false; this.pendingTrade = null; }
       else { this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle'; }
       this.addLog('engine', 'ENGINE', newActive ? 'OMEGA Strategy Engaged' : 'Session Terminated');
@@ -4950,7 +5028,12 @@ window.NexusStrategies=exports;
           <div class="glass-monitor" style="padding:8px"><div class="font-mono-data">${wr}%</div>WIN RATE</div>
         </div>
       </div>
-      <div style="margin-top:8px">${s.journal.slice(0, 60).map((j) => `<div style="display:flex;gap:8px;padding:10px;margin-bottom:4px;border-radius:10px;font-size:12px;font-family:monospace;background:hsl(var(--${j.type === 'win' ? 'win' : 'loss'})/0.06);border-left:3px solid hsl(var(--${j.type === 'win' ? 'win' : 'loss'})/0.5)"><b class="neon-text-${j.type === 'win' ? 'win' : 'loss'}">${j.type === 'win' ? 'W' : 'L'}</b><span style="color:hsl(var(--muted-foreground))">${j.time}</span><span>B:${j.barrier}</span><span class="neon-text-secondary">→${j.exitDigit}</span><span style="margin-left:auto" class="neon-text-${j.type === 'win' ? 'win' : 'loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span></div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
+      <div style="margin-top:8px" class="journal-list">${s.journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
+        <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
+        <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
+        <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
+        <span class="journal-net ${j.type === 'win' ? 'neon-text-win' : 'neon-text-loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
+      </div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
       <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
     if (setHtmlIfChanged(el('differ-right'), rightHtml)) {
       el('differ-reset').onclick = () => global.benzEngine.dispatch({ type: 'RESET_JOURNAL' });
@@ -5391,6 +5474,7 @@ window.NexusStrategies=exports;
     const { state: s, logs } = snap;
     const total = s.stats.win + s.stats.loss;
     const wr = total ? ((s.stats.win / total) * 100).toFixed(1) : '0.0';
+    const journal = engine.journal || [];
     const rightHtml = `
       <div class="font-orbitron text-success" style="font-size:10px;letter-spacing:2px;margin-bottom:8px">● JOURNAL</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;text-align:center">
@@ -5399,6 +5483,15 @@ window.NexusStrategies=exports;
         <div class="panel" style="padding:10px"><div class="${s.stats.profit >= 0 ? 'text-success' : 'text-destructive'} font-fira" style="font-size:1.2rem">${s.stats.profit.toFixed(2)}</div><div class="text-muted" style="font-size:8px">PROFIT</div></div>
       </div>
       <div class="text-muted" style="font-size:10px;margin-bottom:8px">Win rate ${wr}% · Net ${s.stats.win - s.stats.loss} contracts</div>
+      <div class="journal-list" style="max-height:240px;margin-bottom:12px">
+        ${journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
+          <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
+          <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
+          <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
+          <span class="journal-net ${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
+        </div>`).join('') || '<div class="text-muted" style="text-align:center;padding:20px;font-size:10px">NO TRADES RECORDED</div>'}
+      </div>
+      <div class="text-muted" style="font-size:9px;letter-spacing:2px;margin-bottom:6px">ACTIVITY LOG</div>
       <div id="${rootId}-logs">
         ${logs.slice(0, 60).map((l) => `<div class="log-entry ${l.type}"><div style="display:flex;gap:6px"><b>${l.title}</b><span class="text-muted">${new Date(l.timestamp).toLocaleTimeString()}</span></div><div class="text-muted" style="margin-top:2px;font-size:10px">${l.message}</div></div>`).join('') || '<div class="text-muted" style="text-align:center;padding:30px;font-size:10px">NO LOG ENTRIES</div>'}
       </div>
@@ -5487,11 +5580,7 @@ window.NexusStrategies=exports;
           sh._lastLeftRender = now;
         }
       }
-      const logs = el(`${rootId}-logs`);
-      if (logs) {
-        const logsHtml = snap.logs.slice(0, 60).map((l) => `<div class="log-entry ${l.type}"><div style="display:flex;gap:6px"><b>${l.title}</b><span class="text-muted">${new Date(l.timestamp).toLocaleTimeString()}</span></div><div class="text-muted" style="margin-top:2px;font-size:10px">${l.message}</div></div>`).join('') || '<div class="text-muted" style="text-align:center;padding:30px">NO LOG ENTRIES</div>';
-        global.setHtmlIfChanged(logs, logsHtml);
-      }
+      renderRight(engine, rootId, snap);
     },
   };
 })(window);
@@ -5528,6 +5617,32 @@ window.NexusStrategies=exports;
     if (!engine) return false;
     if (botId === 'differ') return engine.state.isArmed || engine.state.isRunning;
     return engine.state.active || engine.state.isLocked;
+  }
+
+  // Derives the 3-stage execution flow (Analysis -> Trading -> Result) for a single bot,
+  // used to drive the glow strip in the dashboard's "Current executions" panel.
+  function getBotFlowStage(engine, botId) {
+    const stage = { engaged: false, analysis: false, trading: false, result: null };
+    if (!engine || !engine.state) return stage;
+    const s = engine.state;
+    if (botId === 'differ') {
+      stage.engaged = s.isArmed || s.isRunning;
+      stage.trading = !!s.isRunning;
+      stage.analysis = !!s.isArmed && !s.isRunning;
+      const last = s.journal && s.journal[0];
+      if (stage.trading || stage.analysis) stage.result = null;
+      else if (last) stage.result = last.type === 'win' ? 'win' : 'loss';
+      return stage;
+    }
+    stage.engaged = !!s.active;
+    stage.trading = !!(s.isLocked || s.isCooldown);
+    stage.analysis = !!s.active && !stage.trading;
+    if (stage.trading && s.inRecovery) stage.result = 'recovery';
+    else if (!stage.trading) {
+      const last = engine.journal && engine.journal[0];
+      if (last && last.botId === botId) stage.result = last.type === 'win' ? 'win' : 'loss';
+    }
+    return stage;
   }
 
   function buildShell(root) {
@@ -5577,6 +5692,7 @@ window.NexusStrategies=exports;
           <div class="dash-sidebar">
             <div class="glass-panel exec-panel">
               <div class="section-divider">Current executions</div>
+              <div id="dash-bot-toggles" class="bot-toggles"></div>
               <div id="dash-exec-list" class="exec-list"></div>
             </div>
             <div class="glass-panel journal-panel">
@@ -5671,10 +5787,55 @@ window.NexusStrategies=exports;
     }).join('');
     global.setHtmlIfChanged(el('dash-perbot', root), perBotHtml);
 
-    const activeBots = botIds.filter((id) => perBot[id].active);
-    const execHtml = activeBots.length
-      ? activeBots.map((id) => `<div class="exec-item"><span><span class="bot-card-dot" style="background:${BOT_META[id].dot};display:inline-block;margin-right:6px"></span>${BOT_META[id].label}</span><span class="text-success font-mono">RUNNING</span></div>`).join('')
-      : '<div class="exec-empty">No bots are currently armed or running</div>';
+    if (!el('dash-bot-toggles', root).childElementCount) {
+      el('dash-bot-toggles', root).innerHTML = botIds.map((id) => `
+        <label class="bot-toggle-chip" data-chip="${id}">
+          <input type="checkbox" data-bot-toggle="${id}">
+          <span class="bot-card-dot" style="background:${BOT_META[id].dot}"></span>${BOT_META[id].label}
+        </label>`).join('');
+      el('dash-bot-toggles', root).querySelectorAll('[data-bot-toggle]').forEach((cb) => {
+        cb.onchange = () => {
+          const id = cb.dataset.botToggle;
+          const enabled = cb.checked;
+          global.HubStore.setBotEnabled(id, enabled);
+          // If the user unchecks a bot that's currently running, stop it immediately
+          // rather than just blocking future engagements.
+          if (!enabled) {
+            const eng = engines[id];
+            if (id === 'differ' && eng && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
+            else if (eng && eng.state && eng.state.active) { eng.toggleEngine(); }
+          }
+        };
+      });
+    }
+    botIds.forEach((id) => {
+      const cb = el('dash-bot-toggles', root).querySelector(`[data-bot-toggle="${id}"]`);
+      const chip = el('dash-bot-toggles', root).querySelector(`[data-chip="${id}"]`);
+      const enabled = global.HubStore.isBotEnabled(id);
+      if (cb && cb.checked !== enabled) cb.checked = enabled;
+      if (chip) chip.classList.toggle('on', enabled);
+    });
+
+    const execHtml = botIds.map((id) => {
+      const flow = getBotFlowStage(engines[id], id);
+      const botOn = global.HubStore.isBotEnabled(id);
+      const statusTag = !botOn ? 'DISABLED' : flow.engaged ? 'ENGAGED' : 'STANDBY';
+      const resultLabel = flow.result === 'win' ? 'WIN' : flow.result === 'loss' ? 'LOSS' : flow.result === 'recovery' ? 'RECOVERY' : '—';
+      const resultGlow = flow.result === 'win' ? 'glow-win' : flow.result === 'loss' ? 'glow-loss' : flow.result === 'recovery' ? 'glow-recovery' : '';
+      return `<div class="exec-row" style="${botOn ? '' : 'opacity:0.55'}">
+        <div class="exec-row-head">
+          <span><span class="bot-card-dot" style="background:${BOT_META[id].dot};display:inline-block;margin-right:6px"></span>${BOT_META[id].label}</span>
+          <span class="exec-status-tag${flow.engaged && botOn ? ' is-on' : ''}">${statusTag}</span>
+        </div>
+        <div class="exec-flow">
+          <div class="exec-flow-box${flow.analysis ? ' glow-analysis' : ''}">Analysis</div>
+          <span class="exec-flow-arrow">→</span>
+          <div class="exec-flow-box${flow.trading ? ' glow-trading' : ''}">Trading</div>
+          <span class="exec-flow-arrow">→</span>
+          <div class="exec-flow-box ${resultGlow}">${flow.result ? resultLabel : 'Result'}</div>
+        </div>
+      </div>`;
+    }).join('');
     global.setHtmlIfChanged(el('dash-exec-list', root), execHtml);
 
     if (!el('dash-journal-tabs', root).childElementCount) {
@@ -5705,8 +5866,9 @@ window.NexusStrategies=exports;
           ? `<span class="text-muted" style="font-size:9px;background:hsl(var(--primary-2)/0.12);padding:2px 5px;border-radius:4px">DERIV</span>`
           : `<span class="text-muted" style="font-size:10px">${BOT_META[j.botId] ? BOT_META[j.botId].label : j.botId}</span>`
         }
+        ${(j.entryDigit != null || j.exitDigit != null) ? `<span class="journal-digits"><b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit ?? '—'}</b></span>` : ''}
         <span style="margin-left:auto">${j.time}</span>
-        <span class="${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
+        <span class="${j.type === 'win' ? 'text-success' : 'text-destructive'}" style="font-weight:700">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
       </div>`).join('') : '<div class="exec-empty">No trades recorded yet — connect your Deriv account in Settings to load history</div>';
     global.setHtmlIfChanged(el('dash-journal-list', root), journalHtml);
   }
