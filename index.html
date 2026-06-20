@@ -3897,12 +3897,14 @@ window.NexusStrategies=exports;
   }
 
   class AudioEngine {
-    constructor() { this.ctx = null; }
+    constructor() { this.ctx = null; this.enabled = true; }
     getCtx() {
       if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       return this.ctx;
     }
+    toggle(on) { this.enabled = on; }
     play(freq, type, dur) {
+      if (!this.enabled) return;
       try {
         const ctx = this.getCtx();
         const o = ctx.createOscillator();
