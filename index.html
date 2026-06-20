@@ -1132,18 +1132,26 @@ html.light .hub-shell { background: hsl(var(--bg)); }
       throw new Error(err.errors?.[0]?.message || `Accounts fetch failed: ${accountsResp.status}`);
     }
     const accountsData = await accountsResp.json();
-    // accountsData.data is array of accounts; pick demo or real based on accountType
-    const accounts = accountsData.data || accountsData.accounts || accountsData || [];
-    const accountList = Array.isArray(accounts) ? accounts : [];
-    const wantReal = state.accountType === 'real';
-    const picked = accountList.find(a => wantReal ? !a.is_virtual : a.is_virtual) || accountList[0];
-    if (!picked) throw new Error('No accounts found — check your PAT scopes');
+    const raw = accountsData.data ?? accountsData.accounts ?? accountsData;
+    const accountList = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    if (!accountList.length) throw new Error('No accounts found — check your PAT scopes (needs trade + account_manage)');
+
+    const wantDemo = state.accountType !== 'real';
+    // Try to match demo/real; Deriv uses is_virtual:true for demo, account_type:'demo' or similar
+    const picked = accountList.find(a => {
+      const isVirtual = a.is_virtual === true || a.account_type === 'demo' || a.type === 'demo' || (a.loginid || a.account_id || '').startsWith('VR');
+      return wantDemo ? isVirtual : !isVirtual;
+    }) || accountList[0];
+
     const accountId = picked.account_id || picked.id || picked.loginid;
     state.accountId = accountId;
-    state.currency = picked.currency || 'USD';
-    state.balanceUSD = parseFloat(picked.balance) || 0;
+    state.currency = picked.currency || picked.default_currency || 'USD';
+    // Balance comes from the WS subscription; don't set 0 here, set only if API gives it
+    const apiBal = parseFloat(picked.balance ?? picked.demo_balance ?? picked.real_balance);
+    if (!isNaN(apiBal)) state.balanceUSD = apiBal;
+    emit();
 
-    // OTP call — returns authenticated WebSocket URL
+    // OTP call — returns authenticated WebSocket URL (one-time, short-lived)
     const otpResp = await fetch(`${API_BASE}/trading/v1/options/accounts/${accountId}/otp`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -1184,6 +1192,7 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     state.accountType = accountType;
     localStorage.setItem('hub_account_type', accountType);
     emit();
+    connectAccount(); // reconnect to pick the right account (demo vs real)
     global.dispatchEvent(new CustomEvent('hub:account-type-changed', { detail: { accountType, appId: state.appId } }));
   }
 
@@ -1218,13 +1227,20 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     getAuthenticatedWsUrl().then((wsUrl) => {
       const ws = new WebSocket(wsUrl);
       statusSocket = ws;
+      let pingInterval = null;
       ws.onopen = () => {
-        // Already authenticated via OTP URL — just subscribe to balance
+        // Already authenticated via OTP URL — subscribe to live balance
         state.isAuthenticated = true;
         state.connectionStatus = 'connected';
         state.connectionError = '';
         emit();
-        try { ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
+        try {
+          ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+          // Keep alive
+          pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
+          }, 25000);
+        } catch (e) { /* */ }
       };
       ws.onerror = () => {
         state.connectionError = 'WebSocket connection failed — check your internet connection.';
@@ -1234,11 +1250,12 @@ html.light .hub-shell { background: hsl(var(--bg)); }
           const d = JSON.parse(m.data);
           if (d.msg_type === 'balance' && d.balance) {
             const bal = parseFloat(d.balance.balance);
-            if (!isNaN(bal)) { state.balanceUSD = bal; emit(); }
+            if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
           }
         } catch (e) { /* */ }
       };
       ws.onclose = () => {
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
         state.connectionStatus = 'disconnected';
         state.isAuthenticated = false;
         emit();
@@ -1695,7 +1712,7 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().appId) || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
+  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -2903,7 +2920,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { return 'wss://ws.binaryws.com/websockets/v3'; }
+  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
 
   class GlobalSocketManager {
     constructor() {
@@ -3782,7 +3799,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  function getPublicWsUrl() { return 'wss://ws.binaryws.com/websockets/v3'; }
+  function getPublicWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -3867,6 +3884,7 @@ window.NexusStrategies=exports;
       this.connectAnalysis();
       if (window.HubStore.getState().apiToken) setTimeout(() => this.authenticate(), 500);
       window.addEventListener('hub:token-changed', () => this.authenticate());
+      window.addEventListener('hub:account-type-changed', () => this.authenticate());
     }
 
     _bindMethods() {
@@ -4085,7 +4103,7 @@ window.NexusStrategies=exports;
       } catch (e) { /* */ }
       this.tickIndex = 0;
       const createSocket = (market, type) => {
-        const ws = new WebSocket(`wss://ws.binaryws.com/websockets/v3`);
+        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=1089`);
         ws.onopen = () => { try { ws.send(JSON.stringify({ ticks: market, subscribe: 1 })); } catch (e) { /* */ } };
         ws.onmessage = (m) => {
           try {
@@ -4210,7 +4228,7 @@ window.NexusStrategies=exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { return 'wss://ws.binaryws.com/websockets/v3'; }
+  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
   const ANALYSIS_HOLD = 20;
 
   class TitanEngine {
@@ -4254,6 +4272,10 @@ window.NexusStrategies=exports;
       const sharedToken = window.HubStore.getState().apiToken;
       if (sharedToken) setTimeout(() => this.connect(sharedToken), 600);
       window.addEventListener('hub:token-changed', (e) => { if (e.detail.token) this.connect(e.detail.token); });
+      window.addEventListener('hub:account-type-changed', () => {
+        const t = window.HubStore.getState().apiToken;
+        if (t) setTimeout(() => this.connect(t), 500);
+      });
     }
 
     loadConfig() {
