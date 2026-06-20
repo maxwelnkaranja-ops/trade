@@ -4066,7 +4066,7 @@ window.NexusStrategies=exports;
       const fireOne = () => {
         this.socketT.send(JSON.stringify({
           buy: '1', price: stake,
-          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
+          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
         }));
       };
       if (speed <= 100) {
@@ -4491,7 +4491,7 @@ window.NexusStrategies=exports;
       const accountCurrency = window.HubStore.getState().currency || 'USD';
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
-        currency: accountCurrency, duration: 1, duration_unit: 't', symbol: cfg.selectedMarket,
+        currency: accountCurrency, duration: 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
       };
       if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER')) params.barrier = barrierValue;
       this.sound.playExecute();
@@ -4732,6 +4732,19 @@ window.NexusStrategies=exports;
 
   function el(id, parent) { return (parent || document).querySelector(id.startsWith('#') ? id : '#' + id); }
 
+  // Only touches the DOM when the generated HTML actually changed.
+  // Re-running the same innerHTML every tick is what was causing the
+  // journal panels to flicker (the browser re-paints + drops scroll/hover
+  // state on every assignment, even if the content is identical).
+  function setHtmlIfChanged(node, html) {
+    if (!node) return false;
+    if (node.__lastHtml === html) return false;
+    node.innerHTML = html;
+    node.__lastHtml = html;
+    return true;
+  }
+  global.setHtmlIfChanged = setHtmlIfChanged;
+
   let shellBuilt = false;
 
   function buildShell(root) {
@@ -4927,7 +4940,7 @@ window.NexusStrategies=exports;
     }
     const total = s.totalWins + s.totalLoss;
     const wr = total ? ((s.totalWins / total) * 100).toFixed(1) : '0.0';
-    el('differ-right').innerHTML = `
+    const rightHtml = `
       <div style="text-align:center;padding:12px" class="glass-panel-glow">
         <div style="font-size:10px;letter-spacing:3px">NET PROFIT</div>
         <div class="stat-5xl ${s.totalProfit >= 0 ? 'neon-text-win' : 'neon-text-loss'}" style="font-size:2.5rem">${s.totalProfit >= 0 ? '+' : ''}${s.totalProfit.toFixed(2)}</div>
@@ -4939,7 +4952,9 @@ window.NexusStrategies=exports;
       </div>
       <div style="margin-top:8px">${s.journal.slice(0, 60).map((j) => `<div style="display:flex;gap:8px;padding:10px;margin-bottom:4px;border-radius:10px;font-size:12px;font-family:monospace;background:hsl(var(--${j.type === 'win' ? 'win' : 'loss'})/0.06);border-left:3px solid hsl(var(--${j.type === 'win' ? 'win' : 'loss'})/0.5)"><b class="neon-text-${j.type === 'win' ? 'win' : 'loss'}">${j.type === 'win' ? 'W' : 'L'}</b><span style="color:hsl(var(--muted-foreground))">${j.time}</span><span>B:${j.barrier}</span><span class="neon-text-secondary">→${j.exitDigit}</span><span style="margin-left:auto" class="neon-text-${j.type === 'win' ? 'win' : 'loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span></div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
       <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:Orbitron,sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
-    el('differ-reset').onclick = () => global.benzEngine.dispatch({ type: 'RESET_JOURNAL' });
+    if (setHtmlIfChanged(el('differ-right'), rightHtml)) {
+      el('differ-reset').onclick = () => global.benzEngine.dispatch({ type: 'RESET_JOURNAL' });
+    }
   }
 
   function updateStatusBar(s) {
@@ -5376,7 +5391,7 @@ window.NexusStrategies=exports;
     const { state: s, logs } = snap;
     const total = s.stats.win + s.stats.loss;
     const wr = total ? ((s.stats.win / total) * 100).toFixed(1) : '0.0';
-    el(`${rootId}-right`).innerHTML = `
+    const rightHtml = `
       <div class="font-orbitron text-success" style="font-size:10px;letter-spacing:2px;margin-bottom:8px">● JOURNAL</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;text-align:center">
         <div class="panel" style="padding:10px"><div class="text-success font-orbitron" style="font-size:1.5rem">${s.stats.win}</div><div class="text-muted" style="font-size:8px">WINS</div></div>
@@ -5388,7 +5403,9 @@ window.NexusStrategies=exports;
         ${logs.slice(0, 60).map((l) => `<div class="log-entry ${l.type}"><div style="display:flex;gap:6px"><b>${l.title}</b><span class="text-muted">${new Date(l.timestamp).toLocaleTimeString()}</span></div><div class="text-muted" style="margin-top:2px;font-size:10px">${l.message}</div></div>`).join('') || '<div class="text-muted" style="text-align:center;padding:30px;font-size:10px">NO LOG ENTRIES</div>'}
       </div>
       <button class="strategy-btn" id="${rootId}-clear" style="width:100%;margin-top:8px;color:hsl(var(--destructive))">✕ CLEAR STATS</button>`;
-    el(`${rootId}-clear`).onclick = () => engine.clearStats();
+    if (global.setHtmlIfChanged(el(`${rootId}-right`), rightHtml)) {
+      el(`${rootId}-clear`).onclick = () => engine.clearStats();
+    }
   }
 
   function updateLive(rootId, snap) {
@@ -5472,7 +5489,8 @@ window.NexusStrategies=exports;
       }
       const logs = el(`${rootId}-logs`);
       if (logs) {
-        logs.innerHTML = snap.logs.slice(0, 60).map((l) => `<div class="log-entry ${l.type}"><div style="display:flex;gap:6px"><b>${l.title}</b><span class="text-muted">${new Date(l.timestamp).toLocaleTimeString()}</span></div><div class="text-muted" style="margin-top:2px;font-size:10px">${l.message}</div></div>`).join('') || '<div class="text-muted" style="text-align:center;padding:30px">NO LOG ENTRIES</div>';
+        const logsHtml = snap.logs.slice(0, 60).map((l) => `<div class="log-entry ${l.type}"><div style="display:flex;gap:6px"><b>${l.title}</b><span class="text-muted">${new Date(l.timestamp).toLocaleTimeString()}</span></div><div class="text-muted" style="margin-top:2px;font-size:10px">${l.message}</div></div>`).join('') || '<div class="text-muted" style="text-align:center;padding:30px">NO LOG ENTRIES</div>';
+        global.setHtmlIfChanged(logs, logsHtml);
       }
     },
   };
@@ -5638,9 +5656,9 @@ window.NexusStrategies=exports;
     allEntries.sort((a, b) => (a.ts || 0) - (b.ts || 0));
     let running = 0;
     const curve = allEntries.map((e) => { running += e.profit; return { ...e, cumulative: running }; });
-    el('dash-equity-wrap', root).innerHTML = buildEquitySVG(curve);
+    global.setHtmlIfChanged(el('dash-equity-wrap', root), buildEquitySVG(curve));
 
-    el('dash-perbot', root).innerHTML = botIds.map((id) => {
+    const perBotHtml = botIds.map((id) => {
       const meta = BOT_META[id]; const b = perBot[id];
       const wr2 = b.trades ? ((b.win / b.trades) * 100).toFixed(1) : '0.0';
       return `<div class="glass-panel bot-card">
@@ -5651,11 +5669,13 @@ window.NexusStrategies=exports;
         <div class="bot-card-meta"><span class="text-success">W ${b.win}</span><span class="text-destructive">L ${b.loss}</span></div>
       </div>`;
     }).join('');
+    global.setHtmlIfChanged(el('dash-perbot', root), perBotHtml);
 
     const activeBots = botIds.filter((id) => perBot[id].active);
-    el('dash-exec-list', root).innerHTML = activeBots.length
+    const execHtml = activeBots.length
       ? activeBots.map((id) => `<div class="exec-item"><span><span class="bot-card-dot" style="background:${BOT_META[id].dot};display:inline-block;margin-right:6px"></span>${BOT_META[id].label}</span><span class="text-success font-mono">RUNNING</span></div>`).join('')
       : '<div class="exec-empty">No bots are currently armed or running</div>';
+    global.setHtmlIfChanged(el('dash-exec-list', root), execHtml);
 
     if (!el('dash-journal-tabs', root).childElementCount) {
       const tabs = [{ id: 'all', label: 'All' }, ...botIds.map((id) => ({ id, label: BOT_META[id].label }))];
@@ -5678,7 +5698,7 @@ window.NexusStrategies=exports;
     }
     const filtered = (filter === 'all' ? allWithHistory : allWithHistory.filter((e) => e.botId === filter))
       .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 80);
-    el('dash-journal-list', root).innerHTML = filtered.length ? filtered.map((j) => `
+    const journalHtml = filtered.length ? filtered.map((j) => `
       <div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}">
         <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
         ${j.isHistory
@@ -5688,6 +5708,7 @@ window.NexusStrategies=exports;
         <span style="margin-left:auto">${j.time}</span>
         <span class="${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
       </div>`).join('') : '<div class="exec-empty">No trades recorded yet — connect your Deriv account in Settings to load history</div>';
+    global.setHtmlIfChanged(el('dash-journal-list', root), journalHtml);
   }
 
   global.DashboardUI = { render };
