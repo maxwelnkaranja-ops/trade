@@ -1309,13 +1309,27 @@ html.light .hub-shell { background: hsl(var(--bg)); }
       if (!this.audioContext) {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       }
+      // Resume if suspended (Chrome autoplay policy requires user gesture first)
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(() => {});
+      }
       return this.audioContext;
+    }
+    // Call this on any user interaction to unlock audio
+    unlock() {
+      try {
+        const ctx = this.getContext();
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      } catch (e) { /* */ }
     }
     toggle(on) { this.enabled = on; }
     playTone(frequency, duration, type = 'sine', gain = 0.3) {
       if (!this.enabled) return;
       try {
         const ctx = this.getContext();
+        // Chrome autoplay policy: don't attempt to play if context is still suspended
+        // (no user gesture yet). The unlock() call on first click will resume it.
+        if (ctx.state === 'suspended') return;
         const oscillator = ctx.createOscillator();
         const gainNode = ctx.createGain();
         oscillator.connect(gainNode);
@@ -1356,6 +1370,17 @@ html.light .hub-shell { background: hsl(var(--bg)); }
     playTick() { this.playTone(1200, 0.02, 'sine', 0.05); }
   }
   window.Sounds = { soundEngine: new SoundEngine() };
+
+  // Unlock AudioContext on first user interaction (Chrome autoplay policy)
+  function unlockAudio() {
+    window.Sounds.soundEngine.unlock();
+    document.removeEventListener('click', unlockAudio);
+    document.removeEventListener('keydown', unlockAudio);
+    document.removeEventListener('touchstart', unlockAudio);
+  }
+  document.addEventListener('click', unlockAudio);
+  document.addEventListener('keydown', unlockAudio);
+  document.addEventListener('touchstart', unlockAudio);
 })();
 
 (function(){
@@ -4041,7 +4066,7 @@ window.NexusStrategies=exports;
       const fireOne = () => {
         this.socketT.send(JSON.stringify({
           buy: '1', price: stake,
-          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: 'USD' },
+          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
         }));
       };
       if (speed <= 100) {
@@ -4463,15 +4488,17 @@ window.NexusStrategies=exports;
       }
       this.pendingTrade = { contractType, barrier: barrierValue, entryTime: Date.now() };
       this.lastTradeTime = Date.now();
+      const accountCurrency = window.HubStore.getState().currency || 'USD';
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
-        currency: 'USD', duration: 1, duration_unit: 't', symbol: cfg.selectedMarket,
+        currency: accountCurrency, duration: 1, duration_unit: 't', symbol: cfg.selectedMarket,
       };
       if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER')) params.barrier = barrierValue;
       this.sound.playExecute();
-      this.addLog('engine', 'BOLT', `${contractType} @ ${st.currentStake.toFixed(2)}`);
+      this.addLog('engine', 'BOLT', `${contractType} @ ${st.currentStake.toFixed(2)} ${accountCurrency}`);
       this.state.lastTradedDigit = st.currentDigit;
-      this.tradingSocket.send(JSON.stringify({ buy: 1, subscribe: 1, price: st.currentStake, parameters: params }));
+      // Deriv WS API requires buy value as string '1' for direct inline-parameter purchases
+      this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: st.currentStake, parameters: params }));
       this.emit();
     }
 
@@ -4601,7 +4628,16 @@ window.NexusStrategies=exports;
           const data = JSON.parse(msg.data);
           if (data.msg_type === 'balance') this.state.balance = data.balance.balance;
           if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract?.is_sold) this.handleContractResult(data.proposal_open_contract);
-          if (data.msg_type === 'buy' && data.error) { this.addLog('error', 'TRADE', data.error.message); this.pendingTrade = null; }
+          if (data.msg_type === 'buy') {
+            if (data.error) {
+              this.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})`);
+              this.pendingTrade = null;
+              this.executionGuard = false;
+            } else if (data.buy) {
+              // Trade accepted — contract_id received, subscription active
+              this.addLog('engine', 'CONFIRMED', `Contract #${data.buy.contract_id} accepted @ ${data.buy.buy_price}`);
+            }
+          }
           this.emit();
         };
         this.tradingSocket.onclose = () => {
