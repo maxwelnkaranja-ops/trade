@@ -600,7 +600,7 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
    ────────────────────────────────────────────────────────────── */
 .benz-grid, .titan-grid {
   display: grid;
-  grid-template-columns: 280px 1fr 300px;
+  grid-template-columns: 320px 1fr 360px;
   gap: 8px; padding: 8px;
   flex: 1; min-height: 0; overflow: hidden;
 }
@@ -1057,8 +1057,8 @@ html.light .log-entry { background: hsl(var(--muted) / .3); }
 .journal-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
 
 .journal-entry {
-  display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: var(--radius-sm);
-  font-size: 11px; font-family: 'DM Mono', monospace;
+  display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-radius: var(--radius-sm);
+  font-size: 12.5px; font-family: 'DM Mono', monospace;
   background: hsl(var(--card)); border-left: 2px solid hsl(var(--border));
   transition: all .18s; animation: slide-in-up .18s ease;
 }
@@ -1067,8 +1067,8 @@ html.light .log-entry { background: hsl(var(--muted) / .3); }
 .journal-entry.loss { border-left-color: hsl(var(--loss)); background: hsl(var(--loss) / .07); box-shadow: 0 0 12px hsl(var(--loss) / .14); }
 .journal-entry.history { border-left-color: hsl(var(--secondary) / .5); background: hsl(var(--secondary) / .04); }
 .journal-badge {
-  width: 20px; height: 20px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
-  font-size: 9px; font-family: 'DM Mono', monospace; font-weight: 700; flex-shrink: 0;
+  width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-family: 'DM Mono', monospace; font-weight: 700; flex-shrink: 0;
 }
 .journal-badge.win { background: hsl(var(--win) / .18); color: hsl(var(--win)); }
 .journal-badge.loss { background: hsl(var(--loss) / .18); color: hsl(var(--loss)); }
@@ -1076,7 +1076,7 @@ html.light .log-entry { background: hsl(var(--muted) / .3); }
 .journal-details { flex: 1; min-width: 0; }
 .journal-details .j-pair { font-size: 10px; font-weight: 700; color: hsl(var(--foreground)); }
 .journal-details .j-meta { font-size: 9px; color: hsl(var(--muted-foreground)); margin-top: 1px; }
-.journal-amount { font-size: 11px; font-weight: 700; font-family: 'DM Mono', monospace; flex-shrink: 0; }
+.journal-amount { font-size: 13px; font-weight: 700; font-family: 'DM Mono', monospace; flex-shrink: 0; }
 .journal-amount.win { color: hsl(var(--win)); }
 .journal-amount.loss { color: hsl(var(--loss)); }
 .journal-empty { text-align: center; padding: 32px 16px; color: hsl(var(--muted-foreground)); font-size: 11px; }
@@ -1122,7 +1122,7 @@ html.light .log-entry { background: hsl(var(--muted) / .3); }
 .dash-stat-card .stat-delta.up { color: hsl(var(--win)); }
 .dash-stat-card .stat-delta.dn { color: hsl(var(--loss)); }
 
-.dash-body { display: grid; grid-template-columns: 1fr 300px; gap: 8px; padding: 0 10px 10px; flex: 1; min-height: 0; overflow: hidden; }
+.dash-body { display: grid; grid-template-columns: 1fr 380px; gap: 8px; padding: 0 10px 10px; flex: 1; min-height: 0; overflow: hidden; }
 .dash-main { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
 .dash-sidebar { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 
@@ -5635,8 +5635,12 @@ window.NexusStrategies=exports;
       this.pendingTrade = null;
       if (win) this.sound.playWin(); else this.sound.playLoss();
       this.addLog(win ? 'win' : 'loss', 'BOLT', `Exit: ${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
+      // Deduplicate: skip if this contract_id was already journaled
+      const contractKey = contract.contract_id ? contract.contract_id.toString() : null;
+      if (contractKey && this.journal.some(j => j.contractId === contractKey)) return;
       this.journal = [{
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
+        contractId: contractKey,
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
         market: contract.underlying || this.config.selectedMarket, barrier: contract.barrier ?? 0,
         exitDigit: parseInt(exitDigit) || 0, entryDigit: entryDigit !== null ? (parseInt(entryDigit) || 0) : null,
@@ -6503,10 +6507,6 @@ window.NexusStrategies=exports;
           <span class="journal-net ${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
         </div>`).join('') || '<div class="text-muted" style="text-align:center;padding:20px;font-size:10px">NO TRADES RECORDED</div>'}
       </div>
-      <div class="text-muted" style="font-size:9px;letter-spacing:2px;margin-bottom:6px">ACTIVITY LOG</div>
-      <div id="${rootId}-logs">
-        ${logs.slice(0, 60).map((l) => `<div class="log-entry ${l.type}"><div style="display:flex;gap:6px"><b>${l.title}</b><span class="text-muted">${new Date(l.timestamp).toLocaleTimeString()}</span></div><div class="text-muted" style="margin-top:2px;font-size:10px">${l.message}</div></div>`).join('') || '<div class="text-muted" style="text-align:center;padding:30px;font-size:10px">NO LOG ENTRIES</div>'}
-      </div>
       <button class="strategy-btn" id="${rootId}-clear" style="width:100%;margin-top:8px;color:hsl(var(--destructive))">✕ CLEAR STATS</button>`;
     if (global.setHtmlIfChanged(el(`${rootId}-right`), rightHtml)) {
       el(`${rootId}-clear`).onclick = () => engine.clearStats();
@@ -6662,7 +6662,7 @@ window.NexusStrategies=exports;
       <div class="dash-scroll">
         <div class="dash-hero">
           <div class="dash-hero-meta"><span class="dash-hero-dot"></span>Last update: <span id="dash-last-update">just now</span></div>
-          <h1 class="dash-hero-title">Live Trading<br><span style="background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--secondary)));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Overview</span> 🔭</h1>
+          <h1 class="dash-hero-title">BENZ<br><span style="background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--secondary)));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">CLUB</span> 🏆</h1>
         </div>
         <div class="glass-panel-glow" id="dash-master-panel" style="padding:16px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
           <div style="flex:1;min-width:180px">
@@ -6784,6 +6784,25 @@ window.NexusStrategies=exports;
 
     el('dash-balance', root).textContent = `${hub.currency || 'USD'} ${hub.balanceUSD.toFixed(2)}`;
     el('dash-account-sub', root).textContent = hub.accountId ? `Account ${hub.accountId} · ${hub.isAuthenticated ? 'Live' : 'Offline'}` : 'Not connected — add a token in Settings';
+
+    // Deduplicate entries by id to prevent double-counting from multiple socket listeners
+    const seenIds = new Set();
+    const dedupedEntries = allEntries.filter(e => {
+      const key = e.contractId || e.id;
+      if (seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    });
+    allEntries.length = 0;
+    dedupedEntries.forEach(e => allEntries.push(e));
+
+    // Persist a small snapshot for the equity curve across page reloads
+    if (allEntries.length > 0) {
+      try {
+        const toSave = allEntries.slice(-50).map(e => ({ id: e.id, contractId: e.contractId, ts: e.ts, profit: e.profit, type: e.type, botId: e.botId, time: e.time, barrier: e.barrier, exitDigit: e.exitDigit, entryDigit: e.entryDigit }));
+        localStorage.setItem('benz_journal_cache', JSON.stringify(toSave));
+      } catch(_) {}
+    }
 
     allEntries.sort((a, b) => (a.ts || 0) - (b.ts || 0));
     let running = 0;
