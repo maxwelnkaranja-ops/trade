@@ -528,7 +528,7 @@ html.light .hub-sidebar { background: hsl(0 0% 100% / .96); }
 /* ──────────────────────────────────────────────────────────────
    MAIN COLUMN + HEADER — breadcrumb-style top bar
    ────────────────────────────────────────────────────────────── */
-.hub-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.hub-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; min-height: 0; }
 .hub-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 0 20px; height: var(--topbar-h); flex-shrink: 0;
@@ -583,7 +583,7 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
    APP PANELS
    ────────────────────────────────────────────────────────────── */
 .app-panel { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
-.app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; }
+.app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; min-height: 0; overflow: hidden; }
 .app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
 @media (max-width: 880px) {
@@ -1122,8 +1122,8 @@ html.light .log-entry { background: hsl(var(--muted) / .3); }
 .dash-stat-card .stat-delta.up { color: hsl(var(--win)); }
 .dash-stat-card .stat-delta.dn { color: hsl(var(--loss)); }
 
-.dash-body { display: grid; grid-template-columns: 1fr 380px; gap: 8px; padding: 0 10px 10px; flex: 1; min-height: 0; overflow: hidden; }
-.dash-main { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.dash-body { display: grid; grid-template-columns: 1fr 380px; gap: 8px; padding: 0 10px 10px; flex: 1; min-height: 0; overflow: visible; }
+.dash-main { display: flex; flex-direction: column; gap: 8px; }
 .dash-sidebar { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 
 /* ──────────────────────────────────────────────────────────────
@@ -1374,14 +1374,15 @@ html.light .freq-bar-grid { background: hsl(var(--muted) / .4); }
 html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 
 /* ── SCROLL FIX ── */
-.app-panel.active { overflow-y: auto !important; }
-.app-root { overflow-y: auto !important; min-height: 0; }
+.app-panel.active { overflow: hidden !important; }
+.app-root { overflow: hidden !important; min-height: 0; }
+.dash-scroll { overflow-y: auto !important; flex: 1; min-height: 0; }
 
 /* Dashboard scroll + layout */
 .dash-scroll {
-  flex: 1; overflow-y: auto; padding: 16px 20px;
-  display: flex; flex-direction: column; gap: 16px;
-  scrollbar-width: thin;
+  flex: 1; overflow-y: auto; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 14px;
+  scrollbar-width: thin; min-height: 0;
 }
 
 /* ── Dashboard hero header ── */
@@ -1501,6 +1502,545 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
   border-radius: var(--radius);
   box-shadow: var(--shadow-md), var(--shadow-gold);
 }
+
+/* ════════════════════════════════════════════════════════════════
+   LUMINOUS LIQUIDITY UPGRADE — MASSIVE DASHBOARD OVERHAUL v2
+   Inspired by the Luminous Liquidity reference UI:
+   - Hero balance like $1,284,950.42 — huge, weighted, gradient
+   - Animated sine-wave equity graph with neon stroke + glow
+   - Yield efficiency ring with animated conic gradient
+   - Refined paddings, spacing, card elevation
+   - Pure obsidian surfaces, laser-precise micro-typography
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── Import Syne + Space Grotesk for even more display weight ── */
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+/* ── New keyframes ── */
+@keyframes sine-flow {
+  0%   { stroke-dashoffset: 1200; }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes ring-fill {
+  from { --ring-pct: 0; }
+  to   { --ring-pct: 78; }
+}
+@keyframes glow-pulse-cyan {
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(0,242,254,0.5)); }
+  50%       { filter: drop-shadow(0 0 22px rgba(0,242,254,0.9)); }
+}
+@keyframes glow-pulse-magenta {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(255,0,122,0.4)); }
+  50%       { filter: drop-shadow(0 0 18px rgba(255,0,122,0.8)); }
+}
+@keyframes float-dot {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-5px); }
+}
+@keyframes counter-tick {
+  from { opacity: 0; transform: translateY(6px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes stream-slide {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes hero-shimmer {
+  0%   { background-position: -400% center; }
+  100% { background-position: 400% center; }
+}
+
+/* ══════════════════════════════════════════════
+   HERO BALANCE CARD — Luminous Liquidity style
+   ══════════════════════════════════════════════ */
+.dash-balance-hero {
+  position: relative; overflow: hidden;
+  background: hsl(240 10% 4%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 20px;
+  padding: 28px 32px 24px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 20px 60px rgba(0,0,0,0.85),
+    0 0 0 1px rgba(0,0,0,0.5);
+}
+.dash-balance-hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 120%, rgba(111,66,193,0.14) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 40% at 15% -10%, rgba(0,242,254,0.08) 0%, transparent 55%);
+  pointer-events: none;
+}
+/* Neon sine-wave canvas inside hero */
+.dash-balance-hero .hero-graph-wrap {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 110px; overflow: hidden; pointer-events: none;
+}
+
+.dash-balance-meta {
+  font-size: 9px; font-weight: 700; letter-spacing: 3px;
+  text-transform: uppercase; color: rgba(160,170,200,0.55);
+  font-family: 'DM Mono', monospace; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.dash-balance-meta::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: hsl(var(--win));
+  box-shadow: 0 0 10px hsl(var(--win));
+  animation: cooldown-pulse 2.2s infinite;
+  flex-shrink: 0;
+}
+
+.dash-balance-amount {
+  font-family: 'Syne', 'Outfit', sans-serif;
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: #ffffff;
+  display: flex; align-items: baseline; gap: 4px;
+  position: relative; z-index: 1;
+}
+.dash-balance-amount .bal-cents {
+  font-size: 0.45em; color: rgba(255,255,255,0.55);
+  letter-spacing: -0.02em; margin-bottom: 4px;
+}
+.dash-balance-amount .bal-badge {
+  font-size: 0.28em; font-family: 'DM Mono', monospace;
+  font-weight: 600; letter-spacing: 1.5px;
+  color: hsl(var(--win)); background: hsl(var(--win) / .12);
+  border: 1px solid hsl(var(--win) / .25);
+  border-radius: 999px; padding: 3px 9px;
+  margin-left: 8px; margin-bottom: 6px;
+  white-space: nowrap;
+}
+
+.dash-balance-row2 {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 10px; position: relative; z-index: 1;
+}
+.dash-balance-currency {
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  letter-spacing: 2px; font-weight: 500;
+  color: rgba(160,170,200,0.5); text-transform: uppercase;
+}
+
+/* ══════════════════════════════════════════════
+   ANIMATED SINE WAVE — neon on dark
+   ══════════════════════════════════════════════ */
+.dash-sine-svg {
+  width: 100%; height: 110px; display: block;
+  overflow: visible;
+}
+.sine-path-glow {
+  fill: none;
+  stroke: url(#sineGrad);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px rgba(0,242,254,0.5)) drop-shadow(0 0 20px rgba(111,66,193,0.4));
+  animation: sine-flow 2.4s cubic-bezier(.4,0,.2,1) forwards;
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+}
+.sine-path-secondary {
+  fill: none;
+  stroke: url(#sineGrad2);
+  stroke-width: 1.5;
+  opacity: 0.4;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(255,0,122,0.4));
+  animation: sine-flow 3.2s 0.4s cubic-bezier(.4,0,.2,1) forwards;
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+}
+.sine-area {
+  fill: url(#sineArea);
+}
+.sine-dot {
+  animation: float-dot 3s ease-in-out infinite, glow-pulse-cyan 3s ease-in-out infinite;
+}
+
+/* ══════════════════════════════════════════════
+   YIELD EFFICIENCY RING CARD
+   ══════════════════════════════════════════════ */
+.dash-yield-card {
+  position: relative; overflow: hidden;
+  background: hsl(240 10% 4%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 20px;
+  padding: 22px 24px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.07),
+    0 16px 48px rgba(0,0,0,0.75);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.dash-yield-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 70% 50% at 50% 110%, rgba(111,66,193,0.10) 0%, transparent 60%);
+  pointer-events: none;
+}
+.dash-yield-label {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 2.5px;
+  text-transform: uppercase; color: rgba(160,170,200,0.5);
+  font-family: 'DM Mono', monospace;
+}
+
+/* Conic ring */
+.dash-ring-wrap {
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.dash-ring-svg {
+  width: 130px; height: 130px; transform: rotate(-90deg);
+  filter: drop-shadow(0 0 12px rgba(0,242,254,0.2));
+}
+.ring-track {
+  fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 10;
+  stroke-linecap: round;
+}
+.ring-fill-1 {
+  fill: none; stroke: url(#ringGrad1); stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: 310 345;
+  stroke-dashoffset: 0;
+  animation: none;
+  transition: stroke-dasharray 1.5s cubic-bezier(.4,0,.2,1);
+}
+.ring-fill-2 {
+  fill: none; stroke: url(#ringGrad2); stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: 280 345;
+  stroke-dashoffset: -320;
+  opacity: 0.4;
+}
+.ring-center-text {
+  position: absolute;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.ring-pct {
+  font-family: 'Syne', 'Outfit', sans-serif;
+  font-size: 2.2rem; font-weight: 800;
+  line-height: 1; letter-spacing: -0.04em;
+  color: #fff;
+}
+.ring-pct-label {
+  font-size: 7px; letter-spacing: 2.5px; font-weight: 700;
+  text-transform: uppercase; color: rgba(0,242,254,0.6);
+  font-family: 'DM Mono', monospace; margin-top: 2px;
+}
+
+/* Yield rows */
+.dash-yield-rows { display: flex; flex-direction: column; gap: 7px; }
+.dash-yield-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 10px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.05);
+  transition: border-color .2s, background .2s;
+}
+.dash-yield-row:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.09); }
+.dash-yield-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  animation: cooldown-pulse 2.5s infinite;
+}
+.dash-yield-row-name {
+  flex: 1; font-size: 10px; font-family: 'DM Mono', monospace;
+  color: rgba(180,190,210,0.7); letter-spacing: .3px;
+}
+.dash-yield-row-apy {
+  font-size: 11px; font-weight: 700; font-family: 'DM Mono', monospace;
+  letter-spacing: .5px;
+}
+
+/* ══════════════════════════════════════════════
+   REAL-TIME STREAM CARD
+   ══════════════════════════════════════════════ */
+.dash-stream-card {
+  background: hsl(240 10% 4%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 20px;
+  padding: 18px 20px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 12px 40px rgba(0,0,0,0.7);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.dash-stream-header {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.dash-stream-title {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 2.5px;
+  text-transform: uppercase; color: rgba(160,170,200,0.5);
+  font-family: 'DM Mono', monospace;
+}
+.dash-stream-link {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; color: hsl(var(--primary));
+  font-family: 'DM Mono', monospace; cursor: pointer;
+  border: none; background: none; padding: 0;
+  transition: color .2s, text-shadow .2s;
+}
+.dash-stream-link:hover { text-shadow: 0 0 12px hsl(var(--primary)); }
+
+.stream-entry {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 12px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.05);
+  animation: stream-slide .3s ease;
+  transition: border-color .2s, background .2s;
+}
+.stream-entry:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.09); }
+.stream-icon {
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.stream-icon.in  { background: rgba(72,255,167,0.10); color: hsl(var(--win)); }
+.stream-icon.swap { background: rgba(0,242,254,0.08); color: hsl(var(--secondary)); }
+.stream-icon.out { background: rgba(255,77,106,0.10); color: hsl(var(--loss)); }
+.stream-entry-body { flex: 1; min-width: 0; }
+.stream-entry-name {
+  font-size: 11px; font-weight: 700; color: rgba(220,225,240,0.9);
+  font-family: 'Plus Jakarta Sans', sans-serif; line-height: 1.2;
+}
+.stream-entry-meta {
+  font-size: 9px; color: rgba(140,150,175,0.55);
+  font-family: 'DM Mono', monospace; margin-top: 1px; letter-spacing: .3px;
+}
+.stream-entry-amount {
+  font-size: 12px; font-weight: 700; font-family: 'DM Mono', monospace;
+  text-align: right; letter-spacing: .3px;
+}
+.stream-entry-amount.pos { color: hsl(var(--win)); }
+.stream-entry-amount.neg { color: hsl(var(--loss)); }
+.stream-entry-amount.neutral { color: hsl(var(--secondary)); }
+
+/* ══════════════════════════════════════════════
+   UPGRADED STAT CARDS — larger, more luxury
+   ══════════════════════════════════════════════ */
+.stat-card {
+  padding: 20px 22px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 8px 28px rgba(0,0,0,0.7) !important;
+}
+.stat-card:hover {
+  transform: translateY(-3px) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 16px 48px rgba(0,0,0,0.8) !important;
+}
+.stat-card-value {
+  font-family: 'Syne', 'Outfit', sans-serif !important;
+  font-size: 2rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  letter-spacing: -0.03em !important;
+  animation: counter-tick .4s ease !important;
+}
+.stat-card-label {
+  font-size: 7.5px !important; letter-spacing: 3px !important;
+  color: rgba(140,150,175,0.5) !important;
+}
+.stat-card-sub {
+  font-size: 10px !important; margin-top: 6px !important;
+  color: rgba(140,150,175,0.55) !important;
+}
+.stat-card-icon {
+  width: 34px !important; height: 34px !important;
+  border-radius: 10px !important;
+}
+
+/* Win stat card */
+.stat-card.is-win-card { border-color: rgba(72,255,167,0.14) !important; }
+.stat-card.is-win-card:hover { border-color: rgba(72,255,167,0.25) !important; box-shadow: inset 0 1px 0 rgba(72,255,167,0.08), 0 0 28px rgba(72,255,167,0.06), 0 16px 48px rgba(0,0,0,0.8) !important; }
+
+/* ══════════════════════════════════════════════
+   DASHBOARD SCROLL + LAYOUT UPGRADES
+   ══════════════════════════════════════════════ */
+.dash-scroll {
+  padding: 14px 16px !important;
+  gap: 14px !important;
+}
+
+/* Balance hero tighter */
+.dash-balance-hero {
+  padding: 20px 24px 110px !important;
+}
+.dash-balance-meta {
+  margin-bottom: 6px !important;
+  font-size: 8px !important;
+  letter-spacing: 2.5px !important;
+}
+
+/* New two-column top row: balance hero + yield ring */
+.dash-hero-row {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+  align-items: stretch;
+}
+@media (max-width: 960px) {
+  .dash-hero-row { grid-template-columns: 1fr; }
+}
+
+/* Upgraded body layout */
+.dash-body {
+  grid-template-columns: 1fr 320px !important;
+  gap: 14px !important;
+  overflow: visible !important;
+  padding: 0 !important;
+}
+.dash-main { gap: 14px !important; overflow: visible !important; }
+.dash-sidebar { gap: 14px !important; }
+
+/* Equity panel upgrade */
+.dash-equity-panel {
+  padding: 20px 22px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 8px 28px rgba(0,0,0,0.7) !important;
+}
+.equity-svg { height: 180px !important; }
+
+/* Master panel upgrade */
+#dash-master-panel {
+  border-radius: 16px !important;
+  padding: 20px 24px !important;
+}
+
+/* ── Glass panels upgrade ── */
+.glass-panel {
+  border-radius: 16px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 28px rgba(0,0,0,0.65) !important;
+}
+.glass-panel-glow {
+  border-radius: 16px !important;
+  border: 1px solid rgba(0,242,254,0.14) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(0,242,254,0.08), 0 0 30px rgba(0,242,254,0.06), 0 12px 40px rgba(0,0,0,0.7) !important;
+}
+
+/* ── Bot cards ── */
+.bot-card {
+  border-radius: 14px !important;
+  padding: 16px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 6px 20px rgba(0,0,0,0.6) !important;
+}
+.bot-card:hover {
+  border-color: rgba(255,255,255,0.13) !important;
+  transform: translateY(-3px) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 16px 40px rgba(0,0,0,0.75) !important;
+}
+.bot-card-value {
+  font-family: 'Syne', 'Outfit', sans-serif !important;
+  font-size: 1.6rem !important; font-weight: 800 !important;
+  letter-spacing: -0.03em !important;
+}
+
+/* ── Journal upgrade ── */
+.journal-entry {
+  border-radius: 10px !important;
+  border: 1px solid rgba(255,255,255,0.05) !important;
+  background: rgba(255,255,255,0.02) !important;
+  border-left-width: 2px !important;
+}
+.journal-entry:hover {
+  background: rgba(255,255,255,0.04) !important;
+  border-color: rgba(255,255,255,0.09) !important;
+  transform: translateX(3px) !important;
+}
+
+/* ── Exec panel ── */
+.exec-row {
+  border-radius: 10px !important;
+  border: 1px solid rgba(255,255,255,0.05) !important;
+  background: rgba(255,255,255,0.02) !important;
+}
+
+/* ── Hub header line ── */
+.hub-header {
+  background: rgba(0,0,0,0.92) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 6px 30px rgba(0,0,0,0.7) !important;
+}
+
+/* ── Sidebar deeper black ── */
+.hub-sidebar {
+  background: rgba(6,6,10,0.98) !important;
+  border-right: 1px solid rgba(255,255,255,0.06) !important;
+  box-shadow: 2px 0 40px rgba(0,0,0,0.8) !important;
+}
+
+/* ── Active sidebar tab ── */
+.hub-tab.active {
+  background: rgba(255,255,255,0.06) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+  box-shadow: inset 3px 0 0 hsl(var(--primary)), 0 0 20px hsl(var(--primary) / .06) !important;
+}
+
+/* ── Dashboard hero title ── */
+.dash-hero-title {
+  font-family: 'Syne', 'Outfit', sans-serif !important;
+  font-size: 2.6rem !important; font-weight: 800 !important;
+  letter-spacing: -0.04em !important;
+  color: #fff !important;
+}
+.dash-hero-subtitle {
+  font-size: 10px; font-family: 'DM Mono', monospace;
+  color: rgba(140,150,175,0.5); letter-spacing: .5px; margin-top: 4px;
+}
+
+/* ── Section dividers ── */
+.section-divider {
+  font-size: 8px !important; letter-spacing: 3px !important;
+  color: rgba(0,242,254,0.5) !important;
+}
+.section-divider::after {
+  background: linear-gradient(90deg, rgba(0,242,254,0.2), transparent) !important;
+}
+
+/* ── Bar fills ── */
+.bar-fill-win {
+  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary))) !important;
+  box-shadow: 0 0 8px hsl(var(--win) / .3) !important;
+  border-radius: 999px !important;
+}
+.bar-track {
+  height: 5px !important;
+  background: rgba(255,255,255,0.06) !important;
+  border-radius: 999px !important;
+}
+
+/* ── Stats row 3 cards ── */
+.dash-stats-row {
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 14px !important;
+}
+
+/* Luminous theme specific overrides for the new cards */
+html.luminous .dash-balance-hero,
+html.luminous .dash-yield-card,
+html.luminous .dash-stream-card {
+  background: rgba(14,14,20,0.60) !important;
+  backdrop-filter: blur(28px) saturate(1.3) !important;
+  border-color: rgba(255,255,255,0.07) !important;
+}
+html.luminous .dash-balance-amount { color: #ffffff; }
+html.luminous .stat-card {
+  background: rgba(14,14,20,0.60) !important;
+  backdrop-filter: blur(20px) !important;
+}
+
+/* ── Scrollbar refine ── */
+.dash-scroll::-webkit-scrollbar { width: 4px; }
+.dash-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
 
 /* ════════════════════════════════════════════════════════════════
    BENZ CLUB — THEME ONE: LUMINOUS (Cyan/Magenta Glass)
@@ -2263,9 +2803,10 @@ html.light body::before { display: none; }
 
 /* ── DASHBOARD SCROLL UPGRADE ── */
 .dash-scroll {
-  padding: 20px 24px !important;
-  gap: 20px !important;
+  padding: 14px 16px !important;
+  gap: 14px !important;
   background: transparent;
+  overflow-y: auto !important;
 }
 
 /* ── HERO SECTION REDESIGN ── */
@@ -3099,8 +3640,9 @@ body::before {
 /* ── DASHBOARD SCROLL ── */
 .dash-scroll {
   background: #000 !important;
-  padding: 22px 26px !important;
-  gap: 18px !important;
+  padding: 14px 16px !important;
+  gap: 14px !important;
+  overflow-y: auto !important;
 }
 
 /* ── HERO — CINEMATIC ── */
@@ -3793,6 +4335,43 @@ body::before {
 /* ── RESPONSIVE DEEPENING ── */
 @media (max-width: 880px) {
   .hub-sidebar { background: hsl(240 8% 2%) !important; }
+}
+
+/* =====================================================================
+   FINAL OVERRIDE — SCROLL FIX + CLEAN LAYOUT (maximum specificity)
+   ===================================================================== */
+
+/* Scroll chain: every ancestor is overflow:hidden, only dash-scroll scrolls */
+html body .hub-shell { height: 100vh !important; overflow: hidden !important; }
+html body .hub-main { flex: 1 !important; min-width: 0 !important; min-height: 0 !important; height: 100% !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
+html body .app-panel { display: none !important; }
+html body .app-panel.active { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
+html body .app-root { flex: 1 !important; min-height: 0 !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
+html body .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
+
+/* Hide the old hero title row — balance card IS the hero */
+html body .dash-hero { display: none !important; }
+
+/* Balance hero flush, no extra top gap */
+html body .dash-balance-hero { padding: 18px 22px 110px !important; border-radius: 18px !important; }
+html body .dash-balance-meta { margin-bottom: 4px !important; font-size: 8px !important; }
+html body .dash-balance-amount { font-size: clamp(2rem, 4vw, 3.2rem) !important; }
+
+/* Two-column hero row */
+html body .dash-hero-row { display: grid !important; grid-template-columns: 1fr 260px !important; gap: 12px !important; }
+
+/* 3-column stat row */
+html body .dash-stats-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; padding: 0 !important; }
+
+/* Body */
+html body .dash-body { display: grid !important; grid-template-columns: 1fr 300px !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
+html body .dash-main { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
+html body .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; }
+
+@media (max-width: 1000px) {
+  html body .dash-hero-row { grid-template-columns: 1fr !important; }
+  html body .dash-body { grid-template-columns: 1fr !important; }
+  html body .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
 }
 </style>
 <script>
@@ -8490,20 +9069,88 @@ window.NexusStrategies=exports;
     root.innerHTML = `
       <div class="dash-scroll">
 
-        <!-- ═══ HERO HEADER ═══ -->
-        <div class="dash-hero">
-          <div class="dash-hero-meta">
-            <span class="dash-hero-dot"></span>
-            <span style="text-transform:uppercase;letter-spacing:2px;font-size:9px">Live · All Systems Nominal</span>
-            <span style="margin-left:auto;color:hsl(var(--muted-foreground))">Last update: <span id="dash-last-update">just now</span></span>
-          </div>
-          <div class="dash-hero-title-bar">
-            <div>
-              <div class="dash-hero-title">Trading Hub</div>
-              <div class="dash-hero-subtitle">Benz Club · Unified Engine Dashboard · 4 Active Bots</div>
+        <!-- ═══ BALANCE HERO + YIELD RING ROW ═══ -->
+        <div class="dash-hero-row">
+
+          <!-- Balance Hero Card -->
+          <div class="dash-balance-hero" id="dash-balance-hero-card">
+            <div class="dash-balance-meta">
+              <span>Trading Hub</span>
+              <span style="margin-left:auto;font-size:8px;opacity:0.5" id="dash-last-update">just now</span>
+            </div>
+            <div class="dash-balance-amount" id="dash-balance">
+              USD 0<span class="bal-cents">.00</span>
+              <span class="bal-badge" id="dash-balance-badge">OFFLINE</span>
+            </div>
+            <div class="dash-balance-row2">
+              <span class="dash-balance-currency" id="dash-account-sub">Not connected — add a token in Settings</span>
+            </div>
+            <!-- Animated sine wave -->
+            <div class="hero-graph-wrap">
+              <svg class="dash-sine-svg" viewBox="0 0 700 110" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="sineGrad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%"   stop-color="#00f2fe"/>
+                    <stop offset="50%"  stop-color="#7b61ff"/>
+                    <stop offset="100%" stop-color="#ff007a"/>
+                  </linearGradient>
+                  <linearGradient id="sineGrad2" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%"   stop-color="#ff007a"/>
+                    <stop offset="100%" stop-color="#7b61ff"/>
+                  </linearGradient>
+                  <linearGradient id="sineArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stop-color="#7b61ff" stop-opacity="0.18"/>
+                    <stop offset="100%" stop-color="#7b61ff" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path class="sine-area" d="M0,75 C87.5,75 87.5,30 175,30 C262.5,30 262.5,75 350,75 C437.5,75 437.5,30 525,30 C612.5,30 612.5,75 700,75 L700,110 L0,110 Z"/>
+                <path class="sine-path-secondary" d="M0,55 C87.5,55 87.5,20 175,20 C262.5,20 262.5,55 350,55 C437.5,55 437.5,20 525,20 C612.5,20 612.5,55 700,55"/>
+                <path class="sine-path-glow" d="M0,75 C87.5,75 87.5,30 175,30 C262.5,30 262.5,75 350,75 C437.5,75 437.5,30 525,30 C612.5,30 612.5,75 700,75"/>
+                <circle class="sine-dot" cx="350" cy="75" r="5" fill="#00f2fe" stroke="#0B0B0F" stroke-width="2"/>
+              </svg>
             </div>
           </div>
+
+          <!-- Yield Efficiency Ring -->
+          <div class="dash-yield-card">
+            <div class="dash-yield-label">Yield Efficiency</div>
+            <div class="dash-ring-wrap">
+              <svg class="dash-ring-svg" viewBox="0 0 120 120">
+                <defs>
+                  <linearGradient id="ringGrad1" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%"   stop-color="#00f2fe"/>
+                    <stop offset="100%" stop-color="#ff007a"/>
+                  </linearGradient>
+                  <linearGradient id="ringGrad2" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%"   stop-color="#7b61ff"/>
+                    <stop offset="100%" stop-color="#00f2fe"/>
+                  </linearGradient>
+                </defs>
+                <circle class="ring-track" cx="60" cy="60" r="50"/>
+                <circle class="ring-fill-1" cx="60" cy="60" r="50" id="dash-ring-fill"/>
+                <circle class="ring-fill-2" cx="60" cy="60" r="50"/>
+              </svg>
+              <div class="ring-center-text">
+                <div class="ring-pct" id="dash-ring-pct">—</div>
+                <div class="ring-pct-label">Win Rate</div>
+              </div>
+            </div>
+            <div class="dash-yield-rows">
+              <div class="dash-yield-row">
+                <span class="dash-yield-dot" style="background:hsl(var(--primary));box-shadow:0 0 8px hsl(var(--primary))"></span>
+                <span class="dash-yield-row-name">Win Rate</span>
+                <span class="dash-yield-row-apy" id="dash-yield-wr" style="color:hsl(var(--primary))">0.0%</span>
+              </div>
+              <div class="dash-yield-row">
+                <span class="dash-yield-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>
+                <span class="dash-yield-row-name">Net P&amp;L</span>
+                <span class="dash-yield-row-apy" id="dash-yield-pf" style="color:hsl(var(--secondary))">$0.00</span>
+              </div>
+            </div>
+          </div>
+
         </div>
+        <!-- ═══ END HERO ROW ═══ -->
 
         <!-- ═══ MASTER CONTROL ═══ -->
         <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
@@ -8539,18 +9186,8 @@ window.NexusStrategies=exports;
         <div class="dash-stats-row">
           <div class="glass-panel stat-card">
             <div class="stat-card-top">
-              <span class="stat-card-label">Net P&amp;L</span>
-              <span class="stat-card-icon" style="background:hsl(var(--win)/.12);border-color:hsl(var(--win)/.2);color:hsl(var(--win))">
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12V4M4 8l4-4 4 4"/></svg>
-              </span>
-            </div>
-            <div class="stat-card-value" id="dash-netpl">$0.00</div>
-            <div class="stat-card-sub" id="dash-netpl-sub">0 closed trades</div>
-          </div>
-          <div class="glass-panel stat-card">
-            <div class="stat-card-top">
               <span class="stat-card-label">Win Rate</span>
-              <span class="stat-card-icon" style="background:hsl(var(--primary)/.12);border-color:hsl(var(--primary)/.2);color:hsl(var(--primary))">
+              <span class="stat-card-icon" style="background:hsl(var(--win)/.12);border-color:hsl(var(--win)/.2);color:hsl(var(--win))">
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg>
               </span>
             </div>
@@ -8569,13 +9206,13 @@ window.NexusStrategies=exports;
           </div>
           <div class="glass-panel stat-card">
             <div class="stat-card-top">
-              <span class="stat-card-label">Balance</span>
-              <span class="stat-card-icon" style="background:hsl(var(--primary-2)/.12);border-color:hsl(var(--primary-2)/.2);color:hsl(var(--primary))">
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="12" height="9" rx="2"/><path d="M2 7h12"/></svg>
+              <span class="stat-card-label">Net P&amp;L</span>
+              <span class="stat-card-icon" style="background:hsl(var(--win)/.12);border-color:hsl(var(--win)/.2);color:hsl(var(--win))">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12V4M4 8l4-4 4 4"/></svg>
               </span>
             </div>
-            <div class="stat-card-value" id="dash-balance">USD 0.00</div>
-            <div class="stat-card-sub" id="dash-account-sub">Not connected</div>
+            <div class="stat-card-value" id="dash-netpl">$0.00</div>
+            <div class="stat-card-sub" id="dash-netpl-sub">0 closed</div>
           </div>
         </div>
 
@@ -8728,8 +9365,28 @@ window.NexusStrategies=exports;
 
     el('dash-wonlost', root).innerHTML = `<span class="text-success">+$${wonUSD.toFixed(0)}</span> <span class="text-muted" style="font-size:1rem">/</span> <span class="text-destructive">-$${lostUSD.toFixed(0)}</span>`;
 
-    el('dash-balance', root).textContent = `${hub.currency || 'USD'} ${hub.balanceUSD.toFixed(2)}`;
+    // ── Balance Hero Card ──
+    const balStr = hub.balanceUSD.toFixed(2).split('.');
+    const balHeroEl = el('dash-balance', root);
+    if (balHeroEl) {
+      balHeroEl.innerHTML = `${hub.currency || 'USD'} ${balStr[0]}<span class="bal-cents">.${balStr[1]}</span><span class="bal-badge" id="dash-balance-badge">${hub.isAuthenticated ? 'LIVE' : 'OFFLINE'}</span>`;
+    }
     el('dash-account-sub', root).textContent = hub.accountId ? `Account ${hub.accountId} · ${hub.isAuthenticated ? 'Live' : 'Offline'}` : 'Not connected — add a token in Settings';
+
+    // ── Yield Ring ──
+    const ringPctEl = el('dash-ring-pct', root);
+    const ringFillEl = el('dash-ring-fill', root);
+    const wrNum = parseFloat(wr);
+    if (ringPctEl) ringPctEl.textContent = `${wr}%`;
+    if (ringFillEl) {
+      const circumference = 2 * Math.PI * 50; // r=50
+      const filled = (wrNum / 100) * circumference;
+      ringFillEl.style.strokeDasharray = `${filled.toFixed(1)} ${circumference.toFixed(1)}`;
+    }
+    const yieldWrEl = el('dash-yield-wr', root);
+    const yieldPfEl = el('dash-yield-pf', root);
+    if (yieldWrEl) yieldWrEl.textContent = `${wr}%`;
+    if (yieldPfEl) yieldPfEl.textContent = `${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`;
 
     // Deduplicate entries by id to prevent double-counting from multiple socket listeners
     const seenIds = new Set();
