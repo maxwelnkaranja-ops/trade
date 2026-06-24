@@ -4810,7 +4810,8 @@ html body .modal-body { font-size: 13.5px !important; }
 
     // Use the classic Deriv WebSocket API — works from any origin, no CORS issues.
     // Auth flow: connect → send {authorize: token} → on success subscribe to balance.
-    const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089');
+    const _hubAppId = (window.HubStore && window.HubStore.getState().appId) || (function(){ try { return localStorage.getItem('hub_app_id') || ''; } catch(_){ return ''; } })() || '33ADPhDZXR2F60qhPudXB';
+    const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=' + _hubAppId);
     statusSocket = ws;
     let pingInterval = null;
 
@@ -5369,7 +5370,10 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
+  function getWsUrl() {
+    const id = (window.HubStore && window.HubStore.getState().appId) || (function(){ try { return localStorage.getItem('hub_app_id') || ''; } catch(_){ return ''; } })() || '33ADPhDZXR2F60qhPudXB';
+    return 'wss://ws.derivws.com/websockets/v3?app_id=' + id;
+  }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -6587,7 +6591,10 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
+  function getWsUrl() {
+    const id = (window.HubStore && window.HubStore.getState().appId) || (function(){ try { return localStorage.getItem('hub_app_id') || ''; } catch(_){ return ''; } })() || '33ADPhDZXR2F60qhPudXB';
+    return 'wss://ws.derivws.com/websockets/v3?app_id=' + id;
+  }
 
   class GlobalSocketManager {
     constructor() {
@@ -7476,7 +7483,10 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  function getPublicWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
+  function getPublicWsUrl() {
+    const id = (window.HubStore && window.HubStore.getState().appId) || (function(){ try { return localStorage.getItem('hub_app_id') || ''; } catch(_){ return ''; } })() || '33ADPhDZXR2F60qhPudXB';
+    return 'wss://ws.derivws.com/websockets/v3?app_id=' + id;
+  }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -7553,6 +7563,13 @@ window.NexusStrategies=exports;
       if (window.HubStore.getState().apiToken) setTimeout(() => this.authenticate(), 500);
       window.addEventListener('hub:token-changed', () => this.authenticate());
       window.addEventListener('hub:account-type-changed', () => this.authenticate());
+      window.addEventListener('hub:appid-changed', () => {
+        // Reconnect public analysis sockets with the new App ID
+        try { if (this.socketP) { this.socketP.onclose = null; this.socketP.close(); } } catch(_) {}
+        try { if (this.socketG) { this.socketG.onclose = null; this.socketG.close(); } } catch(_) {}
+        this.connectAnalysis();
+        if (window.HubStore.getState().apiToken) setTimeout(() => this.authenticate(), 500);
+      });
     }
 
     _bindMethods() {
@@ -7786,7 +7803,7 @@ window.NexusStrategies=exports;
       this.tickIndex = 0;
       if (this.analysisReconnectAttempts == null) this.analysisReconnectAttempts = 0;
       const createSocket = (market, type) => {
-        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=1089`);
+        const ws = new WebSocket(getPublicWsUrl());
         ws.onopen = () => {
           this.analysisReconnectAttempts = 0; // reset backoff on a clean connection
           try { ws.send(JSON.stringify({ ticks: market, subscribe: 1 })); } catch (e) { /* */ }
@@ -7824,7 +7841,7 @@ window.NexusStrategies=exports;
 
       // Classic Deriv WS API — no CORS, works from any origin
       {
-        const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089');
+        const ws = new WebSocket(getPublicWsUrl());
         this.socketT = ws;
         const _self = this;
         ws.onerror = () => {
@@ -7939,7 +7956,10 @@ window.NexusStrategies=exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
+  function getWsUrl() {
+    const id = (window.HubStore && window.HubStore.getState().appId) || (function(){ try { return localStorage.getItem('hub_app_id') || ''; } catch(_){ return ''; } })() || '33ADPhDZXR2F60qhPudXB';
+    return 'wss://ws.derivws.com/websockets/v3?app_id=' + id;
+  }
   const ANALYSIS_HOLD = 20;
 
   function showCongratulationsPopup(target) {
@@ -7999,6 +8019,12 @@ window.NexusStrategies=exports;
       if (sharedToken) setTimeout(() => this.connect(sharedToken), 600);
       window.addEventListener('hub:token-changed', (e) => { if (e.detail.token) this.connect(e.detail.token); });
       window.addEventListener('hub:account-type-changed', () => {
+        const t = window.HubStore.getState().apiToken;
+        if (t) setTimeout(() => this.connect(t), 500);
+      });
+      window.addEventListener('hub:appid-changed', () => {
+        // Reconnect both analysis and trading sockets with the new App ID
+        this._init();
         const t = window.HubStore.getState().apiToken;
         if (t) setTimeout(() => this.connect(t), 500);
       });
@@ -8359,7 +8385,7 @@ window.NexusStrategies=exports;
 
       // Classic Deriv WS — no CORS, works from any origin
       {
-        this.tradingSocket = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089');
+        this.tradingSocket = new WebSocket(getWsUrl());
         const _titan = this;
         this.tradingSocket.onerror = () => {
           this.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
