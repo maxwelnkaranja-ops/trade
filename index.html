@@ -4337,6 +4337,228 @@ body::before {
   .hub-sidebar { background: hsl(240 8% 2%) !important; }
 }
 
+
+
+/* ═══════════════════════════════════════════════════════════════
+   LAYOUT REFINEMENT — FAT LEFT SIDEBAR, SHRUNK MAIN PANELS
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Sidebar — column order already swapped in HTML */
+html body .dash-sidebar {
+  gap: 10px !important;
+  overflow-y: auto !important;
+  max-height: calc(100vh - 200px) !important;
+}
+html body .dash-sidebar::-webkit-scrollbar { width: 3px !important; }
+html body .dash-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1) !important; border-radius: 3px !important; }
+
+/* Exec panel — fatter padding */
+html body .exec-panel { padding: 18px 20px 20px !important; }
+
+/* Exec rows — wider feel */
+html body .exec-row { padding: 15px 16px !important; }
+html body .exec-flow-box { padding: 8px 6px !important; font-size: 9.5px !important; }
+
+/* Journal panel — fatter padding */
+html body .journal-panel {
+  padding: 18px 20px 20px !important;
+  max-height: none !important;
+  flex: 1 !important;
+}
+
+/* Equity curve — shorter */
+html body .dash-equity-panel { padding: 12px 14px !important; }
+html body .equity-svg { height: 140px !important; }
+
+/* Engine overview — compact */
+html body .rank-table { gap: 8px !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   EXEC ROWS — BIGGER + COOLDOWN COUNTDOWN
+   ═══════════════════════════════════════════════════════════════ */
+html body .exec-panel { padding: 16px 16px !important; }
+html body .exec-list {
+  display: flex !important; flex-direction: column !important;
+  gap: 10px !important; max-height: none !important;
+  overflow: visible !important; margin-top: 8px !important;
+}
+html body .exec-row {
+  padding: 13px 14px !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: rgba(255,255,255,0.025) !important;
+  display: flex !important; flex-direction: column !important; gap: 10px !important;
+  transition: border-color .2s, background .2s !important;
+}
+html body .exec-row:hover {
+  background: rgba(255,255,255,0.04) !important;
+  border-color: rgba(255,255,255,0.11) !important;
+}
+html body .exec-row.exec-row-cd {
+  border-color: rgba(255,170,0,0.25) !important;
+  background: rgba(255,150,0,0.04) !important;
+}
+html body .exec-row-head {
+  display: flex !important; align-items: center !important;
+  justify-content: space-between !important; gap: 8px !important;
+}
+html body .exec-bot-name {
+  display: flex !important; align-items: center !important; gap: 8px !important;
+  font-size: 12.5px !important; font-weight: 700 !important;
+  color: rgba(220,225,240,0.9) !important;
+}
+html body .exec-dot {
+  width: 8px !important; height: 8px !important; border-radius: 50% !important; flex-shrink: 0 !important;
+}
+html body .exec-row-right {
+  display: flex !important; align-items: center !important; gap: 8px !important;
+}
+html body .exec-pl {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 12px !important; font-weight: 700 !important;
+}
+html body .exec-status-tag {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9px !important; font-weight: 700 !important;
+  letter-spacing: 1.5px !important; text-transform: uppercase !important;
+  padding: 3px 8px !important; border-radius: 999px !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  background: rgba(255,255,255,0.04) !important;
+  color: rgba(150,160,185,0.7) !important;
+}
+html body .exec-status-tag.is-on {
+  color: hsl(var(--win)) !important;
+  background: hsl(var(--win) / .1) !important;
+  border-color: hsl(var(--win) / .3) !important;
+  box-shadow: 0 0 10px hsl(var(--win) / .15) !important;
+}
+html body .exec-status-tag.is-cd {
+  color: #ffaa00 !important;
+  background: rgba(255,170,0,0.1) !important;
+  border-color: rgba(255,170,0,0.35) !important;
+  box-shadow: 0 0 10px rgba(255,170,0,0.2) !important;
+  animation: cooldown-pulse 1s ease-in-out infinite !important;
+}
+@keyframes cooldown-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+html body .exec-cd-bar {
+  height: 3px !important; border-radius: 999px !important;
+  background: rgba(255,170,0,0.12) !important; overflow: hidden !important;
+}
+html body .exec-cd-fill {
+  height: 100% !important; border-radius: 999px !important;
+  background: linear-gradient(90deg, #ffaa00, #ff6600) !important;
+  box-shadow: 0 0 8px rgba(255,170,0,0.5) !important;
+  width: 100% !important;
+}
+@keyframes exec-cd-drain { from { width: 100%; } to { width: 0%; } }
+html body .exec-flow {
+  display: flex !important; align-items: center !important; gap: 6px !important;
+}
+html body .exec-flow-box {
+  flex: 1 !important; text-align: center !important;
+  padding: 7px 6px !important; border-radius: 8px !important;
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9px !important; font-weight: 700 !important;
+  letter-spacing: 1.2px !important; text-transform: uppercase !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: rgba(255,255,255,0.025) !important;
+  color: rgba(140,150,175,0.6) !important;
+}
+html body .exec-flow-arrow {
+  color: rgba(100,110,135,0.4) !important;
+  font-size: 12px !important; flex-shrink: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   JOURNAL — SCROLLABLE, BIGGER RICHER ENTRIES
+   ═══════════════════════════════════════════════════════════════ */
+html body .journal-panel {
+  flex: 1 !important; min-height: 0 !important;
+  display: flex !important; flex-direction: column !important;
+  padding: 16px !important; max-height: 520px !important;
+}
+html body .journal-tabs {
+  display: flex !important; gap: 5px !important;
+  flex-wrap: wrap !important; margin-bottom: 10px !important; flex-shrink: 0 !important;
+}
+html body .journal-list {
+  flex: 1 !important; overflow-y: auto !important; min-height: 0 !important;
+  display: flex !important; flex-direction: column !important; gap: 7px !important;
+  padding-right: 2px !important;
+}
+html body .journal-list::-webkit-scrollbar { width: 3px !important; }
+html body .journal-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12) !important; border-radius: 3px !important; }
+html body .journal-entry {
+  display: flex !important; align-items: center !important; gap: 10px !important;
+  padding: 12px 14px !important; border-radius: 12px !important;
+  border: 1px solid rgba(255,255,255,0.06) !important;
+  background: rgba(255,255,255,0.02) !important;
+  border-left-width: 3px !important;
+  transition: all .18s !important;
+  min-height: 58px !important;
+}
+html body .journal-entry:hover {
+  background: rgba(255,255,255,0.04) !important;
+  transform: translateX(3px) !important;
+}
+html body .journal-entry.win { border-left-color: hsl(var(--win)) !important; background: hsl(var(--win) / .04) !important; }
+html body .journal-entry.loss { border-left-color: hsl(var(--loss)) !important; background: hsl(var(--loss) / .04) !important; }
+html body .journal-badge-wrap { flex-shrink: 0 !important; }
+html body .journal-badge {
+  width: 28px !important; height: 28px !important;
+  border-radius: 8px !important; font-size: 12px !important; font-weight: 800 !important;
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+}
+html body .journal-badge.win { background: hsl(var(--win) / .15) !important; color: hsl(var(--win)) !important; }
+html body .journal-badge.loss { background: hsl(var(--loss) / .15) !important; color: hsl(var(--loss)) !important; }
+html body .journal-entry-body {
+  flex: 1 !important; min-width: 0 !important;
+  display: flex !important; flex-direction: column !important; gap: 4px !important;
+}
+html body .journal-entry-top {
+  display: flex !important; align-items: center !important; gap: 6px !important;
+  flex-wrap: wrap !important;
+}
+html body .journal-bot-label {
+  font-size: 11px !important; font-weight: 700 !important;
+}
+html body .journal-digits-pill {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 10px !important; font-weight: 600 !important;
+  color: rgba(160,170,200,0.7) !important;
+  background: rgba(255,255,255,0.05) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 5px !important; padding: 1px 6px !important;
+}
+html body .journal-time-stamp {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9px !important; color: rgba(130,140,165,0.55) !important;
+  margin-left: auto !important; white-space: nowrap !important;
+}
+html body .journal-entry-bottom {
+  display: flex !important; align-items: center !important; gap: 6px !important;
+}
+html body .journal-type-label {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9.5px !important; font-weight: 700 !important; letter-spacing: 0.8px !important;
+}
+html body .journal-type-label.win { color: hsl(var(--win)) !important; }
+html body .journal-type-label.loss { color: hsl(var(--loss)) !important; }
+html body .journal-barrier {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9px !important; color: rgba(130,140,165,0.5) !important;
+}
+html body .journal-pl {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 14px !important; font-weight: 800 !important;
+  flex-shrink: 0 !important; text-align: right !important;
+}
+html body .journal-pl.win { color: hsl(var(--win)) !important; }
+html body .journal-pl.loss { color: hsl(var(--loss)) !important; }
+
 /* =====================================================================
    FINAL OVERRIDE — SCROLL FIX + CLEAN LAYOUT (maximum specificity)
    ===================================================================== */
@@ -4364,7 +4586,7 @@ html body .dash-hero-row { display: grid !important; grid-template-columns: 1fr 
 html body .dash-stats-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; padding: 0 !important; }
 
 /* Body */
-html body .dash-body { display: grid !important; grid-template-columns: 1fr 300px !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
+html body .dash-body { display: grid !important; grid-template-columns: 380px 1fr !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
 html body .dash-main { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
 html body .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; }
 
@@ -4373,6 +4595,95 @@ html body .dash-sidebar { display: flex !important; flex-direction: column !impo
   html body .dash-body { grid-template-columns: 1fr !important; }
   html body .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GLOBAL FONT SCALE — everything bumped up ~15–20%
+   All rules use html body for maximum specificity without !important abuse
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Base body ── */
+html body {
+  font-size: 15px !important;
+  line-height: 1.6 !important;
+}
+
+/* ── Navigation & shell ── */
+html body .hub-nav-label { font-size: 13px !important; }
+html body .hub-logo-text { font-size: 15px !important; }
+html body .hub-breadcrumb { font-size: 14px !important; }
+html body .hub-nav-badge { font-size: 9.5px !important; }
+html body .hub-tab { font-size: 12px !important; }
+
+/* ── Section dividers / headings ── */
+html body .section-divider { font-size: 10.5px !important; letter-spacing: 2px !important; }
+html body .section-label { font-size: 10.5px !important; }
+html.luminous .section-divider, html.void .section-divider { font-size: 10.5px !important; }
+
+/* ── Stat cards (dashboard top row) ── */
+html body .stat-card-label { font-size: 9.5px !important; letter-spacing: 2px !important; }
+html body .stat-card-value { font-size: 2rem !important; }
+html body .stat-card-sub { font-size: 12px !important; }
+
+/* ── Balance hero ── */
+html body .dash-balance-meta { font-size: 9.5px !important; }
+html body .dash-balance-amount { font-size: clamp(2.4rem, 4.5vw, 3.6rem) !important; }
+
+/* ── Bot cards (engine overview rank table) ── */
+html body .bot-card-head { font-size: 12px !important; }
+html body .bot-card-value { font-size: 1.6rem !important; }
+html body .bot-card-meta { font-size: 12px !important; }
+
+/* ── Exec rows (active engines) ── */
+html body .exec-bot-name { font-size: 14px !important; }
+html body .exec-pl { font-size: 13px !important; }
+html body .exec-status-tag { font-size: 10px !important; }
+html body .exec-flow-box { font-size: 10.5px !important; }
+html body .exec-flow-arrow { font-size: 13px !important; }
+
+/* ── Journal ── */
+html body .journal-bot-label { font-size: 12.5px !important; }
+html body .journal-digits-pill { font-size: 11.5px !important; }
+html body .journal-time-stamp { font-size: 10.5px !important; }
+html body .journal-type-label { font-size: 11px !important; }
+html body .journal-barrier { font-size: 10.5px !important; }
+html body .journal-pl { font-size: 15.5px !important; }
+html body .journal-badge { font-size: 13px !important; width: 30px !important; height: 30px !important; }
+html body .journal-tab { font-size: 11px !important; }
+
+/* ── Settings panel ── */
+html body .settings-label { font-size: 11px !important; }
+html body .settings-hint { font-size: 12.5px !important; line-height: 1.65 !important; }
+html body .settings-toggle-row-label { font-size: 13.5px !important; }
+html body .settings-toggle-row-label .label-sub { font-size: 12px !important; }
+html body .labeled-input label { font-size: 11px !important; }
+html body .labeled-input input, html body .labeled-input select { font-size: 13px !important; }
+html body .labeled-input .input-hint { font-size: 12px !important; }
+
+/* ── Buttons ── */
+html body .btn-primary, html body .btn-secondary, html body .btn-ghost { font-size: 13px !important; }
+html body .engage-btn { font-size: 13px !important; letter-spacing: 1.5px !important; }
+
+/* ── Logs / mono text streams ── */
+html body .log-line, html body .log-entry { font-size: 11.5px !important; line-height: 1.6 !important; }
+html body .auto-log, html body .auto-log-line { font-size: 11.5px !important; }
+
+/* ── Titan engine panels ── */
+html body .titan-input { font-size: 13px !important; }
+html body .titan-label, html body .text-muted { font-size: 11.5px !important; }
+
+/* ── Bot toggles ── */
+html body .bot-toggle-label { font-size: 12px !important; }
+html body .bot-toggles-hint { font-size: 10.5px !important; }
+
+/* ── General text utilities ── */
+html body .text-sm { font-size: 12.5px !important; }
+html body .text-xs { font-size: 11px !important; }
+html body .font-mono { font-size: 12.5px !important; }
+
+/* ── Modal ── */
+html body .modal-title { font-size: 16px !important; }
+html body .modal-body { font-size: 13.5px !important; }
+
 </style>
 <script>
 /* ============================================================
@@ -9218,6 +9529,27 @@ window.NexusStrategies=exports;
 
         <!-- ═══ MAIN BODY ═══ -->
         <div class="dash-body">
+          <!-- ═══ SIDEBAR (now LEFT) ═══ -->
+          <div class="dash-sidebar">
+
+            <!-- Active engines -->
+            <div class="glass-panel exec-panel">
+              <div class="section-divider" style="margin-bottom:10px">ACTIVE ENGINES</div>
+              <div id="dash-bot-toggles" class="bot-toggles"></div>
+              <div id="dash-exec-list" class="exec-list"></div>
+            </div>
+
+            <!-- Trade journal -->
+            <div class="glass-panel journal-panel">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
+              </div>
+              <div class="journal-tabs" id="dash-journal-tabs"></div>
+              <div class="journal-list" id="dash-journal-list"></div>
+            </div>
+
+          </div>
+
           <div class="dash-main">
 
             <!-- Equity chart -->
@@ -9236,33 +9568,12 @@ window.NexusStrategies=exports;
             </div>
 
             <!-- Engine overview -->
-            <div class="glass-panel" style="padding:18px 20px">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div class="glass-panel" style="padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
                 <div class="section-divider" style="margin-bottom:0;flex:1">ENGINE OVERVIEW</div>
                 <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">4 BOTS</div>
               </div>
               <div class="rank-table" id="dash-perbot"></div>
-            </div>
-
-          </div>
-
-          <!-- ═══ SIDEBAR ═══ -->
-          <div class="dash-sidebar">
-
-            <!-- Active engines -->
-            <div class="glass-panel exec-panel">
-              <div class="section-divider" style="margin-bottom:10px">ACTIVE ENGINES</div>
-              <div id="dash-bot-toggles" class="bot-toggles"></div>
-              <div id="dash-exec-list" class="exec-list"></div>
-            </div>
-
-            <!-- Trade journal -->
-            <div class="glass-panel journal-panel">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
-              </div>
-              <div class="journal-tabs" id="dash-journal-tabs"></div>
-              <div class="journal-list" id="dash-journal-list"></div>
             </div>
 
           </div>
@@ -9455,16 +9766,40 @@ window.NexusStrategies=exports;
     });
 
     const execHtml = botIds.map((id) => {
-      const flow = getBotFlowStage(engines[id], id);
+      const engine = engines[id];
+      const flow = getBotFlowStage(engine, id);
       const botOn = global.HubStore.isBotEnabled(id);
-      const statusTag = !botOn ? 'DISABLED' : flow.engaged ? 'ENGAGED' : 'STANDBY';
+
+      // Cooldown countdown
+      let cdSecs = 0;
+      if (engine) {
+        if (id === 'differ') cdSecs = (engine.state && engine.state.cooldownRemaining) || 0;
+        else cdSecs = engine.cooldownTime || 0;
+      }
+      const isCd = cdSecs > 0;
+      const statusTag = !botOn ? 'DISABLED' : isCd ? `CD ${cdSecs}s` : flow.engaged ? 'ENGAGED' : 'STANDBY';
+      const statusClass = !botOn ? '' : isCd ? ' is-cd' : flow.engaged ? ' is-on' : '';
+
       const resultLabel = flow.result === 'win' ? 'WIN' : flow.result === 'loss' ? 'LOSS' : flow.result === 'recovery' ? 'RECOVERY' : '—';
       const resultGlow = flow.result === 'win' ? 'glow-win' : flow.result === 'loss' ? 'glow-loss' : flow.result === 'recovery' ? 'glow-recovery' : '';
-      return `<div class="exec-row" style="${botOn ? '' : 'opacity:0.55'}">
+
+      // Per-bot P&L
+      const b = perBot[id];
+      const plStr = (b.profit >= 0 ? '+' : '') + '$' + b.profit.toFixed(2);
+      const plClass = b.profit >= 0 ? 'text-success' : 'text-destructive';
+
+      return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" style="${botOn ? '' : 'opacity:0.45'}">
         <div class="exec-row-head">
-          <span><span class="bot-card-dot" style="background:${BOT_META[id].dot};display:inline-block;margin-right:6px"></span>${BOT_META[id].label}</span>
-          <span class="exec-status-tag${flow.engaged && botOn ? ' is-on' : ''}">${statusTag}</span>
+          <span class="exec-bot-name">
+            <span class="bot-card-dot exec-dot" style="background:${BOT_META[id].dot};box-shadow:0 0 8px ${BOT_META[id].dot}"></span>
+            ${BOT_META[id].label}
+          </span>
+          <span class="exec-row-right">
+            <span class="exec-pl ${plClass}">${plStr}</span>
+            <span class="exec-status-tag${statusClass}">${statusTag}</span>
+          </span>
         </div>
+        ${isCd ? `<div class="exec-cd-bar"><div class="exec-cd-fill" style="animation:exec-cd-drain ${cdSecs}s linear forwards"></div></div>` : ''}
         <div class="exec-flow">
           <div class="exec-flow-box${flow.analysis ? ' glow-analysis' : ''}">Analysis</div>
           <span class="exec-flow-arrow">→</span>
@@ -9497,17 +9832,34 @@ window.NexusStrategies=exports;
     }
     const filtered = (filter === 'all' ? allWithHistory : allWithHistory.filter((e) => e.botId === filter))
       .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 80);
-    const journalHtml = filtered.length ? filtered.map((j) => `
-      <div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}">
-        <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
-        ${j.isHistory
-          ? `<span class="text-muted" style="font-size:9px;background:hsl(var(--primary-2)/0.12);padding:2px 5px;border-radius:4px">DERIV</span>`
-          : `<span class="text-muted" style="font-size:10px">${BOT_META[j.botId] ? BOT_META[j.botId].label : j.botId}</span>`
-        }
-        ${(j.entryDigit != null || j.exitDigit != null) ? `<span class="journal-digits"><b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit ?? '—'}</b></span>` : ''}
-        <span style="margin-left:auto">${j.time}</span>
-        <span class="${j.type === 'win' ? 'text-success' : 'text-destructive'}" style="font-weight:700">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
-      </div>`).join('') : '<div class="exec-empty">No trades recorded yet — connect your Deriv account in Settings to load history</div>';
+    const journalHtml = filtered.length ? filtered.map((j) => {
+      const isWin = j.type === 'win';
+      const botLabel = j.isHistory ? 'DERIV' : (BOT_META[j.botId] ? BOT_META[j.botId].label : (j.botId || '—'));
+      const botDot = j.isHistory ? 'hsl(var(--secondary))' : (BOT_META[j.botId] ? BOT_META[j.botId].dot : 'hsl(var(--muted-foreground))');
+      const hasDigits = j.entryDigit != null || j.exitDigit != null;
+      const plStr = (j.profit >= 0 ? '+' : '') + '$' + j.profit.toFixed(2);
+      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}">
+        <div class="journal-badge-wrap">
+          <span class="journal-badge ${j.type}">${isWin ? 'W' : 'L'}</span>
+        </div>
+        <div class="journal-entry-body">
+          <div class="journal-entry-top">
+            <span class="journal-bot-label" style="color:${botDot}">
+              <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${botDot};box-shadow:0 0 6px ${botDot};margin-right:4px;vertical-align:middle"></span>
+              ${botLabel}
+            </span>
+            ${hasDigits ? `<span class="journal-digits-pill"><b>${j.entryDigit ?? '—'}</b> → <b>${j.exitDigit ?? '—'}</b></span>` : ''}
+            <span class="journal-time-stamp">${j.time || ''}</span>
+          </div>
+          <div class="journal-entry-bottom">
+            <span class="journal-type-label ${j.type}">${isWin ? '▲ Win' : '▼ Loss'}</span>
+            ${j.barrier != null ? `<span class="journal-barrier">Barrier ${j.barrier}</span>` : ''}
+            ${j.contract_type ? `<span class="journal-barrier">${j.contract_type}</span>` : ''}
+          </div>
+        </div>
+        <div class="journal-pl ${isWin ? 'win' : 'loss'}">${plStr}</div>
+      </div>`;
+    }).join('') : '<div class="exec-empty">No trades yet — connect your account in Settings</div>';
     global.setHtmlIfChanged(el('dash-journal-list', root), journalHtml);
   }
 
