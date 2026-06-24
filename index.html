@@ -4709,7 +4709,7 @@ html body .modal-body { font-size: 13.5px !important; }
   const state = {
     apiToken: load('hub_api_token', ''),
     accountType: load('hub_account_type', 'demo'), // 'demo' or 'real'
-    appId: (() => { const v = load('hub_app_id', ''); return v || ''; })(), // Alphanumeric App ID from developers.deriv.com
+    appId: (() => { const v = load('hub_app_id', ''); return v || '33ADPhDZXR2F60qhPudXB'; })(), // Alphanumeric App ID from developers.deriv.com
     accountId: '',
     balanceUSD: 0,
     currency: 'USD',
@@ -4834,6 +4834,7 @@ html body .modal-body { font-size: 13.5px !important; }
 
   let statusSocket = null;
   let reconnectTimer = null;
+  let reconnectDelay = 8000;
 
   function connectAccount() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -4841,9 +4842,11 @@ html body .modal-body { font-size: 13.5px !important; }
       state.isAuthenticated = false;
       state.connectionStatus = 'disconnected';
       state.connectionError = '';
+      reconnectDelay = 8000;
       emit();
       return;
     }
+    if (!state.appId) state.appId = '33ADPhDZXR2F60qhPudXB';
     try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (e) { /* */ }
     state.connectionStatus = 'connecting';
     state.connectionError = '';
@@ -4854,6 +4857,7 @@ html body .modal-body { font-size: 13.5px !important; }
       statusSocket = ws;
       let pingInterval = null;
       ws.onopen = () => {
+        reconnectDelay = 8000; // reset backoff on successful connect
         // Already authenticated via OTP URL — subscribe to live balance
         state.isAuthenticated = true;
         state.connectionStatus = 'connected';
@@ -4884,14 +4888,20 @@ html body .modal-body { font-size: 13.5px !important; }
         state.connectionStatus = 'disconnected';
         state.isAuthenticated = false;
         emit();
-        if (state.apiToken) reconnectTimer = setTimeout(connectAccount, 8000);
+        if (state.apiToken) {
+          reconnectTimer = setTimeout(connectAccount, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
+        }
       };
     }).catch((err) => {
       state.isAuthenticated = false;
       state.connectionStatus = 'disconnected';
       state.connectionError = err.message || 'Connection failed — check your PAT and App ID';
       emit();
-      if (state.apiToken) reconnectTimer = setTimeout(connectAccount, 8000);
+      if (state.apiToken) {
+        reconnectTimer = setTimeout(connectAccount, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
+      }
     });
   }
 
@@ -7850,6 +7860,7 @@ window.NexusStrategies=exports;
           this.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
         };
         ws.onopen = () => {
+          this._authDelay = 8000; // reset backoff on success
           // Already authenticated via OTP URL
           const hub = window.HubStore.getState();
           const bal = hub.balanceUSD || 0;
@@ -7914,12 +7925,18 @@ window.NexusStrategies=exports;
         };
         ws.onclose = () => {
           this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-          setTimeout(() => { if (window.HubStore.getState().apiToken) this.authenticate(); }, 8000);
+          if (window.HubStore.getState().apiToken) {
+            this._authDelay = Math.min((this._authDelay || 8000) * 1.5, 60000);
+            setTimeout(() => this.authenticate(), this._authDelay);
+          }
         };
       }).catch((err) => {
         this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
         this.dispatch({ type: 'NOTIFY', message: `Auth failed: ${err.message}`, ntype: 'loss' });
-        setTimeout(() => { if (window.HubStore.getState().apiToken) this.authenticate(); }, 8000);
+        if (window.HubStore.getState().apiToken) {
+          this._authDelay = Math.min((this._authDelay || 8000) * 1.5, 60000);
+          setTimeout(() => this.authenticate(), this._authDelay);
+        }
       });
     }
 
