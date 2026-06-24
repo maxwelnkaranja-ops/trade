@@ -819,6 +819,7 @@ html.light .settings-section { background: hsl(var(--muted) / .3); }
 .settings-status {
   font-size: 11px; font-family: 'DM Mono', monospace;
   color: hsl(var(--muted-foreground)); padding: 3px 0;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.55;
 }
 .settings-status:not(:empty) { animation: fade-in .3s ease; }
 .settings-toggle-row {
@@ -4824,8 +4825,18 @@ html body .modal-body { font-size: 13.5px !important; }
         try {
           const acctResp = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
           if (!acctResp.ok) {
-            const err = await acctResp.json().catch(() => ({}));
-            throw new Error((err.errors && err.errors[0]?.message) || `Accounts fetch failed (${acctResp.status})`);
+            const errBody = await acctResp.json().catch(() => ({}));
+            const apiMsg = errBody.errors && errBody.errors[0]?.message;
+            const code   = errBody.errors && errBody.errors[0]?.code;
+            let hint = '';
+            if (acctResp.status === 401) {
+              hint = ' — 401: PAT token invalid/expired OR App ID registered as OAuth type instead of PAT type. Re-register app as PAT at developers.deriv.com → Dashboard → Applications, then regenerate token with trade scope.';
+            } else if (acctResp.status === 403) {
+              hint = ' — 403: PAT token missing trade scope. Regenerate at developers.deriv.com → API Tokens with trade scope enabled.';
+            } else if (acctResp.status === 404) {
+              hint = ' — 404: No Options trading account found. Create one at developers.deriv.com first, or switch Demo/Real in Settings.';
+            }
+            throw new Error((apiMsg ? apiMsg + ' (' + code + ')' : 'Accounts fetch failed (' + acctResp.status + ')') + hint);
           }
           const acctData = await acctResp.json();
           // Pick demo or real account based on accountType setting
@@ -4833,10 +4844,23 @@ html body .modal-body { font-size: 13.5px !important; }
           const preferred = state.accountType === 'real'
             ? accounts.find(a => !a.is_virtual) || accounts[0]
             : accounts.find(a => a.is_virtual) || accounts[0];
-          if (!preferred) throw new Error('No accounts found for this token');
-          accountId = preferred.account_id;
-          state.accountId = accountId;
-          state.currency = preferred.currency || state.currency;
+          if (!preferred) {
+            // No matching account — auto-create one
+            const createResp = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
+              method: 'POST', headers,
+              body: JSON.stringify({ currency: 'USD', group: 'row', account_type: state.accountType === 'real' ? 'real' : 'demo' }),
+            });
+            if (!createResp.ok) throw new Error('No accounts found and auto-create failed. Visit developers.deriv.com to create an Options account manually.');
+            const created = await createResp.json();
+            accountId = created.data && created.data.account_id;
+            if (!accountId) throw new Error('Account created but no account_id in response');
+            state.accountId = accountId;
+            state.currency = (created.data && created.data.currency) || state.currency;
+          } else {
+            accountId = preferred.account_id;
+            state.accountId = accountId;
+            state.currency = preferred.currency || state.currency;
+          }
         } catch (e) {
           state.isAuthenticated = false;
           state.connectionStatus = 'disconnected';
@@ -7873,13 +7897,20 @@ window.NexusStrategies=exports;
         if (!accountId) {
           try {
             const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
-            if (!r.ok) throw new Error(`Accounts ${r.status}`);
+            if (!r.ok) {
+              const eb = await r.json().catch(() => ({}));
+              const em = (eb.errors && eb.errors[0]?.message) || '';
+              let hint = '';
+              if (r.status === 401) hint = ' — 401: PAT token invalid/expired or App registered as OAuth type (needs PAT type). Check developers.deriv.com.';
+              else if (r.status === 403) hint = ' — 403: token missing trade scope. Regenerate at developers.deriv.com → API Tokens.';
+              throw new Error((em || 'Accounts ' + r.status) + hint);
+            }
             const d = await r.json();
             const accounts = d.data || [];
             const preferred = hub.accountType === 'real'
               ? accounts.find(a => !a.is_virtual) || accounts[0]
               : accounts.find(a => a.is_virtual) || accounts[0];
-            if (!preferred) throw new Error('No accounts found');
+            if (!preferred) throw new Error('No accounts found — try toggling Demo/Real in Settings or create an account at developers.deriv.com');
             accountId = preferred.account_id;
           } catch (e) {
             _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
@@ -8439,13 +8470,20 @@ window.NexusStrategies=exports;
         if (!accountId) {
           try {
             const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
-            if (!r.ok) throw new Error(`Accounts ${r.status}`);
+            if (!r.ok) {
+              const eb = await r.json().catch(() => ({}));
+              const em = (eb.errors && eb.errors[0]?.message) || '';
+              let hint = '';
+              if (r.status === 401) hint = ' — 401: PAT token invalid/expired or App registered as OAuth type (needs PAT type). Check developers.deriv.com.';
+              else if (r.status === 403) hint = ' — 403: token missing trade scope. Regenerate at developers.deriv.com → API Tokens.';
+              throw new Error((em || 'Accounts ' + r.status) + hint);
+            }
             const d = await r.json();
             const accounts = d.data || [];
             const preferred = hub.accountType === 'real'
               ? accounts.find(a => !a.is_virtual) || accounts[0]
               : accounts.find(a => a.is_virtual) || accounts[0];
-            if (!preferred) throw new Error('No accounts found');
+            if (!preferred) throw new Error('No accounts found — try toggling Demo/Real in Settings or create an account at developers.deriv.com');
             accountId = preferred.account_id;
           } catch (e) {
             _titan.addLog('error', 'AUTH', `Accounts fetch failed: ${e.message}`);
