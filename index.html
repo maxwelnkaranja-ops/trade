@@ -4746,7 +4746,7 @@ html body .modal-body { font-size: 13.5px !important; }
     };
   }
 
-  // Auth handled directly in connectAccount via classic WS authorize flow
+  // Auth via 2026 REST OTP → WebSocket URL flow (no {authorize} message needed)
 
   function emit() { listeners.forEach((cb) => { try { cb(state); } catch (e) { /* */ } }); }
 
@@ -4940,7 +4940,7 @@ html body .modal-body { font-size: 13.5px !important; }
   }
 
   global.HubStore = {
-    getAuthenticatedWsUrl: () => Promise.reject(new Error('Use WS authorize flow')),
+    getAuthenticatedWsUrl: () => Promise.reject(new Error('Deprecated — use REST OTP flow (POST /trading/v1/options/accounts/{id}/otp) to get a pre-authenticated WS URL')),
     getState: () => state,
     subscribe(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     setToken, setTheme, setTelegram, setTelegramEnabled, setAccountType, setAppId, notifyTelegram, connectAccount,
@@ -5407,7 +5407,7 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
+  function getWsUrl() { const _aid = (window.HubStore && window.HubStore.getState().appId) || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + _aid; }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -6625,7 +6625,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
+  function getWsUrl() { const _aid = (window.HubStore && window.HubStore.getState().appId) || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + _aid; }
 
   class GlobalSocketManager {
     constructor() {
@@ -7514,7 +7514,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  function getPublicWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
+  function getPublicWsUrl() { const _aid = (window.HubStore && window.HubStore.getState().appId) || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + _aid; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -7591,6 +7591,7 @@ window.NexusStrategies=exports;
       if (window.HubStore.getState().apiToken) setTimeout(() => this.authenticate(), 500);
       window.addEventListener('hub:token-changed', () => this.authenticate());
       window.addEventListener('hub:account-type-changed', () => this.authenticate());
+      window.addEventListener('hub:appid-changed', () => this.authenticate());
     }
 
     _bindMethods() {
@@ -7824,7 +7825,7 @@ window.NexusStrategies=exports;
       this.tickIndex = 0;
       if (this.analysisReconnectAttempts == null) this.analysisReconnectAttempts = 0;
       const createSocket = (market, type) => {
-        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=1089`);
+        const _aid = (window.HubStore && window.HubStore.getState().appId) || '1089'; const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${_aid}`);
         ws.onopen = () => {
           this.analysisReconnectAttempts = 0; // reset backoff on a clean connection
           try { ws.send(JSON.stringify({ ticks: market, subscribe: 1 })); } catch (e) { /* */ }
@@ -8004,7 +8005,7 @@ window.NexusStrategies=exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
+  function getWsUrl() { const _aid = (window.HubStore && window.HubStore.getState().appId) || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + _aid; }
   const ANALYSIS_HOLD = 20;
 
   function showCongratulationsPopup(target) {
@@ -8064,6 +8065,10 @@ window.NexusStrategies=exports;
       if (sharedToken) setTimeout(() => this.connect(sharedToken), 600);
       window.addEventListener('hub:token-changed', (e) => { if (e.detail.token) this.connect(e.detail.token); });
       window.addEventListener('hub:account-type-changed', () => {
+        const t = window.HubStore.getState().apiToken;
+        if (t) setTimeout(() => this.connect(t), 500);
+      });
+      window.addEventListener('hub:appid-changed', () => {
         const t = window.HubStore.getState().apiToken;
         if (t) setTimeout(() => this.connect(t), 500);
       });
