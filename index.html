@@ -209,15 +209,6 @@
     </div>
   </div>
 
-  <!-- Congratulations Popup -->
-  <div id="congrats-popup" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.85);z-index:200;min-width:280px;max-width:340px;background:hsl(var(--card));border:1px solid hsl(var(--win)/0.5);border-radius:20px;box-shadow:0 0 60px hsl(var(--win)/0.35),0 24px 60px hsl(0 0% 0%/0.8);padding:28px 32px;text-align:center;opacity:0;transition:all 0.35s cubic-bezier(.34,1.56,.64,1)">
-    <div style="font-size:48px;line-height:1;margin-bottom:12px">🎉</div>
-    <div style="font-family:'Outfit',sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;color:hsl(var(--win));margin-bottom:6px">TAKE PROFIT HIT!</div>
-    <div style="font-family:'DM Mono',monospace;font-size:13px;color:hsl(var(--muted-foreground));margin-bottom:4px">All bots stopped</div>
-    <div id="congrats-amount" style="font-family:'DM Mono',monospace;font-size:28px;font-weight:700;color:hsl(var(--win));margin:12px 0"></div>
-    <button onclick="document.getElementById('congrats-popup').style.display='none'" style="margin-top:8px;padding:10px 28px;border-radius:999px;border:none;background:hsl(var(--win)/0.15);color:hsl(var(--win));font-family:'Outfit',sans-serif;font-weight:700;font-size:12px;letter-spacing:2px;cursor:pointer;border:1px solid hsl(var(--win)/0.3)">AWESOME ✓</button>
-  </div>
-
   <!-- Shared libs -->
   <!-- App engines -->
   <style>
@@ -537,7 +528,7 @@ html.light .hub-sidebar { background: hsl(0 0% 100% / .96); }
 /* ──────────────────────────────────────────────────────────────
    MAIN COLUMN + HEADER — breadcrumb-style top bar
    ────────────────────────────────────────────────────────────── */
-.hub-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.hub-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; min-height: 0; }
 .hub-header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 0 20px; height: var(--topbar-h); flex-shrink: 0;
@@ -592,7 +583,7 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
    APP PANELS
    ────────────────────────────────────────────────────────────── */
 .app-panel { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
-.app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; }
+.app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; min-height: 0; overflow: hidden; }
 .app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
 @media (max-width: 880px) {
@@ -1131,8 +1122,8 @@ html.light .log-entry { background: hsl(var(--muted) / .3); }
 .dash-stat-card .stat-delta.up { color: hsl(var(--win)); }
 .dash-stat-card .stat-delta.dn { color: hsl(var(--loss)); }
 
-.dash-body { display: grid; grid-template-columns: 1fr 380px; gap: 8px; padding: 0 10px 10px; flex: 1; min-height: 0; overflow: hidden; }
-.dash-main { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.dash-body { display: grid; grid-template-columns: 1fr 380px; gap: 8px; padding: 0 10px 10px; flex: 1; min-height: 0; overflow: visible; }
+.dash-main { display: flex; flex-direction: column; gap: 8px; }
 .dash-sidebar { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 
 /* ──────────────────────────────────────────────────────────────
@@ -1383,14 +1374,15 @@ html.light .freq-bar-grid { background: hsl(var(--muted) / .4); }
 html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 
 /* ── SCROLL FIX ── */
-.app-panel.active { overflow-y: auto !important; }
-.app-root { overflow-y: auto !important; min-height: 0; }
+.app-panel.active { overflow: hidden !important; }
+.app-root { overflow: hidden !important; min-height: 0; }
+.dash-scroll { overflow-y: auto !important; flex: 1; min-height: 0; }
 
 /* Dashboard scroll + layout */
 .dash-scroll {
-  flex: 1; overflow-y: auto; padding: 16px 20px;
-  display: flex; flex-direction: column; gap: 16px;
-  scrollbar-width: thin;
+  flex: 1; overflow-y: auto; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 14px;
+  scrollbar-width: thin; min-height: 0;
 }
 
 /* ── Dashboard hero header ── */
@@ -1510,6 +1502,545 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
   border-radius: var(--radius);
   box-shadow: var(--shadow-md), var(--shadow-gold);
 }
+
+/* ════════════════════════════════════════════════════════════════
+   LUMINOUS LIQUIDITY UPGRADE — MASSIVE DASHBOARD OVERHAUL v2
+   Inspired by the Luminous Liquidity reference UI:
+   - Hero balance like $1,284,950.42 — huge, weighted, gradient
+   - Animated sine-wave equity graph with neon stroke + glow
+   - Yield efficiency ring with animated conic gradient
+   - Refined paddings, spacing, card elevation
+   - Pure obsidian surfaces, laser-precise micro-typography
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── Import Syne + Space Grotesk for even more display weight ── */
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+/* ── New keyframes ── */
+@keyframes sine-flow {
+  0%   { stroke-dashoffset: 1200; }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes ring-fill {
+  from { --ring-pct: 0; }
+  to   { --ring-pct: 78; }
+}
+@keyframes glow-pulse-cyan {
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(0,242,254,0.5)); }
+  50%       { filter: drop-shadow(0 0 22px rgba(0,242,254,0.9)); }
+}
+@keyframes glow-pulse-magenta {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(255,0,122,0.4)); }
+  50%       { filter: drop-shadow(0 0 18px rgba(255,0,122,0.8)); }
+}
+@keyframes float-dot {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-5px); }
+}
+@keyframes counter-tick {
+  from { opacity: 0; transform: translateY(6px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes stream-slide {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes hero-shimmer {
+  0%   { background-position: -400% center; }
+  100% { background-position: 400% center; }
+}
+
+/* ══════════════════════════════════════════════
+   HERO BALANCE CARD — Luminous Liquidity style
+   ══════════════════════════════════════════════ */
+.dash-balance-hero {
+  position: relative; overflow: hidden;
+  background: hsl(240 10% 4%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 20px;
+  padding: 28px 32px 24px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 20px 60px rgba(0,0,0,0.85),
+    0 0 0 1px rgba(0,0,0,0.5);
+}
+.dash-balance-hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 120%, rgba(111,66,193,0.14) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 40% at 15% -10%, rgba(0,242,254,0.08) 0%, transparent 55%);
+  pointer-events: none;
+}
+/* Neon sine-wave canvas inside hero */
+.dash-balance-hero .hero-graph-wrap {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 110px; overflow: hidden; pointer-events: none;
+}
+
+.dash-balance-meta {
+  font-size: 9px; font-weight: 700; letter-spacing: 3px;
+  text-transform: uppercase; color: rgba(160,170,200,0.55);
+  font-family: 'DM Mono', monospace; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.dash-balance-meta::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: hsl(var(--win));
+  box-shadow: 0 0 10px hsl(var(--win));
+  animation: cooldown-pulse 2.2s infinite;
+  flex-shrink: 0;
+}
+
+.dash-balance-amount {
+  font-family: 'Syne', 'Outfit', sans-serif;
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: #ffffff;
+  display: flex; align-items: baseline; gap: 4px;
+  position: relative; z-index: 1;
+}
+.dash-balance-amount .bal-cents {
+  font-size: 0.45em; color: rgba(255,255,255,0.55);
+  letter-spacing: -0.02em; margin-bottom: 4px;
+}
+.dash-balance-amount .bal-badge {
+  font-size: 0.28em; font-family: 'DM Mono', monospace;
+  font-weight: 600; letter-spacing: 1.5px;
+  color: hsl(var(--win)); background: hsl(var(--win) / .12);
+  border: 1px solid hsl(var(--win) / .25);
+  border-radius: 999px; padding: 3px 9px;
+  margin-left: 8px; margin-bottom: 6px;
+  white-space: nowrap;
+}
+
+.dash-balance-row2 {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 10px; position: relative; z-index: 1;
+}
+.dash-balance-currency {
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  letter-spacing: 2px; font-weight: 500;
+  color: rgba(160,170,200,0.5); text-transform: uppercase;
+}
+
+/* ══════════════════════════════════════════════
+   ANIMATED SINE WAVE — neon on dark
+   ══════════════════════════════════════════════ */
+.dash-sine-svg {
+  width: 100%; height: 110px; display: block;
+  overflow: visible;
+}
+.sine-path-glow {
+  fill: none;
+  stroke: url(#sineGrad);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px rgba(0,242,254,0.5)) drop-shadow(0 0 20px rgba(111,66,193,0.4));
+  animation: sine-flow 2.4s cubic-bezier(.4,0,.2,1) forwards;
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+}
+.sine-path-secondary {
+  fill: none;
+  stroke: url(#sineGrad2);
+  stroke-width: 1.5;
+  opacity: 0.4;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(255,0,122,0.4));
+  animation: sine-flow 3.2s 0.4s cubic-bezier(.4,0,.2,1) forwards;
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+}
+.sine-area {
+  fill: url(#sineArea);
+}
+.sine-dot {
+  animation: float-dot 3s ease-in-out infinite, glow-pulse-cyan 3s ease-in-out infinite;
+}
+
+/* ══════════════════════════════════════════════
+   YIELD EFFICIENCY RING CARD
+   ══════════════════════════════════════════════ */
+.dash-yield-card {
+  position: relative; overflow: hidden;
+  background: hsl(240 10% 4%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 20px;
+  padding: 22px 24px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.07),
+    0 16px 48px rgba(0,0,0,0.75);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.dash-yield-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 70% 50% at 50% 110%, rgba(111,66,193,0.10) 0%, transparent 60%);
+  pointer-events: none;
+}
+.dash-yield-label {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 2.5px;
+  text-transform: uppercase; color: rgba(160,170,200,0.5);
+  font-family: 'DM Mono', monospace;
+}
+
+/* Conic ring */
+.dash-ring-wrap {
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.dash-ring-svg {
+  width: 130px; height: 130px; transform: rotate(-90deg);
+  filter: drop-shadow(0 0 12px rgba(0,242,254,0.2));
+}
+.ring-track {
+  fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 10;
+  stroke-linecap: round;
+}
+.ring-fill-1 {
+  fill: none; stroke: url(#ringGrad1); stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: 310 345;
+  stroke-dashoffset: 0;
+  animation: none;
+  transition: stroke-dasharray 1.5s cubic-bezier(.4,0,.2,1);
+}
+.ring-fill-2 {
+  fill: none; stroke: url(#ringGrad2); stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: 280 345;
+  stroke-dashoffset: -320;
+  opacity: 0.4;
+}
+.ring-center-text {
+  position: absolute;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.ring-pct {
+  font-family: 'Syne', 'Outfit', sans-serif;
+  font-size: 2.2rem; font-weight: 800;
+  line-height: 1; letter-spacing: -0.04em;
+  color: #fff;
+}
+.ring-pct-label {
+  font-size: 7px; letter-spacing: 2.5px; font-weight: 700;
+  text-transform: uppercase; color: rgba(0,242,254,0.6);
+  font-family: 'DM Mono', monospace; margin-top: 2px;
+}
+
+/* Yield rows */
+.dash-yield-rows { display: flex; flex-direction: column; gap: 7px; }
+.dash-yield-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 10px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.05);
+  transition: border-color .2s, background .2s;
+}
+.dash-yield-row:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.09); }
+.dash-yield-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  animation: cooldown-pulse 2.5s infinite;
+}
+.dash-yield-row-name {
+  flex: 1; font-size: 10px; font-family: 'DM Mono', monospace;
+  color: rgba(180,190,210,0.7); letter-spacing: .3px;
+}
+.dash-yield-row-apy {
+  font-size: 11px; font-weight: 700; font-family: 'DM Mono', monospace;
+  letter-spacing: .5px;
+}
+
+/* ══════════════════════════════════════════════
+   REAL-TIME STREAM CARD
+   ══════════════════════════════════════════════ */
+.dash-stream-card {
+  background: hsl(240 10% 4%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 20px;
+  padding: 18px 20px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 12px 40px rgba(0,0,0,0.7);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.dash-stream-header {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.dash-stream-title {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 2.5px;
+  text-transform: uppercase; color: rgba(160,170,200,0.5);
+  font-family: 'DM Mono', monospace;
+}
+.dash-stream-link {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; color: hsl(var(--primary));
+  font-family: 'DM Mono', monospace; cursor: pointer;
+  border: none; background: none; padding: 0;
+  transition: color .2s, text-shadow .2s;
+}
+.dash-stream-link:hover { text-shadow: 0 0 12px hsl(var(--primary)); }
+
+.stream-entry {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 12px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.05);
+  animation: stream-slide .3s ease;
+  transition: border-color .2s, background .2s;
+}
+.stream-entry:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.09); }
+.stream-icon {
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.stream-icon.in  { background: rgba(72,255,167,0.10); color: hsl(var(--win)); }
+.stream-icon.swap { background: rgba(0,242,254,0.08); color: hsl(var(--secondary)); }
+.stream-icon.out { background: rgba(255,77,106,0.10); color: hsl(var(--loss)); }
+.stream-entry-body { flex: 1; min-width: 0; }
+.stream-entry-name {
+  font-size: 11px; font-weight: 700; color: rgba(220,225,240,0.9);
+  font-family: 'Plus Jakarta Sans', sans-serif; line-height: 1.2;
+}
+.stream-entry-meta {
+  font-size: 9px; color: rgba(140,150,175,0.55);
+  font-family: 'DM Mono', monospace; margin-top: 1px; letter-spacing: .3px;
+}
+.stream-entry-amount {
+  font-size: 12px; font-weight: 700; font-family: 'DM Mono', monospace;
+  text-align: right; letter-spacing: .3px;
+}
+.stream-entry-amount.pos { color: hsl(var(--win)); }
+.stream-entry-amount.neg { color: hsl(var(--loss)); }
+.stream-entry-amount.neutral { color: hsl(var(--secondary)); }
+
+/* ══════════════════════════════════════════════
+   UPGRADED STAT CARDS — larger, more luxury
+   ══════════════════════════════════════════════ */
+.stat-card {
+  padding: 20px 22px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 8px 28px rgba(0,0,0,0.7) !important;
+}
+.stat-card:hover {
+  transform: translateY(-3px) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 16px 48px rgba(0,0,0,0.8) !important;
+}
+.stat-card-value {
+  font-family: 'Syne', 'Outfit', sans-serif !important;
+  font-size: 2rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  letter-spacing: -0.03em !important;
+  animation: counter-tick .4s ease !important;
+}
+.stat-card-label {
+  font-size: 7.5px !important; letter-spacing: 3px !important;
+  color: rgba(140,150,175,0.5) !important;
+}
+.stat-card-sub {
+  font-size: 10px !important; margin-top: 6px !important;
+  color: rgba(140,150,175,0.55) !important;
+}
+.stat-card-icon {
+  width: 34px !important; height: 34px !important;
+  border-radius: 10px !important;
+}
+
+/* Win stat card */
+.stat-card.is-win-card { border-color: rgba(72,255,167,0.14) !important; }
+.stat-card.is-win-card:hover { border-color: rgba(72,255,167,0.25) !important; box-shadow: inset 0 1px 0 rgba(72,255,167,0.08), 0 0 28px rgba(72,255,167,0.06), 0 16px 48px rgba(0,0,0,0.8) !important; }
+
+/* ══════════════════════════════════════════════
+   DASHBOARD SCROLL + LAYOUT UPGRADES
+   ══════════════════════════════════════════════ */
+.dash-scroll {
+  padding: 14px 16px !important;
+  gap: 14px !important;
+}
+
+/* Balance hero tighter */
+.dash-balance-hero {
+  padding: 20px 24px 110px !important;
+}
+.dash-balance-meta {
+  margin-bottom: 6px !important;
+  font-size: 8px !important;
+  letter-spacing: 2.5px !important;
+}
+
+/* New two-column top row: balance hero + yield ring */
+.dash-hero-row {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+  align-items: stretch;
+}
+@media (max-width: 960px) {
+  .dash-hero-row { grid-template-columns: 1fr; }
+}
+
+/* Upgraded body layout */
+.dash-body {
+  grid-template-columns: 1fr 320px !important;
+  gap: 14px !important;
+  overflow: visible !important;
+  padding: 0 !important;
+}
+.dash-main { gap: 14px !important; overflow: visible !important; }
+.dash-sidebar { gap: 14px !important; }
+
+/* Equity panel upgrade */
+.dash-equity-panel {
+  padding: 20px 22px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 8px 28px rgba(0,0,0,0.7) !important;
+}
+.equity-svg { height: 180px !important; }
+
+/* Master panel upgrade */
+#dash-master-panel {
+  border-radius: 16px !important;
+  padding: 20px 24px !important;
+}
+
+/* ── Glass panels upgrade ── */
+.glass-panel {
+  border-radius: 16px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 28px rgba(0,0,0,0.65) !important;
+}
+.glass-panel-glow {
+  border-radius: 16px !important;
+  border: 1px solid rgba(0,242,254,0.14) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(0,242,254,0.08), 0 0 30px rgba(0,242,254,0.06), 0 12px 40px rgba(0,0,0,0.7) !important;
+}
+
+/* ── Bot cards ── */
+.bot-card {
+  border-radius: 14px !important;
+  padding: 16px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: hsl(240 10% 4%) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 6px 20px rgba(0,0,0,0.6) !important;
+}
+.bot-card:hover {
+  border-color: rgba(255,255,255,0.13) !important;
+  transform: translateY(-3px) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 16px 40px rgba(0,0,0,0.75) !important;
+}
+.bot-card-value {
+  font-family: 'Syne', 'Outfit', sans-serif !important;
+  font-size: 1.6rem !important; font-weight: 800 !important;
+  letter-spacing: -0.03em !important;
+}
+
+/* ── Journal upgrade ── */
+.journal-entry {
+  border-radius: 10px !important;
+  border: 1px solid rgba(255,255,255,0.05) !important;
+  background: rgba(255,255,255,0.02) !important;
+  border-left-width: 2px !important;
+}
+.journal-entry:hover {
+  background: rgba(255,255,255,0.04) !important;
+  border-color: rgba(255,255,255,0.09) !important;
+  transform: translateX(3px) !important;
+}
+
+/* ── Exec panel ── */
+.exec-row {
+  border-radius: 10px !important;
+  border: 1px solid rgba(255,255,255,0.05) !important;
+  background: rgba(255,255,255,0.02) !important;
+}
+
+/* ── Hub header line ── */
+.hub-header {
+  background: rgba(0,0,0,0.92) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 6px 30px rgba(0,0,0,0.7) !important;
+}
+
+/* ── Sidebar deeper black ── */
+.hub-sidebar {
+  background: rgba(6,6,10,0.98) !important;
+  border-right: 1px solid rgba(255,255,255,0.06) !important;
+  box-shadow: 2px 0 40px rgba(0,0,0,0.8) !important;
+}
+
+/* ── Active sidebar tab ── */
+.hub-tab.active {
+  background: rgba(255,255,255,0.06) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+  box-shadow: inset 3px 0 0 hsl(var(--primary)), 0 0 20px hsl(var(--primary) / .06) !important;
+}
+
+/* ── Dashboard hero title ── */
+.dash-hero-title {
+  font-family: 'Syne', 'Outfit', sans-serif !important;
+  font-size: 2.6rem !important; font-weight: 800 !important;
+  letter-spacing: -0.04em !important;
+  color: #fff !important;
+}
+.dash-hero-subtitle {
+  font-size: 10px; font-family: 'DM Mono', monospace;
+  color: rgba(140,150,175,0.5); letter-spacing: .5px; margin-top: 4px;
+}
+
+/* ── Section dividers ── */
+.section-divider {
+  font-size: 8px !important; letter-spacing: 3px !important;
+  color: rgba(0,242,254,0.5) !important;
+}
+.section-divider::after {
+  background: linear-gradient(90deg, rgba(0,242,254,0.2), transparent) !important;
+}
+
+/* ── Bar fills ── */
+.bar-fill-win {
+  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary))) !important;
+  box-shadow: 0 0 8px hsl(var(--win) / .3) !important;
+  border-radius: 999px !important;
+}
+.bar-track {
+  height: 5px !important;
+  background: rgba(255,255,255,0.06) !important;
+  border-radius: 999px !important;
+}
+
+/* ── Stats row 3 cards ── */
+.dash-stats-row {
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 14px !important;
+}
+
+/* Luminous theme specific overrides for the new cards */
+html.luminous .dash-balance-hero,
+html.luminous .dash-yield-card,
+html.luminous .dash-stream-card {
+  background: rgba(14,14,20,0.60) !important;
+  backdrop-filter: blur(28px) saturate(1.3) !important;
+  border-color: rgba(255,255,255,0.07) !important;
+}
+html.luminous .dash-balance-amount { color: #ffffff; }
+html.luminous .stat-card {
+  background: rgba(14,14,20,0.60) !important;
+  backdrop-filter: blur(20px) !important;
+}
+
+/* ── Scrollbar refine ── */
+.dash-scroll::-webkit-scrollbar { width: 4px; }
+.dash-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
 
 /* ════════════════════════════════════════════════════════════════
    BENZ CLUB — THEME ONE: LUMINOUS (Cyan/Magenta Glass)
@@ -2055,6 +2586,2104 @@ html.void .hub-breadcrumb .crumb-current { color: rgba(220,220,230,0.9) !importa
 html.void .text-muted { color: rgba(110,110,120,0.75) !important; }
 html.void *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10) !important; }
 html.void *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20) !important; }
+
+/* ════════════════════════════════════════════════════════════════
+   BENZ CLUB — MASSIVE SAAS UI UPGRADE v6
+   "Obsidian Pro" — premium black SaaS terminal with cinematic
+   animations, floating particles, scanline overlays, neon glows,
+   glassmorphism 2.0, and a completely redesigned dashboard.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── NEW KEYFRAMES ── */
+@keyframes float-particle {
+  0%   { transform: translateY(0) translateX(0) scale(1);   opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 0.6; }
+  100% { transform: translateY(-120px) translateX(40px) scale(0); opacity: 0; }
+}
+
+@keyframes border-flow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes grid-pulse {
+  0%, 100% { opacity: 0.03; }
+  50%       { opacity: 0.07; }
+}
+@keyframes stat-rise {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes dash-card-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes glow-pulse-blue {
+  0%, 100% { box-shadow: 0 0 20px hsl(var(--primary)/0.2), 0 0 60px hsl(var(--primary)/0.05); }
+  50%       { box-shadow: 0 0 40px hsl(var(--primary)/0.4), 0 0 80px hsl(var(--primary)/0.15); }
+}
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@keyframes ring-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes number-count {
+  from { opacity: 0; transform: translateY(6px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+@keyframes hero-glow {
+  0%, 100% { text-shadow: 0 0 20px hsl(var(--primary)/0.3), 0 0 60px hsl(var(--primary)/0.1); }
+  50%       { text-shadow: 0 0 40px hsl(var(--primary)/0.6), 0 0 100px hsl(var(--primary)/0.2); }
+}
+@keyframes tab-active-slide {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+@keyframes sidebar-item-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes card-hover-lift {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-4px); }
+}
+@keyframes shimmer-sweep {
+  0%   { left: -100%; }
+  100% { left: 200%; }
+}
+@keyframes equity-draw {
+  from { stroke-dashoffset: 1000; }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes bg-grid-shift {
+  0%   { background-position: 0 0; }
+  100% { background-position: 40px 40px; }
+}
+
+/* ── BODY AMBIENT GRID (cinematic tech background) ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(hsl(var(--border)/0.05) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--border)/0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: bg-grid-shift 8s linear infinite, grid-pulse 4s ease-in-out infinite;
+}
+html.light body::before { display: none; }
+
+
+
+
+/* ── ENHANCED SIDEBAR ── */
+.hub-sidebar {
+  background: linear-gradient(180deg,
+    hsl(var(--bg-soft)/0.98) 0%,
+    hsl(var(--bg)/0.96) 100%) !important;
+  border-right: 1px solid hsl(var(--border)) !important;
+  box-shadow: 4px 0 40px hsl(0 0% 0% / 0.5) !important;
+  position: relative;
+  overflow: hidden;
+}
+.hub-sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 100%;
+  background: linear-gradient(180deg, hsl(var(--primary)/0.04) 0%, transparent 30%);
+  pointer-events: none;
+}
+.hub-sidebar::after {
+  content: '';
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg,
+    transparent 0%,
+    hsl(var(--primary)/0.3) 40%,
+    hsl(var(--secondary)/0.2) 70%,
+    transparent 100%);
+}
+
+/* ── BRAND LOGO UPGRADE ── */
+.hub-brand-avatar {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 10px !important;
+  font-size: 15px !important;
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2))) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary)/0.4),
+    0 0 24px hsl(var(--primary)/0.35),
+    0 0 60px hsl(var(--primary)/0.1) !important;
+  animation: glow-pulse-blue 3s ease-in-out infinite !important;
+}
+.hub-brand-name {
+  font-size: 13px !important;
+  letter-spacing: 4px !important;
+  background: linear-gradient(90deg, hsl(var(--foreground)), hsl(var(--primary)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── ANIMATED NAV TABS ── */
+.hub-tab {
+  position: relative;
+  border-radius: 10px !important;
+  margin-bottom: 1px;
+  transition: all 0.2s cubic-bezier(0.16,1,0.3,1) !important;
+  overflow: hidden;
+}
+.hub-tab::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: hsl(var(--primary)/0.06);
+  opacity: 0;
+  transition: opacity 0.2s;
+  border-radius: 10px;
+}
+.hub-tab:hover::before { opacity: 1; }
+.hub-tab.active {
+  background: hsl(var(--primary)/0.12) !important;
+  border-color: hsl(var(--primary)/0.3) !important;
+  box-shadow: 0 0 20px hsl(var(--primary)/0.1), inset 0 1px 0 hsl(var(--primary)/0.2) !important;
+}
+.hub-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 60%;
+  background: linear-gradient(180deg, hsl(var(--primary)), hsl(var(--secondary)));
+  border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 8px hsl(var(--primary)/0.8);
+}
+.hub-tab-icon {
+  transition: transform 0.2s var(--ease), color 0.2s !important;
+}
+.hub-tab:hover .hub-tab-icon { transform: scale(1.1); }
+.hub-tab.active .hub-tab-icon { color: hsl(var(--primary)) !important; }
+
+/* ── TOPBAR UPGRADE ── */
+.hub-header {
+  background: hsl(var(--bg)/0.9) !important;
+  backdrop-filter: blur(20px) saturate(1.6) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+  box-shadow: 0 1px 0 hsl(var(--primary)/0.06), 0 4px 20px hsl(0 0% 0% / 0.3) !important;
+  position: relative;
+}
+.hub-header::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    hsl(var(--primary)/0.2) 30%,
+    hsl(var(--secondary)/0.2) 60%,
+    transparent 100%);
+}
+
+.hub-clock {
+  background: hsl(var(--bg)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  color: hsl(var(--primary)) !important;
+  box-shadow: 0 0 12px hsl(var(--primary)/0.1) !important;
+  letter-spacing: 2px !important;
+}
+
+/* ── DASHBOARD SCROLL UPGRADE ── */
+.dash-scroll {
+  padding: 14px 16px !important;
+  gap: 14px !important;
+  background: transparent;
+  overflow-y: auto !important;
+}
+
+/* ── HERO SECTION REDESIGN ── */
+.dash-hero {
+  padding: 8px 0 16px !important;
+  position: relative;
+}
+.dash-hero-meta {
+  font-size: 11px !important;
+  color: hsl(var(--primary)/0.8) !important;
+  letter-spacing: 1px !important;
+  text-transform: uppercase;
+}
+.dash-hero-dot {
+  background: hsl(var(--win)) !important;
+  box-shadow: 0 0 10px hsl(var(--win)/0.8), 0 0 20px hsl(var(--win)/0.4) !important;
+}
+
+/* NEW: Dashboard hero title bar */
+.dash-hero-title-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-top: 8px;
+}
+.dash-hero-title {
+  font-family: 'Outfit', sans-serif !important;
+  font-size: 2.2rem !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.04em !important;
+  background: linear-gradient(135deg,
+    hsl(var(--foreground)) 0%,
+    hsl(var(--primary)) 50%,
+    hsl(var(--secondary)) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: hero-glow 4s ease-in-out infinite;
+  line-height: 1.05;
+}
+.dash-hero-subtitle {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+/* ── TICKER BAR (new decorative element) ── */
+.dash-ticker {
+  overflow: hidden;
+  height: 28px;
+  background: hsl(var(--bg));
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+.dash-ticker::before,
+.dash-ticker::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 40px;
+  z-index: 2;
+}
+.dash-ticker::before { left: 0; background: linear-gradient(90deg, hsl(var(--bg)), transparent); }
+.dash-ticker::after  { right: 0; background: linear-gradient(-90deg, hsl(var(--bg)), transparent); }
+.dash-ticker-inner {
+  display: flex;
+  gap: 0;
+  animation: ticker-scroll 20s linear infinite;
+  white-space: nowrap;
+}
+.dash-ticker-item {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  padding: 0 20px;
+  color: hsl(var(--muted-foreground));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dash-ticker-item .t-name { color: hsl(var(--foreground)); font-weight: 600; }
+.dash-ticker-item .t-up   { color: hsl(var(--win)); }
+.dash-ticker-item .t-down { color: hsl(var(--loss)); }
+.dash-ticker-item .t-sep  { color: hsl(var(--border-bright)); margin: 0 4px; }
+
+/* ── MASTER CONTROL PANEL — COMPLETE REDESIGN ── */
+#dash-master-panel {
+  background: linear-gradient(135deg,
+    hsl(var(--primary)/0.12),
+    hsl(var(--primary-2)/0.08),
+    hsl(var(--secondary)/0.05)) !important;
+  border: 1px solid hsl(var(--primary)/0.25) !important;
+  border-radius: 16px !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary)/0.08) inset,
+    0 8px 32px hsl(var(--primary)/0.08),
+    0 0 60px hsl(var(--primary)/0.04) !important;
+  position: relative;
+  overflow: hidden;
+}
+#dash-master-panel::before {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: radial-gradient(ellipse at 30% 30%, hsl(var(--primary)/0.08) 0%, transparent 60%);
+  pointer-events: none;
+}
+#dash-master-panel::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    hsl(var(--primary)/0.5) 30%,
+    hsl(var(--secondary)/0.4) 70%,
+    transparent);
+}
+#dash-master-toggle {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2))) !important;
+  border-radius: 12px !important;
+  padding: 11px 32px !important;
+  font-size: 10px !important;
+  letter-spacing: 3px !important;
+  box-shadow:
+    0 0 30px hsl(var(--primary)/0.4),
+    0 4px 16px hsl(var(--primary)/0.3),
+    inset 0 1px 0 hsl(0 0% 100% / 0.2) !important;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s var(--ease) !important;
+}
+#dash-master-toggle::before {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 50%; height: 100%;
+  background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.2), transparent);
+  animation: shimmer-sweep 2.5s ease-in-out infinite;
+}
+#dash-master-toggle:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 0 50px hsl(var(--primary)/0.6), 0 8px 24px hsl(var(--primary)/0.4) !important;
+}
+
+/* ── STAT CARDS — PREMIUM REDESIGN ── */
+.stat-card {
+  border-radius: 16px !important;
+  padding: 20px 22px !important;
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
+  animation: dash-card-in 0.5s cubic-bezier(0.16,1,0.3,1) both;
+}
+.stat-card:nth-child(1) { animation-delay: 0.05s; }
+.stat-card:nth-child(2) { animation-delay: 0.10s; }
+.stat-card:nth-child(3) { animation-delay: 0.15s; }
+.stat-card:nth-child(4) { animation-delay: 0.20s; }
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    hsl(var(--primary)/0.5) 50%,
+    transparent 100%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: -40%; right: -20%;
+  width: 80%; height: 80%;
+  background: radial-gradient(ellipse, hsl(var(--primary)/0.06) 0%, transparent 70%);
+  pointer-events: none;
+  transition: opacity 0.3s;
+  opacity: 0;
+}
+.stat-card:hover {
+  transform: translateY(-4px) !important;
+  border-color: hsl(var(--primary)/0.3) !important;
+  box-shadow: 0 12px 40px hsl(0 0% 0% / 0.4), 0 0 0 1px hsl(var(--primary)/0.12) !important;
+}
+.stat-card:hover::before { opacity: 1; }
+.stat-card:hover::after  { opacity: 1; }
+.stat-card-icon {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 10px !important;
+  font-size: 16px !important;
+  box-shadow: 0 4px 12px hsl(0 0% 0% / 0.3) !important;
+}
+.stat-card-value {
+  font-size: 1.9rem !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.03em !important;
+  animation: number-count 0.4s ease both !important;
+}
+.stat-card-label {
+  font-size: 9px !important;
+  letter-spacing: 2.5px !important;
+}
+
+/* ── BOT CARDS — REDESIGNED ── */
+.bot-card {
+  border-radius: 14px !important;
+  padding: 16px !important;
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  transition: all 0.25s var(--ease) !important;
+  position: relative;
+  overflow: hidden;
+}
+.bot-card::before {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, hsl(var(--primary)/0.5), hsl(var(--secondary)/0.4));
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.bot-card:hover {
+  transform: translateY(-3px) !important;
+  border-color: hsl(var(--primary)/0.25) !important;
+  box-shadow: 0 8px 30px hsl(0 0% 0% / 0.35) !important;
+}
+.bot-card:hover::before { opacity: 1; }
+.bot-card-value {
+  font-size: 1.55rem !important;
+  font-weight: 900 !important;
+}
+.bar-track {
+  height: 3px;
+  background: hsl(var(--muted));
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill-win {
+  height: 100%;
+  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary)));
+  border-radius: 3px;
+  transition: width 0.8s cubic-bezier(0.16,1,0.3,1);
+  box-shadow: 0 0 8px hsl(var(--win)/0.5);
+}
+
+/* ── EQUITY CHART PANEL ── */
+.dash-equity-panel {
+  padding: 20px 20px !important;
+  border-radius: 16px !important;
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  position: relative;
+  overflow: hidden;
+}
+.dash-equity-panel::before {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 200px; height: 200px;
+  background: radial-gradient(ellipse, hsl(var(--win)/0.05) 0%, transparent 70%);
+  pointer-events: none;
+}
+.equity-svg { border-radius: 10px; }
+
+/* ── EXEC / ACTIVE ENGINES PANEL ── */
+.exec-panel {
+  border-radius: 16px !important;
+  padding: 16px !important;
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+.exec-row {
+  border-radius: 10px !important;
+  padding: 10px 12px !important;
+  background: hsl(var(--bg)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  transition: all 0.2s var(--ease) !important;
+}
+.exec-row:hover {
+  border-color: hsl(var(--border-bright)) !important;
+  background: hsl(var(--card)) !important;
+}
+.exec-flow-box {
+  border-radius: 7px !important;
+  font-size: 8.5px !important;
+  letter-spacing: 0.8px !important;
+}
+
+/* ── JOURNAL PANEL ── */
+.journal-panel {
+  border-radius: 16px !important;
+  padding: 16px !important;
+}
+.journal-entry {
+  border-radius: 10px !important;
+  padding: 9px 12px !important;
+  margin-bottom: 5px !important;
+  border: 1px solid hsl(var(--border)) !important;
+  background: hsl(var(--bg)) !important;
+  transition: all 0.15s var(--ease) !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.journal-entry:hover {
+  transform: translateX(2px) !important;
+  border-color: hsl(var(--border-bright)) !important;
+}
+.journal-tab {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border: 1px solid hsl(var(--border));
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.journal-tab:hover { border-color: hsl(var(--border-bright)); color: hsl(var(--foreground)); }
+.journal-tab.active {
+  background: hsl(var(--primary)/0.12);
+  border-color: hsl(var(--primary)/0.35);
+  color: hsl(var(--primary));
+}
+
+/* ── SECTION DIVIDERS — REDESIGNED ── */
+.section-divider {
+  font-size: 9px !important;
+  letter-spacing: 3px !important;
+  color: hsl(var(--primary)/0.7) !important;
+  margin-bottom: 14px !important;
+  position: relative;
+}
+.section-divider::after {
+  background: linear-gradient(90deg, hsl(var(--primary)/0.3), hsl(var(--border)/0.3), transparent) !important;
+  height: 1px !important;
+}
+
+/* ── GLASS PANELS — UPGRADE ── */
+.glass-panel {
+  border-radius: 16px !important;
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 hsl(255 100% 100% / 0.025) !important;
+  position: relative;
+  overflow: hidden;
+}
+.glass-panel-glow {
+  border-radius: 16px !important;
+  box-shadow: var(--shadow-md), var(--shadow-gold) !important;
+}
+
+/* ── SETTINGS MODAL — UPGRADE ── */
+.modal-card {
+  border-radius: 20px !important;
+  backdrop-filter: blur(40px) !important;
+  box-shadow: 0 40px 80px hsl(0 0% 0% / 0.7), 0 0 0 1px hsl(var(--primary)/0.15) !important;
+}
+.modal-header {
+  border-radius: 20px 20px 0 0 !important;
+}
+.settings-section {
+  border-radius: 12px !important;
+  transition: all 0.2s var(--ease) !important;
+}
+.settings-section:hover {
+  border-color: hsl(var(--primary)/0.2) !important;
+  box-shadow: 0 0 20px hsl(var(--primary)/0.05) !important;
+}
+
+/* ── BUTTONS — PREMIUM ── */
+.btn-primary {
+  border-radius: 10px !important;
+  font-size: 11px !important;
+  letter-spacing: 0.5px !important;
+  box-shadow: 0 0 20px hsl(var(--primary)/0.25), inset 0 1px 0 hsl(0 0% 100% / 0.15) !important;
+}
+.btn-primary:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 0 40px hsl(var(--primary)/0.4) !important;
+}
+
+/* ── TOGGLE SWITCHES — PREMIUM ── */
+.toggle {
+  position: relative;
+  width: 42px !important;
+  height: 24px !important;
+  border-radius: 999px !important;
+  background: hsl(var(--muted)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  cursor: pointer;
+  transition: all 0.25s var(--ease) !important;
+  outline: none;
+}
+.toggle.on {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2))) !important;
+  border-color: hsl(var(--primary)/0.5) !important;
+  box-shadow: 0 0 16px hsl(var(--primary)/0.35) !important;
+}
+
+/* ── LIVE BADGE — NEON GLOW ── */
+.hub-live-badge {
+  border-radius: 999px !important;
+  font-size: 9px !important;
+  letter-spacing: 2px !important;
+  transition: all 0.3s var(--ease) !important;
+}
+.hub-live-badge.connected {
+  box-shadow: 0 0 20px hsl(var(--win)/0.2), 0 0 0 1px hsl(var(--win)/0.25) !important;
+}
+
+/* ── BOT TOGGLE CHIPS — UPGRADE ── */
+.bot-toggle-chip {
+  border-radius: 999px !important;
+  padding: 5px 12px 5px 8px !important;
+  font-size: 10.5px !important;
+  transition: all 0.2s var(--ease) !important;
+}
+.bot-toggle-chip.on {
+  box-shadow: 0 0 12px hsl(var(--win)/0.2) !important;
+}
+
+/* ── DASH BODY LAYOUT ── */
+.dash-body {
+  grid-template-columns: 1fr 320px !important;
+  gap: 14px !important;
+}
+
+/* ── GLASS MONITOR (digit pads) ── */
+.glass-monitor {
+  border-radius: 12px !important;
+}
+
+/* ── INPUT FIELDS — PREMIUM ── */
+.input-field, .titan-input, .terminal-input, .terminal-select {
+  border-radius: 10px !important;
+  background: hsl(var(--bg)) !important;
+  transition: all 0.2s var(--ease) !important;
+}
+.input-field:focus, .titan-input:focus {
+  box-shadow: 0 0 0 3px hsl(var(--primary)/0.15), 0 0 20px hsl(var(--primary)/0.08) !important;
+}
+
+/* ── DASH MASTER TP/SL inputs — enhanced ── */
+#dash-master-tp {
+  border-radius: 10px !important;
+  transition: box-shadow 0.2s !important;
+}
+#dash-master-tp:focus {
+  box-shadow: 0 0 0 3px hsl(var(--win)/0.2), 0 0 16px hsl(var(--win)/0.15) !important;
+}
+#dash-master-sl {
+  border-radius: 10px !important;
+  transition: box-shadow 0.2s !important;
+}
+#dash-master-sl:focus {
+  box-shadow: 0 0 0 3px hsl(var(--loss)/0.2), 0 0 16px hsl(var(--loss)/0.15) !important;
+}
+
+/* ── SCROLLBARS — CUSTOM ── */
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, hsl(var(--primary)/0.3), hsl(var(--secondary)/0.2)) !important;
+  border-radius: 4px !important;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, hsl(var(--primary)/0.5), hsl(var(--secondary)/0.4)) !important;
+}
+
+/* ── BALANCE PILL — PREMIUM ── */
+.hub-balance-pill {
+  border-radius: 999px !important;
+  animation: glow-pulse-blue 3s ease-in-out infinite;
+}
+
+/* ── ENGINE OVERVIEW SECTION ── */
+.rank-table {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) !important;
+  gap: 10px !important;
+}
+
+/* ── JOURNAL TABS ROW ── */
+.journal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+/* ── EXEC LIST ITEMS ANIMATION ── */
+.exec-list > * {
+  animation: slide-in-up 0.3s var(--ease) both;
+}
+.exec-list > *:nth-child(1) { animation-delay: 0.05s; }
+.exec-list > *:nth-child(2) { animation-delay: 0.10s; }
+.exec-list > *:nth-child(3) { animation-delay: 0.15s; }
+.exec-list > *:nth-child(4) { animation-delay: 0.20s; }
+
+/* ── RESPONSIVE TWEAKS ── */
+@media (max-width: 1100px) {
+  .dash-body { grid-template-columns: 1fr !important; }
+  .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
+}
+@media (max-width: 640px) {
+  .dash-scroll { padding: 12px 14px !important; }
+  .stat-card-value { font-size: 1.4rem !important; }
+}
+
+/* ── PARTICLES (CSS only, positioned via nth-child tricks) ── */
+.hub-shell > aside::before {
+  content: '';
+  position: absolute;
+  bottom: 20%; left: 30%;
+  width: 2px; height: 2px;
+  border-radius: 50%;
+  background: hsl(var(--primary)/0.6);
+  box-shadow: 0 0 6px hsl(var(--primary)/0.8);
+  animation: float-particle 5s ease-in-out infinite;
+}
+.hub-shell > aside .hub-tabs::before {
+  content: '';
+  position: absolute;
+  bottom: 40%; left: 60%;
+  width: 1.5px; height: 1.5px;
+  border-radius: 50%;
+  background: hsl(var(--secondary)/0.5);
+  box-shadow: 0 0 5px hsl(var(--secondary)/0.8);
+  animation: float-particle 7s 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── GLASS CARD GLOW — UPGRADE ── */
+.glass-card-glow {
+  border-radius: 16px !important;
+}
+
+/* ── ANIMATED ACTIVE TAB INDICATOR ── */
+@keyframes nav-dot-pulse {
+  0%, 100% { box-shadow: 0 0 4px hsl(var(--win)); }
+  50%       { box-shadow: 0 0 12px hsl(var(--win)), 0 0 20px hsl(var(--win)/0.4); }
+}
+.hub-tab .dot.live {
+  animation: nav-dot-pulse 2s infinite !important;
+}
+
+/* ── DASHBOARD OVERALL: STAGGER ENTRANCE ── */
+.dash-stats-row .stat-card { animation: stat-rise 0.5s cubic-bezier(0.16,1,0.3,1) both; }
+.dash-stats-row .stat-card:nth-child(1) { animation-delay: 0.0s; }
+.dash-stats-row .stat-card:nth-child(2) { animation-delay: 0.08s; }
+.dash-stats-row .stat-card:nth-child(3) { animation-delay: 0.16s; }
+.dash-stats-row .stat-card:nth-child(4) { animation-delay: 0.24s; }
+
+/* ══════════════════════════════════════════════════════════════════
+   BENZ CLUB — ULTRA DARK PRO v7  "ABYSS"
+   Obsidian void surfaces · deep chromatic glows · cinematic depth
+   Premium terminal aesthetic — darker than dark, sharper than sharp
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── DEEPER BLACK ROOT OVERRIDES ── */
+:root, .dark {
+  --bg:         0 0% 0% !important;
+  --bg-soft:    240 8% 2.2% !important;
+  --card:       240 6% 4.5% !important;
+  --card-2:     240 6% 7% !important;
+  --border:     240 6% 9% !important;
+  --border-bright: 240 6% 16% !important;
+  --muted:      240 5% 7% !important;
+  --muted-foreground: 240 4% 42% !important;
+  --foreground: 220 18% 94% !important;
+
+  /* Richer accent palette */
+  --primary:    232 95% 64% !important;
+  --primary-2:  258 88% 60% !important;
+  --secondary:  195 100% 54% !important;
+  --accent:     232 95% 64% !important;
+  --win:        155 72% 46% !important;
+  --loss:       350 84% 58% !important;
+
+  /* Stronger shadows for deeper depth */
+  --shadow-sm:  0 1px 4px hsl(0 0% 0% / 0.8) !important;
+  --shadow-md:  0 8px 32px hsl(0 0% 0% / 0.85), 0 2px 8px hsl(0 0% 0% / 0.6) !important;
+  --shadow-lg:  0 24px 64px hsl(0 0% 0% / 0.9), 0 6px 20px hsl(0 0% 0% / 0.7) !important;
+  --glow-gold:  0 0 0 1px hsl(var(--primary) / .2), 0 8px 32px hsl(var(--primary) / .15) !important;
+  --glow-win:   0 0 20px hsl(var(--win) / .4) !important;
+  --glow-loss:  0 0 20px hsl(var(--loss) / .4) !important;
+}
+
+/* ── NEW KEYFRAMES (ultra dark edition) ── */
+@keyframes aurora-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes void-breathe {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%       { opacity: 0.7; transform: scale(1.05); }
+}
+@keyframes neon-border-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px hsl(var(--primary)/0.15) inset, 0 0 20px hsl(var(--primary)/0.05); }
+  50%       { box-shadow: 0 0 0 1px hsl(var(--primary)/0.35) inset, 0 0 40px hsl(var(--primary)/0.12); }
+}
+@keyframes data-flash {
+  0%   { color: hsl(var(--win)); text-shadow: 0 0 20px hsl(var(--win)/0.8); }
+  100% { color: inherit; text-shadow: none; }
+}
+@keyframes corner-glow {
+  0%, 100% { opacity: 0.3; }
+  50%       { opacity: 0.8; }
+}
+@keyframes status-flicker {
+  0%, 96%, 100% { opacity: 1; }
+  97%           { opacity: 0.6; }
+  98%           { opacity: 1; }
+  99%           { opacity: 0.7; }
+}
+@keyframes deep-pulse {
+  0%, 100% { box-shadow: 0 0 30px hsl(var(--primary)/0.15), 0 0 80px hsl(var(--primary)/0.04); }
+  50%       { box-shadow: 0 0 60px hsl(var(--primary)/0.3),  0 0 120px hsl(var(--primary)/0.08); }
+}
+@keyframes card-ambient {
+  0%, 100% { background-position: 0% 0%; }
+  50%       { background-position: 100% 100%; }
+}
+@keyframes orb-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  33%  { transform: translate(30px, -20px) scale(1.08); }
+  66%  { transform: translate(-20px, 15px) scale(0.96); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+@keyframes terminal-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+@keyframes stat-value-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.94); filter: blur(6px); }
+  to   { opacity: 1; transform: translateY(0) scale(1);    filter: blur(0); }
+}
+@keyframes bot-card-glow {
+  0%, 100% { box-shadow: 0 4px 20px hsl(0 0% 0% / 0.6), 0 0 0 1px hsl(var(--border)); }
+  50%       { box-shadow: 0 8px 40px hsl(0 0% 0% / 0.8), 0 0 0 1px hsl(var(--primary)/0.12); }
+}
+
+/* ── ULTRA DARK BODY + AMBIENT ORBS ── */
+html, body {
+  background: #000 !important;
+}
+body {
+  background: #000000 !important;
+}
+
+/* Deep ambient orbs — the soul of the aesthetic */
+.hub-shell::before {
+  background:
+    radial-gradient(ellipse 50% 35% at 5% 0%,   hsl(232 95% 64% / 0.10) 0%, transparent 60%),
+    radial-gradient(ellipse 35% 25% at 95% 8%,  hsl(195 100% 54% / 0.07) 0%, transparent 55%),
+    radial-gradient(ellipse 45% 30% at 50% 105%, hsl(258 88% 60% / 0.08) 0%, transparent 55%),
+    radial-gradient(ellipse 30% 20% at 80% 90%,  hsl(155 72% 46% / 0.05) 0%, transparent 50%)
+    !important;
+  animation: void-breathe 12s ease-in-out infinite !important;
+}
+
+/* ── ABSOLUTE BLACK BODY GRID — subtle, not overpowering ── */
+body::before {
+  background-image:
+    linear-gradient(hsl(240 6% 14% / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(240 6% 14% / 0.035) 1px, transparent 1px) !important;
+  background-size: 48px 48px !important;
+  animation: bg-grid-shift 12s linear infinite, grid-pulse 6s ease-in-out infinite !important;
+}
+
+/* ── SIDEBAR — ABYSS EDITION ── */
+.hub-sidebar {
+  background: linear-gradient(180deg,
+    hsl(240 8% 2.5% / 0.99) 0%,
+    hsl(240 8% 1.5% / 1) 100%) !important;
+  border-right: 1px solid hsl(240 6% 9%) !important;
+  box-shadow:
+    1px 0 0 hsl(240 6% 12%),
+    6px 0 60px hsl(0 0% 0% / 0.7) !important;
+}
+.hub-sidebar::after {
+  background: linear-gradient(180deg,
+    transparent 0%,
+    hsl(232 95% 64% / 0.25) 35%,
+    hsl(195 100% 54% / 0.18) 65%,
+    transparent 100%) !important;
+  width: 1px !important;
+}
+
+/* ── BRAND — PREMIUM CRYSTAL LOGO ── */
+.hub-brand-avatar {
+  background: linear-gradient(135deg,
+    hsl(232 95% 64%),
+    hsl(258 88% 60%),
+    hsl(195 100% 54%)) !important;
+  background-size: 200% 200% !important;
+  animation: aurora-shift 4s ease-in-out infinite, glow-pulse-blue 3s ease-in-out infinite !important;
+  box-shadow:
+    0 0 0 1px hsl(232 95% 64% / 0.5),
+    0 0 30px hsl(232 95% 64% / 0.4),
+    0 0 80px hsl(232 95% 64% / 0.15),
+    inset 0 1px 0 hsl(0 0% 100% / 0.25) !important;
+}
+.hub-brand-name {
+  background: linear-gradient(90deg,
+    hsl(220 18% 94%),
+    hsl(232 95% 75%),
+    hsl(195 100% 70%)) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  font-size: 12px !important;
+  letter-spacing: 4.5px !important;
+}
+.hub-brand-sub {
+  color: hsl(240 4% 35%) !important;
+  font-size: 8px !important;
+  letter-spacing: 1.5px !important;
+}
+
+/* ── NAV TABS — CRYSTAL ACTIVE STATE ── */
+.hub-tab {
+  border-radius: 10px !important;
+  padding: 8px 10px !important;
+}
+.hub-tab:hover:not(.active) {
+  background: hsl(240 6% 5.5%) !important;
+  border-color: hsl(240 6% 12%) !important;
+  color: hsl(var(--foreground)) !important;
+}
+.hub-tab.active {
+  background: linear-gradient(135deg,
+    hsl(232 95% 64% / 0.13),
+    hsl(258 88% 60% / 0.08)) !important;
+  border-color: hsl(232 95% 64% / 0.28) !important;
+  box-shadow:
+    0 0 0 1px hsl(232 95% 64% / 0.08) inset,
+    0 2px 20px hsl(0 0% 0% / 0.4) !important;
+}
+.hub-tab.active::after {
+  background: linear-gradient(180deg,
+    hsl(232 95% 64%),
+    hsl(195 100% 54%)) !important;
+  box-shadow: 0 0 10px hsl(232 95% 64% / 0.9), 0 0 20px hsl(232 95% 64% / 0.4) !important;
+  width: 3px !important;
+  border-radius: 0 4px 4px 0 !important;
+}
+.hub-nav-label {
+  color: hsl(240 4% 28%) !important;
+  font-size: 7.5px !important;
+  letter-spacing: 2.5px !important;
+}
+
+/* ── TOPBAR — VOID BLACK ── */
+.hub-header {
+  background: hsl(0 0% 0% / 0.96) !important;
+  border-bottom: 1px solid hsl(240 6% 8%) !important;
+  box-shadow:
+    0 1px 0 hsl(232 95% 64% / 0.05),
+    0 8px 32px hsl(0 0% 0% / 0.5) !important;
+  height: 50px !important;
+}
+.hub-header::after {
+  background: linear-gradient(90deg,
+    transparent,
+    hsl(232 95% 64% / 0.15) 25%,
+    hsl(195 100% 54% / 0.12) 75%,
+    transparent) !important;
+}
+.hub-clock {
+  background: hsl(240 8% 3.5%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  color: hsl(232 95% 70%) !important;
+  box-shadow: 0 0 14px hsl(232 95% 64% / 0.12), inset 0 1px 0 hsl(232 95% 64% / 0.08) !important;
+  font-size: 10.5px !important;
+  animation: status-flicker 8s infinite !important;
+}
+.hub-breadcrumb { color: hsl(240 4% 35%) !important; }
+.hub-breadcrumb .crumb-current { color: hsl(220 18% 88%) !important; }
+
+/* ── LIVE BADGE — NEON SIGNAL ── */
+.hub-live-badge {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 11%) !important;
+  font-size: 8.5px !important;
+  letter-spacing: 2.5px !important;
+}
+.hub-live-badge.connected {
+  background: hsl(155 72% 46% / 0.06) !important;
+  border-color: hsl(155 72% 46% / 0.22) !important;
+  color: hsl(155 72% 50%) !important;
+  box-shadow:
+    0 0 20px hsl(155 72% 46% / 0.18),
+    0 0 0 1px hsl(155 72% 46% / 0.1) !important;
+}
+.hub-live-badge.connected .dot {
+  box-shadow: 0 0 10px hsl(155 72% 46% / 0.9), 0 0 20px hsl(155 72% 46% / 0.5) !important;
+}
+
+/* ── SETTINGS BUTTON — VOID GLASS ── */
+.hub-settings-btn {
+  background: hsl(240 8% 3.5%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  color: hsl(240 4% 50%) !important;
+  border-radius: 10px !important;
+  transition: all 0.2s var(--ease) !important;
+}
+.hub-settings-btn:hover {
+  background: hsl(240 6% 6%) !important;
+  border-color: hsl(232 95% 64% / 0.25) !important;
+  color: hsl(var(--foreground)) !important;
+  box-shadow: 0 0 16px hsl(232 95% 64% / 0.08) !important;
+}
+
+/* ── DASHBOARD SCROLL ── */
+.dash-scroll {
+  background: #000 !important;
+  padding: 14px 16px !important;
+  gap: 14px !important;
+  overflow-y: auto !important;
+}
+
+/* ── HERO — CINEMATIC ── */
+.dash-hero-title {
+  font-size: 2.5rem !important;
+  font-weight: 900 !important;
+  background: linear-gradient(135deg,
+    hsl(220 18% 96%) 0%,
+    hsl(232 95% 76%) 45%,
+    hsl(195 100% 66%) 100%) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  letter-spacing: -0.045em !important;
+  line-height: 1.02 !important;
+  filter: drop-shadow(0 0 30px hsl(232 95% 64% / 0.3));
+}
+.dash-hero-meta {
+  color: hsl(240 4% 32%) !important;
+  font-size: 9.5px !important;
+  letter-spacing: 2px !important;
+}
+.dash-hero-dot {
+  box-shadow: 0 0 12px hsl(155 72% 46% / 0.9), 0 0 24px hsl(155 72% 46% / 0.5) !important;
+}
+.dash-hero-subtitle {
+  color: hsl(240 4% 32%) !important;
+  font-size: 9px !important;
+  letter-spacing: 2.5px !important;
+  margin-top: 5px !important;
+}
+
+/* ── MASTER CONTROL — DEEP GLASS ── */
+#dash-master-panel {
+  background: linear-gradient(135deg,
+    hsl(232 95% 64% / 0.09),
+    hsl(258 88% 60% / 0.06),
+    hsl(195 100% 54% / 0.04)) !important;
+  border: 1px solid hsl(232 95% 64% / 0.2) !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 0 0 1px hsl(232 95% 64% / 0.06) inset,
+    0 12px 48px hsl(0 0% 0% / 0.6),
+    0 0 80px hsl(232 95% 64% / 0.04) !important;
+  animation: neon-border-pulse 4s ease-in-out infinite !important;
+}
+#dash-master-toggle {
+  background: linear-gradient(135deg,
+    hsl(232 95% 60%),
+    hsl(258 88% 56%),
+    hsl(195 100% 50%)) !important;
+  background-size: 200% 200% !important;
+  animation: aurora-shift 3s ease-in-out infinite !important;
+  border-radius: 12px !important;
+  box-shadow:
+    0 0 40px hsl(232 95% 64% / 0.5),
+    0 4px 20px hsl(232 95% 64% / 0.3),
+    inset 0 1px 0 hsl(0 0% 100% / 0.25) !important;
+  padding: 12px 38px !important;
+  font-size: 10px !important;
+  letter-spacing: 3.5px !important;
+  font-weight: 900 !important;
+}
+#dash-master-toggle:hover {
+  transform: translateY(-3px) scale(1.02) !important;
+  box-shadow:
+    0 0 60px hsl(232 95% 64% / 0.7),
+    0 8px 30px hsl(232 95% 64% / 0.45),
+    inset 0 1px 0 hsl(0 0% 100% / 0.3) !important;
+}
+
+/* ── STAT CARDS — ABYSS CRYSTALS ── */
+.stat-card {
+  background: hsl(240 6% 4.5%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 4px 24px hsl(0 0% 0% / 0.7),
+    inset 0 1px 0 hsl(0 0% 100% / 0.025) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+/* Ambient corner light */
+.stat-card::before {
+  content: '' !important;
+  position: absolute !important;
+  top: 0 !important; left: 0 !important; right: 0 !important;
+  height: 1px !important;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    hsl(232 95% 64% / 0.4) 50%,
+    transparent 100%) !important;
+  opacity: 0 !important;
+  transition: opacity 0.3s !important;
+}
+.stat-card::after {
+  content: '' !important;
+  position: absolute !important;
+  top: -60% !important; right: -30% !important;
+  width: 90% !important; height: 90% !important;
+  background: radial-gradient(ellipse, hsl(232 95% 64% / 0.05) 0%, transparent 70%) !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  transition: opacity 0.3s !important;
+}
+.stat-card:hover {
+  background: hsl(240 6% 5.5%) !important;
+  border-color: hsl(232 95% 64% / 0.22) !important;
+  transform: translateY(-5px) !important;
+  box-shadow:
+    0 16px 50px hsl(0 0% 0% / 0.75),
+    0 0 0 1px hsl(232 95% 64% / 0.1),
+    inset 0 1px 0 hsl(232 95% 64% / 0.08) !important;
+}
+.stat-card:hover::before { opacity: 1 !important; }
+.stat-card:hover::after  { opacity: 1 !important; }
+.stat-card-value {
+  font-size: 2rem !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.04em !important;
+  animation: stat-value-in 0.5s cubic-bezier(0.16,1,0.3,1) both !important;
+}
+.stat-card-label {
+  color: hsl(240 4% 38%) !important;
+  font-size: 8.5px !important;
+  letter-spacing: 3px !important;
+  font-weight: 800 !important;
+}
+.stat-card-icon {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 14px hsl(0 0% 0% / 0.5) !important;
+}
+.stat-card-sub {
+  color: hsl(240 4% 36%) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.3px !important;
+}
+
+/* ── GLASS PANELS — DEEP VOID ── */
+.glass-panel {
+  background: hsl(240 6% 4.5%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 4px 28px hsl(0 0% 0% / 0.7),
+    inset 0 1px 0 hsl(0 0% 100% / 0.022) !important;
+}
+.glass-panel-glow {
+  background: hsl(240 6% 4.5%) !important;
+  border: 1px solid hsl(232 95% 64% / 0.18) !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 8px 40px hsl(0 0% 0% / 0.75),
+    0 0 0 1px hsl(232 95% 64% / 0.06),
+    var(--glow-gold) !important;
+}
+
+/* ── EQUITY PANEL ── */
+.dash-equity-panel {
+  background: hsl(240 6% 4%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 18px !important;
+  padding: 22px 22px !important;
+  box-shadow:
+    0 8px 40px hsl(0 0% 0% / 0.75),
+    inset 0 1px 0 hsl(0 0% 100% / 0.02) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+.dash-equity-panel::after {
+  content: '' !important;
+  position: absolute !important;
+  top: -30% !important; right: -10% !important;
+  width: 300px !important; height: 300px !important;
+  background: radial-gradient(ellipse, hsl(155 72% 46% / 0.04) 0%, transparent 70%) !important;
+  pointer-events: none !important;
+}
+
+/* ── BOT CARDS — DEEP PANELS ── */
+.bot-card {
+  background: hsl(240 6% 4.5%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  border-radius: 14px !important;
+  padding: 16px 15px !important;
+  box-shadow: 0 4px 20px hsl(0 0% 0% / 0.6) !important;
+  transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+.bot-card::before {
+  content: '' !important;
+  position: absolute !important;
+  bottom: 0 !important; left: 0 !important; right: 0 !important;
+  height: 2px !important;
+  background: linear-gradient(90deg,
+    hsl(232 95% 64% / 0.4),
+    hsl(195 100% 54% / 0.3)) !important;
+  opacity: 0 !important;
+  transition: opacity 0.25s !important;
+}
+.bot-card:hover {
+  background: hsl(240 6% 5.5%) !important;
+  border-color: hsl(232 95% 64% / 0.18) !important;
+  transform: translateY(-4px) !important;
+  box-shadow: 0 12px 40px hsl(0 0% 0% / 0.75) !important;
+  animation: bot-card-glow 0.3s ease forwards !important;
+}
+.bot-card:hover::before { opacity: 1 !important; }
+.bot-card-head {
+  font-size: 9.5px !important;
+  letter-spacing: 1.5px !important;
+  color: hsl(240 4% 48%) !important;
+  margin-bottom: 2px !important;
+}
+.bot-card-value {
+  font-size: 1.5rem !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.03em !important;
+}
+.bot-card-dot {
+  width: 6px !important; height: 6px !important;
+  box-shadow: 0 0 8px currentColor !important;
+}
+.bar-track {
+  background: hsl(240 6% 8%) !important;
+  height: 3px !important;
+  border-radius: 3px !important;
+}
+.bar-fill-win {
+  background: linear-gradient(90deg,
+    hsl(155 72% 46%),
+    hsl(195 100% 54%)) !important;
+  box-shadow: 0 0 10px hsl(155 72% 46% / 0.6) !important;
+}
+
+/* ── EXEC PANEL ── */
+.exec-panel {
+  background: hsl(240 6% 4%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 18px !important;
+  padding: 18px !important;
+}
+.exec-row {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 10px !important;
+  padding: 10px 12px !important;
+  transition: all 0.18s var(--ease) !important;
+}
+.exec-row:hover {
+  background: hsl(240 6% 5%) !important;
+  border-color: hsl(240 6% 14%) !important;
+}
+.exec-flow-box {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 11%) !important;
+  border-radius: 7px !important;
+  color: hsl(240 4% 36%) !important;
+}
+.exec-flow-box.glow-analysis {
+  background: hsl(232 95% 64% / 0.12) !important;
+  border-color: hsl(232 95% 64% / 0.35) !important;
+  color: hsl(232 95% 72%) !important;
+  box-shadow: 0 0 12px hsl(232 95% 64% / 0.25) !important;
+}
+.exec-flow-box.glow-trading {
+  background: hsl(195 100% 54% / 0.1) !important;
+  border-color: hsl(195 100% 54% / 0.35) !important;
+  color: hsl(195 100% 62%) !important;
+  box-shadow: 0 0 12px hsl(195 100% 54% / 0.25) !important;
+}
+.exec-flow-box.glow-win {
+  background: hsl(155 72% 46% / 0.12) !important;
+  border-color: hsl(155 72% 46% / 0.4) !important;
+  color: hsl(155 72% 54%) !important;
+  box-shadow: 0 0 12px hsl(155 72% 46% / 0.3) !important;
+}
+.exec-flow-box.glow-loss {
+  background: hsl(350 84% 58% / 0.12) !important;
+  border-color: hsl(350 84% 58% / 0.4) !important;
+  color: hsl(350 84% 66%) !important;
+  box-shadow: 0 0 12px hsl(350 84% 58% / 0.3) !important;
+}
+.exec-status-tag {
+  background: hsl(240 8% 6%) !important;
+  color: hsl(240 4% 38%) !important;
+  border: 1px solid hsl(240 6% 12%) !important;
+}
+.exec-status-tag.is-on {
+  background: hsl(155 72% 46% / 0.1) !important;
+  color: hsl(155 72% 52%) !important;
+  border-color: hsl(155 72% 46% / 0.22) !important;
+  box-shadow: 0 0 8px hsl(155 72% 46% / 0.15) !important;
+}
+.exec-empty {
+  color: hsl(240 4% 30%) !important;
+  font-size: 10px !important;
+}
+
+/* ── JOURNAL PANEL ── */
+.journal-panel {
+  background: hsl(240 6% 4%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 18px !important;
+  padding: 18px !important;
+}
+.journal-entry {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 10px !important;
+  border-left-width: 3px !important;
+  transition: all 0.15s var(--ease) !important;
+}
+.journal-entry:hover {
+  background: hsl(240 6% 4.5%) !important;
+  border-color: hsl(240 6% 14%) !important;
+  transform: translateX(3px) !important;
+}
+.journal-entry.win {
+  border-left-color: hsl(155 72% 46%) !important;
+  background: hsl(155 72% 46% / 0.04) !important;
+  box-shadow: 0 0 14px hsl(155 72% 46% / 0.08) !important;
+}
+.journal-entry.loss {
+  border-left-color: hsl(350 84% 58%) !important;
+  background: hsl(350 84% 58% / 0.04) !important;
+  box-shadow: 0 0 14px hsl(350 84% 58% / 0.08) !important;
+}
+.journal-tab {
+  background: hsl(240 8% 3.5%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  color: hsl(240 4% 38%) !important;
+  border-radius: 999px !important;
+  font-size: 9.5px !important;
+  padding: 4px 12px !important;
+}
+.journal-tab:hover {
+  border-color: hsl(240 6% 18%) !important;
+  color: hsl(var(--foreground)) !important;
+  background: hsl(240 6% 6%) !important;
+}
+.journal-tab.active {
+  background: hsl(232 95% 64% / 0.1) !important;
+  border-color: hsl(232 95% 64% / 0.3) !important;
+  color: hsl(232 95% 72%) !important;
+  box-shadow: 0 0 12px hsl(232 95% 64% / 0.15) !important;
+}
+
+/* ── SECTION DIVIDERS — ULTRA DARK ── */
+.section-divider {
+  font-size: 8px !important;
+  letter-spacing: 3.5px !important;
+  color: hsl(240 4% 30%) !important;
+  font-weight: 800 !important;
+}
+.section-divider::after {
+  background: linear-gradient(90deg,
+    hsl(232 95% 64% / 0.2),
+    hsl(240 6% 11%),
+    transparent) !important;
+}
+
+/* ── BOT TOGGLE CHIPS ── */
+.bot-toggle-chip {
+  background: hsl(240 8% 3.5%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  color: hsl(240 4% 36%) !important;
+  border-radius: 999px !important;
+  transition: all 0.18s var(--ease) !important;
+}
+.bot-toggle-chip.on {
+  background: hsl(155 72% 46% / 0.08) !important;
+  border-color: hsl(155 72% 46% / 0.28) !important;
+  color: hsl(155 72% 52%) !important;
+  box-shadow: 0 0 10px hsl(155 72% 46% / 0.12) !important;
+}
+.bot-toggle-chip:hover {
+  border-color: hsl(240 6% 18%) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+/* ── INPUT FIELDS — VOID DARK ── */
+.input-field, .titan-input, .terminal-input, .terminal-select {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  color: hsl(220 18% 90%) !important;
+  border-radius: 10px !important;
+}
+.input-field:focus, .titan-input:focus, .terminal-input:focus {
+  background: hsl(240 8% 3.5%) !important;
+  border-color: hsl(232 95% 64% / 0.4) !important;
+  box-shadow:
+    0 0 0 3px hsl(232 95% 64% / 0.1),
+    0 0 20px hsl(232 95% 64% / 0.06) !important;
+}
+.input-field::placeholder, .titan-input::placeholder {
+  color: hsl(240 4% 28%) !important;
+}
+
+/* ── BUTTONS — DEEP GLOW ── */
+.btn-primary {
+  background: linear-gradient(135deg,
+    hsl(232 95% 60%),
+    hsl(258 88% 56%)) !important;
+  box-shadow:
+    0 0 24px hsl(232 95% 64% / 0.3),
+    inset 0 1px 0 hsl(0 0% 100% / 0.2) !important;
+  border-radius: 10px !important;
+}
+.btn-primary:hover {
+  box-shadow:
+    0 0 40px hsl(232 95% 64% / 0.5),
+    inset 0 1px 0 hsl(0 0% 100% / 0.25) !important;
+  transform: translateY(-2px) !important;
+}
+.btn-omega, .btn-engage {
+  border-radius: 12px !important;
+}
+
+/* ── MODAL — VOID LUXURY ── */
+.modal-overlay {
+  background: hsl(0 0% 0% / 0.85) !important;
+  backdrop-filter: blur(20px) !important;
+}
+.modal-card {
+  background: hsl(240 6% 4.5%) !important;
+  border: 1px solid hsl(240 6% 12%) !important;
+  border-radius: 22px !important;
+  box-shadow:
+    0 40px 100px hsl(0 0% 0% / 0.9),
+    0 0 0 1px hsl(232 95% 64% / 0.12),
+    inset 0 1px 0 hsl(0 0% 100% / 0.03) !important;
+}
+.modal-header {
+  background: hsl(240 6% 4.5%) !important;
+  border-bottom: 1px solid hsl(240 6% 10%) !important;
+  border-radius: 22px 22px 0 0 !important;
+}
+.modal-header::after {
+  background: linear-gradient(90deg,
+    transparent,
+    hsl(232 95% 64% / 0.3) 40%,
+    hsl(195 100% 54% / 0.2) 60%,
+    transparent) !important;
+}
+.settings-section {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  border-radius: 12px !important;
+}
+.settings-section:hover {
+  border-color: hsl(232 95% 64% / 0.15) !important;
+  box-shadow: 0 0 24px hsl(232 95% 64% / 0.04) !important;
+}
+.settings-label { color: hsl(232 95% 68%) !important; }
+.settings-hint { color: hsl(240 4% 38%) !important; }
+
+/* ── TOGGLE SWITCHES ── */
+.toggle {
+  background: hsl(240 8% 8%) !important;
+  border: 1px solid hsl(240 6% 14%) !important;
+}
+.toggle.on {
+  background: linear-gradient(135deg,
+    hsl(232 95% 58%),
+    hsl(258 88% 54%)) !important;
+  border-color: hsl(232 95% 64% / 0.5) !important;
+  box-shadow:
+    0 0 20px hsl(232 95% 64% / 0.4),
+    inset 0 1px 0 hsl(0 0% 100% / 0.2) !important;
+}
+
+/* ── SCROLLBARS — ABYSS ── */
+*::-webkit-scrollbar { width: 3px !important; height: 3px !important; }
+*::-webkit-scrollbar-track { background: transparent !important; }
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg,
+    hsl(232 95% 64% / 0.25),
+    hsl(195 100% 54% / 0.15)) !important;
+  border-radius: 3px !important;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg,
+    hsl(232 95% 64% / 0.5),
+    hsl(195 100% 54% / 0.35)) !important;
+}
+
+/* ── BALANCE PILL ── */
+.hub-balance-pill {
+  background: hsl(155 72% 46% / 0.08) !important;
+  border-color: hsl(155 72% 46% / 0.2) !important;
+  box-shadow: 0 0 16px hsl(155 72% 46% / 0.15) !important;
+  color: hsl(155 72% 52%) !important;
+}
+
+/* ── TEXT COLORS ── */
+.text-muted { color: hsl(240 4% 34%) !important; }
+.text-success, .neon-text-win { color: hsl(155 72% 50%) !important; text-shadow: 0 0 12px hsl(155 72% 46% / 0.4) !important; }
+.text-destructive, .neon-text-loss { color: hsl(350 84% 62%) !important; text-shadow: 0 0 12px hsl(350 84% 58% / 0.4) !important; }
+.text-primary, .neon-text-primary { color: hsl(232 95% 70%) !important; }
+
+/* ── P&L BADGE ── */
+.pnl-badge.pos { background: hsl(155 72% 46% / 0.1) !important; box-shadow: 0 0 10px hsl(155 72% 46% / 0.15) !important; }
+.pnl-badge.neg { background: hsl(350 84% 58% / 0.1) !important; box-shadow: 0 0 10px hsl(350 84% 58% / 0.15) !important; }
+
+/* ── LIVE TICK CELLS ── */
+.live-tick-cell {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  border-radius: 14px !important;
+  transition: all 0.3s var(--ease) !important;
+}
+.live-tick-cell:hover {
+  border-color: hsl(232 95% 64% / 0.25) !important;
+  box-shadow: 0 0 24px hsl(232 95% 64% / 0.08) !important;
+}
+
+/* ── BENZ COL (3-column trading desk) ── */
+.benz-col {
+  background: hsl(240 6% 4%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 28px hsl(0 0% 0% / 0.7) !important;
+}
+.benz-col:hover {
+  border-color: hsl(240 6% 14%) !important;
+  box-shadow: 0 8px 40px hsl(0 0% 0% / 0.8) !important;
+}
+.benz-col::before {
+  background: linear-gradient(90deg,
+    transparent,
+    hsl(232 95% 64% / 0.1),
+    transparent) !important;
+}
+
+/* ── BARRIER BUTTONS & DIGIT CELLS ── */
+.barrier-btn {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  border-radius: 8px !important;
+  transition: all 0.15s !important;
+}
+.barrier-btn:hover {
+  border-color: hsl(232 95% 64% / 0.3) !important;
+  background: hsl(232 95% 64% / 0.08) !important;
+}
+.barrier-btn.selected {
+  background: hsl(232 95% 64% / 0.12) !important;
+  border-color: hsl(232 95% 64% / 0.4) !important;
+  box-shadow: 0 0 12px hsl(232 95% 64% / 0.2) !important;
+}
+
+/* ── DIGIT CELLS (frequency display) ── */
+.digit-cell {
+  background: hsl(240 8% 3.5%) !important;
+  border: 1px solid hsl(240 6% 11%) !important;
+  border-radius: 8px !important;
+  transition: all 0.2s !important;
+}
+
+/* ── SIGNAL CHIPS ── */
+.signal-chip.buy {
+  background: hsl(155 72% 46% / 0.1) !important;
+  border-color: hsl(155 72% 46% / 0.22) !important;
+  box-shadow: 0 0 10px hsl(155 72% 46% / 0.12) !important;
+}
+.signal-chip.sell {
+  background: hsl(350 84% 58% / 0.1) !important;
+  border-color: hsl(350 84% 58% / 0.22) !important;
+  box-shadow: 0 0 10px hsl(350 84% 58% / 0.12) !important;
+}
+
+/* ── ENGINE STATUS CARDS ── */
+.engine-status-card {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  border-radius: 12px !important;
+}
+.engine-status-card.is-active {
+  border-color: hsl(232 95% 64% / 0.22) !important;
+  box-shadow: 0 0 24px hsl(232 95% 64% / 0.08) !important;
+  animation: neon-border-pulse 3s ease-in-out infinite !important;
+}
+
+/* ── GLASS MONITOR (digit pad bg) ── */
+.glass-monitor {
+  background: hsl(240 8% 2.5%) !important;
+  border: 1px solid hsl(240 6% 9%) !important;
+  border-radius: 12px !important;
+}
+
+/* ── ANALYSIS HUB CARDS ── */
+.analysis-hub-card {
+  background: hsl(240 8% 3%) !important;
+  border: 1px solid hsl(240 6% 10%) !important;
+  border-radius: 12px !important;
+  transition: border-color 0.2s !important;
+}
+.analysis-hub-card:hover {
+  border-color: hsl(232 95% 64% / 0.2) !important;
+  box-shadow: 0 0 20px hsl(232 95% 64% / 0.04) !important;
+}
+
+/* ── AUTO SECTION HEADERS ── */
+.auto-section {
+  border-color: hsl(240 6% 10%) !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+}
+.auto-header {
+  background: hsl(240 8% 3.5%) !important;
+}
+.auto-header:hover { background: hsl(240 6% 5%) !important; }
+.auto-body { background: hsl(240 8% 2.5%) !important; border-top-color: hsl(240 6% 9%) !important; }
+
+/* ── MARTINGALE SECTION ── */
+.mart-section { border-color: hsl(240 6% 10%) !important; border-radius: 12px !important; }
+.mart-header { background: hsl(240 8% 3.5%) !important; }
+.mart-header:hover { background: hsl(240 6% 5%) !important; }
+.mart-body { background: hsl(240 8% 2.5%) !important; border-top-color: hsl(240 6% 8%) !important; }
+
+/* ── FREQ BARS ── */
+.freq-bar-grid {
+  background: hsl(240 8% 2.5%) !important;
+  border-radius: 10px !important;
+}
+.freq-bar-fill { background: linear-gradient(180deg, hsl(232 95% 64%), hsl(258 88% 60%)) !important; }
+
+/* ── RECOVERY MODE CARDS ── */
+.recovery-mode-card {
+  background: hsl(240 8% 3%) !important;
+  border-color: hsl(240 6% 10%) !important;
+  border-radius: 10px !important;
+}
+.recovery-mode-card:hover {
+  background: hsl(240 6% 4.5%) !important;
+  border-color: hsl(240 6% 16%) !important;
+}
+.recovery-mode-card.selected {
+  background: hsl(232 95% 64% / 0.07) !important;
+  border-color: hsl(232 95% 64% / 0.4) !important;
+  box-shadow:
+    0 0 0 1px hsl(232 95% 64% / 0.1) inset,
+    0 0 24px hsl(232 95% 64% / 0.08) !important;
+}
+
+/* ── GLOBAL ERROR TOAST ── */
+.global-error-toast {
+  background: hsl(350 40% 6%) !important;
+  border-color: hsl(350 84% 58% / 0.35) !important;
+  box-shadow: 0 16px 50px hsl(0 0% 0% / 0.8), 0 0 0 1px hsl(350 84% 58% / 0.1) !important;
+}
+
+/* ── THEME PILL BUTTONS ── */
+.hub-theme-pills button, .theme-pill-btn {
+  background: hsl(240 8% 3%) !important;
+  border-color: hsl(240 6% 11%) !important;
+  transition: all 0.18s var(--ease) !important;
+}
+.hub-theme-pills button:hover, .theme-pill-btn:hover {
+  border-color: hsl(232 95% 64% / 0.25) !important;
+  background: hsl(240 6% 5%) !important;
+}
+.hub-theme-pills button.active, .theme-pill-btn.active {
+  background: hsl(232 95% 64% / 0.1) !important;
+  border-color: hsl(232 95% 64% / 0.35) !important;
+  box-shadow: 0 0 12px hsl(232 95% 64% / 0.2) !important;
+}
+
+/* ── COLLAPSE BUTTON ── */
+.hub-sidebar-collapse {
+  background: hsl(240 8% 3.5%) !important;
+  border-color: hsl(240 6% 11%) !important;
+  color: hsl(240 4% 36%) !important;
+}
+.hub-sidebar-collapse:hover {
+  border-color: hsl(240 6% 20%) !important;
+  color: hsl(var(--foreground)) !important;
+  background: hsl(240 6% 6%) !important;
+}
+
+/* ── MODAL CLOSE BUTTON ── */
+.modal-close {
+  background: hsl(240 8% 5%) !important;
+  border-color: hsl(240 6% 12%) !important;
+}
+
+/* ── RESPONSIVE DEEPENING ── */
+@media (max-width: 880px) {
+  .hub-sidebar { background: hsl(240 8% 2%) !important; }
+}
+
+
+
+/* ═══════════════════════════════════════════════════════════════
+   LAYOUT REFINEMENT — FAT LEFT SIDEBAR, SHRUNK MAIN PANELS
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Sidebar — column order already swapped in HTML */
+html body .dash-sidebar {
+  gap: 10px !important;
+  overflow-y: auto !important;
+  max-height: calc(100vh - 200px) !important;
+}
+html body .dash-sidebar::-webkit-scrollbar { width: 3px !important; }
+html body .dash-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1) !important; border-radius: 3px !important; }
+
+/* Exec panel — fatter padding */
+html body .exec-panel { padding: 18px 20px 20px !important; }
+
+/* Exec rows — wider feel */
+html body .exec-row { padding: 15px 16px !important; }
+html body .exec-flow-box { padding: 8px 6px !important; font-size: 9.5px !important; }
+
+/* Journal panel — fatter padding */
+html body .journal-panel {
+  padding: 18px 20px 20px !important;
+  max-height: none !important;
+  flex: 1 !important;
+}
+
+/* Equity curve — shorter */
+html body .dash-equity-panel { padding: 12px 14px !important; }
+html body .equity-svg { height: 140px !important; }
+
+/* Engine overview — compact */
+html body .rank-table { gap: 8px !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   EXEC ROWS — BIGGER + COOLDOWN COUNTDOWN
+   ═══════════════════════════════════════════════════════════════ */
+html body .exec-panel { padding: 16px 16px !important; }
+html body .exec-list {
+  display: flex !important; flex-direction: column !important;
+  gap: 10px !important; max-height: none !important;
+  overflow: visible !important; margin-top: 8px !important;
+}
+html body .exec-row {
+  padding: 13px 14px !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: rgba(255,255,255,0.025) !important;
+  display: flex !important; flex-direction: column !important; gap: 10px !important;
+  transition: border-color .2s, background .2s !important;
+}
+html body .exec-row:hover {
+  background: rgba(255,255,255,0.04) !important;
+  border-color: rgba(255,255,255,0.11) !important;
+}
+html body .exec-row.exec-row-cd {
+  border-color: rgba(255,170,0,0.25) !important;
+  background: rgba(255,150,0,0.04) !important;
+}
+html body .exec-row-head {
+  display: flex !important; align-items: center !important;
+  justify-content: space-between !important; gap: 8px !important;
+}
+html body .exec-bot-name {
+  display: flex !important; align-items: center !important; gap: 8px !important;
+  font-size: 12.5px !important; font-weight: 700 !important;
+  color: rgba(220,225,240,0.9) !important;
+}
+html body .exec-dot {
+  width: 8px !important; height: 8px !important; border-radius: 50% !important; flex-shrink: 0 !important;
+}
+html body .exec-row-right {
+  display: flex !important; align-items: center !important; gap: 8px !important;
+}
+html body .exec-pl {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 12px !important; font-weight: 700 !important;
+}
+html body .exec-status-tag {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9px !important; font-weight: 700 !important;
+  letter-spacing: 1.5px !important; text-transform: uppercase !important;
+  padding: 3px 8px !important; border-radius: 999px !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  background: rgba(255,255,255,0.04) !important;
+  color: rgba(150,160,185,0.7) !important;
+}
+html body .exec-status-tag.is-on {
+  color: hsl(var(--win)) !important;
+  background: hsl(var(--win) / .1) !important;
+  border-color: hsl(var(--win) / .3) !important;
+  box-shadow: 0 0 10px hsl(var(--win) / .15) !important;
+}
+html body .exec-status-tag.is-cd {
+  color: #ffaa00 !important;
+  background: rgba(255,170,0,0.1) !important;
+  border-color: rgba(255,170,0,0.35) !important;
+  box-shadow: 0 0 10px rgba(255,170,0,0.2) !important;
+  animation: cooldown-pulse 1s ease-in-out infinite !important;
+}
+@keyframes cooldown-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+html body .exec-cd-bar {
+  height: 3px !important; border-radius: 999px !important;
+  background: rgba(255,170,0,0.12) !important; overflow: hidden !important;
+}
+html body .exec-cd-fill {
+  height: 100% !important; border-radius: 999px !important;
+  background: linear-gradient(90deg, #ffaa00, #ff6600) !important;
+  box-shadow: 0 0 8px rgba(255,170,0,0.5) !important;
+  width: 100% !important;
+}
+@keyframes exec-cd-drain { from { width: 100%; } to { width: 0%; } }
+html body .exec-flow {
+  display: flex !important; align-items: center !important; gap: 6px !important;
+}
+html body .exec-flow-box {
+  flex: 1 !important; text-align: center !important;
+  padding: 7px 6px !important; border-radius: 8px !important;
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9px !important; font-weight: 700 !important;
+  letter-spacing: 1.2px !important; text-transform: uppercase !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  background: rgba(255,255,255,0.025) !important;
+  color: rgba(140,150,175,0.6) !important;
+}
+html body .exec-flow-arrow {
+  color: rgba(100,110,135,0.4) !important;
+  font-size: 12px !important; flex-shrink: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   JOURNAL — SCROLLABLE, BIGGER RICHER ENTRIES
+   ═══════════════════════════════════════════════════════════════ */
+html body .journal-panel {
+  flex: 1 !important; min-height: 0 !important;
+  display: flex !important; flex-direction: column !important;
+  padding: 16px !important; max-height: 520px !important;
+}
+html body .journal-tabs {
+  display: flex !important; gap: 5px !important;
+  flex-wrap: wrap !important; margin-bottom: 10px !important; flex-shrink: 0 !important;
+}
+html body .journal-list {
+  flex: 1 !important; overflow-y: auto !important; min-height: 0 !important;
+  display: flex !important; flex-direction: column !important; gap: 7px !important;
+  padding-right: 2px !important;
+}
+html body .journal-list::-webkit-scrollbar { width: 3px !important; }
+html body .journal-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12) !important; border-radius: 3px !important; }
+html body .journal-entry {
+  display: flex !important; align-items: center !important; gap: 10px !important;
+  padding: 12px 14px !important; border-radius: 12px !important;
+  border: 1px solid rgba(255,255,255,0.06) !important;
+  background: rgba(255,255,255,0.02) !important;
+  border-left-width: 3px !important;
+  transition: all .18s !important;
+  min-height: 58px !important;
+}
+html body .journal-entry:hover {
+  background: rgba(255,255,255,0.04) !important;
+  transform: translateX(3px) !important;
+}
+html body .journal-entry.win { border-left-color: hsl(var(--win)) !important; background: hsl(var(--win) / .04) !important; }
+html body .journal-entry.loss { border-left-color: hsl(var(--loss)) !important; background: hsl(var(--loss) / .04) !important; }
+html body .journal-badge-wrap { flex-shrink: 0 !important; }
+html body .journal-badge {
+  width: 28px !important; height: 28px !important;
+  border-radius: 8px !important; font-size: 12px !important; font-weight: 800 !important;
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+}
+html body .journal-badge.win { background: hsl(var(--win) / .15) !important; color: hsl(var(--win)) !important; }
+html body .journal-badge.loss { background: hsl(var(--loss) / .15) !important; color: hsl(var(--loss)) !important; }
+html body .journal-entry-body {
+  flex: 1 !important; min-width: 0 !important;
+  display: flex !important; flex-direction: column !important; gap: 4px !important;
+}
+html body .journal-entry-top {
+  display: flex !important; align-items: center !important; gap: 6px !important;
+  flex-wrap: wrap !important;
+}
+html body .journal-bot-label {
+  font-size: 11px !important; font-weight: 700 !important;
+}
+html body .journal-digits-pill {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 10px !important; font-weight: 600 !important;
+  color: rgba(160,170,200,0.7) !important;
+  background: rgba(255,255,255,0.05) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 5px !important; padding: 1px 6px !important;
+}
+html body .journal-time-stamp {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9px !important; color: rgba(130,140,165,0.55) !important;
+  margin-left: auto !important; white-space: nowrap !important;
+}
+html body .journal-entry-bottom {
+  display: flex !important; align-items: center !important; gap: 6px !important;
+}
+html body .journal-type-label {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9.5px !important; font-weight: 700 !important; letter-spacing: 0.8px !important;
+}
+html body .journal-type-label.win { color: hsl(var(--win)) !important; }
+html body .journal-type-label.loss { color: hsl(var(--loss)) !important; }
+html body .journal-barrier {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 9px !important; color: rgba(130,140,165,0.5) !important;
+}
+html body .journal-pl {
+  font-family: 'DM Mono', monospace !important;
+  font-size: 14px !important; font-weight: 800 !important;
+  flex-shrink: 0 !important; text-align: right !important;
+}
+html body .journal-pl.win { color: hsl(var(--win)) !important; }
+html body .journal-pl.loss { color: hsl(var(--loss)) !important; }
+
+/* =====================================================================
+   FINAL OVERRIDE — SCROLL FIX + CLEAN LAYOUT (maximum specificity)
+   ===================================================================== */
+
+/* Scroll chain: every ancestor is overflow:hidden, only dash-scroll scrolls */
+html body .hub-shell { height: 100vh !important; overflow: hidden !important; }
+html body .hub-main { flex: 1 !important; min-width: 0 !important; min-height: 0 !important; height: 100% !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
+html body .app-panel { display: none !important; }
+html body .app-panel.active { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
+html body .app-root { flex: 1 !important; min-height: 0 !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
+html body .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
+
+/* Hide the old hero title row — balance card IS the hero */
+html body .dash-hero { display: none !important; }
+
+/* Balance hero flush, no extra top gap */
+html body .dash-balance-hero { padding: 18px 22px 110px !important; border-radius: 18px !important; }
+html body .dash-balance-meta { margin-bottom: 4px !important; font-size: 8px !important; }
+html body .dash-balance-amount { font-size: clamp(2rem, 4vw, 3.2rem) !important; }
+
+/* Two-column hero row */
+html body .dash-hero-row { display: grid !important; grid-template-columns: 1fr 260px !important; gap: 12px !important; }
+
+/* 3-column stat row */
+html body .dash-stats-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; padding: 0 !important; }
+
+/* Body */
+html body .dash-body { display: grid !important; grid-template-columns: 380px 1fr !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
+html body .dash-main { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
+html body .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; }
+
+@media (max-width: 1000px) {
+  html body .dash-hero-row { grid-template-columns: 1fr !important; }
+  html body .dash-body { grid-template-columns: 1fr !important; }
+  html body .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GLOBAL FONT SCALE — everything bumped up ~15–20%
+   All rules use html body for maximum specificity without !important abuse
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Base body ── */
+html body {
+  font-size: 15px !important;
+  line-height: 1.6 !important;
+}
+
+/* ── Navigation & shell ── */
+html body .hub-nav-label { font-size: 13px !important; }
+html body .hub-logo-text { font-size: 15px !important; }
+html body .hub-breadcrumb { font-size: 14px !important; }
+html body .hub-nav-badge { font-size: 9.5px !important; }
+html body .hub-tab { font-size: 12px !important; }
+
+/* ── Section dividers / headings ── */
+html body .section-divider { font-size: 10.5px !important; letter-spacing: 2px !important; }
+html body .section-label { font-size: 10.5px !important; }
+html.luminous .section-divider, html.void .section-divider { font-size: 10.5px !important; }
+
+/* ── Stat cards (dashboard top row) ── */
+html body .stat-card-label { font-size: 9.5px !important; letter-spacing: 2px !important; }
+html body .stat-card-value { font-size: 2rem !important; }
+html body .stat-card-sub { font-size: 12px !important; }
+
+/* ── Balance hero ── */
+html body .dash-balance-meta { font-size: 9.5px !important; }
+html body .dash-balance-amount { font-size: clamp(2.4rem, 4.5vw, 3.6rem) !important; }
+
+/* ── Bot cards (engine overview rank table) ── */
+html body .bot-card-head { font-size: 12px !important; }
+html body .bot-card-value { font-size: 1.6rem !important; }
+html body .bot-card-meta { font-size: 12px !important; }
+
+/* ── Exec rows (active engines) ── */
+html body .exec-bot-name { font-size: 14px !important; }
+html body .exec-pl { font-size: 13px !important; }
+html body .exec-status-tag { font-size: 10px !important; }
+html body .exec-flow-box { font-size: 10.5px !important; }
+html body .exec-flow-arrow { font-size: 13px !important; }
+
+/* ── Journal ── */
+html body .journal-bot-label { font-size: 12.5px !important; }
+html body .journal-digits-pill { font-size: 11.5px !important; }
+html body .journal-time-stamp { font-size: 10.5px !important; }
+html body .journal-type-label { font-size: 11px !important; }
+html body .journal-barrier { font-size: 10.5px !important; }
+html body .journal-pl { font-size: 15.5px !important; }
+html body .journal-badge { font-size: 13px !important; width: 30px !important; height: 30px !important; }
+html body .journal-tab { font-size: 11px !important; }
+
+/* ── Settings panel ── */
+html body .settings-label { font-size: 11px !important; }
+html body .settings-hint { font-size: 12.5px !important; line-height: 1.65 !important; }
+html body .settings-toggle-row-label { font-size: 13.5px !important; }
+html body .settings-toggle-row-label .label-sub { font-size: 12px !important; }
+html body .labeled-input label { font-size: 11px !important; }
+html body .labeled-input input, html body .labeled-input select { font-size: 13px !important; }
+html body .labeled-input .input-hint { font-size: 12px !important; }
+
+/* ── Buttons ── */
+html body .btn-primary, html body .btn-secondary, html body .btn-ghost { font-size: 13px !important; }
+html body .engage-btn { font-size: 13px !important; letter-spacing: 1.5px !important; }
+
+/* ── Logs / mono text streams ── */
+html body .log-line, html body .log-entry { font-size: 11.5px !important; line-height: 1.6 !important; }
+html body .auto-log, html body .auto-log-line { font-size: 11.5px !important; }
+
+/* ── Titan engine panels ── */
+html body .titan-input { font-size: 13px !important; }
+html body .titan-label, html body .text-muted { font-size: 11.5px !important; }
+
+/* ── Bot toggles ── */
+html body .bot-toggle-label { font-size: 12px !important; }
+html body .bot-toggles-hint { font-size: 10.5px !important; }
+
+/* ── General text utilities ── */
+html body .text-sm { font-size: 12.5px !important; }
+html body .text-xs { font-size: 11px !important; }
+html body .font-mono { font-size: 12.5px !important; }
+
+/* ── Modal ── */
+html body .modal-title { font-size: 16px !important; }
+html body .modal-body { font-size: 13.5px !important; }
+
 </style>
 <script>
 /* ============================================================
@@ -2080,7 +4709,7 @@ html.void *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20) 
   const state = {
     apiToken: load('hub_api_token', ''),
     accountType: load('hub_account_type', 'demo'), // 'demo' or 'real'
-    appId: (() => { const v = load('hub_app_id', ''); return v || ''; })(), // Alphanumeric App ID from developers.deriv.com
+    appId: (() => { const v = load('hub_app_id', ''); return v || '33ADPhDZXR2F60qhPudXB'; })(), // Alphanumeric App ID from developers.deriv.com
     accountId: '',
     balanceUSD: 0,
     currency: 'USD',
@@ -2117,33 +4746,35 @@ html.void *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20) 
     };
   }
 
-  // Fetches accounts list, picks demo or real, then calls OTP to get authenticated WS URL.
+  // Gets or creates an Options account, then calls OTP to get authenticated WS URL.
+  // Deriv's new REST API: POST /accounts to create/get, then POST /accounts/{id}/otp for WS URL.
   async function getAuthenticatedWsUrl() {
+    const wantDemo = state.accountType !== 'real';
+    const accountType = wantDemo ? 'demo' : 'real';
+
+    // POST /accounts — creates account if it doesn't exist, or returns existing one (200 = exists, 201 = created)
     const accountsResp = await fetch(`${API_BASE}/trading/v1/options/accounts`, {
-      method: 'GET',
+      method: 'POST',
       headers: getAuthHeaders(),
+      body: JSON.stringify({ currency: 'USD', group: 'row', account_type: accountType }),
     });
+
     if (!accountsResp.ok) {
       const err = await accountsResp.json().catch(() => ({}));
-      throw new Error(err.errors?.[0]?.message || `Accounts fetch failed: ${accountsResp.status}`);
+      const msg = err.errors?.[0]?.message || `Accounts fetch failed: ${accountsResp.status}`;
+      throw new Error(msg);
     }
-    const accountsData = await accountsResp.json();
-    const raw = accountsData.data ?? accountsData.accounts ?? accountsData;
-    const accountList = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-    if (!accountList.length) throw new Error('No accounts found — check your PAT scopes (needs trade + account_manage)');
 
-    const wantDemo = state.accountType !== 'real';
-    // Try to match demo/real; Deriv uses is_virtual:true for demo, account_type:'demo' or similar
-    const picked = accountList.find(a => {
-      const isVirtual = a.is_virtual === true || a.account_type === 'demo' || a.type === 'demo' || (a.loginid || a.account_id || '').startsWith('VR');
-      return wantDemo ? isVirtual : !isVirtual;
-    }) || accountList[0];
+    const accountsData = await accountsResp.json();
+    // 200 returns data as object, 201 returns data as array
+    const raw = accountsData.data;
+    const picked = Array.isArray(raw) ? raw[0] : raw;
+    if (!picked) throw new Error('No account returned — check your PAT has the "trade" scope');
 
     const accountId = picked.account_id || picked.id || picked.loginid;
     state.accountId = accountId;
-    state.currency = picked.currency || picked.default_currency || 'USD';
-    // Balance comes from the WS subscription; don't set 0 here, set only if API gives it
-    const apiBal = parseFloat(picked.balance ?? picked.demo_balance ?? picked.real_balance);
+    state.currency = picked.currency || 'USD';
+    const apiBal = parseFloat(picked.balance);
     if (!isNaN(apiBal)) state.balanceUSD = apiBal;
     emit();
 
@@ -2205,6 +4836,7 @@ html.void *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20) 
 
   let statusSocket = null;
   let reconnectTimer = null;
+  let reconnectDelay = 8000;
 
   function connectAccount() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -2212,9 +4844,11 @@ html.void *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20) 
       state.isAuthenticated = false;
       state.connectionStatus = 'disconnected';
       state.connectionError = '';
+      reconnectDelay = 8000;
       emit();
       return;
     }
+    if (!state.appId) state.appId = '33ADPhDZXR2F60qhPudXB';
     try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (e) { /* */ }
     state.connectionStatus = 'connecting';
     state.connectionError = '';
@@ -2225,6 +4859,7 @@ html.void *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20) 
       statusSocket = ws;
       let pingInterval = null;
       ws.onopen = () => {
+        reconnectDelay = 8000; // reset backoff on successful connect
         // Already authenticated via OTP URL — subscribe to live balance
         state.isAuthenticated = true;
         state.connectionStatus = 'connected';
@@ -2255,14 +4890,20 @@ html.void *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20) 
         state.connectionStatus = 'disconnected';
         state.isAuthenticated = false;
         emit();
-        if (state.apiToken) reconnectTimer = setTimeout(connectAccount, 8000);
+        if (state.apiToken) {
+          reconnectTimer = setTimeout(connectAccount, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
+        }
       };
     }).catch((err) => {
       state.isAuthenticated = false;
       state.connectionStatus = 'disconnected';
       state.connectionError = err.message || 'Connection failed — check your PAT and App ID';
       emit();
-      if (state.apiToken) reconnectTimer = setTimeout(connectAccount, 8000);
+      if (state.apiToken) {
+        reconnectTimer = setTimeout(connectAccount, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
+      }
     });
   }
 
@@ -5221,6 +7862,7 @@ window.NexusStrategies=exports;
           this.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
         };
         ws.onopen = () => {
+          this._authDelay = 8000; // reset backoff on success
           // Already authenticated via OTP URL
           const hub = window.HubStore.getState();
           const bal = hub.balanceUSD || 0;
@@ -5285,12 +7927,18 @@ window.NexusStrategies=exports;
         };
         ws.onclose = () => {
           this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-          setTimeout(() => { if (window.HubStore.getState().apiToken) this.authenticate(); }, 8000);
+          if (window.HubStore.getState().apiToken) {
+            this._authDelay = Math.min((this._authDelay || 8000) * 1.5, 60000);
+            setTimeout(() => this.authenticate(), this._authDelay);
+          }
         };
       }).catch((err) => {
         this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
         this.dispatch({ type: 'NOTIFY', message: `Auth failed: ${err.message}`, ntype: 'loss' });
-        setTimeout(() => { if (window.HubStore.getState().apiToken) this.authenticate(); }, 8000);
+        if (window.HubStore.getState().apiToken) {
+          this._authDelay = Math.min((this._authDelay || 8000) * 1.5, 60000);
+          setTimeout(() => this.authenticate(), this._authDelay);
+        }
       });
     }
 
@@ -5325,6 +7973,20 @@ window.NexusStrategies=exports;
   function getWsUrl() { return 'wss://ws.derivws.com/websockets/v3?app_id=1089'; }
   const ANALYSIS_HOLD = 20;
 
+  function showCongratulationsPopup(target) {
+    const existing = document.getElementById('benz-congrats-popup');
+    if (existing) existing.remove();
+    const div = document.createElement('div');
+    div.id = 'benz-congrats-popup';
+    div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(72,255,167,0.12),rgba(0,200,120,0.08));border:1px solid rgba(72,255,167,0.5);border-radius:20px;padding:32px 40px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 60px rgba(72,255,167,0.2),0 20px 60px rgba(0,0,0,0.5);backdrop-filter:blur(24px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;cursor:pointer;min-width:260px';
+    div.innerHTML = `<div style="font-size:2.8rem;margin-bottom:10px">🏆</div><div style="font-size:18px;font-weight:900;letter-spacing:3px;color:#48ffa7;text-transform:uppercase;margin-bottom:8px">Take Profit Hit!</div><div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:14px">Target of <b style="color:#48ffa7">$${Number(target).toFixed(2)}</b> reached 🎉</div><div style="font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.4);text-transform:uppercase">Session Complete · Tap to dismiss</div>`;
+    document.body.appendChild(div);
+    requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translate(-50%,-50%) scale(1)'; });
+    const dismiss = () => { div.style.opacity = '0'; div.style.transform = 'translate(-50%,-50%) scale(0.85)'; setTimeout(() => { try { div.remove(); } catch(_) {} }, 350); };
+    setTimeout(dismiss, 6000);
+    div.onclick = dismiss;
+  }
+
   class TitanEngine {
     constructor(opts) {
       this.id = opts.id;
@@ -5349,6 +8011,7 @@ window.NexusStrategies=exports;
         currentDigit: -1, currentQuote: 0, streak: 0, lastTradedDigit: null,
       };
       this.analysis = null; this.logs = []; this.journal = []; this.cooldownTime = 0;
+      this._processedContracts = new Set();
       this.scannerState = { markets: [], bestMarket: null, topThree: [], isScanning: false, lastUpdate: 0 };
       this.marketHealth = null; this.liveDigit = -1; this.liveQuote = 0;
       this.analysisCountdown = 0; this.strategyPhase = 'idle'; this.strategyWaitReason = '';
@@ -5558,6 +8221,12 @@ window.NexusStrategies=exports;
             const step = st.martingaleStep;
             if (step === 1 || (step > 1 && ((step - 1) % 3 === 0))) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
           }
+          // STEP 4 OVER 0 SHIELD: at step 3 of a 4-cap chain, override everything with OVER 0
+          // for ~90% survival rate rather than risking full session loss (documentary §3.4)
+          if (st.martingaleStep === 3 && cfg.martingaleStopStep === 4) {
+            contractType = 'DIGITOVER'; barrierValue = 0;
+            this.addLog('engine', 'SHIELD', '🛡 STEP 4: OVER 0 SHIELD ACTIVE — maximizing survival');
+          }
         }
       }
       this.pendingTrade = { contractType, barrier: barrierValue, entryTime: Date.now() };
@@ -5586,14 +8255,14 @@ window.NexusStrategies=exports;
         this.executionGuard = false;
         this.stuckWatchdog = null;
         this.emit();
-      }, 20000);
+      }, 45000); // STUCK_WATCHDOG_MS = 45000 per documentary
       this.emit();
     }
 
     completeSession() {
       this.executionGuard = false; this.pendingTrade = null;
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false };
-      const cd = 15;
+      const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
       this.addLog('engine', 'SYSTEM', `COOLING DOWN ${cd}s...`);
       this.runsSinceRefresh++;
@@ -5646,7 +8315,10 @@ window.NexusStrategies=exports;
       this.addLog(win ? 'win' : 'loss', 'BOLT', `Exit: ${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
       // Deduplicate: skip if this contract_id was already journaled
       const contractKey = contract.contract_id ? contract.contract_id.toString() : null;
-      if (contractKey && this.journal.some(j => j.contractId === contractKey)) return;
+      if (contractKey) {
+        if (this._processedContracts.has(contractKey)) return;
+        this._processedContracts.add(contractKey);
+      }
       this.journal = [{
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
         contractId: contractKey,
@@ -5681,8 +8353,15 @@ window.NexusStrategies=exports;
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
       if (cfg.autoPilot && st.active) {
-        if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); this.completeSession(); return; }
+        if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); showCongratulationsPopup(cfg.takeProfit); this.completeSession(); return; }
         if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); this.completeSession(); return; }
+      }
+      // REWAIT mode (documentary §3.2 Mode A): escalate stake but release lock, await fresh signal
+      if (st.isLocked && cfg.martingaleEnabled && cfg.martingaleStopStep === 1 && !st.win && st.inRecovery) {
+        this.executionGuard = false;
+        this.state = { ...this.state, isLocked: false };
+        this.addLog('engine', 'REWAIT', `REWAIT: Loss → awaiting new entry @ $${st.currentStake.toFixed(2)}`);
+        return;
       }
       if (st.isLocked && cfg.martingaleEnabled && st.martingaleStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
         this.completeSession(); return;
@@ -6002,8 +8681,7 @@ window.NexusStrategies=exports;
           <button class="toggle-pill ${s.autoMode ? 'on' : ''}" id="differ-auto"></button>
         </div>
         <div id="differ-auto-panel" style="${s.autoMode ? '' : 'display:none'};padding:12px;background:hsl(var(--bg-soft)/0.6);border-top:1px solid hsl(var(--border)/0.5)">
-          <div style="font-size:10px;color:hsl(var(--muted-foreground));margin-bottom:6px">⚙ SL / TP is controlled from the Dashboard master control</div>
-          <div style="display:grid;grid-template-columns:1fr;gap:8px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
             <div class="labeled-input" style="grid-column:1/-1">
               <span class="input-label">Auto Batch Size</span>
               <input type="number" class="terminal-input" id="differ-autobatch" value="${s.autoBatchSize}">
@@ -6025,6 +8703,8 @@ window.NexusStrategies=exports;
     el('differ-trigger').onchange = (e) => eng.dispatch({ type: 'SET_TRIGGER', value: Math.max(1, parseInt(e.target.value) || 12) });
     el('differ-abortonloss').onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' });
     el('differ-auto').onclick = () => { eng.dispatch({ type: 'TOGGLE_AUTO' }); renderCenterConfig(eng.state); };
+    el('differ-tp') && (el('differ-tp').onchange = (e) => eng.dispatch({ type: 'SET_TP', value: Math.max(0, parseFloat(e.target.value) || 0) }));
+    el('differ-sl') && (el('differ-sl').onchange = (e) => eng.dispatch({ type: 'SET_SL', value: Math.max(0, parseFloat(e.target.value) || 0) }));
     el('differ-autobatch') && (el('differ-autobatch').onchange = (e) => eng.dispatch({ type: 'SET_AUTO_BATCH', value: Math.max(1, parseInt(e.target.value) || 1) }));
     el('differ-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
     el('differ-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
@@ -6131,7 +8811,7 @@ window.NexusStrategies=exports;
       <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0">
         <div>
           <h1 class="font-orbitron text-primary" style="margin:0;font-size:1.1rem;letter-spacing:4px">${label}</h1>
-          <div class="text-muted" style="font-size:9px;letter-spacing:2px" id="${rootId}-subtitle">TITAN OMEGA · SCANNING</div>
+          <div class="text-muted" style="font-size:9px;letter-spacing:2px" id="${rootId}-subtitle">TITAN OMEGA · ANALYSIS HUB · MARTINGALE ENGINE · FULL AUTOMATION · ANTI-PREDICTION LOGIC</div>
         </div>
         <div style="flex:1"></div>
         <div class="panel" id="${rootId}-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
@@ -6402,8 +9082,8 @@ window.NexusStrategies=exports;
           <button class="titan-toggle ${c.autoPilot ? 'on' : ''}" id="${rootId}-auto" onclick="event.stopPropagation()"></button>
         </div>
         <div id="${rootId}-auto-panel" class="auto-body" style="${c.autoPilot ? '' : 'display:none'}">
+
           <div style="display:flex;flex-direction:column;gap:6px">
-            <div class="auto-rescan-note" style="font-size:10px;color:hsl(var(--muted-foreground));margin-bottom:4px">⚙ SL / TP is controlled from the Dashboard master control</div>
             <div class="settings-toggle-row">
               <div class="settings-toggle-row-label">
                 <span class="label-title">♻️ Auto-Refresh</span>
@@ -6436,6 +9116,8 @@ window.NexusStrategies=exports;
     if (autoHdr) autoHdr.onclick = () => { const p = el(`${rootId}-auto-panel`); if (p) { p.style.display = p.style.display === 'none' ? '' : 'none'; } };
     el(`${rootId}-auto`).onclick = (e) => { e.stopPropagation(); engine.setConfig({ autoPilot: !c.autoPilot }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     el(`${rootId}-mult`) && (el(`${rootId}-mult`).onchange = (e) => engine.setConfig({ martingaleMultiplier: Math.max(1.01, parseFloat(e.target.value) || c.martingaleMultiplier) }));
+    el(`${rootId}-tp`) && (el(`${rootId}-tp`).onchange = (e) => engine.setConfig({ takeProfit: Math.max(0, parseFloat(e.target.value) || 0) }));
+    el(`${rootId}-sl`) && (el(`${rootId}-sl`).onchange = (e) => engine.setConfig({ stopLoss: Math.max(0, parseFloat(e.target.value) || 0) }));
     el(`${rootId}-autorefresh`) && (el(`${rootId}-autorefresh`).onclick = () => { engine.setConfig({ autoRefresh: !c.autoRefresh }); renderCenterConfig(engine, rootId, engine.getSnapshot()); });
     // Stop step dropdown
     const stopSel = el(`${rootId}-stop-select`);
@@ -6494,7 +9176,76 @@ window.NexusStrategies=exports;
           <span class="journal-net ${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
         </div>`).join('') || '<div class="text-muted" style="text-align:center;padding:20px;font-size:10px">NO TRADES RECORDED</div>'}
       </div>
-      <button class="strategy-btn" id="${rootId}-clear" style="width:100%;margin-top:8px;color:hsl(var(--destructive))">✕ CLEAR STATS</button>`;
+      <button class="strategy-btn" id="${rootId}-clear" style="width:100%;margin-top:8px;color:hsl(var(--destructive))">✕ CLEAR STATS</button>
+      <div style="margin-top:14px">
+        <button id="${rootId}-audit-toggle" style="width:100%;background:hsl(var(--card));border:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));border-radius:var(--radius-sm);padding:8px 12px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;text-align:left;display:flex;align-items:center;justify-content:space-between" onclick="(function(btn){const p=btn.nextElementSibling;const open=p.style.display!=='none';p.style.display=open?'none':'block';btn.querySelector('.audit-arrow').textContent=open?'▶':'▼';})(this)">
+          <span>🔍 ENGINE LOGIC AUDIT</span><span class="audit-arrow">▶</span>
+        </button>
+        <div style="display:none;margin-top:8px;padding:10px 12px;background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:9px;line-height:1.9;color:hsl(var(--muted-foreground))">
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin-bottom:6px;font-weight:700">PART I — ANALYSIS HUB</div>
+          <div>✅ Singleton WebSocket — all engines share one socket</div>
+          <div>✅ Digit extracted via quote.toFixed(2) last char</div>
+          <div>✅ Short-term buffer: 200 ticks · Long-term: 120 ticks</div>
+          <div>✅ analyzeDigits — hot &gt;15%, cold &lt;8% thresholds</div>
+          <div>✅ Weighted trend: older half ×1, newer half ×3</div>
+          <div>✅ Momentum: last 10 vs prev 10, normalised 0–100</div>
+          <div>✅ Volatility: mean |d[i]−d[i−1]|, scaled from 100</div>
+          <div>✅ oddDigitWeight — sum pct of digits 1,3,5,7,9</div>
+          <div>✅ rareDigits: 4+ digits under 8% of window</div>
+          <div>✅ dominantOdd: odd weight &gt; 55%</div>
+          <div>✅ stablePattern: window ≥ 25 ticks</div>
+          <div>✅ momentumUp: score &gt; 55</div>
+          <div>✅ lowVolatility: volatilityIndex &gt; 50</div>
+          <div>✅ Probability formula: additive, capped at 100</div>
+          <div>✅ STRONG_BUY ≥85 · BUY ≥70 · AVOID &lt;50 · HOLD else</div>
+          <div>✅ MTF: short×0.6 + long×0.4 confidence</div>
+          <div>✅ ANALYSIS_HOLD = 20s snapshot freeze</div>
+          <div>✅ Market health gate: POOR blocks chain start</div>
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin:8px 0 6px;font-weight:700">PART I — 9 STRATEGIES</div>
+          <div>✅ S1 NORMAL: minSignal 80, minEvenStreak 3 → ODD</div>
+          <div>✅ S2 EVEN FLOOD: 60%+ even/30T AND last 5 all even</div>
+          <div>✅ S3 ODD BOUNCE: E→O→E pattern, 3+ confirms ≥40%</div>
+          <div>✅ S4 PARITY SWITCH: 5 consec evens + odd &lt;30% in 20T</div>
+          <div>✅ S5 GHOST DIGIT: odd 4T ago, 3 even gap, 2+ confirms</div>
+          <div>✅ S6 DOUBLE TAP: same odd 2× in 5T gap≥2, 3+ in 20T</div>
+          <div>✅ S7 RAPID SCALP: last 5 all even, ≤2 odds/15T, no consec</div>
+          <div>✅ S8 ODD STARVATION: odd &lt;35% in 100T, absent 8 ticks</div>
+          <div>✅ S9 EVEN AVALANCHE: inverts contract type (EVEN ride)</div>
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin:8px 0 6px;font-weight:700">PART II — MARTINGALE ENGINE</div>
+          <div>✅ Multiplier: 1.8× (not pure 2.0×)</div>
+          <div>✅ Default stopStep: 2 · Unlimited mode: 999</div>
+          <div>✅ calculateNextStake: toFixed(2) two-decimal precision</div>
+          <div>✅ WIN resets: step→0, inRecovery→false, stake→base</div>
+          <div>✅ LOSS: step++, stake×=multiplier, inRecovery=true</div>
+          <div>✅ stepCap hit → CRITICAL log → completeSession()</div>
+          <div>✅ Smart Recovery: odd &lt;50% in 20T → bet ODD (contrarian)</div>
+          <div>✅ ALT-A flips at steps 2,5,8… ((step-2)%3===0)</div>
+          <div>✅ ALT-B flips at step 1 and steps 4,7,10… (default ON)</div>
+          <div>✅ S9 AVALANCHE inverts contract type for anti-pattern</div>
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin:8px 0 6px;font-weight:700">PART III — FULL AUTOMATION</div>
+          <div>✅ completeSession: randomised cooldown 5–25s</div>
+          <div>✅ Auto-refresh: socket reconnect every 4 runs</div>
+          <div>✅ Golden market: HEALTHY + prob≥75 + not AVOID</div>
+          <div>✅ autoPilot: picks best golden market on restart</div>
+          <div>✅ Market score gate: score &gt;70 + not POOR health</div>
+          <div>✅ Stuck watchdog: stale tick &gt;12s → reconnect</div>
+          <div>✅ Stuck trade: &gt;45s pending → release lock</div>
+          <div>✅ Mode-switch cooldown: random 10–29s enforced</div>
+          <div>⚠️ API key shuffle (every 5 runs): not in this build</div>
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin:8px 0 6px;font-weight:700">PART IV — ANTI-PREDICTION LOGIC</div>
+          <div>✅ Randomised cooldown timing (5–25s per session)</div>
+          <div>✅ Stake drifts from round numbers via 1.8× toFixed(2)</div>
+          <div>✅ S9 inverts parity — confuses broker pattern matching</div>
+          <div>✅ ALT-A/B recovery flips break martingale fingerprint</div>
+          <div>✅ Market hot-swap via golden scanner each restart</div>
+          <div>✅ quote.toFixed(2) digit extraction causes tick drift</div>
+          <div>✅ 20s analysis hold randomises tick-to-trade latency</div>
+          <div>✅ Socket reconnect on closed socket before retry</div>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid hsl(var(--border));color:hsl(var(--win));font-size:8px;letter-spacing:1px">
+            34 CONFIRMED ✅ &nbsp;·&nbsp; 1 NOT IN BUILD ⚠️
+          </div>
+        </div>
+      </div>`;
     if (global.setHtmlIfChanged(el(`${rootId}-right`), rightHtml)) {
       el(`${rootId}-clear`).onclick = () => engine.clearStats();
     }
@@ -6647,88 +9398,224 @@ window.NexusStrategies=exports;
   function buildShell(root) {
     root.innerHTML = `
       <div class="dash-scroll">
-        <div class="dash-hero">
-          <div class="dash-hero-meta"><span class="dash-hero-dot"></span>Last update: <span id="dash-last-update">just now</span></div>
-          <h1 class="dash-hero-title">BENZ<br><span style="background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--secondary)));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">CLUB</span> 🏆</h1>
-        </div>
-        <div class="glass-panel-glow" id="dash-master-panel" style="padding:16px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-          <div style="flex:1;min-width:180px">
-            <div style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:hsl(var(--primary));margin-bottom:4px">MASTER CONTROL</div>
-            <div class="text-muted" style="font-size:11px" id="dash-master-status">0/4 bots engaged</div>
+
+        <!-- ═══ BALANCE HERO + YIELD RING ROW ═══ -->
+        <div class="dash-hero-row">
+
+          <!-- Balance Hero Card -->
+          <div class="dash-balance-hero" id="dash-balance-hero-card">
+            <div class="dash-balance-meta">
+              <span>Trading Hub</span>
+              <span style="margin-left:auto;font-size:8px;opacity:0.5" id="dash-last-update">just now</span>
+            </div>
+            <div class="dash-balance-amount" id="dash-balance">
+              USD 0<span class="bal-cents">.00</span>
+              <span class="bal-badge" id="dash-balance-badge">OFFLINE</span>
+            </div>
+            <div class="dash-balance-row2">
+              <span class="dash-balance-currency" id="dash-account-sub">Not connected — add a token in Settings</span>
+            </div>
+            <!-- Animated sine wave -->
+            <div class="hero-graph-wrap">
+              <svg class="dash-sine-svg" viewBox="0 0 700 110" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="sineGrad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%"   stop-color="#00f2fe"/>
+                    <stop offset="50%"  stop-color="#7b61ff"/>
+                    <stop offset="100%" stop-color="#ff007a"/>
+                  </linearGradient>
+                  <linearGradient id="sineGrad2" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%"   stop-color="#ff007a"/>
+                    <stop offset="100%" stop-color="#7b61ff"/>
+                  </linearGradient>
+                  <linearGradient id="sineArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stop-color="#7b61ff" stop-opacity="0.18"/>
+                    <stop offset="100%" stop-color="#7b61ff" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path class="sine-area" d="M0,75 C87.5,75 87.5,30 175,30 C262.5,30 262.5,75 350,75 C437.5,75 437.5,30 525,30 C612.5,30 612.5,75 700,75 L700,110 L0,110 Z"/>
+                <path class="sine-path-secondary" d="M0,55 C87.5,55 87.5,20 175,20 C262.5,20 262.5,55 350,55 C437.5,55 437.5,20 525,20 C612.5,20 612.5,55 700,55"/>
+                <path class="sine-path-glow" d="M0,75 C87.5,75 87.5,30 175,30 C262.5,30 262.5,75 350,75 C437.5,75 437.5,30 525,30 C612.5,30 612.5,75 700,75"/>
+                <circle class="sine-dot" cx="350" cy="75" r="5" fill="#00f2fe" stroke="#0B0B0F" stroke-width="2"/>
+              </svg>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+
+          <!-- Yield Efficiency Ring -->
+          <div class="dash-yield-card">
+            <div class="dash-yield-label">Yield Efficiency</div>
+            <div class="dash-ring-wrap">
+              <svg class="dash-ring-svg" viewBox="0 0 120 120">
+                <defs>
+                  <linearGradient id="ringGrad1" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%"   stop-color="#00f2fe"/>
+                    <stop offset="100%" stop-color="#ff007a"/>
+                  </linearGradient>
+                  <linearGradient id="ringGrad2" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%"   stop-color="#7b61ff"/>
+                    <stop offset="100%" stop-color="#00f2fe"/>
+                  </linearGradient>
+                </defs>
+                <circle class="ring-track" cx="60" cy="60" r="50"/>
+                <circle class="ring-fill-1" cx="60" cy="60" r="50" id="dash-ring-fill"/>
+                <circle class="ring-fill-2" cx="60" cy="60" r="50"/>
+              </svg>
+              <div class="ring-center-text">
+                <div class="ring-pct" id="dash-ring-pct">—</div>
+                <div class="ring-pct-label">Win Rate</div>
+              </div>
+            </div>
+            <div class="dash-yield-rows">
+              <div class="dash-yield-row">
+                <span class="dash-yield-dot" style="background:hsl(var(--primary));box-shadow:0 0 8px hsl(var(--primary))"></span>
+                <span class="dash-yield-row-name">Win Rate</span>
+                <span class="dash-yield-row-apy" id="dash-yield-wr" style="color:hsl(var(--primary))">0.0%</span>
+              </div>
+              <div class="dash-yield-row">
+                <span class="dash-yield-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>
+                <span class="dash-yield-row-name">Net P&amp;L</span>
+                <span class="dash-yield-row-apy" id="dash-yield-pf" style="color:hsl(var(--secondary))">$0.00</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <!-- ═══ END HERO ROW ═══ -->
+
+        <!-- ═══ MASTER CONTROL ═══ -->
+        <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <div style="font-family:'Outfit',sans-serif;font-size:8px;font-weight:900;letter-spacing:4px;text-transform:uppercase;color:hsl(var(--primary));margin-bottom:6px;display:flex;align-items:center;gap:8px">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg>
+              MASTER CONTROL
+            </div>
+            <div class="text-muted" style="font-size:11.5px;font-weight:600" id="dash-master-status">0 / 4 engines engaged</div>
+          </div>
+          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
             <div style="display:flex;flex-direction:column;gap:4px">
-              <label style="font-family:'Outfit',sans-serif;font-size:8px;font-weight:700;letter-spacing:2px;color:hsl(var(--loss));text-transform:uppercase">Stop Loss ($)</label>
-              <select id="dash-master-sl" style="background:hsl(var(--card));border:1px solid hsl(var(--loss)/0.4);border-radius:8px;color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:12px;padding:6px 10px;cursor:pointer;min-width:90px">
-                <option value="5">$5</option><option value="10" selected>$10</option><option value="15">$15</option><option value="20">$20</option><option value="25">$25</option><option value="50">$50</option><option value="100">$100</option>
-              </select>
+              <label style="font-size:8px;letter-spacing:2.5px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--win));text-transform:uppercase;display:flex;align-items:center;gap:4px">
+                <svg viewBox="0 0 10 10" width="8" height="8" fill="hsl(var(--win))"><polygon points="5,1 9,9 1,9"/></svg>
+                Stop Profit
+              </label>
+              <input id="dash-master-tp" type="number" min="0" step="1" value="50" style="width:86px;padding:8px 10px;border:1px solid hsl(var(--win)/0.35);border-radius:10px;background:hsl(var(--win)/0.07);color:hsl(var(--win));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
             </div>
             <div style="display:flex;flex-direction:column;gap:4px">
-              <label style="font-family:'Outfit',sans-serif;font-size:8px;font-weight:700;letter-spacing:2px;color:hsl(var(--win));text-transform:uppercase">Stop Profit ($)</label>
-              <select id="dash-master-tp" style="background:hsl(var(--card));border:1px solid hsl(var(--win)/0.4);border-radius:8px;color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:12px;padding:6px 10px;cursor:pointer;min-width:90px">
-                <option value="5">$5</option><option value="10">$10</option><option value="15" selected>$15</option><option value="20">$20</option><option value="25">$25</option><option value="50">$50</option><option value="100">$100</option>
-              </select>
+              <label style="font-size:8px;letter-spacing:2.5px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--loss));text-transform:uppercase;display:flex;align-items:center;gap:4px">
+                <svg viewBox="0 0 10 10" width="8" height="8" fill="hsl(var(--loss))"><polygon points="5,9 9,1 1,1"/></svg>
+                Stop Loss
+              </label>
+              <input id="dash-master-sl" type="number" min="0" step="1" value="20" style="width:86px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
             </div>
           </div>
-          <button id="dash-master-toggle" style="margin:0;padding:11px 28px;font-size:11px;letter-spacing:2px;border-radius:999px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:800;cursor:pointer;transition:all .2s;box-shadow:0 0 24px hsl(var(--primary)/.3),0 4px 16px hsl(var(--primary)/.2)">ENGAGE NOW</button>
+          <button id="dash-master-toggle" style="margin:0;padding:12px 36px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden">
+            ⚡ ENGAGE ALL
+          </button>
         </div>
+
+        <!-- ═══ STAT CARDS ═══ -->
         <div class="dash-stats-row">
           <div class="glass-panel stat-card">
-            <div class="stat-card-top"><span class="stat-card-label">Net P&amp;L</span><span class="stat-card-icon" style="background:hsl(var(--win)/.12);border-color:hsl(var(--win)/.2);color:hsl(var(--win))">↑</span></div>
-            <div class="stat-card-value" id="dash-netpl">$0.00</div>
-            <div class="stat-card-sub" id="dash-netpl-sub">0 closed trades</div>
-          </div>
-          <div class="glass-panel stat-card">
-            <div class="stat-card-top"><span class="stat-card-label">Win Rate</span><span class="stat-card-icon" style="background:hsl(var(--primary)/.12);border-color:hsl(var(--primary)/.2);color:hsl(var(--primary))">%</span></div>
+            <div class="stat-card-top">
+              <span class="stat-card-label">Win Rate</span>
+              <span class="stat-card-icon" style="background:hsl(var(--win)/.12);border-color:hsl(var(--win)/.2);color:hsl(var(--win))">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg>
+              </span>
+            </div>
             <div class="stat-card-value" id="dash-winrate">0.0%</div>
             <div class="stat-card-sub" id="dash-winrate-sub">0 wins · 0 losses</div>
           </div>
           <div class="glass-panel stat-card">
-            <div class="stat-card-top"><span class="stat-card-label">Won / Lost</span><span class="stat-card-icon" style="background:hsl(var(--secondary)/.12);border-color:hsl(var(--secondary)/.2);color:hsl(var(--secondary))">$</span></div>
+            <div class="stat-card-top">
+              <span class="stat-card-label">Won / Lost</span>
+              <span class="stat-card-icon" style="background:hsl(var(--secondary)/.12);border-color:hsl(var(--secondary)/.2);color:hsl(var(--secondary))">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M8 3l5 5-5 5"/></svg>
+              </span>
+            </div>
             <div class="stat-card-value" id="dash-wonlost" style="font-size:1.4rem"></div>
             <div class="stat-card-sub">Across all engines</div>
           </div>
           <div class="glass-panel stat-card">
-            <div class="stat-card-top"><span class="stat-card-label">Balance</span><span class="stat-card-icon" style="background:hsl(var(--primary-2)/.12);border-color:hsl(var(--primary-2)/.2);color:hsl(var(--primary))">◈</span></div>
-            <div class="stat-card-value" id="dash-balance">USD 0.00</div>
-            <div class="stat-card-sub" id="dash-account-sub">Not connected</div>
+            <div class="stat-card-top">
+              <span class="stat-card-label">Net P&amp;L</span>
+              <span class="stat-card-icon" style="background:hsl(var(--win)/.12);border-color:hsl(var(--win)/.2);color:hsl(var(--win))">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12V4M4 8l4-4 4 4"/></svg>
+              </span>
+            </div>
+            <div class="stat-card-value" id="dash-netpl">$0.00</div>
+            <div class="stat-card-sub" id="dash-netpl-sub">0 closed</div>
           </div>
         </div>
+
+        <!-- ═══ MAIN BODY ═══ -->
         <div class="dash-body">
-          <div class="dash-main">
-            <div class="glass-panel dash-equity-panel">
-              <div class="section-divider" style="margin-bottom:6px">📈 Equity Curve</div>
-              <div class="text-muted" style="font-size:10.5px;margin-bottom:10px;font-family:'DM Mono',monospace">Cumulative P&amp;L across all engines — most recent last</div>
-              <div id="dash-equity-wrap"></div>
-            </div>
-            <div class="glass-panel" style="padding:14px 16px">
-              <div class="section-divider" style="margin-bottom:12px">⚡ Engine Overview</div>
-              <div class="rank-table" id="dash-perbot"></div>
-            </div>
-          </div>
+          <!-- ═══ SIDEBAR (now LEFT) ═══ -->
           <div class="dash-sidebar">
+
+            <!-- Active engines -->
             <div class="glass-panel exec-panel">
-              <div class="section-divider" style="margin-bottom:8px">⚙ Active Engines</div>
+              <div class="section-divider" style="margin-bottom:10px">ACTIVE ENGINES</div>
               <div id="dash-bot-toggles" class="bot-toggles"></div>
               <div id="dash-exec-list" class="exec-list"></div>
             </div>
+
+            <!-- Trade journal -->
             <div class="glass-panel journal-panel">
-              <div class="section-divider" style="margin-bottom:8px">📋 Trade Journal</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
+              </div>
               <div class="journal-tabs" id="dash-journal-tabs"></div>
               <div class="journal-list" id="dash-journal-list"></div>
             </div>
+
+          </div>
+
+          <div class="dash-main">
+
+            <!-- Equity chart -->
+            <div class="glass-panel dash-equity-panel">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                <div>
+                  <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
+                  <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · all engines · most recent last</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
+                  <span style="width:20px;height:2px;background:linear-gradient(90deg,hsl(var(--win)),hsl(var(--secondary)));border-radius:2px;display:inline-block"></span>
+                  P&amp;L
+                </div>
+              </div>
+              <div id="dash-equity-wrap"></div>
+            </div>
+
+            <!-- Engine overview -->
+            <div class="glass-panel" style="padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div class="section-divider" style="margin-bottom:0;flex:1">ENGINE OVERVIEW</div>
+                <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">4 BOTS</div>
+              </div>
+              <div class="rank-table" id="dash-perbot"></div>
+            </div>
+
           </div>
         </div>
       </div>`;
   }
 
   function buildEquitySVG(points) {
-    const w = 680, h = 220, pad = 28;
+    const w = 680, h = 200, pad = 28;
     if (points.length < 2) {
       return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
-        <rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}" fill="none" stroke="hsl(var(--border)/0.4)" stroke-dasharray="4,4" rx="8"/>
-        <text x="${w/2}" y="${h/2-8}" text-anchor="middle" fill="hsl(var(--muted-foreground))" font-size="13" font-family="Outfit,sans-serif" letter-spacing="1">NO EQUITY DATA YET</text>
-        <text x="${w/2}" y="${h/2+12}" text-anchor="middle" fill="hsl(var(--muted-foreground))" font-size="10" font-family="DM Mono,monospace">Curve appears after first closed trade</text>
+        <defs>
+          <linearGradient id="empty-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="hsl(var(--primary))" stop-opacity="0.06"/>
+            <stop offset="100%" stop-color="hsl(var(--secondary))" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}"
+          fill="url(#empty-grad)" stroke="hsl(var(--border))" stroke-width="0.5" stroke-dasharray="4,4" rx="10"/>
+        <text x="${w/2}" y="${h/2-10}" text-anchor="middle" fill="hsl(var(--muted-foreground))"
+          font-size="11" font-family="Outfit,sans-serif" letter-spacing="3" font-weight="700" text-transform="uppercase">NO EQUITY DATA</text>
+        <text x="${w/2}" y="${h/2+12}" text-anchor="middle" fill="hsl(var(--muted-foreground))"
+          font-size="9" font-family="DM Mono,monospace" opacity="0.6">Curve appears after first closed trade</text>
       </svg>`;
     }
     const values = points.map((p) => p.cumulative);
@@ -6741,15 +9628,40 @@ window.NexusStrategies=exports;
     const area = `${line} L${xAt(points.length - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`;
     const zeroY = yAt(0).toFixed(1);
     const last = values[values.length - 1];
-    const lineColor = last >= 0 ? 'hsl(var(--win))' : 'hsl(var(--primary))';
+    const isPos = last >= 0;
+    const lineColor = isPos ? 'hsl(var(--win))' : 'hsl(var(--primary))';
+    const lineColor2 = isPos ? 'hsl(var(--secondary))' : 'hsl(var(--loss))';
+    // Grid lines
+    const gridLines = [0.25, 0.5, 0.75].map(t => {
+      const y = (pad + t * (h - pad*2)).toFixed(1);
+      return `<line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}" stroke="hsl(var(--border))" stroke-width="0.5" opacity="0.4"/>`;
+    }).join('');
     return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
-      <defs><linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.30"/>
-        <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
-      </linearGradient></defs>
-      <line x1="${pad}" y1="${zeroY}" x2="${w - pad}" y2="${zeroY}" stroke="hsl(var(--border))" stroke-width="1" stroke-dasharray="3,3"/>
+      <defs>
+        <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.28"/>
+          <stop offset="70%" stop-color="${lineColor}" stop-opacity="0.06"/>
+          <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="eqline" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="${lineColor}"/>
+          <stop offset="100%" stop-color="${lineColor2}"/>
+        </linearGradient>
+        <filter id="eq-glow">
+          <feGaussianBlur stdDeviation="2" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      ${gridLines}
+      <line x1="${pad}" y1="${zeroY}" x2="${w - pad}" y2="${zeroY}"
+        stroke="hsl(var(--border-bright))" stroke-width="1" stroke-dasharray="3,4" opacity="0.6"/>
       <path d="${area}" fill="url(#eqfill)" stroke="none"/>
-      <path d="${line}" fill="none" stroke="${lineColor}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${line}" fill="none" stroke="url(#eqline)" stroke-width="2.5"
+        stroke-linejoin="round" stroke-linecap="round" filter="url(#eq-glow)"/>
+      <!-- End dot -->
+      <circle cx="${xAt(points.length-1).toFixed(1)}" cy="${yAt(last).toFixed(1)}" r="4"
+        fill="${lineColor}" stroke="hsl(var(--bg))" stroke-width="2"
+        style="filter:drop-shadow(0 0 6px ${lineColor})"/>
     </svg>`;
   }
 
@@ -6783,8 +9695,28 @@ window.NexusStrategies=exports;
 
     el('dash-wonlost', root).innerHTML = `<span class="text-success">+$${wonUSD.toFixed(0)}</span> <span class="text-muted" style="font-size:1rem">/</span> <span class="text-destructive">-$${lostUSD.toFixed(0)}</span>`;
 
-    el('dash-balance', root).textContent = `${hub.currency || 'USD'} ${hub.balanceUSD.toFixed(2)}`;
+    // ── Balance Hero Card ──
+    const balStr = hub.balanceUSD.toFixed(2).split('.');
+    const balHeroEl = el('dash-balance', root);
+    if (balHeroEl) {
+      balHeroEl.innerHTML = `${hub.currency || 'USD'} ${balStr[0]}<span class="bal-cents">.${balStr[1]}</span><span class="bal-badge" id="dash-balance-badge">${hub.isAuthenticated ? 'LIVE' : 'OFFLINE'}</span>`;
+    }
     el('dash-account-sub', root).textContent = hub.accountId ? `Account ${hub.accountId} · ${hub.isAuthenticated ? 'Live' : 'Offline'}` : 'Not connected — add a token in Settings';
+
+    // ── Yield Ring ──
+    const ringPctEl = el('dash-ring-pct', root);
+    const ringFillEl = el('dash-ring-fill', root);
+    const wrNum = parseFloat(wr);
+    if (ringPctEl) ringPctEl.textContent = `${wr}%`;
+    if (ringFillEl) {
+      const circumference = 2 * Math.PI * 50; // r=50
+      const filled = (wrNum / 100) * circumference;
+      ringFillEl.style.strokeDasharray = `${filled.toFixed(1)} ${circumference.toFixed(1)}`;
+    }
+    const yieldWrEl = el('dash-yield-wr', root);
+    const yieldPfEl = el('dash-yield-pf', root);
+    if (yieldWrEl) yieldWrEl.textContent = `${wr}%`;
+    if (yieldPfEl) yieldPfEl.textContent = `${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`;
 
     // Deduplicate entries by id to prevent double-counting from multiple socket listeners
     const seenIds = new Set();
@@ -6853,16 +9785,40 @@ window.NexusStrategies=exports;
     });
 
     const execHtml = botIds.map((id) => {
-      const flow = getBotFlowStage(engines[id], id);
+      const engine = engines[id];
+      const flow = getBotFlowStage(engine, id);
       const botOn = global.HubStore.isBotEnabled(id);
-      const statusTag = !botOn ? 'DISABLED' : flow.engaged ? 'ENGAGED' : 'STANDBY';
+
+      // Cooldown countdown
+      let cdSecs = 0;
+      if (engine) {
+        if (id === 'differ') cdSecs = (engine.state && engine.state.cooldownRemaining) || 0;
+        else cdSecs = engine.cooldownTime || 0;
+      }
+      const isCd = cdSecs > 0;
+      const statusTag = !botOn ? 'DISABLED' : isCd ? `CD ${cdSecs}s` : flow.engaged ? 'ENGAGED' : 'STANDBY';
+      const statusClass = !botOn ? '' : isCd ? ' is-cd' : flow.engaged ? ' is-on' : '';
+
       const resultLabel = flow.result === 'win' ? 'WIN' : flow.result === 'loss' ? 'LOSS' : flow.result === 'recovery' ? 'RECOVERY' : '—';
       const resultGlow = flow.result === 'win' ? 'glow-win' : flow.result === 'loss' ? 'glow-loss' : flow.result === 'recovery' ? 'glow-recovery' : '';
-      return `<div class="exec-row" style="${botOn ? '' : 'opacity:0.55'}">
+
+      // Per-bot P&L
+      const b = perBot[id];
+      const plStr = (b.profit >= 0 ? '+' : '') + '$' + b.profit.toFixed(2);
+      const plClass = b.profit >= 0 ? 'text-success' : 'text-destructive';
+
+      return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" style="${botOn ? '' : 'opacity:0.45'}">
         <div class="exec-row-head">
-          <span><span class="bot-card-dot" style="background:${BOT_META[id].dot};display:inline-block;margin-right:6px"></span>${BOT_META[id].label}</span>
-          <span class="exec-status-tag${flow.engaged && botOn ? ' is-on' : ''}">${statusTag}</span>
+          <span class="exec-bot-name">
+            <span class="bot-card-dot exec-dot" style="background:${BOT_META[id].dot};box-shadow:0 0 8px ${BOT_META[id].dot}"></span>
+            ${BOT_META[id].label}
+          </span>
+          <span class="exec-row-right">
+            <span class="exec-pl ${plClass}">${plStr}</span>
+            <span class="exec-status-tag${statusClass}">${statusTag}</span>
+          </span>
         </div>
+        ${isCd ? `<div class="exec-cd-bar"><div class="exec-cd-fill" style="animation:exec-cd-drain ${cdSecs}s linear forwards"></div></div>` : ''}
         <div class="exec-flow">
           <div class="exec-flow-box${flow.analysis ? ' glow-analysis' : ''}">Analysis</div>
           <span class="exec-flow-arrow">→</span>
@@ -6889,29 +9845,40 @@ window.NexusStrategies=exports;
     const filter = global._dashJournalFilter || 'all';
     // Merge live session entries with Deriv historical entries
     const derivHistory = (global.HubStore.getDerivHistory ? global.HubStore.getDerivHistory() : []);
-    // Load persisted entries from localStorage to fill the equity curve on refresh
-    let cachedEntries = [];
-    try {
-      const raw = localStorage.getItem('benz_journal_cache');
-      if (raw) cachedEntries = JSON.parse(raw).filter(c => !allEntries.some(e => (e.contractId || e.id) === (c.contractId || c.id)));
-    } catch(_) {}
-    let allWithHistory = [...cachedEntries, ...allEntries];
-    if (filter === 'all' && derivHistory.length > 0 && allWithHistory.length === 0) {
+    let allWithHistory = [...allEntries];
+    if (filter === 'all' && derivHistory.length > 0 && allEntries.length === 0) {
       allWithHistory = derivHistory.map(h => ({ ...h, isHistory: true }));
     }
     const filtered = (filter === 'all' ? allWithHistory : allWithHistory.filter((e) => e.botId === filter))
       .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 80);
-    const journalHtml = filtered.length ? filtered.map((j) => `
-      <div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}">
-        <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
-        ${j.isHistory
-          ? `<span class="text-muted" style="font-size:10px;background:hsl(var(--primary-2)/0.12);padding:2px 6px;border-radius:4px">DERIV</span>`
-          : `<span class="text-muted" style="font-size:11px">${BOT_META[j.botId] ? BOT_META[j.botId].label : j.botId}</span>`
-        }
-        ${(j.entryDigit != null || j.exitDigit != null) ? `<span class="journal-digits" style="font-size:12px"><b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit ?? '—'}</b></span>` : ''}
-        <span style="margin-left:auto;font-size:11px">${j.time}</span>
-        <span class="${j.type === 'win' ? 'text-success' : 'text-destructive'}" style="font-weight:700;font-size:13px">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
-      </div>`).join('') : '<div class="exec-empty">No trades recorded yet — connect your Deriv account in Settings to load history</div>';
+    const journalHtml = filtered.length ? filtered.map((j) => {
+      const isWin = j.type === 'win';
+      const botLabel = j.isHistory ? 'DERIV' : (BOT_META[j.botId] ? BOT_META[j.botId].label : (j.botId || '—'));
+      const botDot = j.isHistory ? 'hsl(var(--secondary))' : (BOT_META[j.botId] ? BOT_META[j.botId].dot : 'hsl(var(--muted-foreground))');
+      const hasDigits = j.entryDigit != null || j.exitDigit != null;
+      const plStr = (j.profit >= 0 ? '+' : '') + '$' + j.profit.toFixed(2);
+      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}">
+        <div class="journal-badge-wrap">
+          <span class="journal-badge ${j.type}">${isWin ? 'W' : 'L'}</span>
+        </div>
+        <div class="journal-entry-body">
+          <div class="journal-entry-top">
+            <span class="journal-bot-label" style="color:${botDot}">
+              <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${botDot};box-shadow:0 0 6px ${botDot};margin-right:4px;vertical-align:middle"></span>
+              ${botLabel}
+            </span>
+            ${hasDigits ? `<span class="journal-digits-pill"><b>${j.entryDigit ?? '—'}</b> → <b>${j.exitDigit ?? '—'}</b></span>` : ''}
+            <span class="journal-time-stamp">${j.time || ''}</span>
+          </div>
+          <div class="journal-entry-bottom">
+            <span class="journal-type-label ${j.type}">${isWin ? '▲ Win' : '▼ Loss'}</span>
+            ${j.barrier != null ? `<span class="journal-barrier">Barrier ${j.barrier}</span>` : ''}
+            ${j.contract_type ? `<span class="journal-barrier">${j.contract_type}</span>` : ''}
+          </div>
+        </div>
+        <div class="journal-pl ${isWin ? 'win' : 'loss'}">${plStr}</div>
+      </div>`;
+    }).join('') : '<div class="exec-empty">No trades yet — connect your account in Settings</div>';
     global.setHtmlIfChanged(el('dash-journal-list', root), journalHtml);
   }
 
@@ -7203,6 +10170,26 @@ window.NexusStrategies=exports;
     }
   }
 
+  function getMasterTpSl() {
+    const tp = parseFloat((document.getElementById('dash-master-tp') || {}).value) || 50;
+    const sl = parseFloat((document.getElementById('dash-master-sl') || {}).value) || 20;
+    return { tp, sl };
+  }
+
+  function applyMasterTpSlToAllEngines() {
+    const { tp, sl } = getMasterTpSl();
+    BOT_IDS.forEach((id) => {
+      const eng = engines[id];
+      if (!eng) return;
+      if (id === 'differ') {
+        eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp });
+        eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl });
+      } else {
+        eng.setConfig && eng.setConfig({ takeProfit: tp, stopLoss: sl });
+      }
+    });
+  }
+
   function bindMasterControl() {
     // Delegated so it works once DashboardUI builds the shell (and rebuilds it).
     document.addEventListener('click', (e) => {
@@ -7214,24 +10201,7 @@ window.NexusStrategies=exports;
         return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
       }).length;
       const turnOn = engagedCount < BOT_IDS.length;
-      // Push master SL/TP to all engines before engaging
-      if (turnOn) {
-        const slEl = document.getElementById('dash-master-sl');
-        const tpEl = document.getElementById('dash-master-tp');
-        const sl = slEl ? parseFloat(slEl.value) : null;
-        const tp = tpEl ? parseFloat(tpEl.value) : null;
-        BOT_IDS.forEach((id) => {
-          const eng = id === 'differ' ? ensureDifferEngine() : ensureTitanEngine(id);
-          if (!eng) return;
-          if (id === 'differ') {
-            if (sl !== null) eng.dispatch({ type: 'SET_SL', value: sl });
-            if (tp !== null) eng.dispatch({ type: 'SET_TP', value: tp });
-          } else {
-            if (sl !== null) eng.setConfig({ stopLoss: sl });
-            if (tp !== null) eng.setConfig({ takeProfit: tp });
-          }
-        });
-      }
+      if (turnOn) applyMasterTpSlToAllEngines();
       BOT_IDS.forEach((id) => {
         const eng = ensureTitanOrDifferForControl(id);
         if (!eng) return;
@@ -7246,59 +10216,12 @@ window.NexusStrategies=exports;
       });
       queueDashboardRender();
     });
-  }
-
-  // Master SL/TP monitor — checks cumulative P&L across all bots every 3s
-  let _congratsShown = false;
-  function checkMasterSlTp() {
-    const slEl = document.getElementById('dash-master-sl');
-    const tpEl = document.getElementById('dash-master-tp');
-    if (!slEl || !tpEl) return;
-    const sl = parseFloat(slEl.value) || 0;
-    const tp = parseFloat(tpEl.value) || 0;
-    let totalProfit = 0;
-    BOT_IDS.forEach((id) => {
-      const eng = engines[id];
-      if (!eng) return;
-      if (id === 'differ') totalProfit += (eng.state.totalProfit || 0);
-      else totalProfit += (eng.state.stats && eng.state.stats.profit) || 0;
-    });
-    const anyActive = BOT_IDS.some((id) => {
-      const eng = engines[id];
-      if (!eng) return false;
-      return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
-    });
-    if (!anyActive) { _congratsShown = false; return; }
-    if (tp > 0 && totalProfit >= tp) {
-      // Stop all bots
-      BOT_IDS.forEach((id) => {
-        const eng = id === 'differ' ? ensureDifferEngine() : ensureTitanEngine(id);
-        if (!eng) return;
-        if (id === 'differ') { if (eng.state.isArmed || eng.state.isRunning) { eng.abortTrades(); eng.disarmSystem(); } }
-        else { if (eng.state.active) eng.toggleEngine(); }
-      });
-      if (!_congratsShown) {
-        _congratsShown = true;
-        const popup = document.getElementById('congrats-popup');
-        const amtEl = document.getElementById('congrats-amount');
-        if (popup) {
-          if (amtEl) amtEl.textContent = `+$${totalProfit.toFixed(2)}`;
-          popup.style.display = 'block';
-          requestAnimationFrame(() => { popup.style.opacity = '1'; popup.style.transform = 'translate(-50%,-50%) scale(1)'; });
-          setTimeout(() => { if (popup) { popup.style.opacity = '0'; popup.style.transform = 'translate(-50%,-50%) scale(0.85)'; setTimeout(() => { popup.style.display = 'none'; }, 400); } }, 7000);
-        }
+    // Apply TP/SL when values change
+    document.addEventListener('change', (e) => {
+      if (e.target.id === 'dash-master-tp' || e.target.id === 'dash-master-sl') {
+        applyMasterTpSlToAllEngines();
       }
-      queueDashboardRender();
-    } else if (sl > 0 && totalProfit <= -sl) {
-      // Stop all bots on stop loss
-      BOT_IDS.forEach((id) => {
-        const eng = id === 'differ' ? ensureDifferEngine() : ensureTitanEngine(id);
-        if (!eng) return;
-        if (id === 'differ') { if (eng.state.isArmed || eng.state.isRunning) { eng.abortTrades(); eng.disarmSystem(); } }
-        else { if (eng.state.active) eng.toggleEngine(); }
-      });
-      queueDashboardRender();
-    }
+    });
   }
 
   function ensureTitanOrDifferForControl(id) {
@@ -7328,7 +10251,7 @@ window.NexusStrategies=exports;
     ['even', 'odd', 'nexus'].forEach(ensureTitanEngine);
     bindHubTabs();
     queueDashboardRender();
-    setInterval(() => { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); checkMasterSlTp(); }, 3000);
+    setInterval(() => { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
