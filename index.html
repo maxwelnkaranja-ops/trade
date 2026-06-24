@@ -4746,33 +4746,35 @@ html body .modal-body { font-size: 13.5px !important; }
     };
   }
 
-  // Fetches accounts list, picks demo or real, then calls OTP to get authenticated WS URL.
+  // Gets or creates an Options account, then calls OTP to get authenticated WS URL.
+  // Deriv's new REST API: POST /accounts to create/get, then POST /accounts/{id}/otp for WS URL.
   async function getAuthenticatedWsUrl() {
+    const wantDemo = state.accountType !== 'real';
+    const accountType = wantDemo ? 'demo' : 'real';
+
+    // POST /accounts — creates account if it doesn't exist, or returns existing one (200 = exists, 201 = created)
     const accountsResp = await fetch(`${API_BASE}/trading/v1/options/accounts`, {
-      method: 'GET',
+      method: 'POST',
       headers: getAuthHeaders(),
+      body: JSON.stringify({ currency: 'USD', group: 'row', account_type: accountType }),
     });
+
     if (!accountsResp.ok) {
       const err = await accountsResp.json().catch(() => ({}));
-      throw new Error(err.errors?.[0]?.message || `Accounts fetch failed: ${accountsResp.status}`);
+      const msg = err.errors?.[0]?.message || `Accounts fetch failed: ${accountsResp.status}`;
+      throw new Error(msg);
     }
-    const accountsData = await accountsResp.json();
-    const raw = accountsData.data ?? accountsData.accounts ?? accountsData;
-    const accountList = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-    if (!accountList.length) throw new Error('No accounts found — check your PAT scopes (needs trade + account_manage)');
 
-    const wantDemo = state.accountType !== 'real';
-    // Try to match demo/real; Deriv uses is_virtual:true for demo, account_type:'demo' or similar
-    const picked = accountList.find(a => {
-      const isVirtual = a.is_virtual === true || a.account_type === 'demo' || a.type === 'demo' || (a.loginid || a.account_id || '').startsWith('VR');
-      return wantDemo ? isVirtual : !isVirtual;
-    }) || accountList[0];
+    const accountsData = await accountsResp.json();
+    // 200 returns data as object, 201 returns data as array
+    const raw = accountsData.data;
+    const picked = Array.isArray(raw) ? raw[0] : raw;
+    if (!picked) throw new Error('No account returned — check your PAT has the "trade" scope');
 
     const accountId = picked.account_id || picked.id || picked.loginid;
     state.accountId = accountId;
-    state.currency = picked.currency || picked.default_currency || 'USD';
-    // Balance comes from the WS subscription; don't set 0 here, set only if API gives it
-    const apiBal = parseFloat(picked.balance ?? picked.demo_balance ?? picked.real_balance);
+    state.currency = picked.currency || 'USD';
+    const apiBal = parseFloat(picked.balance);
     if (!isNaN(apiBal)) state.balanceUSD = apiBal;
     emit();
 
