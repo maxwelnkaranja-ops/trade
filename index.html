@@ -593,8 +593,9 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
 .app-panel { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; min-height: 0; overflow: hidden; }
 .app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-/* Dashboard panel gets its own scroll container */
-#panel-dashboard { overflow: hidden !important; display: flex !important; flex-direction: column !important; }
+/* Dashboard panel gets its own scroll container — no display override here;
+   visibility is governed by .app-panel / .app-panel.active rules above */
+#panel-dashboard.active { overflow: hidden; flex-direction: column; }
 #panel-dashboard #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
 
 @media (max-width: 880px) {
@@ -8599,6 +8600,7 @@ window.NexusStrategies=exports;
           this.completeSession();
         } else if (st.inRecovery) {
           // Still in recovery (loss, not at max step) → keep trading on martingale, NO cooldown
+          this.executionGuard = false; // release guard so the next bolt purchase can fire
           this.executeBoltPurchase();
         } else if (st.currentRuns > 0) {
           this.executeBoltPurchase();
