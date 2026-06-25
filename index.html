@@ -504,7 +504,7 @@ html.light .hub-sidebar { background: hsl(0 0% 100% / .96); }
 .hub-tab-icon { display: flex; flex-shrink: 0; color: hsl(var(--muted-foreground)); transition: color .16s; }
 .hub-tab-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .hub-tab .dot { width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--border-bright)); flex-shrink: 0; transition: .3s; }
-.hub-tab .dot.live { background: hsl(var(--win)); box-shadow: 0 0 7px hsl(var(--win)); animation: cooldown-pulse 2.2s infinite; }
+.hub-tab .dot.live { background: hsl(var(--win)); box-shadow: 0 0 7px hsl(var(--win)); }
 .hub-tab.active .dot.live { box-shadow: 0 0 10px hsl(var(--win)), 0 0 20px hsl(var(--win) / .35); }
 
 .hub-sidebar-bottom { padding: 12px; border-top: 1px solid hsl(var(--border)); flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -584,7 +584,7 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
   color: hsl(var(--win)); border-color: hsl(var(--win) / .28);
   background: hsl(var(--win) / .05); box-shadow: 0 0 14px hsl(var(--win) / .1);
 }
-.hub-live-badge.connected .dot { background: hsl(var(--win)); box-shadow: 0 0 8px hsl(var(--win) / .8); animation: cooldown-pulse 2.2s infinite; }
+.hub-live-badge.connected .dot { background: hsl(var(--win)); box-shadow: 0 0 8px hsl(var(--win) / .8); }
 .hub-live-badge.connecting .dot { background: hsl(var(--accent)); box-shadow: 0 0 7px hsl(var(--accent) / .8); animation: cooldown-pulse .9s infinite; }
 
 /* ──────────────────────────────────────────────────────────────
@@ -593,6 +593,9 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
 .app-panel { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; min-height: 0; overflow: hidden; }
 .app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+/* Dashboard panel gets its own scroll container */
+#panel-dashboard { overflow-y: auto !important; }
+#panel-dashboard #dashboard-root { overflow: visible !important; min-height: min-content; }
 
 @media (max-width: 880px) {
   .hub-sidebar { width: 72px; }
@@ -1303,7 +1306,7 @@ html.light .hub-live-badge { background: hsl(var(--muted) / .5); }
 .analysis-hub-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); padding: 11px; margin-bottom: 7px; transition: border-color .2s; }
 .analysis-hub-card:hover { border-color: hsl(var(--primary) / .28); }
 .analysis-hub-title { font-family: 'Outfit', sans-serif; font-size: 8.5px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: hsl(var(--muted-foreground)); margin-bottom: 8px; display: flex; align-items: center; gap: 7px; }
-.dot-indicator { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--primary)); box-shadow: 0 0 7px hsl(var(--primary) / .7); flex-shrink: 0; animation: cooldown-pulse 2s infinite; }
+.dot-indicator { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--primary)); box-shadow: 0 0 7px hsl(var(--primary) / .7); flex-shrink: 0; }
 .analysis-hub-title .dot-indicator { width: 5px; height: 5px; }
 
 /* Signal ring */
@@ -1404,7 +1407,6 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
   width: 7px; height: 7px; border-radius: 50%;
   background: hsl(var(--win)); flex-shrink: 0;
   box-shadow: 0 0 8px hsl(var(--win) / .7);
-  animation: cooldown-pulse 2.2s infinite;
 }
 .dash-hero-title {
   font-family: 'Outfit', sans-serif; font-size: 2.4rem; font-weight: 800;
@@ -1597,7 +1599,6 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
   width: 6px; height: 6px; border-radius: 50%;
   background: hsl(var(--win));
   box-shadow: 0 0 10px hsl(var(--win));
-  animation: cooldown-pulse 2.2s infinite;
   flex-shrink: 0;
 }
 
@@ -1752,7 +1753,6 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 .dash-yield-row:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.09); }
 .dash-yield-dot {
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-  animation: cooldown-pulse 2.5s infinite;
 }
 .dash-yield-row-name {
   flex: 1; font-size: 10px; font-family: 'DM Mono', monospace;
@@ -4442,10 +4442,42 @@ html body .exec-status-tag.is-on {
 }
 html body .exec-status-tag.is-cd {
   color: #ffaa00 !important;
-  background: rgba(255,170,0,0.1) !important;
-  border-color: rgba(255,170,0,0.35) !important;
-  box-shadow: 0 0 10px rgba(255,170,0,0.2) !important;
-  animation: cooldown-pulse 1s ease-in-out infinite !important;
+  background: rgba(255,170,0,0.12) !important;
+  border-color: rgba(255,170,0,0.5) !important;
+  box-shadow: 0 0 14px rgba(255,170,0,0.4), inset 0 0 8px rgba(255,170,0,0.08) !important;
+  padding: 5px 14px !important;
+  border-radius: 999px !important;
+  font-size: 10px !important;
+  letter-spacing: 2px !important;
+  animation: cd-tag-glow 1.4s ease-in-out infinite !important;
+}
+@keyframes cd-tag-glow {
+  0%, 100% { box-shadow: 0 0 10px rgba(255,170,0,0.3), inset 0 0 6px rgba(255,170,0,0.06); }
+  50% { box-shadow: 0 0 22px rgba(255,170,0,0.65), inset 0 0 12px rgba(255,170,0,0.12); }
+}
+
+/* ── Full Automation Toggle ──────────────────────────────────────── */
+.dash-auto-toggle {
+  width: 34px; height: 18px; border-radius: 999px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  position: relative; cursor: pointer; transition: background .22s, border-color .22s, box-shadow .22s;
+  flex-shrink: 0;
+}
+.dash-auto-toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: rgba(150,160,185,0.55);
+  transition: transform .22s cubic-bezier(.34,1.56,.64,1), background .22s;
+}
+.dash-auto-toggle.on {
+  background: hsl(var(--primary) / .18);
+  border-color: hsl(var(--primary) / .5);
+  box-shadow: 0 0 14px hsl(var(--primary) / .35);
+}
+.dash-auto-toggle.on::after {
+  transform: translateX(16px);
+  background: hsl(var(--primary));
+  box-shadow: 0 0 8px hsl(var(--primary) / .8);
 }
 @keyframes cooldown-pulse {
   0%, 100% { opacity: 1; }
@@ -4462,6 +4494,56 @@ html body .exec-cd-fill {
   width: 100% !important;
 }
 @keyframes exec-cd-drain { from { width: 100%; } to { width: 0%; } }
+
+/* ── Titan Cooldown Overlay ──────────────────────────────────────── */
+.titan-cd-overlay {
+  position: absolute; inset: 0; z-index: 50;
+  background: hsl(var(--bg) / .85); backdrop-filter: blur(16px);
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius);
+  transition: opacity .4s ease;
+}
+.titan-cd-popup {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 32px 40px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--primary) / .3);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 60px hsl(var(--primary) / .15), var(--shadow-lg);
+}
+.titan-cd-ring {
+  position: relative; width: 120px; height: 120px;
+}
+.titan-cd-svg { width: 120px; height: 120px; }
+.titan-cd-track { stroke: hsl(var(--border)); }
+.titan-cd-arc {
+  stroke: hsl(var(--primary));
+  filter: drop-shadow(0 0 8px hsl(var(--primary) / .6));
+  animation: cd-arc-glow 1.2s ease-in-out infinite alternate;
+}
+@keyframes cd-arc-glow {
+  from { filter: drop-shadow(0 0 4px hsl(var(--primary) / .4)); }
+  to   { filter: drop-shadow(0 0 16px hsl(var(--primary) / .9)); }
+}
+.titan-cd-num {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Outfit', sans-serif; font-size: 2.4rem; font-weight: 800;
+  color: hsl(var(--primary)); letter-spacing: -1px;
+}
+.titan-cd-title {
+  font-family: 'Outfit', sans-serif; font-size: 11px; font-weight: 800;
+  letter-spacing: 4px; color: hsl(var(--primary)); text-transform: uppercase;
+}
+.titan-cd-sub {
+  font-size: 11px; color: hsl(var(--muted-foreground)); text-align: center; line-height: 1.5;
+}
+.titan-cd-market {
+  font-size: 10px; color: hsl(var(--win)); letter-spacing: 1px; text-align: center;
+  padding: 4px 12px; border-radius: 999px;
+  background: hsl(var(--win) / .08); border: 1px solid hsl(var(--win) / .2);
+}
+/* ── Dashboard exec-cd-bar ───────────────────────────────────────── */
 html body .exec-flow {
   display: flex !important; align-items: center !important; gap: 6px !important;
 }
@@ -4576,6 +4658,9 @@ html body .hub-shell { height: 100vh !important; overflow: hidden !important; }
 html body .hub-main { flex: 1 !important; min-width: 0 !important; min-height: 0 !important; height: 100% !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
 html body .app-panel { display: none !important; }
 html body .app-panel.active { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
+/* dashboard panel + root must pass flex height to dash-scroll */
+html body #panel-dashboard { overflow: hidden !important; }
+html body #panel-dashboard #dashboard-root { overflow: hidden !important; }
 html body .app-root { flex: 1 !important; min-height: 0 !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
 html body .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
 
@@ -8316,29 +8401,38 @@ window.NexusStrategies=exports;
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false };
       const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
-      this.addLog('engine', 'SYSTEM', `COOLING DOWN ${cd}s...`);
+      this.addLog('engine', 'SYSTEM', `COOLING DOWN ${cd}s — scanning for best market...`);
       this.runsSinceRefresh++;
       if (this.config.autoRefresh && this.runsSinceRefresh >= 4) {
         this.runsSinceRefresh = 0;
         const token = window.HubStore.getState().apiToken;
         if (token) this.connect(token);
       }
+      // Show cooldown overlay popup on this engine's tab
+      this._showCooldownOverlay(cd);
       if (this.cooldownTimer) clearInterval(this.cooldownTimer);
       this.cooldownTimer = setInterval(() => {
         this.cooldownTime--;
+        // Update overlay countdown
+        this._updateCooldownOverlay(this.cooldownTime);
         if (this.cooldownTime <= 0) {
           clearInterval(this.cooldownTimer); this.cooldownTimer = null;
           this.state = { ...this.state, isCooldown: false };
+          this._hideCooldownOverlay();
+          // Market switch: find best market
+          if (this.scanner) {
+            const best = this.scanner.getGoldenMarkets ? (this.scanner.getGoldenMarkets()[0] || this.scanner.getBestMarket()) : this.scanner.getBestMarket();
+            if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
+              this.addLog('engine', 'MARKET', `🔀 Switching to best market: ${best.symbol} (score: ${best.score || '?'})`);
+              this.setConfig({ selectedMarket: best.symbol });
+              this.changeMarket(best.symbol);
+            }
+          }
           if (this.config.autoPilot) {
-            const best = this.scanner.getGoldenMarkets()[0] || this.scanner.getBestMarket();
             setTimeout(() => {
               if (!this.state.isCooldown) {
-                if (best && best.score > 70 && best.health?.longTerm !== 'POOR') {
-                  this.setConfig({ selectedMarket: best.symbol });
-                  this.changeMarket(best.symbol);
-                }
                 this.state.active = true;
-                this.addLog('engine', 'ENGINE', 'Auto-restart engaged');
+                this.addLog('engine', 'ENGINE', 'Auto-restart engaged — waiting for triggers');
                 this.emit();
               }
             }, 1500);
@@ -8347,6 +8441,65 @@ window.NexusStrategies=exports;
         this.emit();
       }, 1000);
       this.emit();
+    }
+
+    _showCooldownOverlay(duration) {
+      const rootId = this.id + '-root';
+      const root = document.getElementById(rootId);
+      if (!root) return;
+      let overlay = root.querySelector('.titan-cd-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'titan-cd-overlay';
+        root.appendChild(overlay);
+      }
+      overlay.innerHTML = `
+        <div class="titan-cd-popup">
+          <div class="titan-cd-ring">
+            <svg class="titan-cd-svg" viewBox="0 0 120 120">
+              <circle class="titan-cd-track" cx="60" cy="60" r="50" fill="none" stroke-width="6"/>
+              <circle class="titan-cd-arc" cx="60" cy="60" r="50" fill="none" stroke-width="6"
+                stroke-dasharray="${2*Math.PI*50}" stroke-dashoffset="0"
+                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:60px 60px"/>
+            </svg>
+            <div class="titan-cd-num">${duration}</div>
+          </div>
+          <div class="titan-cd-title">COOLING DOWN</div>
+          <div class="titan-cd-sub">🔍 Scanning for best volatility market…</div>
+          <div class="titan-cd-market font-mono" id="${rootId}-cd-market"></div>
+        </div>`;
+      overlay.style.display = 'flex';
+      // Start arc animation
+      const arc = overlay.querySelector('.titan-cd-arc');
+      if (arc) {
+        const total = 2 * Math.PI * 50;
+        arc.style.strokeDashoffset = '0';
+        setTimeout(() => { arc.style.strokeDashoffset = total.toFixed(1); arc.style.transition = `stroke-dashoffset ${duration}s linear`; }, 50);
+      }
+      // Scan for best market and show it
+      if (this.scanner) {
+        setTimeout(() => {
+          const best = this.scanner.getGoldenMarkets ? (this.scanner.getGoldenMarkets()[0] || this.scanner.getBestMarket()) : this.scanner.getBestMarket();
+          const mEl = document.getElementById(rootId + '-cd-market');
+          if (mEl && best) mEl.textContent = `Best market: ${best.symbol || '—'} (${best.score ? Math.round(best.score) + '% score' : '—'})`;
+        }, 800);
+      }
+    }
+
+    _updateCooldownOverlay(remaining) {
+      const rootId = this.id + '-root';
+      const root = document.getElementById(rootId);
+      if (!root) return;
+      const numEl = root.querySelector('.titan-cd-num');
+      if (numEl) numEl.textContent = Math.max(0, remaining);
+    }
+
+    _hideCooldownOverlay() {
+      const rootId = this.id + '-root';
+      const root = document.getElementById(rootId);
+      if (!root) return;
+      const overlay = root.querySelector('.titan-cd-overlay');
+      if (overlay) { overlay.style.opacity = '0'; setTimeout(() => { overlay.style.display = 'none'; overlay.style.opacity = ''; }, 400); }
     }
 
     handleContractResult(contract) {
@@ -8415,12 +8568,22 @@ window.NexusStrategies=exports;
         this.addLog('engine', 'REWAIT', `REWAIT: Loss → awaiting new entry @ $${st.currentStake.toFixed(2)}`);
         return;
       }
+      // MAX RECOVERY STEP REACHED → cooldown (market switch needed)
       if (st.isLocked && cfg.martingaleEnabled && st.martingaleStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
+        this.addLog('loss', 'CRITICAL', `MAX RECOVERY STEP ${cfg.martingaleStopStep} REACHED — accepting loss, entering cooldown for market switch`);
         this.completeSession(); return;
       }
       if (st.active && st.isLocked && !st.isCooldown) {
-        if (st.currentRuns >= cfg.targetRuns) { this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE!`); this.completeSession(); }
-        else if (st.inRecovery || st.currentRuns > 0) this.executeBoltPurchase();
+        if (st.currentRuns >= cfg.targetRuns) {
+          // WIN target reached → cooldown before next session
+          this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE! Entering cooldown.`);
+          this.completeSession();
+        } else if (st.inRecovery) {
+          // Still in recovery (loss, not at max step) → keep trading on martingale, NO cooldown
+          this.executeBoltPurchase();
+        } else if (st.currentRuns > 0) {
+          this.executeBoltPurchase();
+        }
       }
     }
 
@@ -9636,7 +9799,13 @@ window.NexusStrategies=exports;
 
             <!-- Active engines -->
             <div class="glass-panel exec-panel">
-              <div class="section-divider" style="margin-bottom:10px">ACTIVE ENGINES</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
+                <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
+                  <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
+                  <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
+                </label>
+              </div>
               <div id="dash-bot-toggles" class="bot-toggles"></div>
               <div id="dash-exec-list" class="exec-list"></div>
             </div>
@@ -9858,6 +10027,41 @@ window.NexusStrategies=exports;
           }
         };
       });
+
+      // ── Full Automation toggle ──
+      const autoToggle = root.querySelector('#dash-full-auto-toggle');
+      const autoTxt = root.querySelector('#dash-full-auto-txt');
+      if (autoToggle) {
+        // Init state from any enabled titan engine's autoPilot
+        const anyAutoPilot = botIds.some(id => {
+          const eng = engines[id];
+          return eng && eng.config && eng.config.autoPilot;
+        });
+        if (anyAutoPilot) autoToggle.classList.add('on');
+        if (autoTxt) autoTxt.style.color = anyAutoPilot ? 'hsl(var(--primary))' : '';
+        autoToggle.onclick = () => {
+          const nowOn = autoToggle.classList.toggle('on');
+          if (autoTxt) autoTxt.style.color = nowOn ? 'hsl(var(--primary))' : 'rgba(150,165,200,0.7)';
+          // Apply to all titan engines
+          botIds.forEach(id => {
+            const eng = engines[id];
+            if (id !== 'differ' && eng && eng.setConfig) {
+              eng.setConfig({ autoPilot: nowOn });
+              // If turning on and engine is inactive, activate it
+              if (nowOn && eng.state && !eng.state.active && !eng.state.isCooldown) {
+                eng.state.active = true;
+                eng.addLog && eng.addLog('engine', 'AUTO', 'Full Automation ON — engine activated');
+                eng.emit && eng.emit();
+              }
+            }
+          });
+          // For differ engine
+          const differ = engines['differ'];
+          if (differ && differ.setConfig) {
+            differ.setConfig ? differ.setConfig({ autoPilot: nowOn }) : null;
+          }
+        };
+      }
     }
     botIds.forEach((id) => {
       const cb = el('dash-bot-toggles', root).querySelector(`[data-bot-toggle="${id}"]`);
@@ -9866,6 +10070,14 @@ window.NexusStrategies=exports;
       if (cb && cb.checked !== enabled) cb.checked = enabled;
       if (chip) chip.classList.toggle('on', enabled);
     });
+    // Sync full auto toggle state with actual engine config
+    const autoToggle2 = root.querySelector('#dash-full-auto-toggle');
+    const autoTxt2 = root.querySelector('#dash-full-auto-txt');
+    if (autoToggle2) {
+      const isAutoOn = botIds.some(id => { const eng = engines[id]; return id !== 'differ' && eng && eng.config && eng.config.autoPilot; });
+      autoToggle2.classList.toggle('on', isAutoOn);
+      if (autoTxt2) autoTxt2.style.color = isAutoOn ? 'hsl(var(--primary))' : 'rgba(150,165,200,0.7)';
+    }
 
     const execHtml = botIds.map((id) => {
       const engine = engines[id];
@@ -9878,7 +10090,7 @@ window.NexusStrategies=exports;
         if (id === 'differ') cdSecs = (engine.state && engine.state.cooldownRemaining) || 0;
         else cdSecs = engine.cooldownTime || 0;
       }
-      const isCd = cdSecs > 0;
+      const isCd = cdSecs > 0 || !!(engine && engine.state && engine.state.isCooldown);
       const statusTag = !botOn ? 'DISABLED' : isCd ? `CD ${cdSecs}s` : flow.engaged ? 'ENGAGED' : 'STANDBY';
       const statusClass = !botOn ? '' : isCd ? ' is-cd' : flow.engaged ? ' is-on' : '';
 
