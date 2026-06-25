@@ -593,10 +593,12 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
 .app-panel { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; min-height: 0; overflow: hidden; }
 .app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-/* Dashboard panel gets its own scroll container — no display override here;
-   visibility is governed by .app-panel / .app-panel.active rules above */
+/* Dashboard panel gets its own scroll container — the dash-scroll div inside
+   handles overflow; the outer shells just size correctly */
 #panel-dashboard.active { overflow: hidden; flex-direction: column; }
 #panel-dashboard #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
+/* Allow the dashboard scroll wrapper to actually scroll */
+#panel-dashboard .dash-scroll { overflow-y: auto !important; }
 
 @media (max-width: 880px) {
   .hub-sidebar { width: 72px; }
@@ -1388,10 +1390,10 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 /* ── SCROLL FIX ── */
 .app-panel.active { overflow: hidden !important; }
 .app-root { overflow: hidden !important; min-height: 0; }
-.dash-scroll { overflow-y: auto !important; flex: 1; min-height: 0; }
+#panel-dashboard .dash-scroll { overflow-y: auto !important; flex: 1; min-height: 0; }
 
 /* Dashboard scroll + layout */
-.dash-scroll {
+#panel-dashboard .dash-scroll {
   flex: 1; overflow-y: auto; padding: 14px 16px;
   display: flex; flex-direction: column; gap: 14px;
   scrollbar-width: thin; min-height: 0;
@@ -1868,7 +1870,7 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 /* ══════════════════════════════════════════════
    DASHBOARD SCROLL + LAYOUT UPGRADES
    ══════════════════════════════════════════════ */
-.dash-scroll {
+#panel-dashboard .dash-scroll {
   padding: 14px 16px !important;
   gap: 14px !important;
 }
@@ -2811,7 +2813,7 @@ html.light body::before { display: none; }
 }
 
 /* ── DASHBOARD SCROLL UPGRADE ── */
-.dash-scroll {
+#panel-dashboard .dash-scroll {
   padding: 14px 16px !important;
   gap: 14px !important;
   background: transparent;
@@ -3336,7 +3338,7 @@ html.light body::before { display: none; }
   .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
 }
 @media (max-width: 640px) {
-  .dash-scroll { padding: 12px 14px !important; }
+  #panel-dashboard .dash-scroll { padding: 12px 14px !important; }
   .stat-card-value { font-size: 1.4rem !important; }
 }
 
@@ -3644,7 +3646,7 @@ body::before {
 }
 
 /* ── DASHBOARD SCROLL ── */
-.dash-scroll {
+#panel-dashboard .dash-scroll {
   background: #000 !important;
   padding: 14px 16px !important;
   gap: 14px !important;
@@ -4514,50 +4516,55 @@ html body .exec-cd-fill {
 /* ── Titan Cooldown Overlay ──────────────────────────────────────── */
 .titan-cd-overlay {
   position: absolute; inset: 0; z-index: 50;
-  background: hsl(var(--bg) / .85); backdrop-filter: blur(16px);
+  background: hsl(var(--bg) / .92); backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius);
   transition: opacity .4s ease;
 }
 .titan-cd-popup {
-  display: flex; flex-direction: column; align-items: center; gap: 14px;
-  padding: 32px 40px;
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--primary) / .3);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 0 60px hsl(var(--primary) / .15), var(--shadow-lg);
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  padding: 36px 48px;
+  background: hsl(var(--card) / .95);
+  border: 1px solid hsl(var(--primary) / .35);
+  border-radius: 24px;
+  box-shadow: 0 0 80px hsl(var(--primary) / .2), 0 0 0 1px hsl(var(--primary) / .08), var(--shadow-lg);
+  animation: modal-enter .3s var(--ease);
 }
 .titan-cd-ring {
-  position: relative; width: 140px; height: 140px;
+  position: relative; width: 160px; height: 160px;
 }
-.titan-cd-svg { width: 140px; height: 140px; }
+.titan-cd-svg { width: 160px; height: 160px; }
 .titan-cd-track { stroke: hsl(var(--border)); }
 .titan-cd-arc {
   stroke: hsl(var(--primary));
-  filter: drop-shadow(0 0 10px hsl(var(--primary) / .8));
-  animation: none;
+  filter: drop-shadow(0 0 12px hsl(var(--primary) / .9)) drop-shadow(0 0 24px hsl(var(--primary) / .5));
+  animation: cd-arc-glow 1.5s ease-in-out infinite alternate;
 }
 @keyframes cd-arc-glow {
-  from { filter: drop-shadow(0 0 4px hsl(var(--primary) / .4)); }
-  to   { filter: drop-shadow(0 0 16px hsl(var(--primary) / .9)); }
+  from { filter: drop-shadow(0 0 6px hsl(var(--primary) / .5)) drop-shadow(0 0 14px hsl(var(--primary) / .3)); }
+  to   { filter: drop-shadow(0 0 18px hsl(var(--primary) / 1)) drop-shadow(0 0 36px hsl(var(--primary) / .6)); }
 }
 .titan-cd-num {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Outfit', sans-serif; font-size: 2.8rem; font-weight: 800;
-  color: hsl(var(--primary)); letter-spacing: -1px;
+  font-family: 'Outfit', sans-serif; font-size: 3.2rem; font-weight: 900;
+  color: hsl(var(--primary)); letter-spacing: -2px;
+  text-shadow: 0 0 20px hsl(var(--primary) / .6);
 }
 .titan-cd-title {
-  font-family: 'Outfit', sans-serif; font-size: 11px; font-weight: 800;
-  letter-spacing: 4px; color: hsl(var(--primary)); text-transform: uppercase;
+  font-family: 'Outfit', sans-serif; font-size: 11px; font-weight: 900;
+  letter-spacing: 5px; color: hsl(var(--primary)); text-transform: uppercase;
+  text-shadow: 0 0 14px hsl(var(--primary) / .5);
 }
 .titan-cd-sub {
   font-size: 11px; color: hsl(var(--muted-foreground)); text-align: center; line-height: 1.5;
 }
 .titan-cd-market {
   font-size: 10px; color: hsl(var(--win)); letter-spacing: 1px; text-align: center;
-  padding: 4px 12px; border-radius: 999px;
-  background: hsl(var(--win) / .08); border: 1px solid hsl(var(--win) / .2);
+  padding: 5px 14px; border-radius: 999px;
+  background: hsl(var(--win) / .08); border: 1px solid hsl(var(--win) / .25);
+  box-shadow: 0 0 12px hsl(var(--win) / .15);
 }
 /* ── Dashboard exec-cd-bar ───────────────────────────────────────── */
 html body .exec-flow {
@@ -4675,11 +4682,11 @@ html body .hub-main { flex: 1 !important; min-width: 0 !important; min-height: 0
 html body .app-panel { display: none !important; }
 html body .app-panel.active { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
 /* dashboard panel + root must pass flex height to dash-scroll */
-html body #panel-dashboard { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
-html body #panel-dashboard #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
-html body #panel-dashboard .app-root { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
+html body #panel-dashboard.active { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
+html body #panel-dashboard.active #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
+html body #panel-dashboard.active .app-root { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
 html body .app-root { flex: 1 !important; min-height: 0 !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
-html body .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
+html body #panel-dashboard .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
 
 /* Hide the old hero title row — balance card IS the hero */
 html body .dash-hero { display: none !important; }
