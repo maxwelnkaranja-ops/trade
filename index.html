@@ -594,8 +594,8 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
 .app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; min-height: 0; overflow: hidden; }
 .app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 /* Dashboard panel gets its own scroll container */
-#panel-dashboard { overflow-y: auto !important; }
-#panel-dashboard #dashboard-root { overflow: visible !important; min-height: min-content; }
+#panel-dashboard { overflow: hidden !important; display: flex !important; flex-direction: column !important; }
+#panel-dashboard #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
 
 @media (max-width: 880px) {
   .hub-sidebar { width: 72px; }
@@ -1232,11 +1232,11 @@ html.light .exec-item { background: hsl(var(--muted) / .3); }
   transition: all .25s ease; text-transform: uppercase;
 }
 .exec-flow-arrow { font-size: 8px; color: hsl(var(--muted-foreground) / .4); flex-shrink: 0; }
-.exec-flow-box.glow-analysis { background: hsl(var(--primary) / .15); border-color: hsl(var(--primary) / .4); color: hsl(var(--primary)); box-shadow: 0 0 8px hsl(var(--primary) / .2); animation: execPulse 1.7s ease-in-out infinite; }
-.exec-flow-box.glow-trading { background: hsl(var(--accent) / .15); border-color: hsl(var(--accent) / .4); color: hsl(var(--accent)); box-shadow: 0 0 8px hsl(var(--accent) / .25); animation: execPulse 1.1s ease-in-out infinite; }
-.exec-flow-box.glow-win { background: hsl(var(--win) / .15); border-color: hsl(var(--win) / .5); color: hsl(var(--win)); box-shadow: 0 0 8px hsl(var(--win) / .25); }
-.exec-flow-box.glow-loss { background: hsl(var(--loss) / .15); border-color: hsl(var(--loss) / .5); color: hsl(var(--loss)); box-shadow: 0 0 8px hsl(var(--loss) / .25); }
-.exec-flow-box.glow-recovery { background: hsl(var(--secondary) / .15); border-color: hsl(var(--secondary) / .5); color: hsl(var(--secondary)); box-shadow: 0 0 8px hsl(var(--secondary) / .25); animation: execPulse 1.4s ease-in-out infinite; }
+.exec-flow-box.glow-analysis { background: hsl(var(--primary) / .15); border-color: hsl(var(--primary) / .4); color: hsl(var(--primary)); box-shadow: 0 0 10px hsl(var(--primary) / .25); animation: none; }
+.exec-flow-box.glow-trading { background: hsl(var(--accent) / .15); border-color: hsl(var(--accent) / .4); color: hsl(var(--accent)); box-shadow: 0 0 10px hsl(var(--accent) / .3); animation: none; }
+.exec-flow-box.glow-win { background: hsl(var(--win) / .15); border-color: hsl(var(--win) / .5); color: hsl(var(--win)); box-shadow: 0 0 10px hsl(var(--win) / .3); }
+.exec-flow-box.glow-loss { background: hsl(var(--loss) / .15); border-color: hsl(var(--loss) / .5); color: hsl(var(--loss)); box-shadow: 0 0 10px hsl(var(--loss) / .3); }
+.exec-flow-box.glow-recovery { background: hsl(var(--secondary) / .15); border-color: hsl(var(--secondary) / .5); color: hsl(var(--secondary)); box-shadow: 0 0 10px hsl(var(--secondary) / .3); animation: none; }
 
 /* ──────────────────────────────────────────────────────────────
    BOT TOGGLE CHIPS
@@ -3367,13 +3367,10 @@ html.light body::before { display: none; }
   border-radius: 16px !important;
 }
 
-/* ── ANIMATED ACTIVE TAB INDICATOR ── */
-@keyframes nav-dot-pulse {
-  0%, 100% { box-shadow: 0 0 4px hsl(var(--win)); }
-  50%       { box-shadow: 0 0 12px hsl(var(--win)), 0 0 20px hsl(var(--win)/0.4); }
-}
+/* ── ACTIVE TAB INDICATOR — static glow, no flicker ── */
 .hub-tab .dot.live {
-  animation: nav-dot-pulse 2s infinite !important;
+  animation: none !important;
+  box-shadow: 0 0 6px hsl(var(--win)), 0 0 12px hsl(var(--win)/0.3) !important;
 }
 
 /* ── DASHBOARD OVERALL: STAGGER ENTRANCE ── */
@@ -3606,7 +3603,7 @@ body::before {
   color: hsl(232 95% 70%) !important;
   box-shadow: 0 0 14px hsl(232 95% 64% / 0.12), inset 0 1px 0 hsl(232 95% 64% / 0.08) !important;
   font-size: 10.5px !important;
-  animation: status-flicker 8s infinite !important;
+  animation: none !important;
 }
 .hub-breadcrumb { color: hsl(240 4% 35%) !important; }
 .hub-breadcrumb .crumb-current { color: hsl(220 18% 88%) !important; }
@@ -4444,12 +4441,13 @@ html body .exec-status-tag.is-cd {
   color: #ffaa00 !important;
   background: rgba(255,170,0,0.12) !important;
   border-color: rgba(255,170,0,0.5) !important;
-  box-shadow: 0 0 14px rgba(255,170,0,0.4), inset 0 0 8px rgba(255,170,0,0.08) !important;
-  padding: 5px 14px !important;
+  box-shadow: 0 0 18px rgba(255,170,0,0.45), 0 0 4px rgba(255,170,0,0.3), inset 0 0 8px rgba(255,170,0,0.08) !important;
+  padding: 5px 16px !important;
   border-radius: 999px !important;
   font-size: 10px !important;
   letter-spacing: 2px !important;
-  animation: cd-tag-glow 1.4s ease-in-out infinite !important;
+  animation: none !important;
+  font-weight: 800 !important;
 }
 @keyframes cd-tag-glow {
   0%, 100% { box-shadow: 0 0 10px rgba(255,170,0,0.3), inset 0 0 6px rgba(255,170,0,0.06); }
@@ -4495,6 +4493,23 @@ html body .exec-cd-fill {
 }
 @keyframes exec-cd-drain { from { width: 100%; } to { width: 0%; } }
 
+/* ── Dashboard circular CD ring ── */
+.exec-cd-ring-wrap {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex-shrink: 0;
+}
+.exec-cd-ring-svg { position: absolute; inset: 0; }
+.exec-cd-ring-track { stroke: rgba(255,170,0,0.15); }
+.exec-cd-ring-arc {
+  stroke: #ffaa00;
+  filter: drop-shadow(0 0 5px rgba(255,170,0,0.7));
+}
+.exec-cd-ring-num {
+  position: relative; z-index: 1;
+  font-family: 'Outfit', sans-serif; font-size: 9px; font-weight: 800;
+  color: #ffaa00; letter-spacing: -0.5px; line-height: 1;
+}
+
 /* ── Titan Cooldown Overlay ──────────────────────────────────────── */
 .titan-cd-overlay {
   position: absolute; inset: 0; z-index: 50;
@@ -4512,14 +4527,14 @@ html body .exec-cd-fill {
   box-shadow: 0 0 60px hsl(var(--primary) / .15), var(--shadow-lg);
 }
 .titan-cd-ring {
-  position: relative; width: 120px; height: 120px;
+  position: relative; width: 140px; height: 140px;
 }
-.titan-cd-svg { width: 120px; height: 120px; }
+.titan-cd-svg { width: 140px; height: 140px; }
 .titan-cd-track { stroke: hsl(var(--border)); }
 .titan-cd-arc {
   stroke: hsl(var(--primary));
-  filter: drop-shadow(0 0 8px hsl(var(--primary) / .6));
-  animation: cd-arc-glow 1.2s ease-in-out infinite alternate;
+  filter: drop-shadow(0 0 10px hsl(var(--primary) / .8));
+  animation: none;
 }
 @keyframes cd-arc-glow {
   from { filter: drop-shadow(0 0 4px hsl(var(--primary) / .4)); }
@@ -4528,7 +4543,7 @@ html body .exec-cd-fill {
 .titan-cd-num {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Outfit', sans-serif; font-size: 2.4rem; font-weight: 800;
+  font-family: 'Outfit', sans-serif; font-size: 2.8rem; font-weight: 800;
   color: hsl(var(--primary)); letter-spacing: -1px;
 }
 .titan-cd-title {
@@ -4568,7 +4583,7 @@ html body .exec-flow-arrow {
 html body .journal-panel {
   flex: 1 !important; min-height: 0 !important;
   display: flex !important; flex-direction: column !important;
-  padding: 16px !important; max-height: 520px !important;
+  padding: 16px !important;
 }
 html body .journal-tabs {
   display: flex !important; gap: 5px !important;
@@ -4659,8 +4674,9 @@ html body .hub-main { flex: 1 !important; min-width: 0 !important; min-height: 0
 html body .app-panel { display: none !important; }
 html body .app-panel.active { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
 /* dashboard panel + root must pass flex height to dash-scroll */
-html body #panel-dashboard { overflow: hidden !important; }
-html body #panel-dashboard #dashboard-root { overflow: hidden !important; }
+html body #panel-dashboard { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
+html body #panel-dashboard #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
+html body #panel-dashboard .app-root { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
 html body .app-root { flex: 1 !important; min-height: 0 !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
 html body .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
 
@@ -4681,7 +4697,9 @@ html body .dash-stats-row { display: grid !important; grid-template-columns: rep
 /* Body */
 html body .dash-body { display: grid !important; grid-template-columns: 380px 1fr !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
 html body .dash-main { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
-html body .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; }
+html body .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
+html body .dash-sidebar .journal-panel { flex: 0 0 auto !important; min-height: 360px !important; }
+html body .dash-sidebar .journal-list { overflow-y: auto !important; max-height: 300px !important; min-height: 200px !important; }
 
 @media (max-width: 1000px) {
   html body .dash-hero-row { grid-template-columns: 1fr !important; }
@@ -8204,7 +8222,7 @@ window.NexusStrategies=exports;
         strategyWaitReason: this.strategyWaitReason, liveDigit: this.liveDigit, liveQuote: this.liveQuote,
         analysisCountdown: this.analysisCountdown, modeSwitchCooldown: this.modeSwitchCooldown,
         currentStrategyName: this.getStrategy(this.config.currentStrategy).shortName,
-        fixedTradeMode: this.fixedTradeMode, botLabel: this.botLabel,
+        fixedTradeMode: this.fixedTradeMode, botLabel: this.botLabel, _cdMax: this._cdMax || 25,
       };
     }
 
@@ -8401,6 +8419,7 @@ window.NexusStrategies=exports;
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false };
       const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
+      this._cdMax = cd; // store for tab ring arc
       this.addLog('engine', 'SYSTEM', `COOLING DOWN ${cd}s — scanning for best market...`);
       this.runsSinceRefresh++;
       if (this.config.autoRefresh && this.runsSinceRefresh >= 4) {
@@ -8456,11 +8475,11 @@ window.NexusStrategies=exports;
       overlay.innerHTML = `
         <div class="titan-cd-popup">
           <div class="titan-cd-ring">
-            <svg class="titan-cd-svg" viewBox="0 0 120 120">
-              <circle class="titan-cd-track" cx="60" cy="60" r="50" fill="none" stroke-width="6"/>
-              <circle class="titan-cd-arc" cx="60" cy="60" r="50" fill="none" stroke-width="6"
-                stroke-dasharray="${2*Math.PI*50}" stroke-dashoffset="0"
-                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:60px 60px"/>
+            <svg class="titan-cd-svg" viewBox="0 0 140 140">
+              <circle class="titan-cd-track" cx="70" cy="70" r="58" fill="none" stroke-width="7"/>
+              <circle class="titan-cd-arc" cx="70" cy="70" r="58" fill="none" stroke-width="7"
+                stroke-dasharray="${2*Math.PI*58}" stroke-dashoffset="0"
+                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:70px 70px"/>
             </svg>
             <div class="titan-cd-num">${duration}</div>
           </div>
@@ -8472,7 +8491,7 @@ window.NexusStrategies=exports;
       // Start arc animation
       const arc = overlay.querySelector('.titan-cd-arc');
       if (arc) {
-        const total = 2 * Math.PI * 50;
+        const total = 2 * Math.PI * 58;
         arc.style.strokeDashoffset = '0';
         setTimeout(() => { arc.style.strokeDashoffset = total.toFixed(1); arc.style.transition = `stroke-dashoffset ${duration}s linear`; }, 50);
       }
@@ -9060,6 +9079,22 @@ window.NexusStrategies=exports;
           <div class="text-muted" style="font-size:9px;letter-spacing:2px" id="${rootId}-subtitle">TITAN OMEGA · ANALYSIS HUB · MARTINGALE ENGINE · FULL AUTOMATION · ANTI-PREDICTION LOGIC</div>
         </div>
         <div style="flex:1"></div>
+        <!-- Cooldown ring shown in tab header during cooldown -->
+        <div id="${rootId}-tab-cd-ring" style="display:none;align-items:center;gap:8px;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.3);border-radius:999px;padding:5px 14px 5px 8px;box-shadow:0 0 16px rgba(255,170,0,0.25)">
+          <div style="position:relative;width:32px;height:32px;flex-shrink:0">
+            <svg viewBox="0 0 36 36" width="32" height="32" style="position:absolute;inset:0">
+              <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,170,0,0.18)" stroke-width="2.5"/>
+              <circle id="${rootId}-tab-cd-arc" cx="18" cy="18" r="14" fill="none" stroke="#ffaa00" stroke-width="2.5"
+                stroke-dasharray="${(2*Math.PI*14).toFixed(1)}" stroke-dashoffset="0"
+                style="transform:rotate(-90deg);transform-origin:18px 18px;transition:stroke-dashoffset 1s linear;filter:drop-shadow(0 0 4px rgba(255,170,0,0.7))"/>
+            </svg>
+            <div id="${rootId}-tab-cd-num" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Outfit',sans-serif;font-size:9px;font-weight:800;color:#ffaa00;line-height:1">—</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:1px">
+            <span style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:800;letter-spacing:2px;color:#ffaa00;text-transform:uppercase">Cooldown</span>
+            <span style="font-size:8px;color:rgba(255,170,0,0.65);letter-spacing:0.5px">Scanning markets…</span>
+          </div>
+        </div>
         <div class="panel" id="${rootId}-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
         <div id="${rootId}-conn" style="width:10px;height:10px;border-radius:50%"></div>
       </header>
@@ -9501,14 +9536,35 @@ window.NexusStrategies=exports;
     const { state: s, config: c, strategyPhase, strategyWaitReason, liveDigit, liveQuote, cooldownTime } = snap;
     const digit = el(`${rootId}-digit`);
     if (digit) {
-      digit.textContent = liveDigit >= 0 ? liveDigit : '—';
-      digit.className = 'digit-pad text-primary';
+      const newDigit = liveDigit >= 0 ? String(liveDigit) : '—';
+      if (digit.textContent !== newDigit) digit.textContent = newDigit;
+      const newClass = 'digit-pad text-primary';
+      if (digit.className !== newClass) digit.className = newClass;
     }
     const badge = el(`${rootId}-badge`);
     if (badge) {
       const txt = s.isCooldown ? `CD ${cooldownTime}s` : s.isLocked ? '⚡ FIRING' : s.active ? 'SCOUT' : 'IDLE';
       badge.textContent = txt;
       badge.className = s.isCooldown ? 'text-accent' : s.isLocked ? 'text-success' : s.active ? 'text-primary' : 'text-muted';
+    }
+    // ── Tab header cooldown ring ──
+    const tabCdRing = document.getElementById(`${rootId}-tab-cd-ring`);
+    const tabCdNum = document.getElementById(`${rootId}-tab-cd-num`);
+    const tabCdArc = document.getElementById(`${rootId}-tab-cd-arc`);
+    if (tabCdRing) {
+      if (s.isCooldown && cooldownTime > 0) {
+        tabCdRing.style.display = 'flex';
+        if (tabCdNum) tabCdNum.textContent = cooldownTime;
+        if (tabCdArc) {
+          const total = 2 * Math.PI * 14;
+          // Assume max CD is 25s; show remaining arc
+          const maxCd = snap._cdMax || 25;
+          const offset = total * (1 - Math.min(cooldownTime / maxCd, 1));
+          tabCdArc.style.strokeDashoffset = offset.toFixed(1);
+        }
+      } else {
+        tabCdRing.style.display = 'none';
+      }
     }
     const sub = el(`${rootId}-subtitle`);
     if (sub) sub.textContent = `${c.selectedMarket} · ${snap.currentStrategyName}`;
@@ -10079,51 +10135,84 @@ window.NexusStrategies=exports;
       if (autoTxt2) autoTxt2.style.color = isAutoOn ? 'hsl(var(--primary))' : 'rgba(150,165,200,0.7)';
     }
 
-    const execHtml = botIds.map((id) => {
+    // Build exec rows — separate stable structure from live CD ring
+    // so countdown ticks don't cause full innerHTML replacement (which resets CSS transitions = flicker).
+    const execDataList = botIds.map((id) => {
       const engine = engines[id];
       const flow = getBotFlowStage(engine, id);
       const botOn = global.HubStore.isBotEnabled(id);
-
-      // Cooldown countdown
       let cdSecs = 0;
       if (engine) {
         if (id === 'differ') cdSecs = (engine.state && engine.state.cooldownRemaining) || 0;
         else cdSecs = engine.cooldownTime || 0;
       }
       const isCd = cdSecs > 0 || !!(engine && engine.state && engine.state.isCooldown);
-      const statusTag = !botOn ? 'DISABLED' : isCd ? `CD ${cdSecs}s` : flow.engaged ? 'ENGAGED' : 'STANDBY';
+      const statusTag = !botOn ? 'DISABLED' : flow.engaged ? 'ENGAGED' : 'STANDBY';
       const statusClass = !botOn ? '' : isCd ? ' is-cd' : flow.engaged ? ' is-on' : '';
-
       const resultLabel = flow.result === 'win' ? 'WIN' : flow.result === 'loss' ? 'LOSS' : flow.result === 'recovery' ? 'RECOVERY' : '—';
       const resultGlow = flow.result === 'win' ? 'glow-win' : flow.result === 'loss' ? 'glow-loss' : flow.result === 'recovery' ? 'glow-recovery' : '';
-
-      // Per-bot P&L
       const b = perBot[id];
       const plStr = (b.profit >= 0 ? '+' : '') + '$' + b.profit.toFixed(2);
       const plClass = b.profit >= 0 ? 'text-success' : 'text-destructive';
+      const cdMax = (engine && engine._cdMax) || 25;
+      return { id, isCd, cdSecs, cdMax, statusTag, statusClass, resultLabel, resultGlow, flow, botOn, plStr, plClass };
+    });
 
-      return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" style="${botOn ? '' : 'opacity:0.45'}">
-        <div class="exec-row-head">
-          <span class="exec-bot-name">
-            <span class="bot-card-dot exec-dot" style="background:${BOT_META[id].dot};box-shadow:0 0 8px ${BOT_META[id].dot}"></span>
-            ${BOT_META[id].label}
-          </span>
-          <span class="exec-row-right">
-            <span class="exec-pl ${plClass}">${plStr}</span>
-            <span class="exec-status-tag${statusClass}">${statusTag}</span>
-          </span>
-        </div>
-        ${isCd ? `<div class="exec-cd-bar"><div class="exec-cd-fill" style="animation:exec-cd-drain ${cdSecs}s linear forwards"></div></div>` : ''}
-        <div class="exec-flow">
-          <div class="exec-flow-box${flow.analysis ? ' glow-analysis' : ''}">Analysis</div>
-          <span class="exec-flow-arrow">→</span>
-          <div class="exec-flow-box${flow.trading ? ' glow-trading' : ''}">Trading</div>
-          <span class="exec-flow-arrow">→</span>
-          <div class="exec-flow-box ${resultGlow}">${flow.result ? resultLabel : 'Result'}</div>
-        </div>
-      </div>`;
-    }).join('');
-    global.setHtmlIfChanged(el('dash-exec-list', root), execHtml);
+    // Structural key — only truly structural changes trigger full innerHTML re-render.
+    // CD ring ticks, PL updates, and result glow are live-patched below to avoid flicker.
+    const execList = el('dash-exec-list', root);
+    const execStructKey = execDataList.map(r =>
+      `${r.id}:${r.isCd?1:0}:${r.botOn?1:0}`
+    ).join('|');
+
+    if (execList && execList.__structKey !== execStructKey) {
+      execList.__structKey = execStructKey;
+      execList.innerHTML = execDataList.map(({ id, isCd, cdSecs, cdMax, statusTag, statusClass, resultLabel, resultGlow, flow, botOn, plStr, plClass }) => {
+        const total = (2 * Math.PI * 14).toFixed(1);
+        const offset = (2 * Math.PI * 14 * (1 - Math.min(cdSecs / Math.max(cdMax, 1), 1))).toFixed(1);
+        return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" data-exec-id="${id}" style="${botOn ? '' : 'opacity:0.45'}">
+          <div class="exec-row-head">
+            <span class="exec-bot-name">
+              <span class="bot-card-dot exec-dot" style="background:${BOT_META[id].dot};box-shadow:0 0 8px ${BOT_META[id].dot}"></span>
+              ${BOT_META[id].label}
+            </span>
+            <span class="exec-row-right">
+              <span class="exec-pl ${plClass}" data-exec-pl="${id}">${plStr}</span>
+              ${isCd ? `
+              <span class="exec-cd-ring-wrap" data-cd-ring="${id}" title="Cooldown: ${cdSecs}s remaining">
+                <svg class="exec-cd-ring-svg" viewBox="0 0 36 36" width="34" height="34">
+                  <circle class="exec-cd-ring-track" cx="18" cy="18" r="14" fill="none" stroke-width="2.5"/>
+                  <circle class="exec-cd-ring-arc" cx="18" cy="18" r="14" fill="none" stroke-width="2.5"
+                    stroke-dasharray="${total}"
+                    style="transform:rotate(-90deg);transform-origin:18px 18px;transition:stroke-dashoffset 1s linear;stroke-dashoffset:${offset}"/>
+                </svg>
+                <span class="exec-cd-ring-num" data-cd-num="${id}">${cdSecs}</span>
+              </span>` : `<span class="exec-status-tag${statusClass}" data-exec-status="${id}">${statusTag}</span>`}
+            </span>
+          </div>
+          <div class="exec-flow" data-exec-flow="${id}">
+            <div class="exec-flow-box${flow.analysis ? ' glow-analysis' : ''}">Analysis</div>
+            <span class="exec-flow-arrow">→</span>
+            <div class="exec-flow-box${flow.trading ? ' glow-trading' : ''}">Trading</div>
+            <span class="exec-flow-arrow">→</span>
+            <div class="exec-flow-box ${resultGlow}" data-exec-result="${id}">${flow.result ? resultLabel : 'Result'}</div>
+          </div>
+        </div>`;
+      }).join('');
+    } else if (execList) {
+      // Patch only the ticking CD number and arc — no full re-render, no flicker
+      execDataList.forEach(({ id, isCd, cdSecs, cdMax }) => {
+        if (!isCd) return;
+        const numEl = execList.querySelector(`[data-cd-num="${id}"]`);
+        if (numEl) numEl.textContent = cdSecs;
+        const ringWrap = execList.querySelector(`[data-cd-ring="${id}"]`);
+        if (ringWrap) {
+          const arc = ringWrap.querySelector('.exec-cd-ring-arc');
+          if (arc) arc.style.strokeDashoffset = (2 * Math.PI * 14 * (1 - Math.min(cdSecs / Math.max(cdMax, 1), 1))).toFixed(1);
+          ringWrap.title = `Cooldown: ${cdSecs}s remaining`;
+        }
+      });
+    }
 
     if (!el('dash-journal-tabs', root).childElementCount) {
       const tabs = [{ id: 'all', label: 'All' }, ...botIds.map((id) => ({ id, label: BOT_META[id].label }))];
