@@ -1340,16 +1340,16 @@ html.light .freq-bar-grid { background: hsl(var(--muted) / .4); }
 
 /* Martingale accordion */
 .mart-section { border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; margin-bottom: 7px; }
-.mart-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 13px; background: hsl(var(--card)); cursor: pointer; user-select: none; transition: background .15s; }
+.mart-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: hsl(var(--card)); cursor: pointer; user-select: none; transition: background .15s; }
 .mart-header:hover { background: hsl(var(--muted) / .45); }
 .mart-header-left { display: flex; align-items: center; gap: 8px; }
 .mart-header-title { font-family: 'Outfit', sans-serif; font-size: 9.5px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: hsl(var(--accent)); }
 .mart-header-chevron { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; color: hsl(var(--muted-foreground)); transition: transform .22s; font-size: 11px; }
 .mart-header-chevron.open { transform: rotate(180deg); }
-.mart-body { padding: 11px 13px; background: hsl(var(--bg-soft) / .8); border-top: 1px solid hsl(var(--border) / .5); display: none; }
+.mart-body { padding: 14px; background: hsl(var(--bg-soft) / .8); border-top: 1px solid hsl(var(--border) / .5); display: none; }
 .mart-body.open { display: block; animation: fade-in .2s ease; }
 .mart-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.mart-field { display: flex; flex-direction: column; gap: 4px; }
+.mart-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 4px; }
 .mart-field-label { font-family: 'Outfit', sans-serif; font-size: 8px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
 .mart-field-hint { font-size: 9.5px; color: hsl(var(--muted-foreground)); line-height: 1.5; margin-top: 2px; }
 
@@ -4375,8 +4375,8 @@ html body .journal-panel {
 }
 
 /* Equity curve — shorter */
-html body .dash-equity-panel { padding: 12px 14px !important; }
-html body .equity-svg { height: 140px !important; }
+html body .dash-equity-panel { padding: 18px 20px !important; }
+html body .equity-svg { height: 220px !important; }
 
 /* Engine overview — compact */
 html body .rank-table { gap: 8px !important; }
@@ -4702,16 +4702,20 @@ html body .dash-hero-row { display: grid !important; grid-template-columns: 1fr 
 /* 3-column stat row */
 html body .dash-stats-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; padding: 0 !important; }
 
-/* Body */
-html body .dash-body { display: grid !important; grid-template-columns: 380px 1fr !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
-html body .dash-main { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
-html body .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
-html body .dash-sidebar .journal-panel { flex: 0 0 auto !important; min-height: 360px !important; }
-html body .dash-sidebar .journal-list { overflow-y: auto !important; max-height: 300px !important; min-height: 200px !important; }
+/* Body rows — stacked layout */
+html body .dash-row-top { display: grid !important; grid-template-columns: 340px 1fr !important; gap: 12px !important; padding: 0 !important; }
+html body .dash-row-full { padding: 0 !important; margin-top: 12px !important; }
+html body .dash-row-full .glass-panel { width: 100% !important; box-sizing: border-box !important; }
+/* Active engines panel — compact */
+html body .dash-row-top .exec-panel { padding: 12px 14px !important; }
+html body .exec-list { max-height: 220px !important; overflow-y: auto !important; }
+/* Journal — full width, nothing beside it */
+html body .dash-row-full .journal-panel { display: flex !important; flex-direction: column !important; padding: 14px !important; min-height: 240px !important; }
+html body .dash-row-full .journal-list { flex: 1 !important; overflow-y: auto !important; min-height: 160px !important; max-height: 300px !important; }
 
 @media (max-width: 1000px) {
   html body .dash-hero-row { grid-template-columns: 1fr !important; }
-  html body .dash-body { grid-template-columns: 1fr !important; }
+  html body .dash-row-top { grid-template-columns: 1fr !important; }
   html body .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
 }
 
@@ -7913,12 +7917,16 @@ window.NexusStrategies=exports;
       const duration = 15;
       this.dispatch({ type: 'COOLDOWN_START', duration });
       audio.cooldown();
+      // Show blur popup overlay like Titan engines
+      this._showDifferCooldownOverlay(duration);
       if (this.cooldownTimer) clearInterval(this.cooldownTimer);
       let remaining = duration;
       this.cooldownTimer = setInterval(() => {
         remaining--;
+        this._updateDifferCooldownOverlay(remaining);
         if (remaining <= 0) {
           clearInterval(this.cooldownTimer); this.cooldownTimer = null;
+          this._hideDifferCooldownOverlay();
           this.dispatch({ type: 'COOLDOWN_END' });
           const cs = this.state;
           if (cs.autoMode) {
@@ -7943,6 +7951,59 @@ window.NexusStrategies=exports;
           this.dispatch({ type: 'COOLDOWN_TICK', remaining });
         }
       }, 1000);
+    }
+
+    _showDifferCooldownOverlay(duration) {
+      const root = document.getElementById('differ-root');
+      if (!root) return;
+      let overlay = root.querySelector('.titan-cd-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'titan-cd-overlay';
+        root.appendChild(overlay);
+      }
+      overlay.innerHTML = `
+        <div class="titan-cd-popup">
+          <div class="titan-cd-ring">
+            <svg class="titan-cd-svg" viewBox="0 0 140 140">
+              <circle class="titan-cd-track" cx="70" cy="70" r="58" fill="none" stroke-width="7"/>
+              <circle class="titan-cd-arc" cx="70" cy="70" r="58" fill="none" stroke-width="7"
+                stroke-dasharray="${2*Math.PI*58}" stroke-dashoffset="0"
+                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:70px 70px"/>
+            </svg>
+            <div class="titan-cd-num" id="differ-cd-popup-num">${duration}</div>
+          </div>
+          <div class="titan-cd-title">COOLING DOWN</div>
+          <div class="titan-cd-sub">⚡ Re-analyzing digit patterns…</div>
+        </div>`;
+      overlay.style.display = 'flex';
+      // Start arc animation draining over duration
+      const arc = overlay.querySelector('.titan-cd-arc');
+      if (arc) {
+        const total = 2 * Math.PI * 58;
+        arc.style.strokeDashoffset = '0';
+        setTimeout(() => {
+          arc.style.strokeDashoffset = total.toFixed(1);
+          arc.style.transition = `stroke-dashoffset ${duration}s linear`;
+        }, 50);
+      }
+    }
+
+    _updateDifferCooldownOverlay(remaining) {
+      const root = document.getElementById('differ-root');
+      if (!root) return;
+      const numEl = root.querySelector('#differ-cd-popup-num');
+      if (numEl) numEl.textContent = Math.max(0, remaining);
+    }
+
+    _hideDifferCooldownOverlay() {
+      const root = document.getElementById('differ-root');
+      if (!root) return;
+      const overlay = root.querySelector('.titan-cd-overlay');
+      if (overlay) {
+        overlay.style.opacity = '0';
+        setTimeout(() => { overlay.style.display = 'none'; overlay.style.opacity = ''; }, 400);
+      }
     }
 
     connectAnalysis() {
@@ -8062,15 +8123,17 @@ window.NexusStrategies=exports;
                 _self.ownContractIds.delete(c.contract_id);
                 const isWin = c.status === 'won';
                 const profit = parseFloat(c.profit) || 0;
-                const exit = c.exit_tick_display_value?.toString().slice(-1) || '?';
+                const exit = c.exit_tick_display_value?.toString().slice(-1);
                 const entryRaw = c.entry_tick_display_value?.toString().slice(-1);
-                const entryDigit = entryRaw !== undefined ? (parseInt(entryRaw) || 0) : null;
+                const entryDigit = entryRaw !== undefined && entryRaw !== '' ? parseInt(entryRaw) : null;
+                // Parse exit digit correctly: '0' is valid, only use null when missing
+                const exitDigitParsed = (exit !== undefined && exit !== '' && exit !== '?') ? parseInt(exit) : null;
                 _self.dispatch({
                   type: 'ADD_JOURNAL',
                   entry: {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
                     time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'differ',
-                    barrier: c.barrier ?? 0, exitDigit: parseInt(exit) || 0, profit, entryDigit,
+                    barrier: c.barrier ?? 0, exitDigit: exitDigitParsed, profit, entryDigit,
                     market: c.underlying || _self.state.primaryMarket, stake: parseFloat(c.buy_price) || _self.state.stake,
                   },
                 });
@@ -8348,47 +8411,127 @@ window.NexusStrategies=exports;
       }
       let contractType, barrierValue = 0;
       if (this.mode === 'evenodd') {
+        // ── Base contract: match the configured trade mode ──────────────────────
         const isOddMode = cfg.tradeMode === 'odd';
         contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
         const strategy = this.getStrategy(cfg.currentStrategy);
+        // Strategy 9 reverses the base direction
         if (strategy.id === 9) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
+
         if (st.inRecovery) {
-          contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
+          // Recovery step index (1-based: first loss = step 1)
+          const step = st.martingaleStep; // already incremented in handleContractResult
+
+          // ── 💡 Standard Recovery ─────────────────────────────────────────────
+          // UI: "Continues with ODD/EVEN at increased stake"
+          // → Keep SAME parity, just raise stake (multiplier already applied).
+          //    No contract-type change needed here; default above is correct.
+          // contractType stays as isOddMode ? 'DIGITODD' : 'DIGITEVEN'
+
           if (cfg.smartRecovery) {
+            // ── 🧠 Smart Recovery ───────────────────────────────────────────────
+            // UI: "Analyzes last 20 ticks → fires opposite of dominant parity"
+            // → Count ODD% in last 20 ticks. If ODD is dominant (>50%) bet EVEN,
+            //   if EVEN is dominant (≤50%) bet ODD (always take the under-served side).
             const recent = st.history.slice(-20);
-            const oddPct = recent.filter((d) => this.T.isOdd(d)).length / recent.length;
-            contractType = oddPct < 0.5 ? 'DIGITODD' : 'DIGITEVEN';
+            const oddPct = recent.length ? recent.filter((d) => this.T.isOdd(d)).length / recent.length : 0.5;
+            contractType = oddPct > 0.5 ? 'DIGITEVEN' : 'DIGITODD';
+            this.addLog('engine', 'SMART-REC', `Smart: ODD ${(oddPct*100).toFixed(0)}% → betting ${contractType.replace('DIGIT','')}`);
+
           } else if (cfg.alternatingRecovery) {
-            const step = st.martingaleStep;
-            if (step >= 2 && ((step - 2) % 3 === 0)) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
+            // ── 🔄 Alt Mode A ───────────────────────────────────────────────────
+            // UI pattern (ODD base): ODD → EVEN → ODD×2 → EVEN → …
+            //                        step:  1      2       3       4
+            //   i.e. step 1 = flip to EVEN; step 2 = back to ODD; step 3 = ODD; step 4 = EVEN …
+            //   Pattern rule: EVEN on steps where (step % 3 === 1), else same parity.
+            const flipToOpposite = (step % 3 === 1);
+            contractType = flipToOpposite
+              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
+              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
+            this.addLog('engine', 'ALT-A', `AltA step ${step}: ${contractType.replace('DIGIT','')}`);
+
           } else if (cfg.alternatingRecoveryB) {
-            const step = st.martingaleStep;
-            if (step === 1 || (step > 1 && ((step - 1) % 3 === 0))) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
+            // ── 🔁 Alt Mode B ───────────────────────────────────────────────────
+            // UI pattern (ODD base): EVEN → ODD×2 → EVEN → ODD×2 → …
+            //                        step:  1        2  3    4        5  6
+            //   Pattern rule: EVEN on steps where (step % 3 === 1), else ODD.
+            //   Same numeric rule as Alt A but starting direction is opposite (EVEN first).
+            const flipToOpposite = (step % 3 === 1);
+            contractType = flipToOpposite
+              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
+              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
+            // Alt B always starts EVEN on step 1 regardless of base mode, for both ODD & EVEN bots
+            if (step === 1) contractType = 'DIGITEVEN';
+            this.addLog('engine', 'ALT-B', `AltB step ${step}: ${contractType.replace('DIGIT','')}`);
           }
         }
+
       } else {
+        // ── Base contract: OVER at the configured barrier ───────────────────────
         contractType = 'DIGITOVER';
         barrierValue = cfg.overBarrier;
         const strategy = this.getStrategy(cfg.currentStrategy);
+        // Strategy 9 reverses the base direction
         if (strategy.id === 9) { contractType = 'DIGITUNDER'; barrierValue = cfg.overBarrier; }
+
         if (st.inRecovery) {
+          const step = st.martingaleStep; // 1-based
+
+          // ── 💡 Standard Recovery ─────────────────────────────────────────────
+          // UI: "Switches to recovery barrier UNDER after loss"
+          // → Always trade DIGITUNDER at recoveryBarrier during any recovery step.
+          contractType = 'DIGITUNDER';
           barrierValue = cfg.recoveryBarrier;
+          this.addLog('engine', 'RECOVERY-BARRIER', `Standard rec step ${step}: UNDER ${cfg.recoveryBarrier} @ $${st.currentStake.toFixed(2)}`);
+
           if (cfg.smartRecovery) {
-            const recent = st.history.slice(-25);
-            const overRate = recent.filter((d) => d > 4).length / recent.length;
-            if (overRate >= 0.6) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
+            // ── 🧠 Smart Recovery ───────────────────────────────────────────────
+            // UI: "Analyzes last 20 ticks → fires opposite of dominant over/under trend"
+            // → If OVER rate >50% in last 20T, the market is OVER-dominant → bet UNDER.
+            //   If UNDER-dominant (≤50% OVER), bet OVER with recovery barrier.
+            const recent = st.history.slice(-20);
+            const overRate = recent.length ? recent.filter((d) => d > 4).length / recent.length : 0.5;
+            if (overRate > 0.5) {
+              contractType = 'DIGITUNDER'; barrierValue = cfg.recoveryBarrier;
+            } else {
+              contractType = 'DIGITOVER';  barrierValue = cfg.recoveryBarrier;
+            }
+            this.addLog('engine', 'SMART-REC', `Smart: OVER% ${(overRate*100).toFixed(0)}% → ${contractType.replace('DIGIT','')} ${barrierValue}`);
+
           } else if (cfg.alternatingRecovery) {
-            const step = st.martingaleStep;
-            if (step >= 2 && ((step - 2) % 3 === 0)) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
+            // ── 🔄 Alt Mode A ───────────────────────────────────────────────────
+            // UI: "Over → Under → Over×2 → Under → …"
+            //  step:  1       2      3  4     5
+            //  Pattern: UNDER on steps where (step % 3 === 1), else OVER (with recoveryBarrier).
+            const isUnderStep = (step % 3 === 1);
+            if (isUnderStep) {
+              contractType = 'DIGITUNDER'; barrierValue = cfg.recoveryBarrier;
+            } else {
+              contractType = 'DIGITOVER';  barrierValue = cfg.recoveryBarrier;
+            }
+            this.addLog('engine', 'ALT-A', `AltA step ${step}: ${contractType.replace('DIGIT','')} ${barrierValue}`);
+
           } else if (cfg.alternatingRecoveryB) {
-            const step = st.martingaleStep;
-            if (step === 1 || (step > 1 && ((step - 1) % 3 === 0))) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
+            // ── 🔁 Alt Mode B ───────────────────────────────────────────────────
+            // UI: "Under → Over×2 → Under → Over×2 → …"
+            //  step:  1       2  3    4        5  6
+            //  Pattern: UNDER on steps where (step % 3 === 1), else OVER.
+            //  Alt B always starts with UNDER on step 1.
+            const isUnderStep = (step % 3 === 1);
+            if (isUnderStep) {
+              contractType = 'DIGITUNDER'; barrierValue = cfg.recoveryBarrier;
+            } else {
+              contractType = 'DIGITOVER';  barrierValue = cfg.recoveryBarrier;
+            }
+            this.addLog('engine', 'ALT-B', `AltB step ${step}: ${contractType.replace('DIGIT','')} ${barrierValue}`);
           }
-          // STEP 4 OVER 0 SHIELD: at step 3 of a 4-cap chain, override everything with OVER 0
-          // for ~90% survival rate rather than risking full session loss (documentary §3.4)
+
+          // ── 🛡 STEP 4 OVER 0 SHIELD ──────────────────────────────────────────
+          // At step 3 of a 4-cap chain, override everything with OVER 0 (~90% win rate)
+          // to survive rather than risk full session loss on the final martingale step.
           if (st.martingaleStep === 3 && cfg.martingaleStopStep === 4) {
             contractType = 'DIGITOVER'; barrierValue = 0;
-            this.addLog('engine', 'SHIELD', '🛡 STEP 4: OVER 0 SHIELD ACTIVE — maximizing survival');
+            this.addLog('engine', 'SHIELD', '🛡 STEP 4 SHIELD: OVER 0 active — maximizing survival');
           }
         }
       }
@@ -8424,7 +8567,10 @@ window.NexusStrategies=exports;
 
     completeSession() {
       this.executionGuard = false; this.pendingTrade = null;
-      this.state = { ...this.state, isLocked: false, isCooldown: true, active: false };
+      // Reset martingale state so the NEXT session always starts from the base stake,
+      // regardless of what step the current session ended on (stop-loss, max step, TP, etc.)
+      this.state = { ...this.state, isLocked: false, isCooldown: true, active: false,
+        currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
       const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
       this._cdMax = cd; // store for tab ring arc
@@ -8551,12 +8697,15 @@ window.NexusStrategies=exports;
         if (this._processedContracts.has(contractKey)) return;
         this._processedContracts.add(contractKey);
       }
+      // Parse exit digit correctly — '0' is a valid digit, use null fallback not 0-fallback
+      const exitDigitParsed = exitDigit !== '?' ? parseInt(exitDigit) : null;
+      const entryDigitParsed = entryDigit !== null && entryDigit !== undefined ? parseInt(entryDigit) : null;
       this.journal = [{
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
         contractId: contractKey,
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
         market: contract.underlying || this.config.selectedMarket, barrier: contract.barrier ?? 0,
-        exitDigit: parseInt(exitDigit) || 0, entryDigit: entryDigit !== null ? (parseInt(entryDigit) || 0) : null,
+        exitDigit: exitDigitParsed, entryDigit: entryDigitParsed,
         profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
       }, ...this.journal].slice(0, 500);
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
@@ -8569,11 +8718,13 @@ window.NexusStrategies=exports;
         const nextStep = this.state.martingaleStep + 1;
         ns.martingaleStep = nextStep; ns.inRecovery = true;
         if (cfg.martingaleEnabled) {
+          // Always compute the escalated stake so the multiplier is applied correctly.
+          // The stop-step boundary is enforced in _chainAfterResult (triggers cooldown),
+          // NOT here — calculating the stake here does not mean the trade will fire.
+          const { stake } = this.T.calculateNextStake(this.state.currentStake, cfg.martingaleMultiplier, nextStep, cfg.martingaleStopStep);
+          ns.currentStake = stake;
           if (nextStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
             this.addLog('loss', 'CRITICAL', `STEP ${cfg.martingaleStopStep} FAILED. COOLING DOWN.`);
-          } else {
-            const { stake } = this.T.calculateNextStake(this.state.currentStake, cfg.martingaleMultiplier, nextStep, cfg.martingaleStopStep);
-            ns.currentStake = stake;
           }
         }
       }
@@ -8589,7 +8740,7 @@ window.NexusStrategies=exports;
         if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); this.completeSession(); return; }
       }
       // REWAIT mode (documentary §3.2 Mode A): escalate stake but release lock, await fresh signal
-      if (st.isLocked && cfg.martingaleEnabled && cfg.martingaleStopStep === 1 && !st.win && st.inRecovery) {
+      if (st.isLocked && cfg.martingaleEnabled && cfg.martingaleStopStep === 1 && st.inRecovery) {
         this.executionGuard = false;
         this.state = { ...this.state, isLocked: false };
         this.addLog('engine', 'REWAIT', `REWAIT: Loss → awaiting new entry @ $${st.currentStake.toFixed(2)}`);
@@ -8601,15 +8752,17 @@ window.NexusStrategies=exports;
         this.completeSession(); return;
       }
       if (st.active && st.isLocked && !st.isCooldown) {
-        if (st.currentRuns >= cfg.targetRuns) {
+        if (st.inRecovery) {
+          // Loss: keep trading on martingale immediately — NO cooldown between recovery steps
+          this.executionGuard = false; // release guard so next bolt can fire
+          this.addLog('engine', 'RECOVERY', `Recovery step ${st.martingaleStep} — stake $${st.currentStake.toFixed(2)}`);
+          setTimeout(() => this.executeBoltPurchase(), 300); // small delay to let WS settle
+        } else if (st.currentRuns >= cfg.targetRuns) {
           // WIN target reached → cooldown before next session
           this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE! Entering cooldown.`);
           this.completeSession();
-        } else if (st.inRecovery) {
-          // Still in recovery (loss, not at max step) → keep trading on martingale, NO cooldown
-          this.executionGuard = false; // release guard so the next bolt purchase can fire
-          this.executeBoltPurchase();
         } else if (st.currentRuns > 0) {
+          // More runs needed in same session
           this.executeBoltPurchase();
         }
       }
@@ -8964,8 +9117,8 @@ window.NexusStrategies=exports;
           </div>
         </div>
       </div>
-      <button class="btn-engage ${s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : ''}" id="differ-engage" style="margin-top:12px">
-        ${s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT'}
+      <button class="btn-omega ${s.isCooldown ? '' : s.isRunning ? 'stop' : s.isArmed ? 'stop' : ''}" id="differ-engage" style="margin-top:12px${s.isCooldown ? ';opacity:0.6;cursor:not-allowed' : ''}" ${s.isCooldown ? 'disabled' : ''}>
+        ${s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⛔ FIRING — CLICK TO DISARM' : s.isArmed ? '⛔ DISARM BOLT' : '⚡ ENGAGE ATOMIC BOLT'}
       </button>
       <button id="differ-abort" style="display:${s.isArmed || s.isRunning ? 'block' : 'none'};width:100%;margin-top:6px;padding:12px;border:1px solid hsl(var(--loss)/0.5);border-radius:10px;background:transparent;color:hsl(var(--loss));font-family:'Outfit',sans-serif;cursor:pointer">⛔ ABORT TRADES</button>`;
 
@@ -8980,7 +9133,12 @@ window.NexusStrategies=exports;
     el('differ-tp') && (el('differ-tp').onchange = (e) => eng.dispatch({ type: 'SET_TP', value: Math.max(0, parseFloat(e.target.value) || 0) }));
     el('differ-sl') && (el('differ-sl').onchange = (e) => eng.dispatch({ type: 'SET_SL', value: Math.max(0, parseFloat(e.target.value) || 0) }));
     el('differ-autobatch') && (el('differ-autobatch').onchange = (e) => eng.dispatch({ type: 'SET_AUTO_BATCH', value: Math.max(1, parseInt(e.target.value) || 1) }));
-    el('differ-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
+    el('differ-engage').onclick = () => {
+      if (s.isCooldown) return;
+      if (s.isRunning) { eng.abortTrades(); eng.disarmSystem(); }
+      else if (s.isArmed) { eng.disarmSystem(); }
+      else { eng.armSystem(); }
+    };
     el('differ-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
   }
 
@@ -9009,7 +9167,7 @@ window.NexusStrategies=exports;
       <div style="margin-top:8px" class="journal-list">${s.journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
         <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
         <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
-        <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
+        <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit ?? '—'}</b></span>
         <span class="journal-net ${j.type === 'win' ? 'neon-text-win' : 'neon-text-loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
       </div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
       <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:'Outfit',sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
@@ -9041,8 +9199,12 @@ window.NexusStrategies=exports;
 
     const engage = el('differ-engage');
     if (engage) {
-      engage.className = 'btn-engage ' + (s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : '');
-      engage.textContent = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT';
+      const isArmedOrRunning = s.isArmed || s.isRunning;
+      engage.className = 'btn-omega' + (isArmedOrRunning ? ' stop' : '') + (s.isCooldown ? '' : '');
+      engage.disabled = s.isCooldown;
+      engage.style.opacity = s.isCooldown ? '0.6' : '';
+      engage.style.cursor = s.isCooldown ? 'not-allowed' : '';
+      engage.textContent = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⛔ FIRING — CLICK TO DISARM' : s.isArmed ? '⛔ DISARM BOLT' : '⚡ ENGAGE ATOMIC BOLT';
     }
     const abort = el('differ-abort');
     if (abort) abort.style.display = s.isArmed || s.isRunning ? 'block' : 'none';
@@ -9295,15 +9457,16 @@ window.NexusStrategies=exports;
             <select class="titan-input" id="${rootId}-rec-barrier-sel" style="margin-top:4px">
               ${[0,1,2,3,4,5,6,7,8,9].map(b => {
                 const winPct = (9 - b) * 10;
-                return `<option value="${b}" ${b === c.recoveryBarrier ? 'selected' : ''}>Under ${b} (${winPct}% win chance)</option>`;
+                return `<option value="${b}" ${b === c.recoveryBarrier ? 'selected' : ''}>Under ${b} — ${winPct}% win chance</option>`;
               }).join('')}
             </select>
-            <span class="mart-field-hint">On loss, switches to UNDER [digit]. Lower = higher win %. Default: Under 4 (50%)</span>
+            <span class="mart-field-hint">Recovery trades use this UNDER barrier. Lower barrier = higher win %. Alt/Smart modes may override direction. Default: Under 4 (50%)</span>
           </div>` : `
           <div class="mart-field" style="margin-bottom:10px">
             <span class="mart-field-label">Recovery Direction</span>
             <div class="mart-field-hint" style="margin-top:4px;padding:8px;background:hsl(var(--bg));border-radius:6px;border:1px solid hsl(var(--border)/0.5)">
-              After a loss on <b style="color:hsl(var(--primary))">${(c.tradeMode||'odd').toUpperCase()}</b>, recovery fires <b style="color:hsl(var(--accent))">${(c.tradeMode||'odd')==='odd'?'EVEN':'ODD'}</b> at higher stake (opposite parity)
+              <b style="color:hsl(var(--primary))">Standard:</b> stays on <b style="color:hsl(var(--accent))">${(c.tradeMode||'odd').toUpperCase()}</b> at higher stake.
+              <b style="color:hsl(var(--primary))">Alt/Smart:</b> alternates parity each step to avoid Deriv pattern detection.
             </div>
           </div>`}
 
@@ -9333,32 +9496,36 @@ window.NexusStrategies=exports;
 
               <div class="recovery-mode-card ${!c.alternatingRecovery && !c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="plain" id="${rootId}-rmode-plain">
                 <div class="rec-card-title">💡 Standard Recovery</div>
-                <div class="rec-card-desc">${isOver ? 'Switches to recovery barrier UNDER after loss' : `Continues with ${(c.tradeMode||'odd').toUpperCase()} at increased stake`}</div>
+                <div class="rec-card-desc">${isOver
+                  ? `UNDER ${c.recoveryBarrier} on every recovery step — consistent high-win-chance direction`
+                  : `Stays on ${(c.tradeMode||'odd').toUpperCase()} at escalated stake — no direction change`
+                }</div>
               </div>
 
               <div class="recovery-mode-card ${c.alternatingRecovery && !c.smartRecovery ? 'selected' : ''}" data-rmode="altA" id="${rootId}-rmode-altA">
-                <div class="rec-card-title">🔄 Alt Mode A</div>
+                <div class="rec-card-title">🔄 Alt Mode A — Staggered flip</div>
                 <div class="rec-card-desc">${isOver
-                  ? 'Over → Under → Over×2 → Under → …'
+                  ? `Step 1: UNDER ${c.recoveryBarrier} → Step 2: OVER ${c.recoveryBarrier} → Steps 3-4: OVER → Step 5: UNDER … (flips every 3rd)`
                   : (c.tradeMode||'odd')==='odd'
-                    ? 'ODD → EVEN → ODD×2 → EVEN → …'
-                    : 'EVEN → ODD → EVEN×2 → ODD → …'
+                    ? 'Step 1: EVEN → Step 2: ODD → Steps 3-4: ODD → Step 5: EVEN … (flips every 3rd)'
+                    : 'Step 1: ODD → Step 2: EVEN → Steps 3-4: EVEN → Step 5: ODD … (flips every 3rd)'
                 }</div>
               </div>
 
               <div class="recovery-mode-card ${c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="altB" id="${rootId}-rmode-altB">
-                <div class="rec-card-title">🔁 Alt Mode B</div>
+                <div class="rec-card-title">🔁 Alt Mode B — EVEN/UNDER-first</div>
                 <div class="rec-card-desc">${isOver
-                  ? 'Under → Over×2 → Under → Over×2 → …'
-                  : (c.tradeMode||'odd')==='odd'
-                    ? 'EVEN → ODD×2 → EVEN → ODD×2 → …'
-                    : 'ODD → EVEN×2 → ODD → EVEN×2 → …'
+                  ? `Step 1: UNDER ${c.recoveryBarrier} → Steps 2-3: OVER ${c.recoveryBarrier} → Step 4: UNDER … (repeating 1→2 block)`
+                  : 'Step 1: EVEN → Steps 2-3: ODD → Step 4: EVEN … (always starts EVEN regardless of base mode)'
                 }</div>
               </div>
 
               <div class="recovery-mode-card ${c.smartRecovery ? 'selected' : ''}" data-rmode="smart" id="${rootId}-rmode-smart">
-                <div class="rec-card-title">🧠 Smart Recovery</div>
-                <div class="rec-card-desc">Analyzes last 20 ticks → fires opposite of dominant ${isOver ? 'over/under trend' : 'parity'} for higher win odds</div>
+                <div class="rec-card-title">🧠 Smart Recovery — Tick-adaptive</div>
+                <div class="rec-card-desc">${isOver
+                  ? `Scans last 20 ticks: if OVER% &gt;50% → bets UNDER ${c.recoveryBarrier}. If UNDER-dominant → bets OVER ${c.recoveryBarrier}. Adapts each step.`
+                  : 'Scans last 20 ticks: if ODD% >50% → bets EVEN. If EVEN-dominant → bets ODD. Adapts each step.'
+                }</div>
               </div>
 
             </div>
@@ -9436,7 +9603,16 @@ window.NexusStrategies=exports;
     el(`${rootId}-toggle`).onclick = () => engine.toggleEngine();
     if (isOver) {
       el(`${rootId}-barriers`) && el(`${rootId}-barriers`).querySelectorAll('[data-barrier]').forEach((b) => {
-        b.onclick = () => engine.setConfig({ overBarrier: parseInt(b.dataset.barrier) });
+        b.onclick = () => {
+          const newBarrier = parseInt(b.dataset.barrier);
+          engine.setConfig({ overBarrier: newBarrier });
+          // Immediately update selected state visually without waiting for full re-render
+          el(`${rootId}-barriers`) && el(`${rootId}-barriers`).querySelectorAll('[data-barrier]').forEach((btn) => {
+            btn.classList.toggle('selected', parseInt(btn.dataset.barrier) === newBarrier);
+          });
+          // Force config panel re-render on next render cycle
+          if (shells[rootId]) { shells[rootId].lastOverBarrier = -1; }
+        };
       });
     } else if (!engine.fixedTradeMode) {
       el(`${rootId}-odd`).onclick = () => engine.switchTradeMode('odd');
@@ -9462,7 +9638,7 @@ window.NexusStrategies=exports;
         ${journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
           <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
           <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
-          <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
+          <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit ?? '—'}</b></span>
           <span class="journal-net ${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
         </div>`).join('') || '<div class="text-muted" style="text-align:center;padding:20px;font-size:10px">NO TRADES RECORDED</div>'}
       </div>
@@ -9615,9 +9791,11 @@ window.NexusStrategies=exports;
       const snap = engine.getSnapshot();
       const sh = shells[rootId];
       renderLeft(engine, rootId, snap);
-      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy) {
+      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy || sh.lastOverBarrier !== snap.config.overBarrier || sh.lastTradeMode !== snap.config.tradeMode) {
         renderCenterConfig(engine, rootId, snap);
         sh.lastStrategy = snap.config.currentStrategy;
+        sh.lastOverBarrier = snap.config.overBarrier;
+        sh.lastTradeMode = snap.config.tradeMode;
       }
       renderRight(engine, rootId, snap);
       updateLive(rootId, snap);
@@ -9821,6 +9999,7 @@ window.NexusStrategies=exports;
           <button id="dash-master-toggle" style="margin:0;padding:12px 36px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden">
             ⚡ ENGAGE ALL
           </button>
+
         </div>
 
         <!-- ═══ STAT CARDS ═══ -->
@@ -9857,68 +10036,64 @@ window.NexusStrategies=exports;
           </div>
         </div>
 
-        <!-- ═══ MAIN BODY ═══ -->
-        <div class="dash-body">
-          <!-- ═══ SIDEBAR (now LEFT) ═══ -->
-          <div class="dash-sidebar">
-
-            <!-- Active engines -->
-            <div class="glass-panel exec-panel">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
-                <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
-                  <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
-                  <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
-                </label>
-              </div>
-              <div id="dash-bot-toggles" class="bot-toggles"></div>
-              <div id="dash-exec-list" class="exec-list"></div>
+        <!-- ═══ ROW 1: Active Engines + Equity Curve side by side ═══ -->
+        <div class="dash-row-top">
+          <!-- Active engines -->
+          <div class="glass-panel exec-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
+              <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
+                <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
+                <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
+              </label>
             </div>
-
-            <!-- Trade journal -->
-            <div class="glass-panel journal-panel">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
-              </div>
-              <div class="journal-tabs" id="dash-journal-tabs"></div>
-              <div class="journal-list" id="dash-journal-list"></div>
-            </div>
-
+            <div id="dash-bot-toggles" class="bot-toggles"></div>
+            <div id="dash-exec-list" class="exec-list"></div>
           </div>
 
-          <div class="dash-main">
-
-            <!-- Equity chart -->
-            <div class="glass-panel dash-equity-panel">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-                <div>
-                  <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
-                  <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · all engines · most recent last</div>
-                </div>
-                <div style="display:flex;align-items:center;gap:6px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
-                  <span style="width:20px;height:2px;background:linear-gradient(90deg,hsl(var(--win)),hsl(var(--secondary)));border-radius:2px;display:inline-block"></span>
-                  P&amp;L
-                </div>
+          <!-- Equity chart -->
+          <div class="glass-panel dash-equity-panel" style="padding:18px 20px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <div>
+                <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
+                <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · all engines · most recent last</div>
               </div>
-              <div id="dash-equity-wrap"></div>
-            </div>
-
-            <!-- Engine overview -->
-            <div class="glass-panel" style="padding:14px 16px">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <div class="section-divider" style="margin-bottom:0;flex:1">ENGINE OVERVIEW</div>
-                <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">4 BOTS</div>
+              <div style="display:flex;align-items:center;gap:12px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
+                <span style="display:flex;align-items:center;gap:5px"><span style="width:20px;height:2px;background:linear-gradient(90deg,hsl(var(--secondary)),hsl(var(--win)));border-radius:2px;display:inline-block"></span>P&amp;L Line</span>
+                <span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:hsl(var(--win));display:inline-block;box-shadow:0 0 6px hsl(var(--win))"></span>Live</span>
               </div>
-              <div class="rank-table" id="dash-perbot"></div>
             </div>
-
+            <div id="dash-equity-wrap"></div>
           </div>
         </div>
+
+        <!-- ═══ ROW 2: Engine Overview — full width ═══ -->
+        <div class="dash-row-full">
+          <div class="glass-panel" style="padding:14px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">ENGINE OVERVIEW</div>
+              <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">4 BOTS</div>
+            </div>
+            <div class="rank-table" id="dash-perbot"></div>
+          </div>
+        </div>
+
+        <!-- ═══ ROW 3: Trade Journal — full width ═══ -->
+        <div class="dash-row-full">
+          <div class="glass-panel journal-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
+            </div>
+            <div class="journal-tabs" id="dash-journal-tabs"></div>
+            <div class="journal-list" id="dash-journal-list"></div>
+          </div>
+        </div>
+
       </div>`;
   }
 
   function buildEquitySVG(points) {
-    const w = 680, h = 200, pad = 28;
+    const w = 680, h = 220, pad = 36;
     if (points.length < 2) {
       return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
         <defs>
@@ -9930,7 +10105,7 @@ window.NexusStrategies=exports;
         <rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}"
           fill="url(#empty-grad)" stroke="hsl(var(--border))" stroke-width="0.5" stroke-dasharray="4,4" rx="10"/>
         <text x="${w/2}" y="${h/2-10}" text-anchor="middle" fill="hsl(var(--muted-foreground))"
-          font-size="11" font-family="Outfit,sans-serif" letter-spacing="3" font-weight="700" text-transform="uppercase">NO EQUITY DATA</text>
+          font-size="11" font-family="Outfit,sans-serif" letter-spacing="3" font-weight="700">NO EQUITY DATA</text>
         <text x="${w/2}" y="${h/2+12}" text-anchor="middle" fill="hsl(var(--muted-foreground))"
           font-size="9" font-family="DM Mono,monospace" opacity="0.6">Curve appears after first closed trade</text>
       </svg>`;
@@ -9938,47 +10113,114 @@ window.NexusStrategies=exports;
     const values = points.map((p) => p.cumulative);
     const min = Math.min(0, ...values), max = Math.max(0, ...values);
     const range = max - min || 1;
-    const stepX = (w - pad * 2) / (points.length - 1);
+    const stepX = (w - pad * 2) / Math.max(points.length - 1, 1);
     const xAt = (i) => pad + i * stepX;
     const yAt = (v) => h - pad - ((v - min) / range) * (h - pad * 2);
     const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(p.cumulative).toFixed(1)}`).join(' ');
-    const area = `${line} L${xAt(points.length - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`;
+    const area = `${line} L${xAt(points.length - 1).toFixed(1)},${h - pad} L${xAt(0).toFixed(1)},${h - pad} Z`;
     const zeroY = yAt(0).toFixed(1);
     const last = values[values.length - 1];
     const isPos = last >= 0;
-    const lineColor = isPos ? 'hsl(var(--win))' : 'hsl(var(--primary))';
-    const lineColor2 = isPos ? 'hsl(var(--secondary))' : 'hsl(var(--loss))';
-    // Grid lines
-    const gridLines = [0.25, 0.5, 0.75].map(t => {
+    const peakVal = Math.max(...values);
+    const troughVal = Math.min(...values);
+    const peakIdx = values.lastIndexOf(peakVal);
+    const troughIdx = values.lastIndexOf(troughVal);
+    const lineColor = isPos ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+    const lineColor2 = isPos ? 'hsl(var(--secondary))' : 'hsl(var(--primary))';
+
+    // Y-axis grid lines with labels
+    const gridCount = 4;
+    const gridLines = Array.from({length: gridCount + 1}, (_, i) => {
+      const t = i / gridCount;
       const y = (pad + t * (h - pad*2)).toFixed(1);
-      return `<line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}" stroke="hsl(var(--border))" stroke-width="0.5" opacity="0.4"/>`;
+      const val = (max - t * range).toFixed(2);
+      const isZero = Math.abs(parseFloat(val)) < range * 0.03;
+      return `
+        <line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}"
+          stroke="${isZero ? 'hsl(var(--border-bright))' : 'hsl(var(--border))'}"
+          stroke-width="${isZero ? 1 : 0.4}" stroke-dasharray="${isZero ? '3,4' : '2,6'}" opacity="${isZero ? 0.7 : 0.35}"/>
+        <text x="${pad - 5}" y="${parseFloat(y) + 3.5}" text-anchor="end"
+          fill="hsl(var(--muted-foreground))" font-size="8" font-family="DM Mono,monospace" opacity="0.6">${parseFloat(val) >= 0 ? '+' : ''}${parseFloat(val).toFixed(2)}</text>`;
     }).join('');
+
+    // Trade count ticks along X axis (max 8)
+    const tickCount = Math.min(8, points.length);
+    const tickStep = Math.floor(points.length / tickCount);
+    const xTicks = Array.from({length: tickCount}, (_, i) => {
+      const idx = i * tickStep;
+      const x = xAt(idx).toFixed(1);
+      return `<line x1="${x}" y1="${h - pad}" x2="${x}" y2="${h - pad + 4}" stroke="hsl(var(--border))" stroke-width="0.5" opacity="0.4"/>
+              <text x="${x}" y="${h - pad + 13}" text-anchor="middle" fill="hsl(var(--muted-foreground))" font-size="7.5" font-family="DM Mono,monospace" opacity="0.5">#${idx+1}</text>`;
+    }).join('');
+
+    // Peak marker
+    const peakX = xAt(peakIdx).toFixed(1), peakY = yAt(peakVal).toFixed(1);
+    const peakLabel = peakVal !== last ? `
+      <line x1="${peakX}" y1="${peakY}" x2="${peakX}" y2="${parseFloat(peakY)+28}" stroke="hsl(var(--win))" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.5"/>
+      <circle cx="${peakX}" cy="${peakY}" r="3" fill="hsl(var(--win))" opacity="0.7" style="filter:drop-shadow(0 0 4px hsl(var(--win)))"/>
+      <text x="${peakX}" y="${parseFloat(peakY)-7}" text-anchor="middle" fill="hsl(var(--win))" font-size="8" font-family="DM Mono,monospace" font-weight="700" opacity="0.8">▲ +${peakVal.toFixed(2)}</text>` : '';
+
+    // Trough marker (only if negative)
+    const troughX = xAt(troughIdx).toFixed(1), troughY = yAt(troughVal).toFixed(1);
+    const troughLabel = troughVal < 0 && troughVal !== last ? `
+      <circle cx="${troughX}" cy="${troughY}" r="3" fill="hsl(var(--loss))" opacity="0.6" style="filter:drop-shadow(0 0 4px hsl(var(--loss)))"/>
+      <text x="${troughX}" y="${parseFloat(troughY)+16}" text-anchor="middle" fill="hsl(var(--loss))" font-size="8" font-family="DM Mono,monospace" font-weight="700" opacity="0.7">▼ ${troughVal.toFixed(2)}</text>` : '';
+
+    const endX = xAt(points.length-1).toFixed(1), endY = yAt(last).toFixed(1);
+
     return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
       <defs>
         <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.28"/>
-          <stop offset="70%" stop-color="${lineColor}" stop-opacity="0.06"/>
+          <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.32"/>
+          <stop offset="60%" stop-color="${lineColor}" stop-opacity="0.08"/>
           <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
         </linearGradient>
         <linearGradient id="eqline" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="${lineColor}"/>
-          <stop offset="100%" stop-color="${lineColor2}"/>
+          <stop offset="0%" stop-color="${lineColor2}"/>
+          <stop offset="100%" stop-color="${lineColor}"/>
         </linearGradient>
         <filter id="eq-glow">
-          <feGaussianBlur stdDeviation="2" result="blur"/>
+          <feGaussianBlur stdDeviation="2.5" result="blur"/>
           <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
+        <filter id="dot-glow">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <clipPath id="eq-clip">
+          <rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}"/>
+        </clipPath>
       </defs>
+      <!-- Y-axis grid + labels -->
       ${gridLines}
+      <!-- X-axis ticks -->
+      ${xTicks}
+      <!-- Axis lines -->
+      <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="hsl(var(--border))" stroke-width="0.6" opacity="0.5"/>
+      <line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="hsl(var(--border))" stroke-width="0.6" opacity="0.5"/>
+      <!-- Zero baseline glow -->
       <line x1="${pad}" y1="${zeroY}" x2="${w - pad}" y2="${zeroY}"
-        stroke="hsl(var(--border-bright))" stroke-width="1" stroke-dasharray="3,4" opacity="0.6"/>
-      <path d="${area}" fill="url(#eqfill)" stroke="none"/>
-      <path d="${line}" fill="none" stroke="url(#eqline)" stroke-width="2.5"
-        stroke-linejoin="round" stroke-linecap="round" filter="url(#eq-glow)"/>
-      <!-- End dot -->
-      <circle cx="${xAt(points.length-1).toFixed(1)}" cy="${yAt(last).toFixed(1)}" r="4"
-        fill="${lineColor}" stroke="hsl(var(--bg))" stroke-width="2"
-        style="filter:drop-shadow(0 0 6px ${lineColor})"/>
+        stroke="${lineColor}" stroke-width="0.8" stroke-dasharray="3,5" opacity="0.45"/>
+      <!-- Area fill (clipped) -->
+      <g clip-path="url(#eq-clip)">
+        <path d="${area}" fill="url(#eqfill)" stroke="none"/>
+      </g>
+      <!-- Main line with glow -->
+      <path d="${line}" fill="none" stroke="url(#eqline)" stroke-width="2.2"
+        stroke-linejoin="round" stroke-linecap="round" filter="url(#eq-glow)" clip-path="url(#eq-clip)"/>
+      <!-- Peak / trough markers -->
+      ${peakLabel}
+      ${troughLabel}
+      <!-- Animated end dot -->
+      <circle cx="${endX}" cy="${endY}" r="7" fill="${lineColor}" opacity="0.12" filter="url(#dot-glow)">
+        <animate attributeName="r" values="5;10;5" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.18;0.06;0.18" dur="2.4s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="${endX}" cy="${endY}" r="4.5" fill="${lineColor}" stroke="hsl(var(--bg))" stroke-width="2" filter="url(#dot-glow)"/>
+      <circle cx="${endX}" cy="${endY}" r="2" fill="hsl(var(--bg))"/>
+      <!-- End label -->
+      <rect x="${parseFloat(endX) - 22}" y="${parseFloat(endY) - 22}" width="44" height="14" rx="4" fill="hsl(var(--bg))" opacity="0.75"/>
+      <text x="${endX}" y="${parseFloat(endY) - 12}" text-anchor="middle" fill="${lineColor}" font-size="9" font-family="DM Mono,monospace" font-weight="700">${last >= 0 ? '+' : ''}${last.toFixed(2)}</text>
     </svg>`;
   }
 
@@ -10301,6 +10543,7 @@ window.NexusStrategies=exports;
   let dashboardEl = null;
   let dashRenderQueued = false;
   const engines = { differ: null, even: null, odd: null, nexus: null };
+  window._hubEngines = engines; // expose for master toggle label updater
   const titanBuilt = { even: false, odd: false, nexus: false };
 
   function queueDashboardRender() {
@@ -10584,6 +10827,54 @@ window.NexusStrategies=exports;
     return { tp, sl };
   }
 
+  function getNetPnL() {
+    let net = 0;
+    BOT_IDS.forEach((id) => {
+      const eng = engines[id];
+      if (!eng) return;
+      if (id === 'differ') { net += (eng.state && eng.state.totalProfit) || 0; }
+      else { net += (eng.state && eng.state.stats && eng.state.stats.profit) || 0; }
+    });
+    return net;
+  }
+
+  function checkMasterTpSl() {
+    const { tp, sl } = getMasterTpSl();
+    const net = getNetPnL();
+    const anyActive = BOT_IDS.some((id) => {
+      const eng = engines[id];
+      if (!eng) return false;
+      return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+    });
+    if (!anyActive) return; // nothing running, no need to check
+    if (net >= tp) {
+      // Stop Profit reached — stop all bots
+      BOT_IDS.forEach((id) => {
+        const eng = engines[id];
+        if (!eng) return;
+        if (id === 'differ') { if (eng.state.isArmed || eng.state.isRunning) { eng.abortTrades(); eng.disarmSystem(); } }
+        else { if (eng.state.active || eng.state.isLocked) eng.toggleEngine(); }
+      });
+      // Show notification
+      const msg = `🏆 STOP PROFIT reached: Net +$${net.toFixed(2)} ≥ $${tp.toFixed(2)} — all bots stopped`;
+      window.HubStore && window.HubStore.notifyTelegram(msg);
+      if (window.Sounds) window.Sounds.soundEngine.playWin();
+      queueDashboardRender();
+    } else if (net <= -Math.abs(sl)) {
+      // Stop Loss reached — stop all bots
+      BOT_IDS.forEach((id) => {
+        const eng = engines[id];
+        if (!eng) return;
+        if (id === 'differ') { if (eng.state.isArmed || eng.state.isRunning) { eng.abortTrades(); eng.disarmSystem(); } }
+        else { if (eng.state.active || eng.state.isLocked) eng.toggleEngine(); }
+      });
+      const msg = `🛑 STOP LOSS reached: Net -$${Math.abs(net).toFixed(2)} ≥ $${sl.toFixed(2)} — all bots stopped`;
+      window.HubStore && window.HubStore.notifyTelegram(msg);
+      if (window.Sounds) window.Sounds.soundEngine.playLoss();
+      queueDashboardRender();
+    }
+  }
+
   function applyMasterTpSlToAllEngines() {
     const { tp, sl } = getMasterTpSl();
     BOT_IDS.forEach((id) => {
@@ -10622,6 +10913,24 @@ window.NexusStrategies=exports;
           if (!turnOn && isOn) eng.toggleEngine();
         }
       });
+      // Update button label immediately after click
+      setTimeout(() => {
+        const masterBtn = document.getElementById('dash-master-toggle');
+        if (masterBtn) {
+          const nowEngaged = BOT_IDS.filter((id) => {
+            const eng = engines[id];
+            if (!eng) return false;
+            return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+          }).length;
+          if (nowEngaged > 0) {
+            masterBtn.textContent = '⛔ TERMINATE ALL';
+            masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--loss)),hsl(350 60% 38%))';
+          } else {
+            masterBtn.textContent = '⚡ ENGAGE ALL';
+            masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)))';
+          }
+        }
+      }, 200);
       queueDashboardRender();
     });
     // Apply TP/SL when values change
@@ -10659,7 +10968,27 @@ window.NexusStrategies=exports;
     ['even', 'odd', 'nexus'].forEach(ensureTitanEngine);
     bindHubTabs();
     queueDashboardRender();
-    setInterval(() => { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); }, 3000);
+    setInterval(() => {
+      if (activeApp === 'dashboard') queueDashboardRender();
+      refreshTabDots();
+      checkMasterTpSl();
+      // Live-update master toggle button label
+      const masterBtn = document.getElementById('dash-master-toggle');
+      if (masterBtn) {
+        const engaged = BOT_IDS.filter((id) => {
+          const eng = engines[id];
+          if (!eng) return false;
+          return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+        }).length;
+        if (engaged > 0) {
+          masterBtn.textContent = '⛔ TERMINATE ALL';
+          masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--loss)),hsl(350 60% 38%))';
+        } else {
+          masterBtn.textContent = '⚡ ENGAGE ALL';
+          masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)))';
+        }
+      }
+    }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
