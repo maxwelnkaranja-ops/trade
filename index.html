@@ -7904,12 +7904,16 @@ window.NexusStrategies=exports;
       const duration = 15;
       this.dispatch({ type: 'COOLDOWN_START', duration });
       audio.cooldown();
+      // Show blur popup overlay like Titan engines
+      this._showDifferCooldownOverlay(duration);
       if (this.cooldownTimer) clearInterval(this.cooldownTimer);
       let remaining = duration;
       this.cooldownTimer = setInterval(() => {
         remaining--;
+        this._updateDifferCooldownOverlay(remaining);
         if (remaining <= 0) {
           clearInterval(this.cooldownTimer); this.cooldownTimer = null;
+          this._hideDifferCooldownOverlay();
           this.dispatch({ type: 'COOLDOWN_END' });
           const cs = this.state;
           if (cs.autoMode) {
@@ -8053,15 +8057,17 @@ window.NexusStrategies=exports;
                 _self.ownContractIds.delete(c.contract_id);
                 const isWin = c.status === 'won';
                 const profit = parseFloat(c.profit) || 0;
-                const exit = c.exit_tick_display_value?.toString().slice(-1) || '?';
+                const exit = c.exit_tick_display_value?.toString().slice(-1);
                 const entryRaw = c.entry_tick_display_value?.toString().slice(-1);
-                const entryDigit = entryRaw !== undefined ? (parseInt(entryRaw) || 0) : null;
+                const entryDigit = entryRaw !== undefined && entryRaw !== '' ? parseInt(entryRaw) : null;
+                // Parse exit digit correctly: '0' is valid, only use null when missing
+                const exitDigitParsed = (exit !== undefined && exit !== '' && exit !== '?') ? parseInt(exit) : null;
                 _self.dispatch({
                   type: 'ADD_JOURNAL',
                   entry: {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
                     time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'differ',
-                    barrier: c.barrier ?? 0, exitDigit: parseInt(exit) || 0, profit, entryDigit,
+                    barrier: c.barrier ?? 0, exitDigit: exitDigitParsed, profit, entryDigit,
                     market: c.underlying || _self.state.primaryMarket, stake: parseFloat(c.buy_price) || _self.state.stake,
                   },
                 });
@@ -8081,7 +8087,9 @@ window.NexusStrategies=exports;
               }
             }
             if (d.msg_type === 'buy') {
-              if (d.error) _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message}`, ntype: 'loss' });
+              if (d.error) {
+                _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+              }
               else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
             }
           } catch (e) { /* */ }
@@ -8094,6 +8102,59 @@ window.NexusStrategies=exports;
           }
         };
       })();
+    }
+
+    _showDifferCooldownOverlay(duration) {
+      const root = document.getElementById('differ-root');
+      if (!root) return;
+      let overlay = root.querySelector('.titan-cd-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'titan-cd-overlay';
+        root.appendChild(overlay);
+      }
+      overlay.innerHTML = `
+        <div class="titan-cd-popup">
+          <div class="titan-cd-ring">
+            <svg class="titan-cd-svg" viewBox="0 0 140 140">
+              <circle class="titan-cd-track" cx="70" cy="70" r="58" fill="none" stroke-width="7"/>
+              <circle class="titan-cd-arc" cx="70" cy="70" r="58" fill="none" stroke-width="7"
+                stroke-dasharray="${2*Math.PI*58}" stroke-dashoffset="0"
+                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:70px 70px"/>
+            </svg>
+            <div class="titan-cd-num" id="differ-cd-popup-num">${duration}</div>
+          </div>
+          <div class="titan-cd-title">COOLING DOWN</div>
+          <div class="titan-cd-sub">⚡ Re-analyzing digit patterns…</div>
+        </div>`;
+      overlay.style.display = 'flex';
+      // Start arc animation draining over duration
+      const arc = overlay.querySelector('.titan-cd-arc');
+      if (arc) {
+        const total = 2 * Math.PI * 58;
+        arc.style.strokeDashoffset = '0';
+        setTimeout(() => {
+          arc.style.strokeDashoffset = total.toFixed(1);
+          arc.style.transition = `stroke-dashoffset ${duration}s linear`;
+        }, 50);
+      }
+    }
+
+    _updateDifferCooldownOverlay(remaining) {
+      const root = document.getElementById('differ-root');
+      if (!root) return;
+      const numEl = root.querySelector('#differ-cd-popup-num');
+      if (numEl) numEl.textContent = Math.max(0, remaining);
+    }
+
+    _hideDifferCooldownOverlay() {
+      const root = document.getElementById('differ-root');
+      if (!root) return;
+      const overlay = root.querySelector('.titan-cd-overlay');
+      if (overlay) {
+        overlay.style.opacity = '0';
+        setTimeout(() => { overlay.style.display = 'none'; overlay.style.opacity = ''; }, 400);
+      }
     }
 
     armSystem() {
@@ -8148,7 +8209,7 @@ window.NexusStrategies=exports;
       this.fixedTradeMode = opts.fixedTradeMode || null; // 'odd' | 'even' | null
       this.botLabel = opts.botLabel || opts.id;
       this.T = opts.trading;
-      this.socket = opts.socket.globalSocket;
+      this.socket = (opts.socket && opts.socket.globalSocket) || null;
       this.Scanner = opts.scanner.MarketScanner;
       this.getStrategy = opts.strategies.getStrategy;
       this.getStrategyDefaults = opts.strategies.getStrategyDefaults;
@@ -8172,6 +8233,7 @@ window.NexusStrategies=exports;
       this.modeSwitchCooldown = 0; this.isStrategyTransitioning = false;
 
       this.tradingSocket = null; this.tickUnsub = null; this.scanner = null;
+      this.ownContractIds = new Set();
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
       this.executionGuard = false; this.pendingTrade = null;
@@ -8191,7 +8253,7 @@ window.NexusStrategies=exports;
 
     loadConfig() {
       const evenDefaults = {
-        stake: 1, targetRuns: 1, minSignal: 70, minStreak: 3, overBarrier: 3, recoveryBarrier: 4,
+        stake: 1, targetRuns: 1, minSignal: 55, minStreak: 3, overBarrier: 3, recoveryBarrier: 4,
         martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 2,
         autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         soundEnabled: true, currentStrategy: 1, alternatingRecovery: true, alternatingRecoveryB: false,
@@ -8244,15 +8306,22 @@ window.NexusStrategies=exports;
     async _init() {
       // Sound state is owned globally (see applyMuteState in the dashboard
       // shell script) — not set per-engine, since this.sound is shared.
-      await this.socket.connect();
-      this.addLog('system', 'NETWORK', 'Global analysis pipe established');
-      this.scanner = new this.Scanner((st) => { this.scannerState = st; this.emit(); });
-      this.scanner.setTickPeriod(this.config.tickPeriod);
-      await this.scanner.start();
-      this.subscribeToMarket(this.config.selectedMarket);
-      this.startAnalysisHold();
-      this.stuckMonitor = setInterval(() => this._watchdog(), 5000);
-      setTimeout(() => this.startAnalysisHold(), 3000);
+      try {
+        if (!this.socket) throw new Error('Socket not available — check network/CSP settings');
+        await this.socket.connect();
+        this.addLog('system', 'NETWORK', 'Global analysis pipe established');
+        this.scanner = new this.Scanner((st) => { this.scannerState = st; this.emit(); });
+        this.scanner.setTickPeriod(this.config.tickPeriod);
+        await this.scanner.start();
+        this.subscribeToMarket(this.config.selectedMarket);
+        this.startAnalysisHold();
+        this.stuckMonitor = setInterval(() => this._watchdog(), 5000);
+        setTimeout(() => this.startAnalysisHold(), 3000);
+      } catch (err) {
+        console.warn('[TitanEngine._init] Startup error (UI still renders):', err);
+        this.addLog('system', 'NETWORK', '⚠ Market feed unavailable — serve via HTTP (not file://) and check your App ID in Settings');
+        this.emit();
+      }
     }
 
     startAnalysisHold() {
@@ -8332,7 +8401,10 @@ window.NexusStrategies=exports;
       const st = this.state, cfg = this.config;
       if (!st.active || st.isCooldown) return;
       if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
-        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting...');
+        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting (bolt will auto-retry on connect)...');
+        this.executionGuard = false; // release guard so engine isn't stuck if socket drops
+        // Set isLocked so onopen handler knows to retry the bolt once socket is ready
+        this.state = { ...this.state, isLocked: true };
         const token = window.HubStore.getState().apiToken;
         if (token) this.connect(token);
         return;
@@ -8342,19 +8414,45 @@ window.NexusStrategies=exports;
         const isOddMode = cfg.tradeMode === 'odd';
         contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
         const strategy = this.getStrategy(cfg.currentStrategy);
-        if (strategy.id === 9) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
+        // Strategy 9 (EVEN AVALANCHE / AVALANCHE DROP) rides parity continuation:
+        // - ODD bot (isOddMode=true):  strategy 9 bets EVEN (opposite of normal ODD direction)  ✅
+        // - EVEN bot (isOddMode=false): strategy 9 bets EVEN (continuation, same as base) ✅
+        // So for EVEN bot: strategy 9 should NOT flip — keep DIGITEVEN.
+        // For ODD bot: strategy 9 DOES flip ODD → EVEN.
+        if (strategy.id === 9 && isOddMode) contractType = 'DIGITEVEN';
         if (st.inRecovery) {
           contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
           if (cfg.smartRecovery) {
             const recent = st.history.slice(-20);
-            const oddPct = recent.filter((d) => this.T.isOdd(d)).length / recent.length;
-            contractType = oddPct < 0.5 ? 'DIGITODD' : 'DIGITEVEN';
+            const oddPct = recent.length ? recent.filter((d) => this.T.isOdd(d)).length / recent.length : 0.5;
+            contractType = oddPct > 0.5 ? 'DIGITEVEN' : 'DIGITODD';
+            this.addLog('engine', 'SMART-REC', `Smart: ODD ${(oddPct*100).toFixed(0)}% → betting ${contractType.replace('DIGIT','')}`);
           } else if (cfg.alternatingRecovery) {
-            const step = st.martingaleStep;
-            if (step >= 2 && ((step - 2) % 3 === 0)) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
+            // ── 🔄 Alt Mode A ───────────────────────────────────────────────────
+            // UI pattern (ODD base): ODD → EVEN → ODD×2 → EVEN → …
+            //                        step:  1      2       3       4
+            //   i.e. step 1 = flip to EVEN; step 2 = back to ODD; step 3 = ODD; step 4 = EVEN …
+            //   Pattern rule: EVEN on steps where (step % 3 === 1), else same parity.
+            const step = st.martingaleStep; // already incremented in handleContractResult
+            const flipToOpposite = (step % 3 === 1);
+            contractType = flipToOpposite
+              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
+              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
+            this.addLog('engine', 'ALT-A', `AltA step ${step}: ${contractType.replace('DIGIT','')}`);
           } else if (cfg.alternatingRecoveryB) {
+            // ── 🔁 Alt Mode B ───────────────────────────────────────────────────
+            // UI pattern (ODD base): EVEN → ODD×2 → EVEN → ODD×2 → …
+            //                        step:  1        2  3    4        5  6
+            //   Pattern rule: EVEN on steps where (step % 3 === 1), else ODD.
+            //   Same numeric rule as Alt A but starting direction is opposite (EVEN first).
             const step = st.martingaleStep;
-            if (step === 1 || (step > 1 && ((step - 1) % 3 === 0))) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
+            const flipToOpposite = (step % 3 === 1);
+            contractType = flipToOpposite
+              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
+              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
+            // Alt B always starts EVEN on step 1 regardless of base mode, for both ODD & EVEN bots
+            if (step === 1) contractType = 'DIGITEVEN';
+            this.addLog('engine', 'ALT-B', `AltB step ${step}: ${contractType.replace('DIGIT','')}`);
           }
         }
       } else {
@@ -8415,7 +8513,10 @@ window.NexusStrategies=exports;
 
     completeSession() {
       this.executionGuard = false; this.pendingTrade = null;
-      this.state = { ...this.state, isLocked: false, isCooldown: true, active: false };
+      // Reset martingale state so the NEXT session always starts from the base stake,
+      // regardless of what step the current session ended on (stop-loss, max step, TP, etc.)
+      this.state = { ...this.state, isLocked: false, isCooldown: true, active: false,
+        currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
       const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
       this._cdMax = cd; // store for tab ring arc
@@ -8423,8 +8524,12 @@ window.NexusStrategies=exports;
       this.runsSinceRefresh++;
       if (this.config.autoRefresh && this.runsSinceRefresh >= 4) {
         this.runsSinceRefresh = 0;
+        // Defer the socket refresh until after cooldown ends so the socket is
+        // ready exactly when the engine re-engages, not ~20s early.
         const token = window.HubStore.getState().apiToken;
-        if (token) this.connect(token);
+        if (token) setTimeout(() => {
+          if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) this.connect(token);
+        }, (this.cooldownTime || 5) * 1000 + 500);
       }
       // Show cooldown overlay popup on this engine's tab
       this._showCooldownOverlay(cd);
@@ -8628,15 +8733,28 @@ window.NexusStrategies=exports;
         const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
         const headers = { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
 
-        // Resolve accountId
+        // Resolve accountId — wait up to 6s for HubStore to finish its own
+        // accounts fetch (which runs in parallel on page load / token save).
+        // This avoids a race condition where the Titan engine fires its own
+        // duplicate accounts+OTP fetch before HubStore has resolved the ID,
+        // resulting in mismatched sockets or OTP URL mismatches.
         let accountId = hub.accountId;
         if (!accountId) {
+          _titan.addLog('engine', 'AUTH', 'Waiting for HubStore accountId…');
+          for (let i = 0; i < 12; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            accountId = window.HubStore.getState().accountId;
+            if (accountId) break;
+          }
+        }
+        if (!accountId) {
+          // HubStore still hasn't resolved — fall back to our own fetch
           try {
             const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
             if (!r.ok) throw new Error(`Accounts ${r.status}`);
             const d = await r.json();
             const accounts = d.data || [];
-            const preferred = hub.accountType === 'real'
+            const preferred = window.HubStore.getState().accountType === 'real'
               ? accounts.find(a => !a.is_virtual) || accounts[0]
               : accounts.find(a => a.is_virtual) || accounts[0];
             if (!preferred) throw new Error('No accounts found');
@@ -8672,9 +8790,20 @@ window.NexusStrategies=exports;
           _titan.sound.playConnect();
           _titan.addLog('win', 'AUTH', 'Ready to trade');
           try { _titan.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
+          try { _titan.tradingSocket.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); } catch (e) { /* */ }
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
+          // If the engine was mid-chain when socket reconnected (isLocked+active, no pending),
+          // retry the bolt now that the socket is ready — otherwise the chain silently stalls.
+          if (_titan.state.active && _titan.state.isLocked && !_titan.pendingTrade && !_titan.executionGuard && !_titan.state.isCooldown) {
+            _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing bolt');
+            setTimeout(() => _titan.executeBoltPurchase(), 300);
+          }
           _titan.emit();
         };
+        // Queue for contract results that arrive before buy confirmation (race condition)
+        // Digit contracts settle in 1 tick — result can arrive before buy ack
+        if (!_titan._earlyResults) _titan._earlyResults = new Map();
+
         _titan.tradingSocket.onmessage = (msg) => {
           let data;
           try { data = JSON.parse(msg.data); } catch (e) {
@@ -8682,14 +8811,49 @@ window.NexusStrategies=exports;
             return;
           }
           if (data.msg_type === 'balance') _titan.state.balance = data.balance.balance;
-          if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract?.is_sold) _titan.handleContractResult(data.proposal_open_contract);
+          // Log every server reply that isn't a ping/balance/heartbeat so trade
+          // failures always appear in the engine log, not just swallowed silently.
+          if (data.msg_type && data.msg_type !== 'balance' && data.msg_type !== 'ping') {
+            _titan.addLog('engine', 'WS-MSG', `msg_type=${data.msg_type} ${data.error ? '❌ ERROR: ' + data.error.message : ''}`);
+          }
+
+          if (data.msg_type === 'proposal_open_contract') {
+            const _c = data.proposal_open_contract;
+            if (_c && _c.is_sold && _c.contract_id) {
+              if (_titan.ownContractIds.has(_c.contract_id)) {
+                // Normal path: buy was already confirmed, process immediately
+                _titan.ownContractIds.delete(_c.contract_id);
+                _titan.handleContractResult(_c);
+              } else if (_titan.pendingTrade) {
+                // Race condition: result arrived before buy confirmation
+                // Queue it — will be processed when buy ack comes in
+                _titan._earlyResults.set(_c.contract_id.toString(), _c);
+                _titan.addLog('engine', 'QUEUE', `Early result queued for contract #${_c.contract_id}`);
+              }
+            }
+          }
+
           if (data.msg_type === 'buy') {
             if (data.error) {
               _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})`);
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
-            } else if (data.buy) {
-              _titan.addLog('engine', 'CONFIRMED', `Contract #${data.buy.contract_id} accepted @ ${data.buy.buy_price}`);
+              // Also reset isLocked so bot re-enters scouting on next tick
+              _titan.state = { ..._titan.state, isLocked: false };
+              _titan.emit();
+            } else if (data.buy && data.buy.contract_id) {
+              const cid = data.buy.contract_id.toString();
+              _titan.addLog('engine', 'CONFIRMED', `Contract #${cid} accepted @ ${data.buy.buy_price}`);
+              // Check if we already got the result (early result race condition)
+              if (_titan._earlyResults && _titan._earlyResults.has(cid)) {
+                const earlyResult = _titan._earlyResults.get(cid);
+                _titan._earlyResults.delete(cid);
+                _titan.addLog('engine', 'QUEUE', `Processing queued early result for #${cid}`);
+                _titan.handleContractResult(earlyResult);
+              } else {
+                // Normal: wait for proposal_open_contract
+                _titan.ownContractIds.add(data.buy.contract_id);
+              }
             }
           }
           _titan.emit();
@@ -8714,7 +8878,11 @@ window.NexusStrategies=exports;
         return;
       }
       if (newActive) { this.sound.playEngineStart(); this.executionGuard = false; this.pendingTrade = null; }
-      else { this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle'; }
+      else {
+        this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle';
+        // Reset martingale so next session starts clean from base stake
+        this.state = { ...this.state, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+      }
       this.addLog('engine', 'ENGINE', newActive ? 'OMEGA Strategy Engaged' : 'Session Terminated');
       this.state = { ...this.state, active: newActive, isLocked: newActive ? this.state.isLocked : false };
       this.emit();
@@ -10058,7 +10226,15 @@ window.NexusStrategies=exports;
         <div class="bot-card-meta"><span class="text-success">W ${b.win}</span><span class="text-destructive">L ${b.loss}</span></div>
       </div>`;
     }).join('');
-    global.setHtmlIfChanged(el('dash-perbot', root), perBotHtml);
+    if (global.setHtmlIfChanged(el('dash-perbot', root), perBotHtml)) {
+      // Wire up click-to-navigate on bot cards
+      el('dash-perbot', root).querySelectorAll('[data-nav-bot]').forEach((card) => {
+        card.onclick = () => {
+          const botId = card.dataset.navBot;
+          if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(botId);
+        };
+      });
+    }
 
     if (!el('dash-bot-toggles', root).childElementCount) {
       el('dash-bot-toggles', root).innerHTML = botIds.map((id) => `
@@ -10158,7 +10334,7 @@ window.NexusStrategies=exports;
     // Structural key — excludes cdSecs so ticking doesn't trigger full re-render
     const execList = el('dash-exec-list', root);
     const execStructKey = execDataList.map(r =>
-      `${r.id}:${r.isCd?1:0}:${r.statusClass}:${r.resultGlow}:${r.flow.analysis?1:0}:${r.flow.trading?1:0}:${r.plStr}:${r.botOn?1:0}`
+      `${r.id}:${r.isCd?1:0}:${r.botOn?1:0}`
     ).join('|');
 
     if (execList && execList.__structKey !== execStructKey) {
@@ -10173,7 +10349,7 @@ window.NexusStrategies=exports;
               ${BOT_META[id].label}
             </span>
             <span class="exec-row-right">
-              <span class="exec-pl ${plClass}">${plStr}</span>
+              <span class="exec-pl ${plClass}" data-exec-pl="${id}">${plStr}</span>
               ${isCd ? `
               <span class="exec-cd-ring-wrap" data-cd-ring="${id}" title="Cooldown: ${cdSecs}s remaining">
                 <svg class="exec-cd-ring-svg" viewBox="0 0 36 36" width="34" height="34">
@@ -10183,15 +10359,15 @@ window.NexusStrategies=exports;
                     style="transform:rotate(-90deg);transform-origin:18px 18px;transition:stroke-dashoffset 1s linear;stroke-dashoffset:${offset}"/>
                 </svg>
                 <span class="exec-cd-ring-num" data-cd-num="${id}">${cdSecs}</span>
-              </span>` : `<span class="exec-status-tag${statusClass}">${statusTag}</span>`}
+              </span>` : `<span class="exec-status-tag${statusClass}" data-exec-status="${id}">${statusTag}</span>`}
             </span>
           </div>
-          <div class="exec-flow">
+          <div class="exec-flow" data-exec-flow="${id}">
             <div class="exec-flow-box${flow.analysis ? ' glow-analysis' : ''}">Analysis</div>
             <span class="exec-flow-arrow">→</span>
             <div class="exec-flow-box${flow.trading ? ' glow-trading' : ''}">Trading</div>
             <span class="exec-flow-arrow">→</span>
-            <div class="exec-flow-box ${resultGlow}">${flow.result ? resultLabel : 'Result'}</div>
+            <div class="exec-flow-box ${resultGlow}" data-exec-result="${id}">${flow.result ? resultLabel : 'Result'}</div>
           </div>
         </div>`;
       }).join('');
@@ -10303,7 +10479,9 @@ window.NexusStrategies=exports;
 
   function ensureDifferEngine() {
     if (engines.differ) return engines.differ;
-    const eng = new window.BenzEngine();
+    if (!window.BenzEngine) { console.warn('[Hub] BenzEngine not loaded yet'); return null; }
+    let eng;
+    try { eng = new window.BenzEngine(); } catch(e) { console.error('[Hub] BenzEngine init failed:', e); return null; }
     eng.onUpdate = function (s) {
       if (window.BenzUI) window.BenzUI.render(s);
       if (activeApp === 'dashboard') queueDashboardRender();
@@ -10315,19 +10493,29 @@ window.NexusStrategies=exports;
 
   function ensureTitanEngine(id) {
     if (engines[id]) return engines[id];
+    if (!window.TitanEngine) { console.warn('[Hub] TitanEngine not loaded yet'); return null; }
     const isOver = id === 'nexus';
+    // Provide safe fallback stubs if socket/scanner globals failed to load
+    // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
+    const safeSocket = (isOver ? window.NexusSocket : (id === 'odd' ? window.OddSocket : window.EvenSocket))
+      || { globalSocket: null };
+    const safeScanner = (isOver ? window.NexusScanner : (id === 'odd' ? window.OddScanner : window.EvenScanner))
+      || { MarketScanner: class { constructor(cb){this._cb=cb;} setTickPeriod(){} async start(){} getBestMarket(){return null;} getGoldenMarkets(){return [];} } };
     const opts = isOver
       ? {
           id, mode: 'over', fixedTradeMode: null, botLabel: 'Over/Under Bot',
-          trading: window.NexusTrading, socket: window.NexusSocket, scanner: window.NexusScanner,
-          strategies: window.NexusStrategies, sounds: window.Sounds, storagePrefix: 'nexus',
+          trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
+          strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: 'nexus',
         }
       : {
           id, mode: 'evenodd', fixedTradeMode: id, botLabel: id === 'even' ? 'Even Bot' : 'Odd Bot',
-          trading: window.EvenTrading, socket: window.EvenSocket, scanner: window.EvenScanner,
+          trading: window.EvenTrading,
+          socket:  safeSocket,
+          scanner: safeScanner,
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         };
-    const eng = new window.TitanEngine(opts);
+    let eng;
+    try { eng = new window.TitanEngine(opts); } catch(e) { console.error('[Hub] TitanEngine init failed:', e); return null; }
     eng.onUpdate = function () {
       const rootId = id + '-root';
       if (activeApp === id && titanBuilt[id] && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
@@ -10340,10 +10528,12 @@ window.NexusStrategies=exports;
   function initBotTab(id) {
     if (id === 'differ') {
       const eng = ensureDifferEngine();
+      if (!eng) return;
       if (window.BenzUI) window.BenzUI.renderFull(eng.state);
       return;
     }
     const eng = ensureTitanEngine(id);
+    if (!eng) return;
     const label = id === 'even' ? 'EVEN OMEGA' : id === 'odd' ? 'ODD OMEGA' : 'NEXUS PROFIT FINDER';
     if (window.TitanUI) window.TitanUI.render(eng, id + '-root', label);
     titanBuilt[id] = true;
@@ -10634,24 +10824,25 @@ window.NexusStrategies=exports;
   }
 
   function init() {
-    bindTopbarAndSettings();
-    refreshTopbar();
+    try { bindTopbarAndSettings(); } catch(e) { console.error('[Hub] bindTopbarAndSettings error:', e); }
+    try { refreshTopbar(); } catch(e) { console.error('[Hub] refreshTopbar error:', e); }
     dashboardEl = document.getElementById('dashboard-root');
-    bindMasterControl();
+    try { bindMasterControl(); } catch(e) { console.error('[Hub] bindMasterControl error:', e); }
     // Start all four engines' public analysis sockets immediately, regardless
     // of which tab is active — ticks/digits should be live the moment the
     // page loads, not only after a tab is opened. Trading sockets inside
     // each engine still only open once a token is set in Settings.
-    ensureDifferEngine();
-    ['even', 'odd', 'nexus'].forEach(ensureTitanEngine);
-    bindHubTabs();
-    queueDashboardRender();
-    setInterval(() => { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); }, 3000);
+    try { ensureDifferEngine(); } catch(e) { console.error('[Hub] ensureDifferEngine error:', e); }
+    try { ['even', 'odd', 'nexus'].forEach(ensureTitanEngine); } catch(e) { console.error('[Hub] ensureTitanEngine error:', e); }
+    try { bindHubTabs(); } catch(e) { console.error('[Hub] bindHubTabs error:', e); }
+    try { queueDashboardRender(); } catch(e) { console.error('[Hub] queueDashboardRender error:', e); }
+    setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); } catch(e){} }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
+  window._hubEngines = engines; // expose for master toggle label updater
   window.UnifiedHub = { switchApp };
 })();
 </script>
