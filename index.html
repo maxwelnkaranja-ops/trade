@@ -9046,6 +9046,10 @@ window.NexusStrategies=exports;
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
           _titan.emit();
         };
+        // Queue for contract results that arrive before buy confirmation (race condition)
+        // Digit contracts settle in 1 tick — result can arrive before buy ack
+        if (!_titan._earlyResults) _titan._earlyResults = new Map();
+
         _titan.tradingSocket.onmessage = (msg) => {
           let data;
           try { data = JSON.parse(msg.data); } catch (e) {
@@ -9053,21 +9057,41 @@ window.NexusStrategies=exports;
             return;
           }
           if (data.msg_type === 'balance') _titan.state.balance = data.balance.balance;
-          if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract?.is_sold) {
+
+          if (data.msg_type === 'proposal_open_contract') {
             const _c = data.proposal_open_contract;
-            if (_c.contract_id && _titan.ownContractIds.has(_c.contract_id)) {
-              _titan.ownContractIds.delete(_c.contract_id);
-              _titan.handleContractResult(_c);
+            if (_c && _c.is_sold && _c.contract_id) {
+              if (_titan.ownContractIds.has(_c.contract_id)) {
+                // Normal path: buy was already confirmed, process immediately
+                _titan.ownContractIds.delete(_c.contract_id);
+                _titan.handleContractResult(_c);
+              } else if (_titan.pendingTrade) {
+                // Race condition: result arrived before buy confirmation
+                // Queue it — will be processed when buy ack comes in
+                _titan._earlyResults.set(_c.contract_id.toString(), _c);
+                _titan.addLog('engine', 'QUEUE', `Early result queued for contract #${_c.contract_id}`);
+              }
             }
           }
+
           if (data.msg_type === 'buy') {
             if (data.error) {
               _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})`);
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
             } else if (data.buy && data.buy.contract_id) {
-              _titan.ownContractIds.add(data.buy.contract_id);
-              _titan.addLog('engine', 'CONFIRMED', `Contract #${data.buy.contract_id} accepted @ ${data.buy.buy_price}`);
+              const cid = data.buy.contract_id.toString();
+              _titan.addLog('engine', 'CONFIRMED', `Contract #${cid} accepted @ ${data.buy.buy_price}`);
+              // Check if we already got the result (early result race condition)
+              if (_titan._earlyResults && _titan._earlyResults.has(cid)) {
+                const earlyResult = _titan._earlyResults.get(cid);
+                _titan._earlyResults.delete(cid);
+                _titan.addLog('engine', 'QUEUE', `Processing queued early result for #${cid}`);
+                _titan.handleContractResult(earlyResult);
+              } else {
+                // Normal: wait for proposal_open_contract
+                _titan.ownContractIds.add(data.buy.contract_id);
+              }
             }
           }
           _titan.emit();
