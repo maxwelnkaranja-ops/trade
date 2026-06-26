@@ -5428,26 +5428,30 @@ function analyzeDigits(history, tickPeriod = 50) {
   const lowVolatility = volatilityIndex > 50;
 
   // CALCULATE PROBABILITY
-  let probability = 0;
-  
-  // Base probability from odd digit weight
-  probability += Math.min(30, oddDigitWeight / 2);
+  // Base = 50 (reflects the intrinsic 50/50 nature of even/odd).
+  // Bonuses push above 50 when conditions are favourable; penalties pull below.
+  // This ensures minSignal=70 is realistically reachable with 1-2 confirming signals.
+  let probability = 50;
+
+  // Odd-weight deviation from neutral (each 1% above 50 → +0.6 probability pts)
+  probability += (oddDigitWeight - 50) * 0.6;
   
   // Trend bonus
-  if (trendScore > 55) probability += 20;
-  else if (trendScore > 50) probability += 10;
+  if (trendScore > 55) probability += 10;
+  else if (trendScore > 50) probability += 5;
+  else if (trendScore < 45) probability -= 10;
   
   // Momentum bonus
-  if (momentumUp) probability += 15;
+  if (momentumUp) probability += 10;
   
   // Stability bonus
-  if (stablePattern) probability += 10;
+  if (stablePattern) probability += 5;
   
   // Low volatility bonus
-  if (lowVolatility) probability += 10;
+  if (lowVolatility) probability += 5;
   
   // Rare digits pattern bonus
-  if (rareDigits) probability += 15;
+  if (rareDigits) probability += 10;
 
   // Best barrier kept for compatibility (not used in even/odd)
   let bestBarrier = 0;
@@ -5456,7 +5460,7 @@ function analyzeDigits(history, tickPeriod = 50) {
   let recommendation = 'HOLD';
   if (probability >= 85) recommendation = 'STRONG_BUY';
   else if (probability >= 70) recommendation = 'BUY';
-  else if (probability < 50) recommendation = 'AVOID';
+  else if (probability < 45) recommendation = 'AVOID';
 
   // Build frequencies array for renderLeft bar chart
   const frequencies = Array.from({length: 10}, (_, i) => ({
@@ -5574,24 +5578,31 @@ function analyzeMultiTimeframe(history) {
 
 /**
  * ENTRY CONDITION CHECKER - EVEN/ODD EDITION
- * Counts streak of EVEN digits, then enters ODD trade
+ * Counts opposite-parity streak, then enters the configured trade direction.
+ * For ODD mode: counts EVEN streak → enters ODD.
+ * For EVEN mode: counts ODD streak → enters EVEN.
+ * Pass tradeMode as 6th argument ('odd' default, 'even' for Even bot).
  */
 function checkEntryConditions(
   history,
   analysis,
   minStreak = 2,
   minProbability = 80,
-  requireMultiTimeframe = true
+  requireMultiTimeframe = true,
+  tradeMode = 'odd'
 ) {
-  // Calculate current streak of EVEN digits
+  // Count streak of the OPPOSITE parity (we enter after a run of the opposite digit)
+  const isEvenMode = tradeMode === 'even';
   let streak = 0;
   for (let i = history.length - 1; i >= 0; i--) {
-    if (isEven(history[i])) streak++;
+    // ODD mode: wait for EVEN streak; EVEN mode: wait for ODD streak
+    if (isEvenMode ? isOdd(history[i]) : isEven(history[i])) streak++;
     else break;
   }
 
+  const streakLabel = isEvenMode ? 'Odd Streak' : 'Even Streak';
   if (streak < minStreak) {
-    return { canEnter: false, streak, reason: `Even Streak ${streak}/${minStreak}` };
+    return { canEnter: false, streak, reason: `${streakLabel} ${streak}/${minStreak}` };
   }
 
   if (analysis.probability < minProbability) {
@@ -6006,7 +6017,7 @@ const normalStrategy = {
   defaults: {
     stake: 0.35,
     targetRuns: 4,
-    minSignal: 80,
+    minSignal: 60,
     minStreak: 3,
     overBarrier: 0,
     recoveryBarrier: 0,
@@ -6644,26 +6655,29 @@ function analyzeDigits(history, tickPeriod = 50) {
   const lowVolatility = volatilityIndex > 50;
 
   // CALCULATE PROBABILITY with improved algorithm
-  let probability = 0;
-  
-  // Base probability from over digit weight
-  probability += Math.min(30, overDigitWeight / 2);
+  // Base = 50 (reflects neutral market). Bonuses push above; penalties pull below.
+  // minSignal=70 is achievable with 1-2 confirming signals.
+  let probability = 50;
+
+  // Over-weight deviation from neutral (each 1% above 50 → +0.6 pts)
+  probability += (overDigitWeight - 50) * 0.6;
   
   // Trend bonus
-  if (trendScore > 55) probability += 20;
-  else if (trendScore > 50) probability += 10;
+  if (trendScore > 55) probability += 10;
+  else if (trendScore > 50) probability += 5;
+  else if (trendScore < 45) probability -= 10;
   
   // Momentum bonus
-  if (momentumUp) probability += 15;
+  if (momentumUp) probability += 10;
   
   // Stability bonus
-  if (stablePattern) probability += 10;
+  if (stablePattern) probability += 5;
   
   // Low volatility bonus
-  if (lowVolatility) probability += 10;
+  if (lowVolatility) probability += 5;
   
   // Rare digits pattern bonus
-  if (rareDigits) probability += 15;
+  if (rareDigits) probability += 10;
 
   // Determine best barrier
   let bestBarrier = 3;
@@ -6674,7 +6688,7 @@ function analyzeDigits(history, tickPeriod = 50) {
   let recommendation = 'HOLD';
   if (probability >= 85) recommendation = 'STRONG_BUY';
   else if (probability >= 70) recommendation = 'BUY';
-  else if (probability < 50) recommendation = 'AVOID';
+  else if (probability < 45) recommendation = 'AVOID';
 
   return {
     probability: Math.min(100, Math.round(probability)),
@@ -7182,7 +7196,7 @@ const normalStrategy = {
   defaults: {
     stake: 0.35,
     targetRuns: 4,
-    minSignal: 80,
+    minSignal: 60,
     minStreak: 2,
     overBarrier: 3,
     recoveryBarrier: 5,
@@ -8410,7 +8424,7 @@ window.NexusStrategies=exports;
 
     loadConfig() {
       const evenDefaults = {
-        stake: 1, targetRuns: 1, minSignal: 70, minStreak: 3, overBarrier: 3, recoveryBarrier: 4,
+        stake: 1, targetRuns: 1, minSignal: 55, minStreak: 3, overBarrier: 3, recoveryBarrier: 4,
         martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 2,
         autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         soundEnabled: true, currentStrategy: 1, alternatingRecovery: true, alternatingRecoveryB: false,
@@ -8530,7 +8544,7 @@ window.NexusStrategies=exports;
           } else { this.strategyPhase = 'waiting'; this.strategyWaitReason = entry.reason; }
         } else {
           const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal,
-            this.mode === 'over' ? this.config.overBarrier : true);
+            this.mode === 'over' ? this.config.overBarrier : true, this.config.tradeMode || 'odd');
           if (canEnter) this.startChainExecution();
         }
         this.emit();
@@ -8570,8 +8584,12 @@ window.NexusStrategies=exports;
         const isOddMode = cfg.tradeMode === 'odd';
         contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
         const strategy = this.getStrategy(cfg.currentStrategy);
-        // Strategy 9 reverses the base direction
-        if (strategy.id === 9) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
+        // Strategy 9 (EVEN AVALANCHE / AVALANCHE DROP) rides parity continuation:
+        // - ODD bot (isOddMode=true):  strategy 9 bets EVEN (opposite of normal ODD direction)  ✅
+        // - EVEN bot (isOddMode=false): strategy 9 bets EVEN (continuation, same as base) ✅
+        // So for EVEN bot: strategy 9 should NOT flip — keep DIGITEVEN.
+        // For ODD bot: strategy 9 DOES flip ODD → EVEN.
+        if (strategy.id === 9 && isOddMode) contractType = 'DIGITEVEN';
 
         if (st.inRecovery) {
           // Recovery step index (1-based: first loss = step 1)
