@@ -8409,16 +8409,24 @@ window.NexusStrategies=exports;
       this.latestLiveAnalysis = null; this.connectRef = null;
 
       this._init();
-      // Trading socket opens lazily on first engine start (not at page load).
-      // This avoids consuming the OTP token before the user engages the bot,
-      // and prevents idle sockets from expiring before the first trade fires.
-      // Reconnect events still call connect() so the socket stays alive while active.
-      window.addEventListener('hub:token-changed', (e) => { if (e.detail.token && (this.state.active || this.state.isLocked)) this.connect(e.detail.token); });
+      // Trading socket connects eagerly (in _init above) and re-connects whenever
+      // the token or account type changes — no need to guard on active/isLocked.
+      // This mirrors Differ's authenticate-on-load pattern so the socket is always
+      // ready before the user clicks Engage, eliminating race conditions.
+      window.addEventListener('hub:token-changed', (e) => {
+        if (e.detail.token) {
+          // Close any existing socket so the new token gets a fresh authenticated URL
+          if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} this.tradingSocket = null; }
+          this._connecting = false;
+          setTimeout(() => this.connect(e.detail.token), 300);
+        }
+      });
       window.addEventListener('hub:account-type-changed', () => {
         const t = window.HubStore.getState().apiToken;
-        if (t && (this.state.active || this.state.isLocked)) {
+        if (t) {
           // Close old trading socket before reconnecting to avoid duplicate listeners
           if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} this.tradingSocket = null; }
+          this._connecting = false;
           setTimeout(() => this.connect(t), 500);
         }
       });
@@ -8488,6 +8496,11 @@ window.NexusStrategies=exports;
       this.startAnalysisHold();
       this.stuckMonitor = setInterval(() => this._watchdog(), 5000);
       setTimeout(() => this.startAnalysisHold(), 3000);
+      // Pre-connect trading socket eagerly (mirrors Differ's authenticate-on-load pattern).
+      // This ensures the socket is OPEN before the user clicks Engage, eliminating the
+      // race where ticks arrive and set isLocked=true before the OTP handshake finishes.
+      const _earlyTok = window.HubStore.getState().apiToken;
+      if (_earlyTok) setTimeout(() => this.connect(_earlyTok), 600);
     }
 
     startAnalysisHold() {
