@@ -593,12 +593,9 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
 .app-panel { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; min-height: 0; overflow: hidden; }
 .app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-/* Dashboard panel gets its own scroll container — the dash-scroll div inside
-   handles overflow; the outer shells just size correctly */
-#panel-dashboard.active { overflow: hidden; flex-direction: column; }
-#panel-dashboard #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
-/* Allow the dashboard scroll wrapper to actually scroll */
-#panel-dashboard .dash-scroll { overflow-y: auto !important; }
+/* Dashboard panel gets its own scroll container */
+#panel-dashboard { overflow-y: auto !important; }
+#panel-dashboard #dashboard-root { overflow: visible !important; min-height: min-content; }
 
 @media (max-width: 880px) {
   .hub-sidebar { width: 72px; }
@@ -1340,16 +1337,16 @@ html.light .freq-bar-grid { background: hsl(var(--muted) / .4); }
 
 /* Martingale accordion */
 .mart-section { border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; margin-bottom: 7px; }
-.mart-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: hsl(var(--card)); cursor: pointer; user-select: none; transition: background .15s; }
+.mart-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 13px; background: hsl(var(--card)); cursor: pointer; user-select: none; transition: background .15s; }
 .mart-header:hover { background: hsl(var(--muted) / .45); }
 .mart-header-left { display: flex; align-items: center; gap: 8px; }
 .mart-header-title { font-family: 'Outfit', sans-serif; font-size: 9.5px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: hsl(var(--accent)); }
 .mart-header-chevron { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; color: hsl(var(--muted-foreground)); transition: transform .22s; font-size: 11px; }
 .mart-header-chevron.open { transform: rotate(180deg); }
-.mart-body { padding: 14px; background: hsl(var(--bg-soft) / .8); border-top: 1px solid hsl(var(--border) / .5); display: none; }
+.mart-body { padding: 11px 13px; background: hsl(var(--bg-soft) / .8); border-top: 1px solid hsl(var(--border) / .5); display: none; }
 .mart-body.open { display: block; animation: fade-in .2s ease; }
 .mart-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.mart-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 4px; }
+.mart-field { display: flex; flex-direction: column; gap: 4px; }
 .mart-field-label { font-family: 'Outfit', sans-serif; font-size: 8px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
 .mart-field-hint { font-size: 9.5px; color: hsl(var(--muted-foreground)); line-height: 1.5; margin-top: 2px; }
 
@@ -1390,10 +1387,10 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 /* ── SCROLL FIX ── */
 .app-panel.active { overflow: hidden !important; }
 .app-root { overflow: hidden !important; min-height: 0; }
-#panel-dashboard .dash-scroll { overflow-y: auto !important; flex: 1; min-height: 0; }
+.dash-scroll { overflow-y: auto !important; flex: 1; min-height: 0; }
 
 /* Dashboard scroll + layout */
-#panel-dashboard .dash-scroll {
+.dash-scroll {
   flex: 1; overflow-y: auto; padding: 14px 16px;
   display: flex; flex-direction: column; gap: 14px;
   scrollbar-width: thin; min-height: 0;
@@ -1870,7 +1867,7 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 /* ══════════════════════════════════════════════
    DASHBOARD SCROLL + LAYOUT UPGRADES
    ══════════════════════════════════════════════ */
-#panel-dashboard .dash-scroll {
+.dash-scroll {
   padding: 14px 16px !important;
   gap: 14px !important;
 }
@@ -2813,7 +2810,7 @@ html.light body::before { display: none; }
 }
 
 /* ── DASHBOARD SCROLL UPGRADE ── */
-#panel-dashboard .dash-scroll {
+.dash-scroll {
   padding: 14px 16px !important;
   gap: 14px !important;
   background: transparent;
@@ -3338,7 +3335,7 @@ html.light body::before { display: none; }
   .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
 }
 @media (max-width: 640px) {
-  #panel-dashboard .dash-scroll { padding: 12px 14px !important; }
+  .dash-scroll { padding: 12px 14px !important; }
   .stat-card-value { font-size: 1.4rem !important; }
 }
 
@@ -3646,7 +3643,7 @@ body::before {
 }
 
 /* ── DASHBOARD SCROLL ── */
-#panel-dashboard .dash-scroll {
+.dash-scroll {
   background: #000 !important;
   padding: 14px 16px !important;
   gap: 14px !important;
@@ -4375,8 +4372,8 @@ html body .journal-panel {
 }
 
 /* Equity curve — shorter */
-html body .dash-equity-panel { padding: 18px 20px !important; }
-html body .equity-svg { height: 280px !important; }
+html body .dash-equity-panel { padding: 12px 14px !important; }
+html body .equity-svg { height: 140px !important; }
 
 /* Engine overview — compact */
 html body .rank-table { gap: 8px !important; }
@@ -4516,55 +4513,50 @@ html body .exec-cd-fill {
 /* ── Titan Cooldown Overlay ──────────────────────────────────────── */
 .titan-cd-overlay {
   position: absolute; inset: 0; z-index: 50;
-  background: hsl(var(--bg) / .92); backdrop-filter: blur(24px) saturate(1.2);
-  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  background: hsl(var(--bg) / .85); backdrop-filter: blur(16px);
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius);
   transition: opacity .4s ease;
 }
 .titan-cd-popup {
-  display: flex; flex-direction: column; align-items: center; gap: 18px;
-  padding: 36px 48px;
-  background: hsl(var(--card) / .95);
-  border: 1px solid hsl(var(--primary) / .35);
-  border-radius: 24px;
-  box-shadow: 0 0 80px hsl(var(--primary) / .2), 0 0 0 1px hsl(var(--primary) / .08), var(--shadow-lg);
-  animation: modal-enter .3s var(--ease);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 32px 40px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--primary) / .3);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 60px hsl(var(--primary) / .15), var(--shadow-lg);
 }
 .titan-cd-ring {
-  position: relative; width: 160px; height: 160px;
+  position: relative; width: 140px; height: 140px;
 }
-.titan-cd-svg { width: 160px; height: 160px; }
+.titan-cd-svg { width: 140px; height: 140px; }
 .titan-cd-track { stroke: hsl(var(--border)); }
 .titan-cd-arc {
   stroke: hsl(var(--primary));
-  filter: drop-shadow(0 0 12px hsl(var(--primary) / .9)) drop-shadow(0 0 24px hsl(var(--primary) / .5));
-  animation: cd-arc-glow 1.5s ease-in-out infinite alternate;
+  filter: drop-shadow(0 0 10px hsl(var(--primary) / .8));
+  animation: none;
 }
 @keyframes cd-arc-glow {
-  from { filter: drop-shadow(0 0 6px hsl(var(--primary) / .5)) drop-shadow(0 0 14px hsl(var(--primary) / .3)); }
-  to   { filter: drop-shadow(0 0 18px hsl(var(--primary) / 1)) drop-shadow(0 0 36px hsl(var(--primary) / .6)); }
+  from { filter: drop-shadow(0 0 4px hsl(var(--primary) / .4)); }
+  to   { filter: drop-shadow(0 0 16px hsl(var(--primary) / .9)); }
 }
 .titan-cd-num {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Outfit', sans-serif; font-size: 3.2rem; font-weight: 900;
-  color: hsl(var(--primary)); letter-spacing: -2px;
-  text-shadow: 0 0 20px hsl(var(--primary) / .6);
+  font-family: 'Outfit', sans-serif; font-size: 2.8rem; font-weight: 800;
+  color: hsl(var(--primary)); letter-spacing: -1px;
 }
 .titan-cd-title {
-  font-family: 'Outfit', sans-serif; font-size: 11px; font-weight: 900;
-  letter-spacing: 5px; color: hsl(var(--primary)); text-transform: uppercase;
-  text-shadow: 0 0 14px hsl(var(--primary) / .5);
+  font-family: 'Outfit', sans-serif; font-size: 11px; font-weight: 800;
+  letter-spacing: 4px; color: hsl(var(--primary)); text-transform: uppercase;
 }
 .titan-cd-sub {
   font-size: 11px; color: hsl(var(--muted-foreground)); text-align: center; line-height: 1.5;
 }
 .titan-cd-market {
   font-size: 10px; color: hsl(var(--win)); letter-spacing: 1px; text-align: center;
-  padding: 5px 14px; border-radius: 999px;
-  background: hsl(var(--win) / .08); border: 1px solid hsl(var(--win) / .25);
-  box-shadow: 0 0 12px hsl(var(--win) / .15);
+  padding: 4px 12px; border-radius: 999px;
+  background: hsl(var(--win) / .08); border: 1px solid hsl(var(--win) / .2);
 }
 /* ── Dashboard exec-cd-bar ───────────────────────────────────────── */
 html body .exec-flow {
@@ -4591,7 +4583,7 @@ html body .exec-flow-arrow {
 html body .journal-panel {
   flex: 1 !important; min-height: 0 !important;
   display: flex !important; flex-direction: column !important;
-  padding: 16px !important;
+  padding: 16px !important; max-height: 520px !important;
 }
 html body .journal-tabs {
   display: flex !important; gap: 5px !important;
@@ -4682,11 +4674,10 @@ html body .hub-main { flex: 1 !important; min-width: 0 !important; min-height: 0
 html body .app-panel { display: none !important; }
 html body .app-panel.active { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
 /* dashboard panel + root must pass flex height to dash-scroll */
-html body #panel-dashboard.active { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
-html body #panel-dashboard.active #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
-html body #panel-dashboard.active .app-root { display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; overflow: hidden !important; }
+html body #panel-dashboard { overflow: hidden !important; }
+html body #panel-dashboard #dashboard-root { overflow: hidden !important; }
 html body .app-root { flex: 1 !important; min-height: 0 !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
-html body #panel-dashboard .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
+html body .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
 
 /* Hide the old hero title row — balance card IS the hero */
 html body .dash-hero { display: none !important; }
@@ -4702,21 +4693,16 @@ html body .dash-hero-row { display: grid !important; grid-template-columns: 1fr 
 /* 3-column stat row */
 html body .dash-stats-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; padding: 0 !important; }
 
-/* Body rows — stacked layout */
-html body .dash-row-top { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 14px !important; padding: 0 !important; min-height: 420px !important; }
-html body .dash-row-top > * { min-height: 420px !important; }
-html body .dash-row-full { padding: 0 !important; margin-top: 12px !important; }
-html body .dash-row-full .glass-panel { width: 100% !important; box-sizing: border-box !important; }
-/* Active engines panel — compact */
-html body .dash-row-top .exec-panel { padding: 12px 14px !important; }
-html body .exec-list { max-height: 320px !important; overflow-y: auto !important; }
-/* Journal — full width, nothing beside it */
-html body .dash-row-full .journal-panel { display: flex !important; flex-direction: column !important; padding: 14px !important; min-height: 240px !important; }
-html body .dash-row-full .journal-list { flex: 1 !important; overflow-y: auto !important; min-height: 160px !important; max-height: 300px !important; }
+/* Body */
+html body .dash-body { display: grid !important; grid-template-columns: 380px 1fr !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
+html body .dash-main { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
+html body .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
+html body .dash-sidebar .journal-panel { flex: 1 1 auto !important; min-height: 300px !important; }
+html body .dash-sidebar .journal-list { overflow-y: auto !important; max-height: 320px !important; }
 
 @media (max-width: 1000px) {
   html body .dash-hero-row { grid-template-columns: 1fr !important; }
-  html body .dash-row-top { grid-template-columns: 1fr !important; }
+  html body .dash-body { grid-template-columns: 1fr !important; }
   html body .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
 }
 
@@ -4787,142 +4773,9 @@ html body .labeled-input .input-hint { font-size: 12px !important; }
 html body .btn-primary, html body .btn-secondary, html body .btn-ghost { font-size: 13px !important; }
 html body .engage-btn { font-size: 13px !important; letter-spacing: 1.5px !important; }
 
-/* ══════════════════════════════════════════════════════════
-   ENTRY CONDITIONS PANEL — Live fire conditions checklist
-   ══════════════════════════════════════════════════════════ */
-.entry-conditions-panel {
-  background: linear-gradient(135deg, hsl(var(--card)), hsl(var(--bg)));
-  border: 1px solid hsl(var(--border));
-  border-radius: 14px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  position: relative;
-  overflow: hidden;
-}
-.entry-conditions-panel::before {
-  content: '';
-  position: absolute; top: 0; left: 0; right: 0; height: 2px;
-  background: linear-gradient(90deg, hsl(var(--primary)/0.6), hsl(var(--secondary)/0.4), transparent);
-  transition: background 0.4s;
-}
-.entry-conditions-panel.all-met::before {
-  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary)));
-  box-shadow: 0 0 16px hsl(var(--win)/0.4);
-  animation: cond-fire-glow 0.6s ease;
-}
-@keyframes cond-fire-glow {
-  0%   { box-shadow: 0 0 0px hsl(var(--win)/0); }
-  50%  { box-shadow: 0 0 30px hsl(var(--win)/0.8); }
-  100% { box-shadow: 0 0 16px hsl(var(--win)/0.4); }
-}
-.entry-cond-title {
-  display: flex; align-items: center; gap: 7px;
-  font-family: 'Outfit', sans-serif; font-size: 9px; font-weight: 800;
-  letter-spacing: 2px; text-transform: uppercase;
-  color: hsl(var(--muted-foreground)); margin-bottom: 10px;
-}
-.entry-cond-pulse {
-  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-  background: hsl(var(--muted-foreground));
-  transition: background 0.3s, box-shadow 0.3s;
-}
-.entry-cond-pulse.active {
-  background: hsl(var(--win));
-  box-shadow: 0 0 10px hsl(var(--win)/0.7);
-  animation: pulse-dot 1.2s ease-in-out infinite;
-}
-.entry-cond-pulse.firing {
-  background: hsl(var(--primary));
-  box-shadow: 0 0 16px hsl(var(--primary)/0.9);
-  animation: pulse-fire 0.4s ease-in-out infinite alternate;
-}
-@keyframes pulse-dot  { 0%,100% { box-shadow: 0 0 6px hsl(var(--win)/0.5); } 50% { box-shadow: 0 0 14px hsl(var(--win)/0.9); } }
-@keyframes pulse-fire { 0% { box-shadow: 0 0 8px hsl(var(--primary)/0.7); } 100% { box-shadow: 0 0 24px hsl(var(--primary)); } }
-.entry-cond-status {
-  margin-left: auto; font-size: 8px; font-weight: 900; letter-spacing: 1.5px;
-  padding: 2px 7px; border-radius: 999px;
-  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
-  transition: all 0.3s;
-}
-.entry-cond-status.met { background: hsl(var(--win)/0.15); color: hsl(var(--win)); border: 1px solid hsl(var(--win)/0.3); }
-.entry-cond-status.fire { background: hsl(var(--primary)/0.2); color: hsl(var(--primary)); border: 1px solid hsl(var(--primary)/0.5); animation: shimmer-sweep 1s linear infinite; }
-.entry-cond-list {
-  display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;
-}
-.entry-cond-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 9px; border-radius: 9px;
-  background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
-  font-size: 10.5px; font-family: 'DM Mono', monospace;
-  transition: all 0.25s cubic-bezier(0.16,1,0.3,1);
-  position: relative; overflow: hidden;
-}
-.entry-cond-row.met {
-  background: hsl(var(--win)/0.06); border-color: hsl(var(--win)/0.35);
-  box-shadow: 0 0 8px hsl(var(--win)/0.1);
-}
-.entry-cond-row.pending {
-  background: hsl(var(--primary)/0.04); border-color: hsl(var(--border));
-}
-.entry-cond-row.loading { opacity: 0.5; }
-.entry-cond-row::after {
-  content: ''; position: absolute; inset: 0;
-  background: linear-gradient(90deg, transparent, hsl(var(--win)/0.08), transparent);
-  opacity: 0; transition: opacity 0.3s;
-}
-.entry-cond-row.met::after { opacity: 1; }
-.entry-cond-icon { font-size: 11px; flex-shrink: 0; width: 16px; text-align: center; }
-.entry-cond-label { flex: 1; color: hsl(var(--foreground)/0.8); }
-.entry-cond-value {
-  font-size: 9.5px; font-weight: 700; color: hsl(var(--muted-foreground));
-  background: hsl(var(--bg)); padding: 1px 6px; border-radius: 5px;
-  border: 1px solid hsl(var(--border)/0.5);
-  min-width: 32px; text-align: center;
-  transition: all 0.2s;
-}
-.entry-cond-row.met .entry-cond-value { color: hsl(var(--win)); border-color: hsl(var(--win)/0.3); }
-.entry-cond-progress {
-  height: 4px; background: hsl(var(--muted)); border-radius: 99px; overflow: hidden; margin-bottom: 5px;
-}
-.entry-cond-fill {
-  height: 100%; border-radius: 99px;
-  background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--secondary)));
-  transition: width 0.4s cubic-bezier(0.16,1,0.3,1);
-  box-shadow: 0 0 6px hsl(var(--primary)/0.5);
-}
-.entry-cond-fill.full {
-  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary)));
-  box-shadow: 0 0 12px hsl(var(--win)/0.6);
-}
-.entry-cond-pct {
-  font-size: 9px; color: hsl(var(--muted-foreground));
-  font-family: 'DM Mono', monospace; text-align: right; letter-spacing: 0.5px;
-}
-
-/* ── Enhanced digit pad ── */
-.digit-pad {
-  font-family: 'Outfit', sans-serif !important;
-  font-size: 4.5rem !important; font-weight: 900 !important;
-  line-height: 1 !important; letter-spacing: -0.04em !important;
-  text-align: center !important; padding: 18px 0 12px !important;
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary))) !important;
-  -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important;
-  background-clip: text !important;
-  filter: drop-shadow(0 0 20px hsl(var(--primary)/0.4)) !important;
-  transition: filter 0.2s !important;
-}
-.digit-pad.flash-win {
-  filter: drop-shadow(0 0 40px hsl(var(--win)/0.9)) !important;
-  background: linear-gradient(135deg, hsl(var(--win)), hsl(var(--secondary))) !important;
-  -webkit-background-clip: text !important; background-clip: text !important;
-}
-.digit-pad.flash-loss {
-  filter: drop-shadow(0 0 40px hsl(var(--loss)/0.9)) !important;
-  background: linear-gradient(135deg, hsl(var(--loss)), hsl(var(--primary-2))) !important;
-  -webkit-background-clip: text !important; background-clip: text !important;
-}
-
-
+/* ── Logs / mono text streams ── */
+html body .log-line, html body .log-entry { font-size: 11.5px !important; line-height: 1.6 !important; }
+html body .auto-log, html body .auto-log-line { font-size: 11.5px !important; }
 
 /* ── Titan engine panels ── */
 html body .titan-input { font-size: 13px !important; }
@@ -5428,30 +5281,26 @@ function analyzeDigits(history, tickPeriod = 50) {
   const lowVolatility = volatilityIndex > 50;
 
   // CALCULATE PROBABILITY
-  // Base = 50 (reflects the intrinsic 50/50 nature of even/odd).
-  // Bonuses push above 50 when conditions are favourable; penalties pull below.
-  // This ensures minSignal=70 is realistically reachable with 1-2 confirming signals.
-  let probability = 50;
-
-  // Odd-weight deviation from neutral (each 1% above 50 → +0.6 probability pts)
-  probability += (oddDigitWeight - 50) * 0.6;
+  let probability = 0;
+  
+  // Base probability from odd digit weight
+  probability += Math.min(30, oddDigitWeight / 2);
   
   // Trend bonus
-  if (trendScore > 55) probability += 10;
-  else if (trendScore > 50) probability += 5;
-  else if (trendScore < 45) probability -= 10;
+  if (trendScore > 55) probability += 20;
+  else if (trendScore > 50) probability += 10;
   
   // Momentum bonus
-  if (momentumUp) probability += 10;
+  if (momentumUp) probability += 15;
   
   // Stability bonus
-  if (stablePattern) probability += 5;
+  if (stablePattern) probability += 10;
   
   // Low volatility bonus
-  if (lowVolatility) probability += 5;
+  if (lowVolatility) probability += 10;
   
   // Rare digits pattern bonus
-  if (rareDigits) probability += 10;
+  if (rareDigits) probability += 15;
 
   // Best barrier kept for compatibility (not used in even/odd)
   let bestBarrier = 0;
@@ -5460,7 +5309,7 @@ function analyzeDigits(history, tickPeriod = 50) {
   let recommendation = 'HOLD';
   if (probability >= 85) recommendation = 'STRONG_BUY';
   else if (probability >= 70) recommendation = 'BUY';
-  else if (probability < 45) recommendation = 'AVOID';
+  else if (probability < 50) recommendation = 'AVOID';
 
   // Build frequencies array for renderLeft bar chart
   const frequencies = Array.from({length: 10}, (_, i) => ({
@@ -5578,31 +5427,24 @@ function analyzeMultiTimeframe(history) {
 
 /**
  * ENTRY CONDITION CHECKER - EVEN/ODD EDITION
- * Counts opposite-parity streak, then enters the configured trade direction.
- * For ODD mode: counts EVEN streak → enters ODD.
- * For EVEN mode: counts ODD streak → enters EVEN.
- * Pass tradeMode as 6th argument ('odd' default, 'even' for Even bot).
+ * Counts streak of EVEN digits, then enters ODD trade
  */
 function checkEntryConditions(
   history,
   analysis,
   minStreak = 2,
   minProbability = 80,
-  requireMultiTimeframe = true,
-  tradeMode = 'odd'
+  requireMultiTimeframe = true
 ) {
-  // Count streak of the OPPOSITE parity (we enter after a run of the opposite digit)
-  const isEvenMode = tradeMode === 'even';
+  // Calculate current streak of EVEN digits
   let streak = 0;
   for (let i = history.length - 1; i >= 0; i--) {
-    // ODD mode: wait for EVEN streak; EVEN mode: wait for ODD streak
-    if (isEvenMode ? isOdd(history[i]) : isEven(history[i])) streak++;
+    if (isEven(history[i])) streak++;
     else break;
   }
 
-  const streakLabel = isEvenMode ? 'Odd Streak' : 'Even Streak';
   if (streak < minStreak) {
-    return { canEnter: false, streak, reason: `${streakLabel} ${streak}/${minStreak}` };
+    return { canEnter: false, streak, reason: `Even Streak ${streak}/${minStreak}` };
   }
 
   if (analysis.probability < minProbability) {
@@ -5639,13 +5481,13 @@ function calculateNextStake(
   step,
   maxStep
 ) {
-  // ALWAYS apply the multiplier — the caller decides what to do with shouldStop.
-  // Returning the un-multiplied stake when step >= maxStep caused the last
-  // martingale trade to fire at the wrong (lower) amount before session abort.
-  const nextStake = parseFloat((currentStake * multiplier).toFixed(2));
+  if (step >= maxStep && maxStep !== 999) {
+    return { stake: currentStake, shouldStop: true };
+  }
+  
   return {
-    stake: nextStake,
-    shouldStop: maxStep !== 999 && step >= maxStep,
+    stake: parseFloat((currentStake * multiplier).toFixed(2)),
+    shouldStop: false,
   };
 }
 
@@ -5863,9 +5705,6 @@ window.EvenTrading = exports;
   }
 
   window.EvenSocket = { globalSocket: new GlobalSocketManager() };
-  // Odd bot gets its own independent socket — must be created here where
-  // GlobalSocketManager is in scope (it's private to this IIFE).
-  window.OddSocket = { globalSocket: new GlobalSocketManager() };
 })();
 
 (function () {
@@ -5986,8 +5825,6 @@ window.EvenTrading = exports;
   }
 
   createMarketScanner(window.EvenTrading, window.EvenSocket, 'EvenScanner');
-  // Odd bot scanner — uses OddSocket so it never shares state with Even
-  createMarketScanner(window.EvenTrading, window.OddSocket, 'OddScanner');
 })();
 
 (function(){
@@ -6017,7 +5854,7 @@ const normalStrategy = {
   defaults: {
     stake: 0.35,
     targetRuns: 4,
-    minSignal: 60,
+    minSignal: 80,
     minStreak: 3,
     overBarrier: 0,
     recoveryBarrier: 0,
@@ -6655,29 +6492,26 @@ function analyzeDigits(history, tickPeriod = 50) {
   const lowVolatility = volatilityIndex > 50;
 
   // CALCULATE PROBABILITY with improved algorithm
-  // Base = 50 (reflects neutral market). Bonuses push above; penalties pull below.
-  // minSignal=70 is achievable with 1-2 confirming signals.
-  let probability = 50;
-
-  // Over-weight deviation from neutral (each 1% above 50 → +0.6 pts)
-  probability += (overDigitWeight - 50) * 0.6;
+  let probability = 0;
+  
+  // Base probability from over digit weight
+  probability += Math.min(30, overDigitWeight / 2);
   
   // Trend bonus
-  if (trendScore > 55) probability += 10;
-  else if (trendScore > 50) probability += 5;
-  else if (trendScore < 45) probability -= 10;
+  if (trendScore > 55) probability += 20;
+  else if (trendScore > 50) probability += 10;
   
   // Momentum bonus
-  if (momentumUp) probability += 10;
+  if (momentumUp) probability += 15;
   
   // Stability bonus
-  if (stablePattern) probability += 5;
+  if (stablePattern) probability += 10;
   
   // Low volatility bonus
-  if (lowVolatility) probability += 5;
+  if (lowVolatility) probability += 10;
   
   // Rare digits pattern bonus
-  if (rareDigits) probability += 10;
+  if (rareDigits) probability += 15;
 
   // Determine best barrier
   let bestBarrier = 3;
@@ -6688,7 +6522,7 @@ function analyzeDigits(history, tickPeriod = 50) {
   let recommendation = 'HOLD';
   if (probability >= 85) recommendation = 'STRONG_BUY';
   else if (probability >= 70) recommendation = 'BUY';
-  else if (probability < 45) recommendation = 'AVOID';
+  else if (probability < 50) recommendation = 'AVOID';
 
   return {
     probability: Math.min(100, Math.round(probability)),
@@ -6822,14 +6656,10 @@ function checkEntryConditions(
   minProbability = 80,
   requireMultiTimeframe = true
 ) {
-  // Calculate current streak of under-barrier digits
+  // Calculate current streak of under-3 digits
   let streak = 0;
-  // Use the barrier passed in (via minProbability param convention) — but streak
-  // is actually derived from minStreak threshold. The barrier context comes from
-  // the calling engine's config. We default to <=3 when not overridden.
-  const streakBarrier = typeof requireMultiTimeframe === 'number' ? requireMultiTimeframe : 3;
   for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i] <= streakBarrier) streak++;
+    if (history[i] <= 3) streak++;
     else break;
   }
 
@@ -6871,11 +6701,13 @@ function calculateNextStake(
   step,
   maxStep
 ) {
-  // ALWAYS apply the multiplier — shouldStop is just a signal for the caller.
-  const nextStake = parseFloat((currentStake * multiplier).toFixed(2));
+  if (step >= maxStep && maxStep !== 999) {
+    return { stake: currentStake, shouldStop: true };
+  }
+  
   return {
-    stake: nextStake,
-    shouldStop: maxStep !== 999 && step >= maxStep,
+    stake: parseFloat((currentStake * multiplier).toFixed(2)),
+    shouldStop: false,
   };
 }
 
@@ -7196,7 +7028,7 @@ const normalStrategy = {
   defaults: {
     stake: 0.35,
     targetRuns: 4,
-    minSignal: 60,
+    minSignal: 80,
     minStreak: 2,
     overBarrier: 3,
     recoveryBarrier: 5,
@@ -8049,7 +7881,7 @@ window.NexusStrategies=exports;
       const fireOne = () => {
         this.socketT.send(JSON.stringify({
           buy: '1', price: stake,
-          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier: String(barrier), underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
+          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
         }));
       };
       if (speed <= 100) {
@@ -8072,16 +7904,12 @@ window.NexusStrategies=exports;
       const duration = 15;
       this.dispatch({ type: 'COOLDOWN_START', duration });
       audio.cooldown();
-      // Show blur popup overlay like Titan engines
-      this._showDifferCooldownOverlay(duration);
       if (this.cooldownTimer) clearInterval(this.cooldownTimer);
       let remaining = duration;
       this.cooldownTimer = setInterval(() => {
         remaining--;
-        this._updateDifferCooldownOverlay(remaining);
         if (remaining <= 0) {
           clearInterval(this.cooldownTimer); this.cooldownTimer = null;
-          this._hideDifferCooldownOverlay();
           this.dispatch({ type: 'COOLDOWN_END' });
           const cs = this.state;
           if (cs.autoMode) {
@@ -8106,59 +7934,6 @@ window.NexusStrategies=exports;
           this.dispatch({ type: 'COOLDOWN_TICK', remaining });
         }
       }, 1000);
-    }
-
-    _showDifferCooldownOverlay(duration) {
-      const root = document.getElementById('differ-root');
-      if (!root) return;
-      let overlay = root.querySelector('.titan-cd-overlay');
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.className = 'titan-cd-overlay';
-        root.appendChild(overlay);
-      }
-      overlay.innerHTML = `
-        <div class="titan-cd-popup">
-          <div class="titan-cd-ring">
-            <svg class="titan-cd-svg" viewBox="0 0 140 140">
-              <circle class="titan-cd-track" cx="70" cy="70" r="58" fill="none" stroke-width="7"/>
-              <circle class="titan-cd-arc" cx="70" cy="70" r="58" fill="none" stroke-width="7"
-                stroke-dasharray="${2*Math.PI*58}" stroke-dashoffset="0"
-                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:70px 70px"/>
-            </svg>
-            <div class="titan-cd-num" id="differ-cd-popup-num">${duration}</div>
-          </div>
-          <div class="titan-cd-title">COOLING DOWN</div>
-          <div class="titan-cd-sub">⚡ Re-analyzing digit patterns…</div>
-        </div>`;
-      overlay.style.display = 'flex';
-      // Start arc animation draining over duration
-      const arc = overlay.querySelector('.titan-cd-arc');
-      if (arc) {
-        const total = 2 * Math.PI * 58;
-        arc.style.strokeDashoffset = '0';
-        setTimeout(() => {
-          arc.style.strokeDashoffset = total.toFixed(1);
-          arc.style.transition = `stroke-dashoffset ${duration}s linear`;
-        }, 50);
-      }
-    }
-
-    _updateDifferCooldownOverlay(remaining) {
-      const root = document.getElementById('differ-root');
-      if (!root) return;
-      const numEl = root.querySelector('#differ-cd-popup-num');
-      if (numEl) numEl.textContent = Math.max(0, remaining);
-    }
-
-    _hideDifferCooldownOverlay() {
-      const root = document.getElementById('differ-root');
-      if (!root) return;
-      const overlay = root.querySelector('.titan-cd-overlay');
-      if (overlay) {
-        overlay.style.opacity = '0';
-        setTimeout(() => { overlay.style.display = 'none'; overlay.style.opacity = ''; }, 400);
-      }
     }
 
     connectAnalysis() {
@@ -8278,17 +8053,15 @@ window.NexusStrategies=exports;
                 _self.ownContractIds.delete(c.contract_id);
                 const isWin = c.status === 'won';
                 const profit = parseFloat(c.profit) || 0;
-                const exit = c.exit_tick_display_value?.toString().slice(-1);
+                const exit = c.exit_tick_display_value?.toString().slice(-1) || '?';
                 const entryRaw = c.entry_tick_display_value?.toString().slice(-1);
-                const entryDigit = entryRaw !== undefined && entryRaw !== '' ? parseInt(entryRaw) : null;
-                // Parse exit digit correctly: '0' is valid, only use null when missing
-                const exitDigitParsed = (exit !== undefined && exit !== '' && exit !== '?') ? parseInt(exit) : null;
+                const entryDigit = entryRaw !== undefined ? (parseInt(entryRaw) || 0) : null;
                 _self.dispatch({
                   type: 'ADD_JOURNAL',
                   entry: {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
                     time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'differ',
-                    barrier: c.barrier ?? 0, exitDigit: exitDigitParsed, profit, entryDigit,
+                    barrier: c.barrier ?? 0, exitDigit: parseInt(exit) || 0, profit, entryDigit,
                     market: c.underlying || _self.state.primaryMarket, stake: parseFloat(c.buy_price) || _self.state.stake,
                   },
                 });
@@ -8308,9 +8081,8 @@ window.NexusStrategies=exports;
               }
             }
             if (d.msg_type === 'buy') {
-              if (d.error) {
-                _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
-              } else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
+              if (d.error) _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message}`, ntype: 'loss' });
+              else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
             }
           } catch (e) { /* */ }
         };
@@ -8394,7 +8166,6 @@ window.NexusStrategies=exports;
       };
       this.analysis = null; this.logs = []; this.journal = []; this.cooldownTime = 0;
       this._processedContracts = new Set();
-      this.ownContractIds = new Set();
       this.scannerState = { markets: [], bestMarket: null, topThree: [], isScanning: false, lastUpdate: 0 };
       this.marketHealth = null; this.liveDigit = -1; this.liveQuote = 0;
       this.analysisCountdown = 0; this.strategyPhase = 'idle'; this.strategyWaitReason = '';
@@ -8409,32 +8180,18 @@ window.NexusStrategies=exports;
       this.latestLiveAnalysis = null; this.connectRef = null;
 
       this._init();
-      // Trading socket connects eagerly (in _init above) and re-connects whenever
-      // the token or account type changes — no need to guard on active/isLocked.
-      // This mirrors Differ's authenticate-on-load pattern so the socket is always
-      // ready before the user clicks Engage, eliminating race conditions.
-      window.addEventListener('hub:token-changed', (e) => {
-        if (e.detail.token) {
-          // Close any existing socket so the new token gets a fresh authenticated URL
-          if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} this.tradingSocket = null; }
-          this._connecting = false;
-          setTimeout(() => this.connect(e.detail.token), 300);
-        }
-      });
+      const sharedToken = window.HubStore.getState().apiToken;
+      if (sharedToken) setTimeout(() => this.connect(sharedToken), 600);
+      window.addEventListener('hub:token-changed', (e) => { if (e.detail.token) this.connect(e.detail.token); });
       window.addEventListener('hub:account-type-changed', () => {
         const t = window.HubStore.getState().apiToken;
-        if (t) {
-          // Close old trading socket before reconnecting to avoid duplicate listeners
-          if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} this.tradingSocket = null; }
-          this._connecting = false;
-          setTimeout(() => this.connect(t), 500);
-        }
+        if (t) setTimeout(() => this.connect(t), 500);
       });
     }
 
     loadConfig() {
       const evenDefaults = {
-        stake: 1, targetRuns: 1, minSignal: 55, minStreak: 3, overBarrier: 3, recoveryBarrier: 4,
+        stake: 1, targetRuns: 1, minSignal: 70, minStreak: 3, overBarrier: 3, recoveryBarrier: 4,
         martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 2,
         autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         soundEnabled: true, currentStrategy: 1, alternatingRecovery: true, alternatingRecoveryB: false,
@@ -8496,11 +8253,6 @@ window.NexusStrategies=exports;
       this.startAnalysisHold();
       this.stuckMonitor = setInterval(() => this._watchdog(), 5000);
       setTimeout(() => this.startAnalysisHold(), 3000);
-      // Pre-connect trading socket eagerly (mirrors Differ's authenticate-on-load pattern).
-      // This ensures the socket is OPEN before the user clicks Engage, eliminating the
-      // race where ticks arrive and set isLocked=true before the OTP handshake finishes.
-      const _earlyTok = window.HubStore.getState().apiToken;
-      if (_earlyTok) setTimeout(() => this.connect(_earlyTok), 600);
     }
 
     startAnalysisHold() {
@@ -8558,8 +8310,7 @@ window.NexusStrategies=exports;
             setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
           } else { this.strategyPhase = 'waiting'; this.strategyWaitReason = entry.reason; }
         } else {
-          const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal,
-            this.mode === 'over' ? this.config.overBarrier : true, this.config.tradeMode || 'odd');
+          const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal);
           if (canEnter) this.startChainExecution();
         }
         this.emit();
@@ -8579,149 +8330,56 @@ window.NexusStrategies=exports;
 
     executeBoltPurchase() {
       const st = this.state, cfg = this.config;
-      // Allow recovery trades (isLocked && inRecovery) even if active was cleared mid-session
-      if (!st.active && !(st.isLocked && st.inRecovery)) return;
-      if (st.isCooldown) return;
-      // Prevent double-fire: bail if a trade is already pending or execution guard is up.
-      if (this.pendingTrade) { this.addLog('engine', 'GUARD', 'Trade in flight — skipping duplicate bolt'); return; }
-      if (this.executionGuard) { this.addLog('engine', 'GUARD', 'Execution guard up — skipping'); return; }
-      this.executionGuard = true;
+      if (!st.active || st.isCooldown) return;
       if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
-        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting (bolt will auto-retry on connect)...');
-        this.executionGuard = false; // release guard so engine isn't stuck if socket drops
-        // Set isLocked so onopen handler knows to retry the bolt once socket is ready
-        this.state = { ...this.state, isLocked: true };
+        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting...');
         const token = window.HubStore.getState().apiToken;
         if (token) this.connect(token);
         return;
       }
       let contractType, barrierValue = 0;
       if (this.mode === 'evenodd') {
-        // ── Base contract: match the configured trade mode ──────────────────────
         const isOddMode = cfg.tradeMode === 'odd';
         contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
         const strategy = this.getStrategy(cfg.currentStrategy);
-        // Strategy 9 (EVEN AVALANCHE / AVALANCHE DROP) rides parity continuation:
-        // - ODD bot (isOddMode=true):  strategy 9 bets EVEN (opposite of normal ODD direction)  ✅
-        // - EVEN bot (isOddMode=false): strategy 9 bets EVEN (continuation, same as base) ✅
-        // So for EVEN bot: strategy 9 should NOT flip — keep DIGITEVEN.
-        // For ODD bot: strategy 9 DOES flip ODD → EVEN.
-        if (strategy.id === 9 && isOddMode) contractType = 'DIGITEVEN';
-
+        if (strategy.id === 9) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
         if (st.inRecovery) {
-          // Recovery step index (1-based: first loss = step 1)
-          const step = st.martingaleStep; // already incremented in handleContractResult
-
-          // ── 💡 Standard Recovery ─────────────────────────────────────────────
-          // UI: "Continues with ODD/EVEN at increased stake"
-          // → Keep SAME parity, just raise stake (multiplier already applied).
-          //    No contract-type change needed here; default above is correct.
-          // contractType stays as isOddMode ? 'DIGITODD' : 'DIGITEVEN'
-
+          contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
           if (cfg.smartRecovery) {
-            // ── 🧠 Smart Recovery ───────────────────────────────────────────────
-            // UI: "Analyzes last 20 ticks → fires opposite of dominant parity"
-            // → Count ODD% in last 20 ticks. If ODD is dominant (>50%) bet EVEN,
-            //   if EVEN is dominant (≤50%) bet ODD (always take the under-served side).
             const recent = st.history.slice(-20);
-            const oddPct = recent.length ? recent.filter((d) => this.T.isOdd(d)).length / recent.length : 0.5;
-            contractType = oddPct > 0.5 ? 'DIGITEVEN' : 'DIGITODD';
-            this.addLog('engine', 'SMART-REC', `Smart: ODD ${(oddPct*100).toFixed(0)}% → betting ${contractType.replace('DIGIT','')}`);
-
+            const oddPct = recent.filter((d) => this.T.isOdd(d)).length / recent.length;
+            contractType = oddPct < 0.5 ? 'DIGITODD' : 'DIGITEVEN';
           } else if (cfg.alternatingRecovery) {
-            // ── 🔄 Alt Mode A ───────────────────────────────────────────────────
-            // UI pattern (ODD base): ODD → EVEN → ODD×2 → EVEN → …
-            //                        step:  1      2       3       4
-            //   i.e. step 1 = flip to EVEN; step 2 = back to ODD; step 3 = ODD; step 4 = EVEN …
-            //   Pattern rule: EVEN on steps where (step % 3 === 1), else same parity.
-            const flipToOpposite = (step % 3 === 1);
-            contractType = flipToOpposite
-              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
-              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
-            this.addLog('engine', 'ALT-A', `AltA step ${step}: ${contractType.replace('DIGIT','')}`);
-
+            const step = st.martingaleStep;
+            if (step >= 2 && ((step - 2) % 3 === 0)) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
           } else if (cfg.alternatingRecoveryB) {
-            // ── 🔁 Alt Mode B ───────────────────────────────────────────────────
-            // UI pattern (ODD base): EVEN → ODD×2 → EVEN → ODD×2 → …
-            //                        step:  1        2  3    4        5  6
-            //   Pattern rule: EVEN on steps where (step % 3 === 1), else ODD.
-            //   Same numeric rule as Alt A but starting direction is opposite (EVEN first).
-            const flipToOpposite = (step % 3 === 1);
-            contractType = flipToOpposite
-              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
-              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
-            // Alt B always starts EVEN on step 1 regardless of base mode, for both ODD & EVEN bots
-            if (step === 1) contractType = 'DIGITEVEN';
-            this.addLog('engine', 'ALT-B', `AltB step ${step}: ${contractType.replace('DIGIT','')}`);
+            const step = st.martingaleStep;
+            if (step === 1 || (step > 1 && ((step - 1) % 3 === 0))) contractType = isOddMode ? 'DIGITEVEN' : 'DIGITODD';
           }
         }
-
       } else {
-        // ── Base contract: OVER at the configured barrier ───────────────────────
         contractType = 'DIGITOVER';
         barrierValue = cfg.overBarrier;
         const strategy = this.getStrategy(cfg.currentStrategy);
-        // Strategy 9 reverses the base direction
         if (strategy.id === 9) { contractType = 'DIGITUNDER'; barrierValue = cfg.overBarrier; }
-
         if (st.inRecovery) {
-          const step = st.martingaleStep; // 1-based
-
-          // ── 💡 Standard Recovery ─────────────────────────────────────────────
-          // UI: "Switches to recovery barrier UNDER after loss"
-          // → Always trade DIGITUNDER at recoveryBarrier during any recovery step.
-          contractType = 'DIGITUNDER';
           barrierValue = cfg.recoveryBarrier;
-          this.addLog('engine', 'RECOVERY-BARRIER', `Standard rec step ${step}: UNDER ${cfg.recoveryBarrier} @ $${st.currentStake.toFixed(2)}`);
-
           if (cfg.smartRecovery) {
-            // ── 🧠 Smart Recovery ───────────────────────────────────────────────
-            // UI: "Analyzes last 20 ticks → fires opposite of dominant over/under trend"
-            // → If OVER rate >50% in last 20T, the market is OVER-dominant → bet UNDER.
-            //   If UNDER-dominant (≤50% OVER), bet OVER with recovery barrier.
-            const recent = st.history.slice(-20);
-            const overRate = recent.length ? recent.filter((d) => d > 4).length / recent.length : 0.5;
-            if (overRate > 0.5) {
-              contractType = 'DIGITUNDER'; barrierValue = cfg.recoveryBarrier;
-            } else {
-              contractType = 'DIGITOVER';  barrierValue = cfg.recoveryBarrier;
-            }
-            this.addLog('engine', 'SMART-REC', `Smart: OVER% ${(overRate*100).toFixed(0)}% → ${contractType.replace('DIGIT','')} ${barrierValue}`);
-
+            const recent = st.history.slice(-25);
+            const overRate = recent.filter((d) => d > 4).length / recent.length;
+            if (overRate >= 0.6) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
           } else if (cfg.alternatingRecovery) {
-            // ── 🔄 Alt Mode A ───────────────────────────────────────────────────
-            // UI: "Over → Under → Over×2 → Under → …"
-            //  step:  1       2      3  4     5
-            //  Pattern: UNDER on steps where (step % 3 === 1), else OVER (with recoveryBarrier).
-            const isUnderStep = (step % 3 === 1);
-            if (isUnderStep) {
-              contractType = 'DIGITUNDER'; barrierValue = cfg.recoveryBarrier;
-            } else {
-              contractType = 'DIGITOVER';  barrierValue = cfg.recoveryBarrier;
-            }
-            this.addLog('engine', 'ALT-A', `AltA step ${step}: ${contractType.replace('DIGIT','')} ${barrierValue}`);
-
+            const step = st.martingaleStep;
+            if (step >= 2 && ((step - 2) % 3 === 0)) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
           } else if (cfg.alternatingRecoveryB) {
-            // ── 🔁 Alt Mode B ───────────────────────────────────────────────────
-            // UI: "Under → Over×2 → Under → Over×2 → …"
-            //  step:  1       2  3    4        5  6
-            //  Pattern: UNDER on steps where (step % 3 === 1), else OVER.
-            //  Alt B always starts with UNDER on step 1.
-            const isUnderStep = (step % 3 === 1);
-            if (isUnderStep) {
-              contractType = 'DIGITUNDER'; barrierValue = cfg.recoveryBarrier;
-            } else {
-              contractType = 'DIGITOVER';  barrierValue = cfg.recoveryBarrier;
-            }
-            this.addLog('engine', 'ALT-B', `AltB step ${step}: ${contractType.replace('DIGIT','')} ${barrierValue}`);
+            const step = st.martingaleStep;
+            if (step === 1 || (step > 1 && ((step - 1) % 3 === 0))) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
           }
-
-          // ── 🛡 STEP 4 OVER 0 SHIELD ──────────────────────────────────────────
-          // At step 3 of a 4-cap chain, override everything with OVER 0 (~90% win rate)
-          // to survive rather than risk full session loss on the final martingale step.
+          // STEP 4 OVER 0 SHIELD: at step 3 of a 4-cap chain, override everything with OVER 0
+          // for ~90% survival rate rather than risking full session loss (documentary §3.4)
           if (st.martingaleStep === 3 && cfg.martingaleStopStep === 4) {
             contractType = 'DIGITOVER'; barrierValue = 0;
-            this.addLog('engine', 'SHIELD', '🛡 STEP 4 SHIELD: OVER 0 active — maximizing survival');
+            this.addLog('engine', 'SHIELD', '🛡 STEP 4: OVER 0 SHIELD ACTIVE — maximizing survival');
           }
         }
       }
@@ -8732,14 +8390,12 @@ window.NexusStrategies=exports;
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
         currency: accountCurrency, duration: 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
       };
-      if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER')) params.barrier = String(barrierValue);
+      if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER')) params.barrier = barrierValue;
       this.sound.playExecute();
       this.addLog('engine', 'BOLT', `${contractType} @ ${st.currentStake.toFixed(2)} ${accountCurrency}`);
       this.state.lastTradedDigit = st.currentDigit;
       // Deriv WS API requires buy value as string '1' for direct inline-parameter purchases
-      const buyPayload = { buy: '1', price: st.currentStake, parameters: params }; // subscribe:1 removed — invalid on buy; proposal_open_contract sub (sent on onopen) handles results
-      this.addLog('engine', 'WS-SEND', `Sending buy: ${contractType} $${st.currentStake.toFixed(2)} on socket readyState=${this.tradingSocket.readyState}`);
-      this.tradingSocket.send(JSON.stringify(buyPayload));
+      this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: st.currentStake, parameters: params }));
       // Stuck-trade watchdog: if neither a buy error nor a contract result
       // arrives within 20s (dropped message, server hiccup, dead socket),
       // unstick the engine instead of leaving executionGuard true forever —
@@ -8748,22 +8404,18 @@ window.NexusStrategies=exports;
       if (this.stuckWatchdog) clearTimeout(this.stuckWatchdog);
       this.stuckWatchdog = setTimeout(() => {
         if (!this.pendingTrade) return; // already resolved normally
-        this.addLog('error', 'TRADE', 'No buy confirmation in 20s — releasing trade lock. Check the engine logs for a "Buy rejected" error.');
+        this.addLog('error', 'TRADE', 'No confirmation received for 20s — releasing trade lock so the engine can continue.');
         this.pendingTrade = null;
         this.executionGuard = false;
-        this.state = { ...this.state, isLocked: false };
         this.stuckWatchdog = null;
         this.emit();
-      }, 20000);
+      }, 45000); // STUCK_WATCHDOG_MS = 45000 per documentary
       this.emit();
     }
 
     completeSession() {
       this.executionGuard = false; this.pendingTrade = null;
-      // Reset martingale state so the NEXT session always starts from the base stake,
-      // regardless of what step the current session ended on (stop-loss, max step, TP, etc.)
-      this.state = { ...this.state, isLocked: false, isCooldown: true, active: false,
-        currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+      this.state = { ...this.state, isLocked: false, isCooldown: true, active: false };
       const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
       this._cdMax = cd; // store for tab ring arc
@@ -8771,12 +8423,8 @@ window.NexusStrategies=exports;
       this.runsSinceRefresh++;
       if (this.config.autoRefresh && this.runsSinceRefresh >= 4) {
         this.runsSinceRefresh = 0;
-        // Defer the socket refresh until after cooldown ends so the socket is
-        // ready exactly when the engine re-engages, not ~20s early.
         const token = window.HubStore.getState().apiToken;
-        if (token) setTimeout(() => {
-          if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) this.connect(token);
-        }, (this.cooldownTime || 5) * 1000 + 500);
+        if (token) this.connect(token);
       }
       // Show cooldown overlay popup on this engine's tab
       this._showCooldownOverlay(cd);
@@ -8874,12 +8522,6 @@ window.NexusStrategies=exports;
 
     handleContractResult(contract) {
       if (this.stuckWatchdog) { clearTimeout(this.stuckWatchdog); this.stuckWatchdog = null; }
-      // ⚡ CRITICAL: Release execution guard immediately. The guard was set in
-      // executeBoltPurchase and MUST be released here before _chainAfterResult
-      // runs. Without this, any code path in _chainAfterResult that doesn't
-      // explicitly call executionGuard=false (e.g. martingale OFF loss path,
-      // win with runs=0) leaves the guard permanently stuck → bot never fires again.
-      this.executionGuard = false;
       const win = contract.status === 'won';
       const profitRaw = parseFloat(contract.profit);
       // Guard: a malformed/missing profit field must never poison the running
@@ -8891,8 +8533,6 @@ window.NexusStrategies=exports;
       if (isNaN(profitRaw)) this.addLog('error', 'DATA', 'Contract result had an unreadable profit value — treated as 0 for stats.');
       const exitDigit = contract.exit_tick_display_value?.slice(-1) || '?';
       const entryDigit = contract.entry_tick_display_value?.slice(-1) ?? null;
-      // Save pendingTrade BEFORE nulling it — journal entry below needs the barrier/contractType
-      const completedTrade = this.pendingTrade;
       this.pendingTrade = null;
       if (win) this.sound.playWin(); else this.sound.playLoss();
       this.addLog(win ? 'win' : 'loss', 'BOLT', `Exit: ${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
@@ -8902,21 +8542,12 @@ window.NexusStrategies=exports;
         if (this._processedContracts.has(contractKey)) return;
         this._processedContracts.add(contractKey);
       }
-      // Parse exit digit correctly — '0' is a valid digit, use null fallback not 0-fallback
-      const exitDigitParsed = exitDigit !== '?' ? parseInt(exitDigit) : null;
-      const entryDigitParsed = entryDigit !== null && entryDigit !== undefined ? parseInt(entryDigit) : null;
       this.journal = [{
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
         contractId: contractKey,
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
-        market: contract.underlying || this.config.selectedMarket,
-        // Use the pendingTrade barrier (recorded at fire time) as fallback for contracts
-        // that return barrier:null/0 in the Deriv WS response (common for digit contracts).
-        barrier: (contract.barrier != null && contract.barrier !== 0)
-          ? contract.barrier
-          : (completedTrade ? completedTrade.barrier : this.config.overBarrier ?? 0),
-        contract_type: (completedTrade && completedTrade.contractType) || contract.contract_type || null,
-        exitDigit: exitDigitParsed, entryDigit: entryDigitParsed,
+        market: contract.underlying || this.config.selectedMarket, barrier: contract.barrier ?? 0,
+        exitDigit: parseInt(exitDigit) || 0, entryDigit: entryDigit !== null ? (parseInt(entryDigit) || 0) : null,
         profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
       }, ...this.journal].slice(0, 500);
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
@@ -8924,32 +8555,17 @@ window.NexusStrategies=exports;
       const stats = { ...this.state.stats, profit: this.state.stats.profit + profit, win: this.state.stats.win + (win ? 1 : 0), loss: this.state.stats.loss + (win ? 0 : 1) };
       let ns = { ...this.state, stats };
       if (win) {
-        // WIN: reset everything back to base so the next trade starts clean
-        ns.currentRuns = this.state.currentRuns + 1;
-        ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = cfg.stake;
+        ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = cfg.stake;
       } else {
-        // LOSS: always escalate stake first, then let _chainAfterResult decide
-        // whether to keep trading (recovery) or abort (stop-step reached).
         const nextStep = this.state.martingaleStep + 1;
         ns.martingaleStep = nextStep; ns.inRecovery = true;
         if (cfg.martingaleEnabled) {
-          // calculateNextStake ALWAYS multiplies now — shouldStop is just a signal.
-          // The old version returned un-multiplied stake when step >= maxStep which
-          // caused the final recovery trade to fire at the wrong (lower) amount.
-          const { stake, shouldStop } = this.T.calculateNextStake(
-            this.state.currentStake, cfg.martingaleMultiplier, nextStep, cfg.martingaleStopStep
-          );
-          ns.currentStake = stake;
-          if (shouldStop) {
-            this.addLog('loss', 'CRITICAL',
-              `STEP ${nextStep} HIT CAP (${cfg.martingaleStopStep}) — stake $${stake.toFixed(2)} — cooldown next`);
+          if (nextStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
+            this.addLog('loss', 'CRITICAL', `STEP ${cfg.martingaleStopStep} FAILED. COOLING DOWN.`);
           } else {
-            this.addLog('engine', 'MART',
-              `Loss step ${nextStep}: $${this.state.currentStake.toFixed(2)} → $${stake.toFixed(2)} (×${cfg.martingaleMultiplier})`);
+            const { stake } = this.T.calculateNextStake(this.state.currentStake, cfg.martingaleMultiplier, nextStep, cfg.martingaleStopStep);
+            ns.currentStake = stake;
           }
-        } else {
-          // Martingale OFF: replay at same stake
-          this.addLog('engine', 'MART', `Loss (mart OFF) — replaying $${ns.currentStake.toFixed(2)}`);
         }
       }
       this.state = ns;
@@ -8959,71 +8575,38 @@ window.NexusStrategies=exports;
 
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
-
-      // ── TP / SL guards (autoPilot only) ──────────────────────────────────────
       if (cfg.autoPilot && st.active) {
-        if (cfg.takeProfit > 0 && st.stats.profit >= cfg.takeProfit) {
-          this.addLog('win', 'AUTO', `TAKE PROFIT $${cfg.takeProfit} REACHED`);
-          showCongratulationsPopup(cfg.takeProfit);
-          this.completeSession(); return;
-        }
-        if (cfg.stopLoss > 0 && st.stats.profit <= -cfg.stopLoss) {
-          this.addLog('loss', 'AUTO', `STOP LOSS $${cfg.stopLoss} REACHED`);
-          this.completeSession(); return;
-        }
+        if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); showCongratulationsPopup(cfg.takeProfit); this.completeSession(); return; }
+        if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); this.completeSession(); return; }
       }
-
-      // ── Stop / Recovery Rule logic ────────────────────────────────────────────
-      // Applies on any LOSS (inRecovery=true), whether martingale is on or off.
-      if (st.isLocked && st.inRecovery) {
-        const step = st.martingaleStep; // already incremented (1-based)
-        const cap  = cfg.martingaleStopStep;
-
-        // ── Martingale OFF or Step 1 cap: stop immediately ────────────────────
-        if (!cfg.martingaleEnabled || cap === 1) {
-          const reason = !cfg.martingaleEnabled ? 'Martingale OFF' : 'STOP AT STEP 1';
-          this.addLog('loss', 'STOP', `${reason} — loss → cooldown, no recovery`);
-          this.completeSession();
-          return;
-        }
-
-        // ── Cap reached: abort session ─────────────────────────────────────────
-        if (step >= cap) {
-          this.addLog('loss', 'CRITICAL',
-            `STOP RULE: step ${step} / ${cap} — session aborted, entering cooldown`);
-          this.completeSession(); return;
-        }
-
-        // ── Under the cap → fire next recovery trade ──────────────────────────
-        this.addLog('engine', 'RECOVERY',
-          `Recovery step ${step} / ${cap - 1} — stake $${st.currentStake.toFixed(2)}`);
-        setTimeout(() => {
-          if (this.state.isLocked && this.state.inRecovery && !this.state.isCooldown) {
-            this.executeBoltPurchase();
-          }
-        }, 350);
+      // REWAIT mode (documentary §3.2 Mode A): escalate stake but release lock, await fresh signal
+      if (st.isLocked && cfg.martingaleEnabled && cfg.martingaleStopStep === 1 && !st.win && st.inRecovery) {
+        this.executionGuard = false;
+        this.state = { ...this.state, isLocked: false };
+        this.addLog('engine', 'REWAIT', `REWAIT: Loss → awaiting new entry @ $${st.currentStake.toFixed(2)}`);
         return;
       }
-
-      // ── WIN path ─────────────────────────────────────────────────────────────
-      if (st.active && st.isLocked && !st.isCooldown && !st.inRecovery) {
+      // MAX RECOVERY STEP REACHED → cooldown (market switch needed)
+      if (st.isLocked && cfg.martingaleEnabled && st.martingaleStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
+        this.addLog('loss', 'CRITICAL', `MAX RECOVERY STEP ${cfg.martingaleStopStep} REACHED — accepting loss, entering cooldown for market switch`);
+        this.completeSession(); return;
+      }
+      if (st.active && st.isLocked && !st.isCooldown) {
         if (st.currentRuns >= cfg.targetRuns) {
-          this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE — cooldown`);
+          // WIN target reached → cooldown before next session
+          this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE! Entering cooldown.`);
           this.completeSession();
-        } else {
-          // More runs needed (or runs just hit 1 for a 1-run target which is caught above)
-          setTimeout(() => {
-            if (this.state.active && this.state.isLocked && !this.state.isCooldown && !this.state.inRecovery) {
-              this.executeBoltPurchase();
-            }
-          }, 200);
+        } else if (st.inRecovery) {
+          // Still in recovery (loss, not at max step) → keep trading on martingale, NO cooldown
+          this.executeBoltPurchase();
+        } else if (st.currentRuns > 0) {
+          this.executeBoltPurchase();
         }
       }
     }
 
     startChainExecution() {
       if (this.executionGuard) return;
-      if (this.state.isLocked) return; // already in a chain — don't restart
       this.executionGuard = true;
       const health = this.socket.getHealth(this.config.selectedMarket);
       if (health && health.longTerm === 'POOR') { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
@@ -9036,12 +8619,6 @@ window.NexusStrategies=exports;
     connect(token) {
       token = (token || '').trim();
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
-      // Prevent duplicate concurrent connect attempts — if an OTP fetch / WS open
-      // is already in-flight, a second call would race and overwrite tradingSocket,
-      // causing the first onopen's retry bolt to fire on a socket that is no longer
-      // referenced, leaving the engine permanently stuck in "Trading" with no trades.
-      if (this._connecting) { this.addLog('engine', 'AUTH', 'Connect already in-flight — skipping duplicate'); return; }
-      this._connecting = true;
       if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
 
       // 2026 Deriv API: REST OTP → authenticated WebSocket URL
@@ -9051,35 +8628,21 @@ window.NexusStrategies=exports;
         const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
         const headers = { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
 
-        // Resolve accountId — wait up to 6s for HubStore to finish its own
-        // accounts fetch (which runs in parallel on page load / token save).
-        // This avoids a race condition where the Titan engine fires its own
-        // duplicate accounts+OTP fetch before HubStore has resolved the ID,
-        // resulting in mismatched sockets or OTP URL mismatches.
+        // Resolve accountId
         let accountId = hub.accountId;
         if (!accountId) {
-          _titan.addLog('engine', 'AUTH', 'Waiting for HubStore accountId…');
-          for (let i = 0; i < 12; i++) {
-            await new Promise(r => setTimeout(r, 500));
-            accountId = window.HubStore.getState().accountId;
-            if (accountId) break;
-          }
-        }
-        if (!accountId) {
-          // HubStore still hasn't resolved — fall back to our own fetch
           try {
             const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
             if (!r.ok) throw new Error(`Accounts ${r.status}`);
             const d = await r.json();
             const accounts = d.data || [];
-            const preferred = window.HubStore.getState().accountType === 'real'
+            const preferred = hub.accountType === 'real'
               ? accounts.find(a => !a.is_virtual) || accounts[0]
               : accounts.find(a => a.is_virtual) || accounts[0];
             if (!preferred) throw new Error('No accounts found');
             accountId = preferred.account_id;
           } catch (e) {
             _titan.addLog('error', 'AUTH', `Accounts fetch failed: ${e.message}`);
-            _titan._connecting = false;
             _titan.state.connected = false; _titan.emit(); return;
           }
         }
@@ -9094,38 +8657,24 @@ window.NexusStrategies=exports;
           if (!wsUrl) throw new Error('No WS URL in OTP response');
         } catch (e) {
           _titan.addLog('error', 'AUTH', `OTP failed: ${e.message}`);
-          _titan._connecting = false;
           _titan.state.connected = false; _titan.emit(); return;
         }
 
         _titan.tradingSocket = new WebSocket(wsUrl);
 
         _titan.tradingSocket.onerror = () => {
-          _titan._connecting = false;
           _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
           _titan.state.connected = false;
         };
         _titan.tradingSocket.onopen = () => {
-          _titan._connecting = false; // OTP + WS handshake complete — allow future reconnects
           _titan.state.balance = hub.balanceUSD || 0;
           _titan.state.connected = true;
           _titan.sound.playConnect();
           _titan.addLog('win', 'AUTH', 'Ready to trade');
           try { _titan.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
-          try { _titan.tradingSocket.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); } catch (e) { /* */ }
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
-          // If the engine was mid-chain when socket reconnected (isLocked+active, no pending),
-          // retry the bolt now that the socket is ready — otherwise the chain silently stalls.
-          if (_titan.state.active && _titan.state.isLocked && !_titan.pendingTrade && !_titan.executionGuard && !_titan.state.isCooldown) {
-            _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing bolt');
-            setTimeout(() => _titan.executeBoltPurchase(), 300);
-          }
           _titan.emit();
         };
-        // Queue for contract results that arrive before buy confirmation (race condition)
-        // Digit contracts settle in 1 tick — result can arrive before buy ack
-        if (!_titan._earlyResults) _titan._earlyResults = new Map();
-
         _titan.tradingSocket.onmessage = (msg) => {
           let data;
           try { data = JSON.parse(msg.data); } catch (e) {
@@ -9133,56 +8682,19 @@ window.NexusStrategies=exports;
             return;
           }
           if (data.msg_type === 'balance') _titan.state.balance = data.balance.balance;
-          // Log every server reply that isn't a ping/balance/heartbeat so trade
-          // failures always appear in the engine log, not just swallowed silently.
-          if (data.msg_type && data.msg_type !== 'balance' && data.msg_type !== 'ping') {
-            const snippet = JSON.stringify(data).slice(0, 200);
-            _titan.addLog('engine', 'WS-MSG', `msg_type=${data.msg_type} ${data.error ? '❌ ERROR: ' + data.error.message : ''}`);
-          }
-
-          if (data.msg_type === 'proposal_open_contract') {
-            const _c = data.proposal_open_contract;
-            if (_c && _c.is_sold && _c.contract_id) {
-              if (_titan.ownContractIds.has(_c.contract_id)) {
-                // Normal path: buy was already confirmed, process immediately
-                _titan.ownContractIds.delete(_c.contract_id);
-                _titan.handleContractResult(_c);
-              } else if (_titan.pendingTrade) {
-                // Race condition: result arrived before buy confirmation
-                // Queue it — will be processed when buy ack comes in
-                _titan._earlyResults.set(_c.contract_id.toString(), _c);
-                _titan.addLog('engine', 'QUEUE', `Early result queued for contract #${_c.contract_id}`);
-              }
-            }
-          }
-
+          if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract?.is_sold) _titan.handleContractResult(data.proposal_open_contract);
           if (data.msg_type === 'buy') {
             if (data.error) {
               _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})`);
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
-              // Also reset isLocked so bot re-enters scouting on next tick
-              _titan.state = { ..._titan.state, isLocked: false };
-              _titan.emit();
-            } else if (data.buy && data.buy.contract_id) {
-              const cid = data.buy.contract_id.toString();
-              _titan.addLog('engine', 'CONFIRMED', `Contract #${cid} accepted @ ${data.buy.buy_price}`);
-              // Check if we already got the result (early result race condition)
-              if (_titan._earlyResults && _titan._earlyResults.has(cid)) {
-                const earlyResult = _titan._earlyResults.get(cid);
-                _titan._earlyResults.delete(cid);
-                _titan.addLog('engine', 'QUEUE', `Processing queued early result for #${cid}`);
-                _titan.handleContractResult(earlyResult);
-              } else {
-                // Normal: wait for proposal_open_contract
-                _titan.ownContractIds.add(data.buy.contract_id);
-              }
+            } else if (data.buy) {
+              _titan.addLog('engine', 'CONFIRMED', `Contract #${data.buy.contract_id} accepted @ ${data.buy.buy_price}`);
             }
           }
           _titan.emit();
         };
         _titan.tradingSocket.onclose = () => {
-          _titan._connecting = false;
           _titan.state.connected = false;
           _titan.emit();
         };
@@ -9195,27 +8707,14 @@ window.NexusStrategies=exports;
     }
 
     toggleEngine() {
-      if (this.state.isCooldown && !this.state.active && !this.state.isLocked) {
-        // Currently in post-session cooldown with engine off — cancel cooldown and stop fully
-        if (this.cooldownTimer) { clearInterval(this.cooldownTimer); this.cooldownTimer = null; }
-        this.state = { ...this.state, isCooldown: false, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
-        this._hideCooldownOverlay && this._hideCooldownOverlay();
-        this.addLog('engine', 'ENGINE', 'Cooldown cancelled — engine stopped');
-        this.emit();
-        return;
-      }
-      if (this.state.isCooldown) return; // mid-session cooldown — let it finish
+      if (this.state.isCooldown) return;
       const newActive = !this.state.active;
       if (newActive && !window.HubStore.isBotEnabled(this.id)) {
         this.addLog('error', 'ENGINE', `${this.botLabel} is disabled — enable it from the Dashboard first`);
         return;
       }
-      if (newActive) {
-        this.sound.playEngineStart(); this.executionGuard = false; this.pendingTrade = null;
-        // Open (or re-open) trading socket now that the engine is engaging
-        const tok = window.HubStore.getState().apiToken;
-        if (tok && (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN)) this.connect(tok);
-      } else { this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle'; this._connecting = false; }
+      if (newActive) { this.sound.playEngineStart(); this.executionGuard = false; this.pendingTrade = null; }
+      else { this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle'; }
       this.addLog('engine', 'ENGINE', newActive ? 'OMEGA Strategy Engaged' : 'Session Terminated');
       this.state = { ...this.state, active: newActive, isLocked: newActive ? this.state.isLocked : false };
       this.emit();
@@ -9266,14 +8765,13 @@ window.NexusStrategies=exports;
     _watchdog() {
       const now = Date.now();
       const tickStale = now - this.lastTickTime > 12000;
-      const tradeStuck = this.state.active && this.state.isLocked && !this.state.isCooldown && now - this.lastTradeTime > 15000 && !this.pendingTrade && !this.executionGuard;
+      const tradeStuck = this.state.active && this.state.isLocked && now - this.lastTradeTime > 60000 && !this.pendingTrade;
       if (tickStale || tradeStuck) {
-        this.addLog('engine', 'WATCHDOG', `🚨 ${tickStale ? 'No ticks 12s' : 'No trade 15s'} — reconnecting`);
+        this.addLog('engine', 'WATCHDOG', `🚨 ${tickStale ? 'No ticks 12s' : 'No trade 60s'} — reconnecting`);
         const token = window.HubStore.getState().apiToken;
-        if (token && (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN)) this.connect(token);
+        if (token) this.connect(token);
         this.subscribeToMarket(this.config.selectedMarket);
         this.lastTickTime = now; this.lastTradeTime = now;
-        if (tradeStuck) { this.executionGuard = false; this.addLog('engine', 'WATCHDOG', 'Guard released — chain will resume on next tick'); }
         if (this.state.active && this.config.autoPilot) setTimeout(() => { this.executionGuard = false; }, 2000);
       }
     }
@@ -9456,8 +8954,8 @@ window.NexusStrategies=exports;
           </div>
         </div>
       </div>
-      <button class="btn-omega ${s.isCooldown ? '' : s.isRunning ? 'stop' : s.isArmed ? 'stop' : ''}" id="differ-engage" style="margin-top:12px${s.isCooldown ? ';opacity:0.6;cursor:not-allowed' : ''}" ${s.isCooldown ? 'disabled' : ''}>
-        ${s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⛔ FIRING — CLICK TO DISARM' : s.isArmed ? '⛔ DISARM BOLT' : '⚡ ENGAGE ATOMIC BOLT'}
+      <button class="btn-engage ${s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : ''}" id="differ-engage" style="margin-top:12px">
+        ${s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT'}
       </button>
       <button id="differ-abort" style="display:${s.isArmed || s.isRunning ? 'block' : 'none'};width:100%;margin-top:6px;padding:12px;border:1px solid hsl(var(--loss)/0.5);border-radius:10px;background:transparent;color:hsl(var(--loss));font-family:'Outfit',sans-serif;cursor:pointer">⛔ ABORT TRADES</button>`;
 
@@ -9472,12 +8970,7 @@ window.NexusStrategies=exports;
     el('differ-tp') && (el('differ-tp').onchange = (e) => eng.dispatch({ type: 'SET_TP', value: Math.max(0, parseFloat(e.target.value) || 0) }));
     el('differ-sl') && (el('differ-sl').onchange = (e) => eng.dispatch({ type: 'SET_SL', value: Math.max(0, parseFloat(e.target.value) || 0) }));
     el('differ-autobatch') && (el('differ-autobatch').onchange = (e) => eng.dispatch({ type: 'SET_AUTO_BATCH', value: Math.max(1, parseInt(e.target.value) || 1) }));
-    el('differ-engage').onclick = () => {
-      if (s.isCooldown) return;
-      if (s.isRunning) { eng.abortTrades(); eng.disarmSystem(); }
-      else if (s.isArmed) { eng.disarmSystem(); }
-      else { eng.armSystem(); }
-    };
+    el('differ-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
     el('differ-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
   }
 
@@ -9506,7 +8999,7 @@ window.NexusStrategies=exports;
       <div style="margin-top:8px" class="journal-list">${s.journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
         <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
         <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
-        <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit ?? '—'}</b></span>
+        <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
         <span class="journal-net ${j.type === 'win' ? 'neon-text-win' : 'neon-text-loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
       </div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
       <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:'Outfit',sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
@@ -9538,12 +9031,8 @@ window.NexusStrategies=exports;
 
     const engage = el('differ-engage');
     if (engage) {
-      const isArmedOrRunning = s.isArmed || s.isRunning;
-      engage.className = 'btn-omega' + (isArmedOrRunning ? ' stop' : '') + (s.isCooldown ? '' : '');
-      engage.disabled = s.isCooldown;
-      engage.style.opacity = s.isCooldown ? '0.6' : '';
-      engage.style.cursor = s.isCooldown ? 'not-allowed' : '';
-      engage.textContent = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⛔ FIRING — CLICK TO DISARM' : s.isArmed ? '⛔ DISARM BOLT' : '⚡ ENGAGE ATOMIC BOLT';
+      engage.className = 'btn-engage ' + (s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : '');
+      engage.textContent = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT';
     }
     const abort = el('differ-abort');
     if (abort) abort.style.display = s.isArmed || s.isRunning ? 'block' : 'none';
@@ -9619,13 +9108,7 @@ window.NexusStrategies=exports;
   }
 
   function renderLeft(engine, rootId, snap) {
-    const { config: c, analysis: aEngine, scannerState, marketHealth } = snap;
-    // ── Use scanner's stored analysis for the selected market (not a fresh restart).
-    // The scanner continuously tracks ALL markets in background. When the user
-    // selects a market from Top Markets, we show its already-computed analysis
-    // immediately without restarting — exactly the same % that was in the list.
-    const scannerMarket = engine.scanner && engine.scanner.marketData && engine.scanner.marketData.get(c.selectedMarket);
-    const a = (scannerMarket && scannerMarket.analysis) ? scannerMarket.analysis : aEngine;
+    const { config: c, analysis: a, scannerState, marketHealth } = snap;
     const prob = a ? a.probability : 0;
     const rec = a ? a.recommendation : '—';
     const mtf = a && a.mtfAligned !== false ? 'MTF ALIGNED' : 'MTF DIVERGENT';
@@ -9684,37 +9167,16 @@ window.NexusStrategies=exports;
       </div>
 
       <div class="analysis-hub-card" style="margin-bottom:8px">
-        <div class="analysis-hub-title" style="display:flex;align-items:center;justify-content:space-between">
-          <span style="display:flex;align-items:center;gap:5px">
-            <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 9V6M5 9V4M8 9V2M11 9V7"/></svg>
-            Signal Strength
-          </span>
-          <span class="mtf-badge ${a && a.mtfAligned !== false ? 'aligned' : 'divergent'}">${mtf}</span>
-        </div>
-        <div style="display:flex;align-items:flex-end;gap:8px;margin-bottom:8px">
-          <div style="font-family:'Outfit',sans-serif;font-size:2rem;font-weight:900;line-height:1;color:${prob >= 80 ? 'hsl(var(--win))' : prob >= 65 ? 'hsl(var(--primary))' : prob >= 50 ? 'hsl(var(--accent))' : 'hsl(var(--loss))'}">${prob}</div>
-          <div style="font-size:1.1rem;color:hsl(var(--muted-foreground));margin-bottom:4px">%</div>
-          <div style="margin-left:auto;text-align:right">
-            <div class="signal-ring-rec" style="font-size:9px;letter-spacing:1.5px">${rec}</div>
+        <div class="analysis-hub-title">Signal Strength</div>
+        <div class="signal-ring-wrap">
+          <div class="signal-ring-labels" style="flex:1">
+            <div class="signal-ring-label">Probability</div>
+            <div class="signal-ring-value">${prob}%</div>
+            <div class="bar-track" style="margin-top:7px"><div class="bar-fill-primary" style="width:${prob}%"></div></div>
+            <div class="signal-ring-rec" style="margin-top:6px">${rec}</div>
+            <div class="mtf-badge ${a && a.mtfAligned !== false ? 'aligned' : 'divergent'}" style="margin-top:4px">${mtf}</div>
           </div>
         </div>
-        <div class="bar-track" style="margin-bottom:10px;height:5px;border-radius:3px">
-          <div style="height:100%;width:${prob}%;border-radius:3px;transition:width .5s;background:${prob >= 80 ? 'linear-gradient(90deg,hsl(var(--primary)),hsl(var(--win)))' : prob >= 65 ? 'hsl(var(--primary))' : prob >= 50 ? 'hsl(var(--accent))' : 'hsl(var(--loss))'};"></div>
-        </div>
-        ${a ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px">
-          ${[
-            ['Trend', a.trendScore || 0, 'var(--primary)'],
-            ['Momentum', a.momentumScore || 0, 'var(--secondary)'],
-            ['Volatility', a.volatilityIndex || 0, 'var(--accent)'],
-            ['Confidence', a.mtfConfidence ? Math.round(a.mtfConfidence * 100) : 0, 'var(--win)'],
-          ].map(([label, val, color]) => `<div style="background:hsl(var(--bg));border-radius:5px;padding:5px 7px">
-            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-              <span style="font-size:7.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${label}</span>
-              <span style="font-size:7.5px;font-weight:700;color:hsl(${color})">${Math.round(val)}%</span>
-            </div>
-            <div class="bar-track" style="height:2.5px"><div style="height:100%;width:${Math.min(100,Math.round(val))}%;background:hsl(${color});border-radius:2px"></div></div>
-          </div>`).join('')}
-        </div>` : ''}
         ${condChips}
       </div>
 
@@ -9732,61 +9194,27 @@ window.NexusStrategies=exports;
       <div class="analysis-hub-card">
         <div class="analysis-hub-title" style="display:flex;align-items:center;justify-content:space-between">
           <span>Top Markets</span>
-          <span class="text-muted" style="font-size:8px;letter-spacing:1px">LIVE SCAN</span>
+          ${scannerState.topThree && scannerState.topThree[0] ? `<button class="strategy-btn" title="Jump to best market" data-mkt="${scannerState.topThree[0].symbol}" style="padding:3px 8px;font-size:9px;letter-spacing:0.5px;width:auto">⚡ BEST</button>` : ''}
         </div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">Scores update every tick · tap to select</div>
-        ${(scannerState.topThree || []).map((m, idx2) => {
-          const isSel = m.symbol === c.selectedMarket;
-          const health = (m.health && m.health.longTerm) || m.longTerm || '—';
-          const trend  = (m.health && m.health.trend) || m.trend || '—';
-          const vol    = (m.health && m.health.volatility) || m.volatility || '';
-          const rankColor = idx2 === 0 ? 'hsl(var(--win))' : idx2 === 1 ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
-          const healthColor = health === 'HEALTHY' ? 'hsl(var(--win))' : health === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))';
-          const trendArrow = trend === 'UP' ? '↑' : trend === 'DOWN' ? '↓' : trend !== '—' ? '→' : '';
-          return '<button class="strategy-btn ' + (isSel ? 'active' : '') + '" data-mkt="' + m.symbol + '"'
-            + ' style="width:100%;text-align:left;margin-bottom:6px;padding:9px 10px;display:block;border:' + (isSel ? '1px solid hsl(var(--primary)/0.6)' : '1px solid hsl(var(--border)/0.4)') + '">'
-            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">'
-            + '<div style="display:flex;align-items:center;gap:5px">'
-            + '<span style="font-size:8px;font-weight:900;color:' + rankColor + ';letter-spacing:1px">#' + (idx2+1) + '</span>'
-            + '<span style="font-size:10.5px;font-weight:700">' + m.name + '</span>'
-            + (isSel ? '<span style="font-size:7.5px;letter-spacing:1px;color:hsl(var(--primary));font-weight:800;margin-left:2px">● ACTIVE</span>' : '')
-            + '</div>'
-            + '<b style="font-size:12px;color:' + rankColor + '">' + m.score + '%</b>'
-            + '</div>'
-            + '<div class="bar-track" style="height:3px;margin-bottom:5px"><div style="height:100%;width:' + m.score + '%;background:' + rankColor + ';border-radius:2px;transition:width .4s"></div></div>'
-            + '<div style="display:flex;gap:6px;align-items:center">'
-            + '<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:hsl(var(--bg));color:' + healthColor + ';font-weight:700">' + health + '</span>'
-            + (trendArrow ? '<span style="font-size:8px;color:hsl(var(--muted-foreground))">' + trendArrow + ' ' + trend + '</span>' : '')
-            + (vol ? '<span style="font-size:8px;color:hsl(var(--muted-foreground));margin-left:auto">Vol:' + vol + '</span>' : '')
-            + '</div>'
-            + '</button>';
-        }).join('') || '<div class="text-muted" style="font-size:10px;padding:12px 0;text-align:center">⏳ Scanning markets…</div>'}
-        ${marketHealth ? '<div style="display:flex;gap:6px;margin-top:4px;padding-top:6px;border-top:1px solid hsl(var(--border)/0.3)">'
-          + '<span class="text-muted" style="font-size:8.5px">Active market:</span>'
-          + '<b style="font-size:8.5px;color:' + (marketHealth.longTerm === 'HEALTHY' ? 'hsl(var(--win))' : marketHealth.longTerm === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))') + '">' + marketHealth.longTerm + '</b>'
-          + '<span class="text-muted" style="font-size:8.5px;margin-left:auto">Vol:' + (marketHealth.volatility || '—') + '</span>'
-          + '</div>' : ''}
-      </div>      </div>`;
+        ${(scannerState.topThree || []).map((m) => `<button class="strategy-btn ${m.symbol === c.selectedMarket ? 'active' : ''}" data-mkt="${m.symbol}" style="width:100%;text-align:left;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:11px">${m.name}</div>
+            <div class="text-muted" style="font-size:8.5px;margin-top:2px">${(m.health && m.health.longTerm) || m.longTerm || '—'} · ${(m.health && m.health.trend) || m.trend || '—'}</div>
+          </div>
+          <b class="text-accent" style="font-family:'Outfit',sans-serif;font-size:11px">${m.score}%</b>
+        </button>`).join('') || '<div class="text-muted" style="font-size:10px;padding:8px 0">Scanning markets…</div>'}
+        ${marketHealth ? `<div class="text-muted" style="font-size:9px;margin-top:6px;padding-top:6px;border-top:1px solid hsl(var(--border)/0.5)">Health: <b>${marketHealth.longTerm}</b> · Vol: ${marketHealth.volatility || '—'}</div>` : ''}
+      </div>`;
 
     el(`${rootId}-strategy`).onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
     el(`${rootId}-left`).querySelectorAll('[data-period]').forEach((b) => {
       b.onclick = () => { engine.setConfig({ tickPeriod: parseInt(b.dataset.period) }); engine.scanner && engine.scanner.setTickPeriod(parseInt(b.dataset.period)); };
     });
     el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
-      const mkt = b.dataset.mkt;
-      // 1. Switch the engine's selected market (updates control panel dropdown too)
-      engine.changeMarket(mkt);
-      // 2. Immediately update the active state on all market buttons visually
-      el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.mkt === mkt);
-      });
-      // 3. Also update the market selector dropdown in the center config panel
-      const mktSel = document.getElementById(`${rootId}-market`);
-      if (mktSel) mktSel.value = mkt;
-      // 4. Re-render left panel to show the selected market's persisted analysis
-      //    (scanner already has it — no restart needed)
-      const snap2 = engine.getSnapshot();
-      renderLeft(engine, rootId, snap2);
+      engine.changeMarket(b.dataset.mkt);
+      const centerCol = document.getElementById(`${rootId}-center`);
+      const centerScroll = centerCol && centerCol.closest('.benz-col');
+      if (centerScroll) { centerScroll.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); centerScroll.scrollTop = 0; }
     });
   }
 
@@ -9813,23 +9241,6 @@ window.NexusStrategies=exports;
         <div class="flow-step" id="${rootId}-flow-fire">FIRE</div>
       </div>
       <div class="text-muted" style="font-size:10px;min-height:28px;margin-bottom:10px" id="${rootId}-wait-reason"></div>
-
-      <!-- ⚡ LIVE ENTRY CONDITIONS PANEL -->
-      <div class="entry-conditions-panel" id="${rootId}-conditions">
-        <div class="entry-cond-title">
-          <span class="entry-cond-pulse" id="${rootId}-cond-pulse"></span>
-          <span>FIRE CONDITIONS</span>
-          <span class="entry-cond-status" id="${rootId}-cond-status">WAITING</span>
-        </div>
-        <div class="entry-cond-list" id="${rootId}-cond-list">
-          <div class="entry-cond-row loading"><span class="entry-cond-icon">⏳</span><span>Loading analysis…</span></div>
-        </div>
-        <div class="entry-cond-progress" id="${rootId}-cond-progress">
-          <div class="entry-cond-fill" id="${rootId}-cond-fill" style="width:0%"></div>
-        </div>
-        <div class="entry-cond-pct" id="${rootId}-cond-pct">0 / 0 conditions met</div>
-      </div>
-
       <div class="font-orbitron text-primary" style="font-size:10px;letter-spacing:2px;margin-bottom:6px">CONTROL PANEL</div>
       <label class="text-muted" style="font-size:9px">MARKET</label>
       <select class="titan-input" id="${rootId}-market" style="margin-bottom:8px">${markets}</select>
@@ -9874,16 +9285,15 @@ window.NexusStrategies=exports;
             <select class="titan-input" id="${rootId}-rec-barrier-sel" style="margin-top:4px">
               ${[0,1,2,3,4,5,6,7,8,9].map(b => {
                 const winPct = (9 - b) * 10;
-                return `<option value="${b}" ${b === c.recoveryBarrier ? 'selected' : ''}>Under ${b} — ${winPct}% win chance</option>`;
+                return `<option value="${b}" ${b === c.recoveryBarrier ? 'selected' : ''}>Under ${b} (${winPct}% win chance)</option>`;
               }).join('')}
             </select>
-            <span class="mart-field-hint">Recovery trades use this UNDER barrier. Lower barrier = higher win %. Alt/Smart modes may override direction. Default: Under 4 (50%)</span>
+            <span class="mart-field-hint">On loss, switches to UNDER [digit]. Lower = higher win %. Default: Under 4 (50%)</span>
           </div>` : `
           <div class="mart-field" style="margin-bottom:10px">
             <span class="mart-field-label">Recovery Direction</span>
             <div class="mart-field-hint" style="margin-top:4px;padding:8px;background:hsl(var(--bg));border-radius:6px;border:1px solid hsl(var(--border)/0.5)">
-              <b style="color:hsl(var(--primary))">Standard:</b> stays on <b style="color:hsl(var(--accent))">${(c.tradeMode||'odd').toUpperCase()}</b> at higher stake.
-              <b style="color:hsl(var(--primary))">Alt/Smart:</b> alternates parity each step to avoid Deriv pattern detection.
+              After a loss on <b style="color:hsl(var(--primary))">${(c.tradeMode||'odd').toUpperCase()}</b>, recovery fires <b style="color:hsl(var(--accent))">${(c.tradeMode||'odd')==='odd'?'EVEN':'ODD'}</b> at higher stake (opposite parity)
             </div>
           </div>`}
 
@@ -9913,36 +9323,32 @@ window.NexusStrategies=exports;
 
               <div class="recovery-mode-card ${!c.alternatingRecovery && !c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="plain" id="${rootId}-rmode-plain">
                 <div class="rec-card-title">💡 Standard Recovery</div>
-                <div class="rec-card-desc">${isOver
-                  ? `UNDER ${c.recoveryBarrier} on every recovery step — consistent high-win-chance direction`
-                  : `Stays on ${(c.tradeMode||'odd').toUpperCase()} at escalated stake — no direction change`
-                }</div>
+                <div class="rec-card-desc">${isOver ? 'Switches to recovery barrier UNDER after loss' : `Continues with ${(c.tradeMode||'odd').toUpperCase()} at increased stake`}</div>
               </div>
 
               <div class="recovery-mode-card ${c.alternatingRecovery && !c.smartRecovery ? 'selected' : ''}" data-rmode="altA" id="${rootId}-rmode-altA">
-                <div class="rec-card-title">🔄 Alt Mode A — Staggered flip</div>
+                <div class="rec-card-title">🔄 Alt Mode A</div>
                 <div class="rec-card-desc">${isOver
-                  ? `Step 1: UNDER ${c.recoveryBarrier} → Step 2: OVER ${c.recoveryBarrier} → Steps 3-4: OVER → Step 5: UNDER … (flips every 3rd)`
+                  ? 'Over → Under → Over×2 → Under → …'
                   : (c.tradeMode||'odd')==='odd'
-                    ? 'Step 1: EVEN → Step 2: ODD → Steps 3-4: ODD → Step 5: EVEN … (flips every 3rd)'
-                    : 'Step 1: ODD → Step 2: EVEN → Steps 3-4: EVEN → Step 5: ODD … (flips every 3rd)'
+                    ? 'ODD → EVEN → ODD×2 → EVEN → …'
+                    : 'EVEN → ODD → EVEN×2 → ODD → …'
                 }</div>
               </div>
 
               <div class="recovery-mode-card ${c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="altB" id="${rootId}-rmode-altB">
-                <div class="rec-card-title">🔁 Alt Mode B — EVEN/UNDER-first</div>
+                <div class="rec-card-title">🔁 Alt Mode B</div>
                 <div class="rec-card-desc">${isOver
-                  ? `Step 1: UNDER ${c.recoveryBarrier} → Steps 2-3: OVER ${c.recoveryBarrier} → Step 4: UNDER … (repeating 1→2 block)`
-                  : 'Step 1: EVEN → Steps 2-3: ODD → Step 4: EVEN … (always starts EVEN regardless of base mode)'
+                  ? 'Under → Over×2 → Under → Over×2 → …'
+                  : (c.tradeMode||'odd')==='odd'
+                    ? 'EVEN → ODD×2 → EVEN → ODD×2 → …'
+                    : 'ODD → EVEN×2 → ODD → EVEN×2 → …'
                 }</div>
               </div>
 
               <div class="recovery-mode-card ${c.smartRecovery ? 'selected' : ''}" data-rmode="smart" id="${rootId}-rmode-smart">
-                <div class="rec-card-title">🧠 Smart Recovery — Tick-adaptive</div>
-                <div class="rec-card-desc">${isOver
-                  ? `Scans last 20 ticks: if OVER% &gt;50% → bets UNDER ${c.recoveryBarrier}. If UNDER-dominant → bets OVER ${c.recoveryBarrier}. Adapts each step.`
-                  : 'Scans last 20 ticks: if ODD% >50% → bets EVEN. If EVEN-dominant → bets ODD. Adapts each step.'
-                }</div>
+                <div class="rec-card-title">🧠 Smart Recovery</div>
+                <div class="rec-card-desc">Analyzes last 20 ticks → fires opposite of dominant ${isOver ? 'over/under trend' : 'parity'} for higher win odds</div>
               </div>
 
             </div>
@@ -10020,16 +9426,7 @@ window.NexusStrategies=exports;
     el(`${rootId}-toggle`).onclick = () => engine.toggleEngine();
     if (isOver) {
       el(`${rootId}-barriers`) && el(`${rootId}-barriers`).querySelectorAll('[data-barrier]').forEach((b) => {
-        b.onclick = () => {
-          const newBarrier = parseInt(b.dataset.barrier);
-          engine.setConfig({ overBarrier: newBarrier });
-          // Immediately update selected state visually without waiting for full re-render
-          el(`${rootId}-barriers`) && el(`${rootId}-barriers`).querySelectorAll('[data-barrier]').forEach((btn) => {
-            btn.classList.toggle('selected', parseInt(btn.dataset.barrier) === newBarrier);
-          });
-          // Force config panel re-render on next render cycle
-          if (shells[rootId]) { shells[rootId].lastOverBarrier = -1; }
-        };
+        b.onclick = () => engine.setConfig({ overBarrier: parseInt(b.dataset.barrier) });
       });
     } else if (!engine.fixedTradeMode) {
       el(`${rootId}-odd`).onclick = () => engine.switchTradeMode('odd');
@@ -10055,7 +9452,7 @@ window.NexusStrategies=exports;
         ${journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
           <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
           <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
-          <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit ?? '—'}</b></span>
+          <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
           <span class="journal-net ${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
         </div>`).join('') || '<div class="text-muted" style="text-align:center;padding:20px;font-size:10px">NO TRADES RECORDED</div>'}
       </div>
@@ -10138,10 +9535,8 @@ window.NexusStrategies=exports;
     const { state: s, config: c, strategyPhase, strategyWaitReason, liveDigit, liveQuote, cooldownTime } = snap;
     const digit = el(`${rootId}-digit`);
     if (digit) {
-      const newDigit = liveDigit >= 0 ? String(liveDigit) : '—';
-      if (digit.textContent !== newDigit) digit.textContent = newDigit;
-      const newClass = 'digit-pad text-primary';
-      if (digit.className !== newClass) digit.className = newClass;
+      digit.textContent = liveDigit >= 0 ? liveDigit : '—';
+      digit.className = 'digit-pad text-primary';
     }
     const badge = el(`${rootId}-badge`);
     if (badge) {
@@ -10199,122 +9594,6 @@ window.NexusStrategies=exports;
       toggle.className = 'btn-omega' + (s.active ? ' stop' : '');
       toggle.disabled = s.isCooldown || snap.isStrategyTransitioning;
     }
-
-    // ── Live Entry Conditions Panel ───────────────────────────────────────────
-    const condPanel = document.getElementById(`${rootId}-conditions`);
-    const condList  = document.getElementById(`${rootId}-cond-list`);
-    const condFill  = document.getElementById(`${rootId}-cond-fill`);
-    const condPct   = document.getElementById(`${rootId}-cond-pct`);
-    const condPulse = document.getElementById(`${rootId}-cond-pulse`);
-    const condStatus= document.getElementById(`${rootId}-cond-status`);
-    if (condPanel && condList) {
-      const a = snap.analysis;
-      const engine_mode = snap.fixedTradeMode !== undefined ? 'evenodd' : (c.overBarrier !== undefined ? 'over' : 'evenodd');
-      const isOver = c.overBarrier !== undefined && snap.fixedTradeMode === null;
-      const isOddMode = !isOver && (snap.fixedTradeMode === 'odd' || c.tradeMode === 'odd');
-
-      // Build conditions list
-      const conditions = [];
-
-      // 1. Engine active
-      conditions.push({
-        label: 'Engine Armed',
-        met: s.active && !s.isCooldown,
-        value: s.active ? (s.isCooldown ? 'CD' : 'ON') : 'OFF',
-      });
-
-      // 2. Connected
-      conditions.push({
-        label: 'Trading Connected',
-        met: !!s.connected,
-        value: s.connected ? 'YES' : 'NO',
-      });
-
-      // 3. Analysis ready
-      const analysisReady = !!a && a.probability > 0;
-      conditions.push({
-        label: 'Analysis Ready',
-        met: analysisReady,
-        value: analysisReady ? `${a.probability}%` : '—',
-      });
-
-      // 4. Min signal
-      const sigMet = a && a.probability >= c.minSignal;
-      conditions.push({
-        label: `Signal ≥ ${c.minSignal}%`,
-        met: !!sigMet,
-        value: a ? `${a.probability}%` : '—',
-      });
-
-      // 5. Streak
-      const streakMet = s.streak >= c.minStreak;
-      conditions.push({
-        label: `Streak ≥ ${c.minStreak}`,
-        met: streakMet,
-        value: `${s.streak}`,
-      });
-
-      // 6. Not AVOID
-      const notAvoid = !a || a.recommendation !== 'AVOID';
-      conditions.push({
-        label: 'Signal not AVOID',
-        met: notAvoid,
-        value: a ? a.recommendation : '—',
-      });
-
-      // 7. Market health
-      const health = snap.marketHealth;
-      const healthOk = !health || health.longTerm !== 'POOR';
-      conditions.push({
-        label: 'Market Health',
-        met: healthOk,
-        value: health ? health.longTerm : 'SCAN',
-      });
-
-      // 8. No pending trade
-      const noLock = !s.isLocked || s.inRecovery;
-      conditions.push({
-        label: 'No active trade',
-        met: noLock,
-        value: s.isLocked ? (s.inRecovery ? 'REC' : 'WAIT') : 'CLEAR',
-      });
-
-      const metCount = conditions.filter(cd => cd.met).length;
-      const total = conditions.length;
-      const allMet = metCount === total;
-      const pct = total > 0 ? Math.round((metCount / total) * 100) : 0;
-      const isFiring = s.isLocked && !s.inRecovery;
-
-      // Update panel glow
-      condPanel.classList.toggle('all-met', allMet);
-
-      // Update pulse
-      if (condPulse) {
-        condPulse.className = 'entry-cond-pulse' + (isFiring ? ' firing' : allMet ? ' active' : '');
-      }
-      if (condStatus) {
-        condStatus.textContent = isFiring ? '⚡ FIRING' : allMet ? '✓ READY' : 'WAITING';
-        condStatus.className = 'entry-cond-status' + (isFiring ? ' fire' : allMet ? ' met' : '');
-      }
-
-      // Render condition rows
-      const newHtml = conditions.map(cd => {
-        const icon = cd.met ? '✓' : '○';
-        return `<div class="entry-cond-row ${cd.met ? 'met' : 'pending'}">
-          <span class="entry-cond-icon" style="color:${cd.met ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${icon}</span>
-          <span class="entry-cond-label">${cd.label}</span>
-          <span class="entry-cond-value">${cd.value}</span>
-        </div>`;
-      }).join('');
-      if (condList.__lastConds !== newHtml) { condList.innerHTML = newHtml; condList.__lastConds = newHtml; }
-
-      // Update progress bar
-      if (condFill) {
-        condFill.style.width = pct + '%';
-        condFill.className = 'entry-cond-fill' + (allMet ? ' full' : '');
-      }
-      if (condPct) condPct.textContent = `${metCount} / ${total} conditions met`;
-    }
   }
 
   global.TitanUI = {
@@ -10324,11 +9603,9 @@ window.NexusStrategies=exports;
       const snap = engine.getSnapshot();
       const sh = shells[rootId];
       renderLeft(engine, rootId, snap);
-      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy || sh.lastOverBarrier !== snap.config.overBarrier || sh.lastTradeMode !== snap.config.tradeMode) {
+      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy) {
         renderCenterConfig(engine, rootId, snap);
         sh.lastStrategy = snap.config.currentStrategy;
-        sh.lastOverBarrier = snap.config.overBarrier;
-        sh.lastTradeMode = snap.config.tradeMode;
       }
       renderRight(engine, rootId, snap);
       updateLive(rootId, snap);
@@ -10505,7 +9782,7 @@ window.NexusStrategies=exports;
         <!-- ═══ END HERO ROW ═══ -->
 
         <!-- ═══ MASTER CONTROL ═══ -->
-        <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-height:80px">
+        <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
           <div style="flex:1;min-width:200px">
             <div style="font-family:'Outfit',sans-serif;font-size:8px;font-weight:900;letter-spacing:4px;text-transform:uppercase;color:hsl(var(--primary));margin-bottom:6px;display:flex;align-items:center;gap:8px">
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg>
@@ -10529,10 +9806,9 @@ window.NexusStrategies=exports;
               <input id="dash-master-sl" type="number" min="0" step="1" value="20" style="width:86px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
             </div>
           </div>
-          <button id="dash-master-toggle" style="margin:0;padding:14px 28px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden;align-self:flex-end;flex-shrink:0;min-width:160px;white-space:nowrap">
+          <button id="dash-master-toggle" style="margin:0;padding:12px 36px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden">
             ⚡ ENGAGE ALL
           </button>
-
         </div>
 
         <!-- ═══ STAT CARDS ═══ -->
@@ -10569,66 +9845,70 @@ window.NexusStrategies=exports;
           </div>
         </div>
 
-        <!-- ═══ ROW 1: Active Engines + Equity Curve side by side ═══ -->
-        <div class="dash-row-top">
-          <!-- Active engines -->
-          <div class="glass-panel exec-panel">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
-              <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
-                <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
-                <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
-              </label>
-            </div>
-            <div id="dash-bot-toggles" class="bot-toggles"></div>
-            <div id="dash-exec-list" class="exec-list"></div>
-          </div>
+        <!-- ═══ MAIN BODY ═══ -->
+        <div class="dash-body">
+          <!-- ═══ SIDEBAR (now LEFT) ═══ -->
+          <div class="dash-sidebar">
 
-          <!-- Equity chart -->
-          <div class="glass-panel dash-equity-panel" style="padding:18px 20px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-              <div>
-                <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
-                <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · all engines · most recent last</div>
+            <!-- Active engines -->
+            <div class="glass-panel exec-panel">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
+                <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
+                  <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
+                  <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
+                </label>
               </div>
-              <div style="display:flex;align-items:center;gap:12px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
-                <span style="display:flex;align-items:center;gap:5px"><span style="width:20px;height:2px;background:linear-gradient(90deg,hsl(var(--secondary)),hsl(var(--win)));border-radius:2px;display:inline-block"></span>P&amp;L Line</span>
-                <span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:hsl(var(--win));display:inline-block;box-shadow:0 0 6px hsl(var(--win))"></span>Live</span>
+              <div id="dash-bot-toggles" class="bot-toggles"></div>
+              <div id="dash-exec-list" class="exec-list"></div>
+            </div>
+
+            <!-- Trade journal -->
+            <div class="glass-panel journal-panel">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
               </div>
+              <div class="journal-tabs" id="dash-journal-tabs"></div>
+              <div class="journal-list" id="dash-journal-list"></div>
             </div>
-            <div id="dash-equity-wrap"></div>
+
+          </div>
+
+          <div class="dash-main">
+
+            <!-- Equity chart -->
+            <div class="glass-panel dash-equity-panel">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                <div>
+                  <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
+                  <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · all engines · most recent last</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
+                  <span style="width:20px;height:2px;background:linear-gradient(90deg,hsl(var(--win)),hsl(var(--secondary)));border-radius:2px;display:inline-block"></span>
+                  P&amp;L
+                </div>
+              </div>
+              <div id="dash-equity-wrap"></div>
+            </div>
+
+            <!-- Engine overview -->
+            <div class="glass-panel" style="padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div class="section-divider" style="margin-bottom:0;flex:1">ENGINE OVERVIEW</div>
+                <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">4 BOTS</div>
+              </div>
+              <div class="rank-table" id="dash-perbot"></div>
+            </div>
+
           </div>
         </div>
-
-        <!-- ═══ ROW 2: Engine Overview — full width ═══ -->
-        <div class="dash-row-full">
-          <div class="glass-panel" style="padding:14px 16px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div class="section-divider" style="margin-bottom:0;flex:1">ENGINE OVERVIEW</div>
-              <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">4 BOTS</div>
-            </div>
-            <div class="rank-table" id="dash-perbot"></div>
-          </div>
-        </div>
-
-        <!-- ═══ ROW 3: Trade Journal — full width ═══ -->
-        <div class="dash-row-full">
-          <div class="glass-panel journal-panel">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
-            </div>
-            <div class="journal-tabs" id="dash-journal-tabs"></div>
-            <div class="journal-list" id="dash-journal-list"></div>
-          </div>
-        </div>
-
       </div>`;
   }
 
   function buildEquitySVG(points) {
-    const w = 780, h = 260, pad = 36;
+    const w = 680, h = 200, pad = 28;
     if (points.length < 2) {
-      return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;overflow:visible">
+      return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
         <defs>
           <linearGradient id="empty-grad" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stop-color="hsl(var(--primary))" stop-opacity="0.06"/>
@@ -10638,7 +9918,7 @@ window.NexusStrategies=exports;
         <rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}"
           fill="url(#empty-grad)" stroke="hsl(var(--border))" stroke-width="0.5" stroke-dasharray="4,4" rx="10"/>
         <text x="${w/2}" y="${h/2-10}" text-anchor="middle" fill="hsl(var(--muted-foreground))"
-          font-size="11" font-family="Outfit,sans-serif" letter-spacing="3" font-weight="700">NO EQUITY DATA</text>
+          font-size="11" font-family="Outfit,sans-serif" letter-spacing="3" font-weight="700" text-transform="uppercase">NO EQUITY DATA</text>
         <text x="${w/2}" y="${h/2+12}" text-anchor="middle" fill="hsl(var(--muted-foreground))"
           font-size="9" font-family="DM Mono,monospace" opacity="0.6">Curve appears after first closed trade</text>
       </svg>`;
@@ -10646,114 +9926,47 @@ window.NexusStrategies=exports;
     const values = points.map((p) => p.cumulative);
     const min = Math.min(0, ...values), max = Math.max(0, ...values);
     const range = max - min || 1;
-    const stepX = (w - pad * 2) / Math.max(points.length - 1, 1);
+    const stepX = (w - pad * 2) / (points.length - 1);
     const xAt = (i) => pad + i * stepX;
     const yAt = (v) => h - pad - ((v - min) / range) * (h - pad * 2);
     const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(p.cumulative).toFixed(1)}`).join(' ');
-    const area = `${line} L${xAt(points.length - 1).toFixed(1)},${h - pad} L${xAt(0).toFixed(1)},${h - pad} Z`;
+    const area = `${line} L${xAt(points.length - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`;
     const zeroY = yAt(0).toFixed(1);
     const last = values[values.length - 1];
     const isPos = last >= 0;
-    const peakVal = Math.max(...values);
-    const troughVal = Math.min(...values);
-    const peakIdx = values.lastIndexOf(peakVal);
-    const troughIdx = values.lastIndexOf(troughVal);
-    const lineColor = isPos ? 'hsl(var(--win))' : 'hsl(var(--loss))';
-    const lineColor2 = isPos ? 'hsl(var(--secondary))' : 'hsl(var(--primary))';
-
-    // Y-axis grid lines with labels
-    const gridCount = 4;
-    const gridLines = Array.from({length: gridCount + 1}, (_, i) => {
-      const t = i / gridCount;
+    const lineColor = isPos ? 'hsl(var(--win))' : 'hsl(var(--primary))';
+    const lineColor2 = isPos ? 'hsl(var(--secondary))' : 'hsl(var(--loss))';
+    // Grid lines
+    const gridLines = [0.25, 0.5, 0.75].map(t => {
       const y = (pad + t * (h - pad*2)).toFixed(1);
-      const val = (max - t * range).toFixed(2);
-      const isZero = Math.abs(parseFloat(val)) < range * 0.03;
-      return `
-        <line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}"
-          stroke="${isZero ? 'hsl(var(--border-bright))' : 'hsl(var(--border))'}"
-          stroke-width="${isZero ? 1 : 0.4}" stroke-dasharray="${isZero ? '3,4' : '2,6'}" opacity="${isZero ? 0.7 : 0.35}"/>
-        <text x="${pad - 5}" y="${parseFloat(y) + 3.5}" text-anchor="end"
-          fill="hsl(var(--muted-foreground))" font-size="8" font-family="DM Mono,monospace" opacity="0.6">${parseFloat(val) >= 0 ? '+' : ''}${parseFloat(val).toFixed(2)}</text>`;
+      return `<line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}" stroke="hsl(var(--border))" stroke-width="0.5" opacity="0.4"/>`;
     }).join('');
-
-    // Trade count ticks along X axis (max 8)
-    const tickCount = Math.min(8, points.length);
-    const tickStep = Math.floor(points.length / tickCount);
-    const xTicks = Array.from({length: tickCount}, (_, i) => {
-      const idx = i * tickStep;
-      const x = xAt(idx).toFixed(1);
-      return `<line x1="${x}" y1="${h - pad}" x2="${x}" y2="${h - pad + 4}" stroke="hsl(var(--border))" stroke-width="0.5" opacity="0.4"/>
-              <text x="${x}" y="${h - pad + 13}" text-anchor="middle" fill="hsl(var(--muted-foreground))" font-size="7.5" font-family="DM Mono,monospace" opacity="0.5">#${idx+1}</text>`;
-    }).join('');
-
-    // Peak marker
-    const peakX = xAt(peakIdx).toFixed(1), peakY = yAt(peakVal).toFixed(1);
-    const peakLabel = peakVal !== last ? `
-      <line x1="${peakX}" y1="${peakY}" x2="${peakX}" y2="${parseFloat(peakY)+28}" stroke="hsl(var(--win))" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.5"/>
-      <circle cx="${peakX}" cy="${peakY}" r="3" fill="hsl(var(--win))" opacity="0.7" style="filter:drop-shadow(0 0 4px hsl(var(--win)))"/>
-      <text x="${peakX}" y="${parseFloat(peakY)-7}" text-anchor="middle" fill="hsl(var(--win))" font-size="8" font-family="DM Mono,monospace" font-weight="700" opacity="0.8">▲ +${peakVal.toFixed(2)}</text>` : '';
-
-    // Trough marker (only if negative)
-    const troughX = xAt(troughIdx).toFixed(1), troughY = yAt(troughVal).toFixed(1);
-    const troughLabel = troughVal < 0 && troughVal !== last ? `
-      <circle cx="${troughX}" cy="${troughY}" r="3" fill="hsl(var(--loss))" opacity="0.6" style="filter:drop-shadow(0 0 4px hsl(var(--loss)))"/>
-      <text x="${troughX}" y="${parseFloat(troughY)+16}" text-anchor="middle" fill="hsl(var(--loss))" font-size="8" font-family="DM Mono,monospace" font-weight="700" opacity="0.7">▼ ${troughVal.toFixed(2)}</text>` : '';
-
-    const endX = xAt(points.length-1).toFixed(1), endY = yAt(last).toFixed(1);
-
     return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
       <defs>
         <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.32"/>
-          <stop offset="60%" stop-color="${lineColor}" stop-opacity="0.08"/>
+          <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.28"/>
+          <stop offset="70%" stop-color="${lineColor}" stop-opacity="0.06"/>
           <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
         </linearGradient>
         <linearGradient id="eqline" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="${lineColor2}"/>
-          <stop offset="100%" stop-color="${lineColor}"/>
+          <stop offset="0%" stop-color="${lineColor}"/>
+          <stop offset="100%" stop-color="${lineColor2}"/>
         </linearGradient>
         <filter id="eq-glow">
-          <feGaussianBlur stdDeviation="2.5" result="blur"/>
+          <feGaussianBlur stdDeviation="2" result="blur"/>
           <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
-        <filter id="dot-glow">
-          <feGaussianBlur stdDeviation="4" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-        <clipPath id="eq-clip">
-          <rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}"/>
-        </clipPath>
       </defs>
-      <!-- Y-axis grid + labels -->
       ${gridLines}
-      <!-- X-axis ticks -->
-      ${xTicks}
-      <!-- Axis lines -->
-      <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="hsl(var(--border))" stroke-width="0.6" opacity="0.5"/>
-      <line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="hsl(var(--border))" stroke-width="0.6" opacity="0.5"/>
-      <!-- Zero baseline glow -->
       <line x1="${pad}" y1="${zeroY}" x2="${w - pad}" y2="${zeroY}"
-        stroke="${lineColor}" stroke-width="0.8" stroke-dasharray="3,5" opacity="0.45"/>
-      <!-- Area fill (clipped) -->
-      <g clip-path="url(#eq-clip)">
-        <path d="${area}" fill="url(#eqfill)" stroke="none"/>
-      </g>
-      <!-- Main line with glow -->
-      <path d="${line}" fill="none" stroke="url(#eqline)" stroke-width="2.2"
-        stroke-linejoin="round" stroke-linecap="round" filter="url(#eq-glow)" clip-path="url(#eq-clip)"/>
-      <!-- Peak / trough markers -->
-      ${peakLabel}
-      ${troughLabel}
-      <!-- Animated end dot -->
-      <circle cx="${endX}" cy="${endY}" r="7" fill="${lineColor}" opacity="0.12" filter="url(#dot-glow)">
-        <animate attributeName="r" values="5;10;5" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.18;0.06;0.18" dur="2.4s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="${endX}" cy="${endY}" r="4.5" fill="${lineColor}" stroke="hsl(var(--bg))" stroke-width="2" filter="url(#dot-glow)"/>
-      <circle cx="${endX}" cy="${endY}" r="2" fill="hsl(var(--bg))"/>
-      <!-- End label -->
-      <rect x="${parseFloat(endX) - 22}" y="${parseFloat(endY) - 22}" width="44" height="14" rx="4" fill="hsl(var(--bg))" opacity="0.75"/>
-      <text x="${endX}" y="${parseFloat(endY) - 12}" text-anchor="middle" fill="${lineColor}" font-size="9" font-family="DM Mono,monospace" font-weight="700">${last >= 0 ? '+' : ''}${last.toFixed(2)}</text>
+        stroke="hsl(var(--border-bright))" stroke-width="1" stroke-dasharray="3,4" opacity="0.6"/>
+      <path d="${area}" fill="url(#eqfill)" stroke="none"/>
+      <path d="${line}" fill="none" stroke="url(#eqline)" stroke-width="2.5"
+        stroke-linejoin="round" stroke-linecap="round" filter="url(#eq-glow)"/>
+      <!-- End dot -->
+      <circle cx="${xAt(points.length-1).toFixed(1)}" cy="${yAt(last).toFixed(1)}" r="4"
+        fill="${lineColor}" stroke="hsl(var(--bg))" stroke-width="2"
+        style="filter:drop-shadow(0 0 6px ${lineColor})"/>
     </svg>`;
   }
 
@@ -10837,27 +10050,15 @@ window.NexusStrategies=exports;
     const perBotHtml = botIds.map((id) => {
       const meta = BOT_META[id]; const b = perBot[id];
       const wr2 = b.trades ? ((b.win / b.trades) * 100).toFixed(1) : '0.0';
-      return `<div class="glass-panel bot-card" data-nav-bot="${id}" style="cursor:pointer" title="Open ${meta.label}">
-        <div class="bot-card-head">
-          <span class="bot-card-dot" style="background:${b.active ? meta.dot : 'hsl(var(--border))'}"></span>
-          ${meta.label}
-          ${b.active ? '<span class="text-success" style="font-size:9px;margin-left:auto">● LIVE</span>' : '<span class="text-muted" style="font-size:9px;margin-left:auto">OPEN →</span>'}
-        </div>
+      return `<div class="glass-panel bot-card">
+        <div class="bot-card-head"><span class="bot-card-dot" style="background:${b.active ? meta.dot : 'hsl(var(--border))'}"></span>${meta.label}${b.active ? ' <span class=\"text-success\" style=\"font-size:9px;margin-left:auto\">● LIVE</span>' : ''}</div>
         <div class="bot-card-value ${b.profit >= 0 ? 'text-success' : 'text-destructive'}">${b.profit >= 0 ? '+' : ''}$${b.profit.toFixed(2)}</div>
         <div class="bot-card-meta"><span>${b.trades} trades</span><span>${wr2}% win</span></div>
         <div class="bar-track"><div class="bar-fill-win" style="width:${wr2}%"></div></div>
         <div class="bot-card-meta"><span class="text-success">W ${b.win}</span><span class="text-destructive">L ${b.loss}</span></div>
       </div>`;
     }).join('');
-    if (global.setHtmlIfChanged(el('dash-perbot', root), perBotHtml)) {
-      // Wire up click-to-navigate on bot cards
-      el('dash-perbot', root).querySelectorAll('[data-nav-bot]').forEach((card) => {
-        card.onclick = () => {
-          const botId = card.dataset.navBot;
-          if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(botId);
-        };
-      });
-    }
+    global.setHtmlIfChanged(el('dash-perbot', root), perBotHtml);
 
     if (!el('dash-bot-toggles', root).childElementCount) {
       el('dash-bot-toggles', root).innerHTML = botIds.map((id) => `
@@ -10954,11 +10155,10 @@ window.NexusStrategies=exports;
       return { id, isCd, cdSecs, cdMax, statusTag, statusClass, resultLabel, resultGlow, flow, botOn, plStr, plClass };
     });
 
-    // Structural key — only truly structural changes trigger full innerHTML re-render.
-    // CD ring ticks, PL updates, and result glow are live-patched below to avoid flicker.
+    // Structural key — excludes cdSecs so ticking doesn't trigger full re-render
     const execList = el('dash-exec-list', root);
     const execStructKey = execDataList.map(r =>
-      `${r.id}:${r.isCd?1:0}:${r.botOn?1:0}`
+      `${r.id}:${r.isCd?1:0}:${r.statusClass}:${r.resultGlow}:${r.flow.analysis?1:0}:${r.flow.trading?1:0}:${r.plStr}:${r.botOn?1:0}`
     ).join('|');
 
     if (execList && execList.__structKey !== execStructKey) {
@@ -10966,14 +10166,14 @@ window.NexusStrategies=exports;
       execList.innerHTML = execDataList.map(({ id, isCd, cdSecs, cdMax, statusTag, statusClass, resultLabel, resultGlow, flow, botOn, plStr, plClass }) => {
         const total = (2 * Math.PI * 14).toFixed(1);
         const offset = (2 * Math.PI * 14 * (1 - Math.min(cdSecs / Math.max(cdMax, 1), 1))).toFixed(1);
-        return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" data-exec-id="${id}" data-nav-exec="${id}" style="cursor:pointer;${botOn ? '' : 'opacity:0.45'}" title="Open ${BOT_META[id].label} tab">
+        return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" data-exec-id="${id}" style="${botOn ? '' : 'opacity:0.45'}">
           <div class="exec-row-head">
             <span class="exec-bot-name">
               <span class="bot-card-dot exec-dot" style="background:${BOT_META[id].dot};box-shadow:0 0 8px ${BOT_META[id].dot}"></span>
               ${BOT_META[id].label}
             </span>
             <span class="exec-row-right">
-              <span class="exec-pl ${plClass}" data-exec-pl="${id}">${plStr}</span>
+              <span class="exec-pl ${plClass}">${plStr}</span>
               ${isCd ? `
               <span class="exec-cd-ring-wrap" data-cd-ring="${id}" title="Cooldown: ${cdSecs}s remaining">
                 <svg class="exec-cd-ring-svg" viewBox="0 0 36 36" width="34" height="34">
@@ -10983,23 +10183,18 @@ window.NexusStrategies=exports;
                     style="transform:rotate(-90deg);transform-origin:18px 18px;transition:stroke-dashoffset 1s linear;stroke-dashoffset:${offset}"/>
                 </svg>
                 <span class="exec-cd-ring-num" data-cd-num="${id}">${cdSecs}</span>
-              </span>` : `<span class="exec-status-tag${statusClass}" data-exec-status="${id}">${statusTag}</span>`}
+              </span>` : `<span class="exec-status-tag${statusClass}">${statusTag}</span>`}
             </span>
           </div>
-          <div class="exec-flow" data-exec-flow="${id}">
+          <div class="exec-flow">
             <div class="exec-flow-box${flow.analysis ? ' glow-analysis' : ''}">Analysis</div>
             <span class="exec-flow-arrow">→</span>
             <div class="exec-flow-box${flow.trading ? ' glow-trading' : ''}">Trading</div>
             <span class="exec-flow-arrow">→</span>
-            <div class="exec-flow-box ${resultGlow}" data-exec-result="${id}">${flow.result ? resultLabel : 'Result'}</div>
+            <div class="exec-flow-box ${resultGlow}">${flow.result ? resultLabel : 'Result'}</div>
           </div>
         </div>`;
       }).join('');
-      execList.querySelectorAll('[data-nav-exec]').forEach((row) => {
-        row.addEventListener('click', () => {
-          if (window.UnifiedHub) window.UnifiedHub.switchApp(row.dataset.navExec);
-        });
-      });
     } else if (execList) {
       // Patch only the ticking CD number and arc — no full re-render, no flicker
       execDataList.forEach(({ id, isCd, cdSecs, cdMax }) => {
@@ -11093,7 +10288,6 @@ window.NexusStrategies=exports;
   let dashboardEl = null;
   let dashRenderQueued = false;
   const engines = { differ: null, even: null, odd: null, nexus: null };
-  window._hubEngines = engines; // expose for master toggle label updater
   const titanBuilt = { even: false, odd: false, nexus: false };
 
   function queueDashboardRender() {
@@ -11130,9 +10324,7 @@ window.NexusStrategies=exports;
         }
       : {
           id, mode: 'evenodd', fixedTradeMode: id, botLabel: id === 'even' ? 'Even Bot' : 'Odd Bot',
-          trading: window.EvenTrading,
-          socket:  id === 'odd' ? window.OddSocket  : window.EvenSocket,
-          scanner: id === 'odd' ? window.OddScanner : window.EvenScanner,
+          trading: window.EvenTrading, socket: window.EvenSocket, scanner: window.EvenScanner,
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         };
     const eng = new window.TitanEngine(opts);
@@ -11379,67 +10571,6 @@ window.NexusStrategies=exports;
     return { tp, sl };
   }
 
-  function getNetPnL() {
-    let net = 0;
-    BOT_IDS.forEach((id) => {
-      const eng = engines[id];
-      if (!eng) return;
-      if (id === 'differ') { net += (eng.state && eng.state.totalProfit) || 0; }
-      else { net += (eng.state && eng.state.stats && eng.state.stats.profit) || 0; }
-    });
-    return net;
-  }
-
-  function checkMasterTpSl() {
-    const { tp, sl } = getMasterTpSl();
-    const net = getNetPnL();
-    const anyActive = BOT_IDS.some((id) => {
-      const eng = engines[id];
-      if (!eng) return false;
-      return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
-    });
-    if (!anyActive) return; // nothing running, no need to check
-    if (net >= tp) {
-      // Stop Profit reached — stop all bots
-      BOT_IDS.forEach((id) => {
-        const eng = engines[id];
-        if (!eng) return;
-        if (id === 'differ') { if (eng.state.isArmed || eng.state.isRunning) { eng.abortTrades(); eng.disarmSystem(); } }
-        else {
-          // Force-stop: clear cooldown timer and all active state regardless of isCooldown
-          if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
-          eng.executionGuard = false; eng.pendingTrade = null;
-          eng.state = { ...eng.state, active: false, isLocked: false, isCooldown: false, inRecovery: false, martingaleStep: 0, currentStake: eng.config.stake };
-          eng._hideCooldownOverlay && eng._hideCooldownOverlay();
-          eng.emit && eng.emit();
-        }
-      });
-      // Show notification
-      const msg = `🏆 STOP PROFIT reached: Net +$${net.toFixed(2)} ≥ $${tp.toFixed(2)} — all bots stopped`;
-      window.HubStore && window.HubStore.notifyTelegram(msg);
-      if (window.Sounds) window.Sounds.soundEngine.playWin();
-      queueDashboardRender();
-    } else if (net <= -Math.abs(sl)) {
-      // Stop Loss reached — stop all bots
-      BOT_IDS.forEach((id) => {
-        const eng = engines[id];
-        if (!eng) return;
-        if (id === 'differ') { if (eng.state.isArmed || eng.state.isRunning) { eng.abortTrades(); eng.disarmSystem(); } }
-        else {
-          if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
-          eng.executionGuard = false; eng.pendingTrade = null;
-          eng.state = { ...eng.state, active: false, isLocked: false, isCooldown: false, inRecovery: false, martingaleStep: 0, currentStake: eng.config.stake };
-          eng._hideCooldownOverlay && eng._hideCooldownOverlay();
-          eng.emit && eng.emit();
-        }
-      });
-      const msg = `🛑 STOP LOSS reached: Net -$${Math.abs(net).toFixed(2)} ≥ $${sl.toFixed(2)} — all bots stopped`;
-      window.HubStore && window.HubStore.notifyTelegram(msg);
-      if (window.Sounds) window.Sounds.soundEngine.playLoss();
-      queueDashboardRender();
-    }
-  }
-
   function applyMasterTpSlToAllEngines() {
     const { tp, sl } = getMasterTpSl();
     BOT_IDS.forEach((id) => {
@@ -11470,13 +10601,7 @@ window.NexusStrategies=exports;
         const eng = ensureTitanOrDifferForControl(id);
         if (!eng) return;
         if (id === 'differ') {
-          if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) {
-            // armSystem has its own guards (auth, coldDigit). We call it — it will notify
-            // the user if it can't arm (e.g. no token, analysis not ready).
-            // Also initialize the differ tab so it's ready to receive events.
-            if (window.BenzUI && !window.BenzUI._initialized) { try { window.BenzUI.renderFull(eng.state); window.BenzUI._initialized = true; } catch(_) {} }
-            eng.armSystem();
-          }
+          if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) eng.armSystem();
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
         } else {
           const isOn = eng.state.active || eng.state.isLocked;
@@ -11484,24 +10609,6 @@ window.NexusStrategies=exports;
           if (!turnOn && isOn) eng.toggleEngine();
         }
       });
-      // Update button label immediately after click
-      setTimeout(() => {
-        const masterBtn = document.getElementById('dash-master-toggle');
-        if (masterBtn) {
-          const nowEngaged = BOT_IDS.filter((id) => {
-            const eng = engines[id];
-            if (!eng) return false;
-            return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
-          }).length;
-          if (nowEngaged > 0) {
-            masterBtn.textContent = '⛔ TERMINATE ALL';
-            masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--loss)),hsl(350 60% 38%))';
-          } else {
-            masterBtn.textContent = '⚡ ENGAGE ALL';
-            masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)))';
-          }
-        }
-      }, 200);
       queueDashboardRender();
     });
     // Apply TP/SL when values change
@@ -11539,27 +10646,7 @@ window.NexusStrategies=exports;
     ['even', 'odd', 'nexus'].forEach(ensureTitanEngine);
     bindHubTabs();
     queueDashboardRender();
-    setInterval(() => {
-      if (activeApp === 'dashboard') queueDashboardRender();
-      refreshTabDots();
-      checkMasterTpSl();
-      // Live-update master toggle button label
-      const masterBtn = document.getElementById('dash-master-toggle');
-      if (masterBtn) {
-        const engaged = BOT_IDS.filter((id) => {
-          const eng = engines[id];
-          if (!eng) return false;
-          return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
-        }).length;
-        if (engaged > 0) {
-          masterBtn.textContent = '⛔ TERMINATE ALL';
-          masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--loss)),hsl(350 60% 38%))';
-        } else {
-          masterBtn.textContent = '⚡ ENGAGE ALL';
-          masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)))';
-        }
-      }
-    }, 3000);
+    setInterval(() => { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
