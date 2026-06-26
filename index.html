@@ -8409,12 +8409,14 @@ window.NexusStrategies=exports;
       this.latestLiveAnalysis = null; this.connectRef = null;
 
       this._init();
-      const sharedToken = window.HubStore.getState().apiToken;
-      if (sharedToken) setTimeout(() => this.connect(sharedToken), 600);
-      window.addEventListener('hub:token-changed', (e) => { if (e.detail.token) this.connect(e.detail.token); });
+      // Trading socket opens lazily on first engine start (not at page load).
+      // This avoids consuming the OTP token before the user engages the bot,
+      // and prevents idle sockets from expiring before the first trade fires.
+      // Reconnect events still call connect() so the socket stays alive while active.
+      window.addEventListener('hub:token-changed', (e) => { if (e.detail.token && (this.state.active || this.state.isLocked)) this.connect(e.detail.token); });
       window.addEventListener('hub:account-type-changed', () => {
         const t = window.HubStore.getState().apiToken;
-        if (t) {
+        if (t && (this.state.active || this.state.isLocked)) {
           // Close old trading socket before reconnecting to avoid duplicate listeners
           if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} this.tradingSocket = null; }
           setTimeout(() => this.connect(t), 500);
@@ -8572,8 +8574,10 @@ window.NexusStrategies=exports;
       if (this.executionGuard) { this.addLog('engine', 'GUARD', 'Execution guard up — skipping'); return; }
       this.executionGuard = true;
       if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
-        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting...');
+        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting (bolt will auto-retry on connect)...');
         this.executionGuard = false; // release guard so engine isn't stuck if socket drops
+        // Set isLocked so onopen handler knows to retry the bolt once socket is ready
+        this.state = { ...this.state, isLocked: true };
         const token = window.HubStore.getState().apiToken;
         if (token) this.connect(token);
         return;
@@ -8754,8 +8758,12 @@ window.NexusStrategies=exports;
       this.runsSinceRefresh++;
       if (this.config.autoRefresh && this.runsSinceRefresh >= 4) {
         this.runsSinceRefresh = 0;
+        // Defer the socket refresh until after cooldown ends so the socket is
+        // ready exactly when the engine re-engages, not ~20s early.
         const token = window.HubStore.getState().apiToken;
-        if (token) this.connect(token);
+        if (token) setTimeout(() => {
+          if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) this.connect(token);
+        }, (this.cooldownTime || 5) * 1000 + 500);
       }
       // Show cooldown overlay popup on this engine's tab
       this._showCooldownOverlay(cd);
@@ -9083,6 +9091,12 @@ window.NexusStrategies=exports;
           try { _titan.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
           try { _titan.tradingSocket.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); } catch (e) { /* */ }
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
+          // If the engine was mid-chain when socket reconnected (isLocked+active, no pending),
+          // retry the bolt now that the socket is ready — otherwise the chain silently stalls.
+          if (_titan.state.active && _titan.state.isLocked && !_titan.pendingTrade && !_titan.executionGuard && !_titan.state.isCooldown) {
+            _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing bolt');
+            setTimeout(() => _titan.executeBoltPurchase(), 300);
+          }
           _titan.emit();
         };
         // Queue for contract results that arrive before buy confirmation (race condition)
@@ -9172,8 +9186,12 @@ window.NexusStrategies=exports;
         this.addLog('error', 'ENGINE', `${this.botLabel} is disabled — enable it from the Dashboard first`);
         return;
       }
-      if (newActive) { this.sound.playEngineStart(); this.executionGuard = false; this.pendingTrade = null; }
-      else { this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle'; }
+      if (newActive) {
+        this.sound.playEngineStart(); this.executionGuard = false; this.pendingTrade = null;
+        // Open (or re-open) trading socket now that the engine is engaging
+        const tok = window.HubStore.getState().apiToken;
+        if (tok && (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN)) this.connect(tok);
+      } else { this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle'; }
       this.addLog('engine', 'ENGINE', newActive ? 'OMEGA Strategy Engaged' : 'Session Terminated');
       this.state = { ...this.state, active: newActive, isLocked: newActive ? this.state.isLocked : false };
       this.emit();
@@ -9224,13 +9242,14 @@ window.NexusStrategies=exports;
     _watchdog() {
       const now = Date.now();
       const tickStale = now - this.lastTickTime > 12000;
-      const tradeStuck = this.state.active && this.state.isLocked && now - this.lastTradeTime > 60000 && !this.pendingTrade;
+      const tradeStuck = this.state.active && this.state.isLocked && !this.state.isCooldown && now - this.lastTradeTime > 15000 && !this.pendingTrade && !this.executionGuard;
       if (tickStale || tradeStuck) {
-        this.addLog('engine', 'WATCHDOG', `🚨 ${tickStale ? 'No ticks 12s' : 'No trade 60s'} — reconnecting`);
+        this.addLog('engine', 'WATCHDOG', `🚨 ${tickStale ? 'No ticks 12s' : 'No trade 15s'} — reconnecting`);
         const token = window.HubStore.getState().apiToken;
-        if (token) this.connect(token);
+        if (token && (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN)) this.connect(token);
         this.subscribeToMarket(this.config.selectedMarket);
         this.lastTickTime = now; this.lastTradeTime = now;
+        if (tradeStuck) { this.executionGuard = false; this.addLog('engine', 'WATCHDOG', 'Guard released — chain will resume on next tick'); }
         if (this.state.active && this.config.autoPilot) setTimeout(() => { this.executionGuard = false; }, 2000);
       }
     }
