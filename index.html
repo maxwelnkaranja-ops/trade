@@ -8724,7 +8724,7 @@ window.NexusStrategies=exports;
       this.addLog('engine', 'BOLT', `${contractType} @ ${st.currentStake.toFixed(2)} ${accountCurrency}`);
       this.state.lastTradedDigit = st.currentDigit;
       // Deriv WS API requires buy value as string '1' for direct inline-parameter purchases
-      const buyPayload = { buy: '1', subscribe: 1, price: st.currentStake, parameters: params };
+      const buyPayload = { buy: '1', price: st.currentStake, parameters: params }; // subscribe:1 removed — invalid on buy; proposal_open_contract sub (sent on onopen) handles results
       this.addLog('engine', 'WS-SEND', `Sending buy: ${contractType} $${st.currentStake.toFixed(2)} on socket readyState=${this.tradingSocket.readyState}`);
       this.tradingSocket.send(JSON.stringify(buyPayload));
       // Stuck-trade watchdog: if neither a buy error nor a contract result
@@ -9023,6 +9023,12 @@ window.NexusStrategies=exports;
     connect(token) {
       token = (token || '').trim();
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
+      // Prevent duplicate concurrent connect attempts — if an OTP fetch / WS open
+      // is already in-flight, a second call would race and overwrite tradingSocket,
+      // causing the first onopen's retry bolt to fire on a socket that is no longer
+      // referenced, leaving the engine permanently stuck in "Trading" with no trades.
+      if (this._connecting) { this.addLog('engine', 'AUTH', 'Connect already in-flight — skipping duplicate'); return; }
+      this._connecting = true;
       if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
 
       // 2026 Deriv API: REST OTP → authenticated WebSocket URL
@@ -9060,6 +9066,7 @@ window.NexusStrategies=exports;
             accountId = preferred.account_id;
           } catch (e) {
             _titan.addLog('error', 'AUTH', `Accounts fetch failed: ${e.message}`);
+            _titan._connecting = false;
             _titan.state.connected = false; _titan.emit(); return;
           }
         }
@@ -9074,16 +9081,19 @@ window.NexusStrategies=exports;
           if (!wsUrl) throw new Error('No WS URL in OTP response');
         } catch (e) {
           _titan.addLog('error', 'AUTH', `OTP failed: ${e.message}`);
+          _titan._connecting = false;
           _titan.state.connected = false; _titan.emit(); return;
         }
 
         _titan.tradingSocket = new WebSocket(wsUrl);
 
         _titan.tradingSocket.onerror = () => {
+          _titan._connecting = false;
           _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
           _titan.state.connected = false;
         };
         _titan.tradingSocket.onopen = () => {
+          _titan._connecting = false; // OTP + WS handshake complete — allow future reconnects
           _titan.state.balance = hub.balanceUSD || 0;
           _titan.state.connected = true;
           _titan.sound.playConnect();
@@ -9159,6 +9169,7 @@ window.NexusStrategies=exports;
           _titan.emit();
         };
         _titan.tradingSocket.onclose = () => {
+          _titan._connecting = false;
           _titan.state.connected = false;
           _titan.emit();
         };
@@ -9191,7 +9202,7 @@ window.NexusStrategies=exports;
         // Open (or re-open) trading socket now that the engine is engaging
         const tok = window.HubStore.getState().apiToken;
         if (tok && (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN)) this.connect(tok);
-      } else { this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle'; }
+      } else { this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle'; this._connecting = false; }
       this.addLog('engine', 'ENGINE', newActive ? 'OMEGA Strategy Engaged' : 'Session Terminated');
       this.state = { ...this.state, active: newActive, isLocked: newActive ? this.state.isLocked : false };
       this.emit();
