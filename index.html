@@ -4787,9 +4787,142 @@ html body .labeled-input .input-hint { font-size: 12px !important; }
 html body .btn-primary, html body .btn-secondary, html body .btn-ghost { font-size: 13px !important; }
 html body .engage-btn { font-size: 13px !important; letter-spacing: 1.5px !important; }
 
-/* ── Logs / mono text streams ── */
-html body .log-line, html body .log-entry { font-size: 11.5px !important; line-height: 1.6 !important; }
-html body .auto-log, html body .auto-log-line { font-size: 11.5px !important; }
+/* ══════════════════════════════════════════════════════════
+   ENTRY CONDITIONS PANEL — Live fire conditions checklist
+   ══════════════════════════════════════════════════════════ */
+.entry-conditions-panel {
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(var(--bg)));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+}
+.entry-conditions-panel::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, hsl(var(--primary)/0.6), hsl(var(--secondary)/0.4), transparent);
+  transition: background 0.4s;
+}
+.entry-conditions-panel.all-met::before {
+  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary)));
+  box-shadow: 0 0 16px hsl(var(--win)/0.4);
+  animation: cond-fire-glow 0.6s ease;
+}
+@keyframes cond-fire-glow {
+  0%   { box-shadow: 0 0 0px hsl(var(--win)/0); }
+  50%  { box-shadow: 0 0 30px hsl(var(--win)/0.8); }
+  100% { box-shadow: 0 0 16px hsl(var(--win)/0.4); }
+}
+.entry-cond-title {
+  display: flex; align-items: center; gap: 7px;
+  font-family: 'Outfit', sans-serif; font-size: 9px; font-weight: 800;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: hsl(var(--muted-foreground)); margin-bottom: 10px;
+}
+.entry-cond-pulse {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: hsl(var(--muted-foreground));
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.entry-cond-pulse.active {
+  background: hsl(var(--win));
+  box-shadow: 0 0 10px hsl(var(--win)/0.7);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+.entry-cond-pulse.firing {
+  background: hsl(var(--primary));
+  box-shadow: 0 0 16px hsl(var(--primary)/0.9);
+  animation: pulse-fire 0.4s ease-in-out infinite alternate;
+}
+@keyframes pulse-dot  { 0%,100% { box-shadow: 0 0 6px hsl(var(--win)/0.5); } 50% { box-shadow: 0 0 14px hsl(var(--win)/0.9); } }
+@keyframes pulse-fire { 0% { box-shadow: 0 0 8px hsl(var(--primary)/0.7); } 100% { box-shadow: 0 0 24px hsl(var(--primary)); } }
+.entry-cond-status {
+  margin-left: auto; font-size: 8px; font-weight: 900; letter-spacing: 1.5px;
+  padding: 2px 7px; border-radius: 999px;
+  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
+  transition: all 0.3s;
+}
+.entry-cond-status.met { background: hsl(var(--win)/0.15); color: hsl(var(--win)); border: 1px solid hsl(var(--win)/0.3); }
+.entry-cond-status.fire { background: hsl(var(--primary)/0.2); color: hsl(var(--primary)); border: 1px solid hsl(var(--primary)/0.5); animation: shimmer-sweep 1s linear infinite; }
+.entry-cond-list {
+  display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;
+}
+.entry-cond-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px; border-radius: 9px;
+  background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+  font-size: 10.5px; font-family: 'DM Mono', monospace;
+  transition: all 0.25s cubic-bezier(0.16,1,0.3,1);
+  position: relative; overflow: hidden;
+}
+.entry-cond-row.met {
+  background: hsl(var(--win)/0.06); border-color: hsl(var(--win)/0.35);
+  box-shadow: 0 0 8px hsl(var(--win)/0.1);
+}
+.entry-cond-row.pending {
+  background: hsl(var(--primary)/0.04); border-color: hsl(var(--border));
+}
+.entry-cond-row.loading { opacity: 0.5; }
+.entry-cond-row::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, hsl(var(--win)/0.08), transparent);
+  opacity: 0; transition: opacity 0.3s;
+}
+.entry-cond-row.met::after { opacity: 1; }
+.entry-cond-icon { font-size: 11px; flex-shrink: 0; width: 16px; text-align: center; }
+.entry-cond-label { flex: 1; color: hsl(var(--foreground)/0.8); }
+.entry-cond-value {
+  font-size: 9.5px; font-weight: 700; color: hsl(var(--muted-foreground));
+  background: hsl(var(--bg)); padding: 1px 6px; border-radius: 5px;
+  border: 1px solid hsl(var(--border)/0.5);
+  min-width: 32px; text-align: center;
+  transition: all 0.2s;
+}
+.entry-cond-row.met .entry-cond-value { color: hsl(var(--win)); border-color: hsl(var(--win)/0.3); }
+.entry-cond-progress {
+  height: 4px; background: hsl(var(--muted)); border-radius: 99px; overflow: hidden; margin-bottom: 5px;
+}
+.entry-cond-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--secondary)));
+  transition: width 0.4s cubic-bezier(0.16,1,0.3,1);
+  box-shadow: 0 0 6px hsl(var(--primary)/0.5);
+}
+.entry-cond-fill.full {
+  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary)));
+  box-shadow: 0 0 12px hsl(var(--win)/0.6);
+}
+.entry-cond-pct {
+  font-size: 9px; color: hsl(var(--muted-foreground));
+  font-family: 'DM Mono', monospace; text-align: right; letter-spacing: 0.5px;
+}
+
+/* ── Enhanced digit pad ── */
+.digit-pad {
+  font-family: 'Outfit', sans-serif !important;
+  font-size: 4.5rem !important; font-weight: 900 !important;
+  line-height: 1 !important; letter-spacing: -0.04em !important;
+  text-align: center !important; padding: 18px 0 12px !important;
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary))) !important;
+  -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  filter: drop-shadow(0 0 20px hsl(var(--primary)/0.4)) !important;
+  transition: filter 0.2s !important;
+}
+.digit-pad.flash-win {
+  filter: drop-shadow(0 0 40px hsl(var(--win)/0.9)) !important;
+  background: linear-gradient(135deg, hsl(var(--win)), hsl(var(--secondary))) !important;
+  -webkit-background-clip: text !important; background-clip: text !important;
+}
+.digit-pad.flash-loss {
+  filter: drop-shadow(0 0 40px hsl(var(--loss)/0.9)) !important;
+  background: linear-gradient(135deg, hsl(var(--loss)), hsl(var(--primary-2))) !important;
+  -webkit-background-clip: text !important; background-clip: text !important;
+}
+
+
 
 /* ── Titan engine panels ── */
 html body .titan-input { font-size: 13px !important; }
@@ -6675,10 +6808,14 @@ function checkEntryConditions(
   minProbability = 80,
   requireMultiTimeframe = true
 ) {
-  // Calculate current streak of under-3 digits
+  // Calculate current streak of under-barrier digits
   let streak = 0;
+  // Use the barrier passed in (via minProbability param convention) — but streak
+  // is actually derived from minStreak threshold. The barrier context comes from
+  // the calling engine's config. We default to <=3 when not overridden.
+  const streakBarrier = typeof requireMultiTimeframe === 'number' ? requireMultiTimeframe : 3;
   for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i] <= 3) streak++;
+    if (history[i] <= streakBarrier) streak++;
     else break;
   }
 
@@ -8387,7 +8524,8 @@ window.NexusStrategies=exports;
             setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
           } else { this.strategyPhase = 'waiting'; this.strategyWaitReason = entry.reason; }
         } else {
-          const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal);
+          const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal,
+            this.mode === 'over' ? this.config.overBarrier : true);
           if (canEnter) this.startChainExecution();
         }
         this.emit();
@@ -8407,7 +8545,9 @@ window.NexusStrategies=exports;
 
     executeBoltPurchase() {
       const st = this.state, cfg = this.config;
-      if (!st.active || st.isCooldown) return;
+      // Allow recovery trades (isLocked && inRecovery) even if active was cleared mid-session
+      if (!st.active && !(st.isLocked && st.inRecovery)) return;
+      if (st.isCooldown) return;
       // Prevent double-fire: bail if a trade is already pending or execution guard is up.
       if (this.pendingTrade) { this.addLog('engine', 'GUARD', 'Trade in flight — skipping duplicate bolt'); return; }
       if (this.executionGuard) { this.addLog('engine', 'GUARD', 'Execution guard up — skipping'); return; }
@@ -8687,6 +8827,12 @@ window.NexusStrategies=exports;
 
     handleContractResult(contract) {
       if (this.stuckWatchdog) { clearTimeout(this.stuckWatchdog); this.stuckWatchdog = null; }
+      // ⚡ CRITICAL: Release execution guard immediately. The guard was set in
+      // executeBoltPurchase and MUST be released here before _chainAfterResult
+      // runs. Without this, any code path in _chainAfterResult that doesn't
+      // explicitly call executionGuard=false (e.g. martingale OFF loss path,
+      // win with runs=0) leaves the guard permanently stuck → bot never fires again.
+      this.executionGuard = false;
       const win = contract.status === 'won';
       const profitRaw = parseFloat(contract.profit);
       // Guard: a malformed/missing profit field must never poison the running
@@ -8781,37 +8927,34 @@ window.NexusStrategies=exports;
       }
 
       // ── Stop / Recovery Rule logic ────────────────────────────────────────────
-      // Only applies on a LOSS (inRecovery=true). On a WIN this whole block is skipped
-      // because martingaleStep was reset to 0 in handleContractResult.
-      if (st.isLocked && st.inRecovery && cfg.martingaleEnabled) {
+      // Applies on any LOSS (inRecovery=true), whether martingale is on or off.
+      if (st.isLocked && st.inRecovery) {
         const step = st.martingaleStep; // already incremented (1-based)
         const cap  = cfg.martingaleStopStep;
 
-        // ── Mode 1: REWAIT (stopStep=1) ───────────────────────────────────────
-        // "Stop at Step 1 — await fresh signal"
-        // On any loss: release the lock so the scanner can find a new entry signal.
-        // The escalated stake is kept — the NEXT win in the same session resets it.
-        if (cap === 1) {
-          this.executionGuard = false;
-          this.state = { ...this.state, isLocked: false };
-          this.addLog('engine', 'REWAIT', `REWAIT: step ${step} loss — unlocked, stake $${st.currentStake.toFixed(2)} held for next signal`);
+        // ── Martingale OFF or Step 1 cap: stop immediately ────────────────────
+        if (!cfg.martingaleEnabled || cap === 1) {
+          const reason = !cfg.martingaleEnabled ? 'Martingale OFF' : 'STOP AT STEP 1';
+          this.addLog('loss', 'STOP', `${reason} — loss → cooldown, no recovery`);
+          this.completeSession();
           return;
         }
 
-        // ── Modes 2-5: abort once step >= cap ─────────────────────────────────
-        // Step cap is reached → cooldown + market switch.
-        // e.g. stopStep=2: aborts on 2nd loss; stopStep=3: aborts on 3rd loss, etc.
+        // ── Cap reached: abort session ─────────────────────────────────────────
         if (step >= cap) {
           this.addLog('loss', 'CRITICAL',
             `STOP RULE: step ${step} / ${cap} — session aborted, entering cooldown`);
           this.completeSession(); return;
         }
 
-        // ── Still under the cap → fire next recovery trade immediately ─────────
-        this.executionGuard = false; // release so executeBoltPurchase can set it again
+        // ── Under the cap → fire next recovery trade ──────────────────────────
         this.addLog('engine', 'RECOVERY',
-          `Recovery step ${step} / ${cap - 1} allowed — stake $${st.currentStake.toFixed(2)}`);
-        setTimeout(() => this.executeBoltPurchase(), 350);
+          `Recovery step ${step} / ${cap - 1} — stake $${st.currentStake.toFixed(2)}`);
+        setTimeout(() => {
+          if (this.state.isLocked && this.state.inRecovery && !this.state.isCooldown) {
+            this.executeBoltPurchase();
+          }
+        }, 350);
         return;
       }
 
@@ -8820,16 +8963,20 @@ window.NexusStrategies=exports;
         if (st.currentRuns >= cfg.targetRuns) {
           this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE — cooldown`);
           this.completeSession();
-        } else if (st.currentRuns > 0) {
-          // More runs still needed — fire next trade
-          this.executionGuard = false;
-          setTimeout(() => this.executeBoltPurchase(), 200);
+        } else {
+          // More runs needed (or runs just hit 1 for a 1-run target which is caught above)
+          setTimeout(() => {
+            if (this.state.active && this.state.isLocked && !this.state.isCooldown && !this.state.inRecovery) {
+              this.executeBoltPurchase();
+            }
+          }, 200);
         }
       }
     }
 
     startChainExecution() {
       if (this.executionGuard) return;
+      if (this.state.isLocked) return; // already in a chain — don't restart
       this.executionGuard = true;
       const health = this.socket.getHealth(this.config.selectedMarket);
       if (health && health.longTerm === 'POOR') { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
@@ -8938,7 +9085,16 @@ window.NexusStrategies=exports;
     }
 
     toggleEngine() {
-      if (this.state.isCooldown) return;
+      if (this.state.isCooldown && !this.state.active && !this.state.isLocked) {
+        // Currently in post-session cooldown with engine off — cancel cooldown and stop fully
+        if (this.cooldownTimer) { clearInterval(this.cooldownTimer); this.cooldownTimer = null; }
+        this.state = { ...this.state, isCooldown: false, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+        this._hideCooldownOverlay && this._hideCooldownOverlay();
+        this.addLog('engine', 'ENGINE', 'Cooldown cancelled — engine stopped');
+        this.emit();
+        return;
+      }
+      if (this.state.isCooldown) return; // mid-session cooldown — let it finish
       const newActive = !this.state.active;
       if (newActive && !window.HubStore.isBotEnabled(this.id)) {
         this.addLog('error', 'ENGINE', `${this.botLabel} is disabled — enable it from the Dashboard first`);
@@ -9542,6 +9698,23 @@ window.NexusStrategies=exports;
         <div class="flow-step" id="${rootId}-flow-fire">FIRE</div>
       </div>
       <div class="text-muted" style="font-size:10px;min-height:28px;margin-bottom:10px" id="${rootId}-wait-reason"></div>
+
+      <!-- ⚡ LIVE ENTRY CONDITIONS PANEL -->
+      <div class="entry-conditions-panel" id="${rootId}-conditions">
+        <div class="entry-cond-title">
+          <span class="entry-cond-pulse" id="${rootId}-cond-pulse"></span>
+          <span>FIRE CONDITIONS</span>
+          <span class="entry-cond-status" id="${rootId}-cond-status">WAITING</span>
+        </div>
+        <div class="entry-cond-list" id="${rootId}-cond-list">
+          <div class="entry-cond-row loading"><span class="entry-cond-icon">⏳</span><span>Loading analysis…</span></div>
+        </div>
+        <div class="entry-cond-progress" id="${rootId}-cond-progress">
+          <div class="entry-cond-fill" id="${rootId}-cond-fill" style="width:0%"></div>
+        </div>
+        <div class="entry-cond-pct" id="${rootId}-cond-pct">0 / 0 conditions met</div>
+      </div>
+
       <div class="font-orbitron text-primary" style="font-size:10px;letter-spacing:2px;margin-bottom:6px">CONTROL PANEL</div>
       <label class="text-muted" style="font-size:9px">MARKET</label>
       <select class="titan-input" id="${rootId}-market" style="margin-bottom:8px">${markets}</select>
@@ -9910,6 +10083,122 @@ window.NexusStrategies=exports;
       toggle.textContent = s.active ? 'TERMINATE SESSION' : 'ENGAGE OMEGA';
       toggle.className = 'btn-omega' + (s.active ? ' stop' : '');
       toggle.disabled = s.isCooldown || snap.isStrategyTransitioning;
+    }
+
+    // ── Live Entry Conditions Panel ───────────────────────────────────────────
+    const condPanel = document.getElementById(`${rootId}-conditions`);
+    const condList  = document.getElementById(`${rootId}-cond-list`);
+    const condFill  = document.getElementById(`${rootId}-cond-fill`);
+    const condPct   = document.getElementById(`${rootId}-cond-pct`);
+    const condPulse = document.getElementById(`${rootId}-cond-pulse`);
+    const condStatus= document.getElementById(`${rootId}-cond-status`);
+    if (condPanel && condList) {
+      const a = snap.analysis;
+      const engine_mode = snap.fixedTradeMode !== undefined ? 'evenodd' : (c.overBarrier !== undefined ? 'over' : 'evenodd');
+      const isOver = c.overBarrier !== undefined && snap.fixedTradeMode === null;
+      const isOddMode = !isOver && (snap.fixedTradeMode === 'odd' || c.tradeMode === 'odd');
+
+      // Build conditions list
+      const conditions = [];
+
+      // 1. Engine active
+      conditions.push({
+        label: 'Engine Armed',
+        met: s.active && !s.isCooldown,
+        value: s.active ? (s.isCooldown ? 'CD' : 'ON') : 'OFF',
+      });
+
+      // 2. Connected
+      conditions.push({
+        label: 'Trading Connected',
+        met: !!s.connected,
+        value: s.connected ? 'YES' : 'NO',
+      });
+
+      // 3. Analysis ready
+      const analysisReady = !!a && a.probability > 0;
+      conditions.push({
+        label: 'Analysis Ready',
+        met: analysisReady,
+        value: analysisReady ? `${a.probability}%` : '—',
+      });
+
+      // 4. Min signal
+      const sigMet = a && a.probability >= c.minSignal;
+      conditions.push({
+        label: `Signal ≥ ${c.minSignal}%`,
+        met: !!sigMet,
+        value: a ? `${a.probability}%` : '—',
+      });
+
+      // 5. Streak
+      const streakMet = s.streak >= c.minStreak;
+      conditions.push({
+        label: `Streak ≥ ${c.minStreak}`,
+        met: streakMet,
+        value: `${s.streak}`,
+      });
+
+      // 6. Not AVOID
+      const notAvoid = !a || a.recommendation !== 'AVOID';
+      conditions.push({
+        label: 'Signal not AVOID',
+        met: notAvoid,
+        value: a ? a.recommendation : '—',
+      });
+
+      // 7. Market health
+      const health = snap.marketHealth;
+      const healthOk = !health || health.longTerm !== 'POOR';
+      conditions.push({
+        label: 'Market Health',
+        met: healthOk,
+        value: health ? health.longTerm : 'SCAN',
+      });
+
+      // 8. No pending trade
+      const noLock = !s.isLocked || s.inRecovery;
+      conditions.push({
+        label: 'No active trade',
+        met: noLock,
+        value: s.isLocked ? (s.inRecovery ? 'REC' : 'WAIT') : 'CLEAR',
+      });
+
+      const metCount = conditions.filter(cd => cd.met).length;
+      const total = conditions.length;
+      const allMet = metCount === total;
+      const pct = total > 0 ? Math.round((metCount / total) * 100) : 0;
+      const isFiring = s.isLocked && !s.inRecovery;
+
+      // Update panel glow
+      condPanel.classList.toggle('all-met', allMet);
+
+      // Update pulse
+      if (condPulse) {
+        condPulse.className = 'entry-cond-pulse' + (isFiring ? ' firing' : allMet ? ' active' : '');
+      }
+      if (condStatus) {
+        condStatus.textContent = isFiring ? '⚡ FIRING' : allMet ? '✓ READY' : 'WAITING';
+        condStatus.className = 'entry-cond-status' + (isFiring ? ' fire' : allMet ? ' met' : '');
+      }
+
+      // Render condition rows
+      const newHtml = conditions.map(cd => {
+        const icon = cd.met ? '✓' : '○';
+        return `<div class="entry-cond-row ${cd.met ? 'met' : 'pending'}">
+          <span class="entry-cond-icon" style="color:${cd.met ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${icon}</span>
+          <span class="entry-cond-label">${cd.label}</span>
+          <span class="entry-cond-value">${cd.value}</span>
+        </div>`;
+      }).join('');
+      if (condList.__lastConds !== newHtml) { condList.innerHTML = newHtml; condList.__lastConds = newHtml; }
+
+      // Update progress bar
+      if (condFill) {
+        condFill.style.width = pct + '%';
+        condFill.className = 'entry-cond-fill' + (allMet ? ' full' : '');
+      }
+      if (condPct) condPct.textContent = `${metCount} / ${total} conditions met`;
     }
   }
 
@@ -11001,7 +11290,14 @@ window.NexusStrategies=exports;
         const eng = engines[id];
         if (!eng) return;
         if (id === 'differ') { if (eng.state.isArmed || eng.state.isRunning) { eng.abortTrades(); eng.disarmSystem(); } }
-        else { if (eng.state.active || eng.state.isLocked) eng.toggleEngine(); }
+        else {
+          // Force-stop: clear cooldown timer and all active state regardless of isCooldown
+          if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
+          eng.executionGuard = false; eng.pendingTrade = null;
+          eng.state = { ...eng.state, active: false, isLocked: false, isCooldown: false, inRecovery: false, martingaleStep: 0, currentStake: eng.config.stake };
+          eng._hideCooldownOverlay && eng._hideCooldownOverlay();
+          eng.emit && eng.emit();
+        }
       });
       // Show notification
       const msg = `🏆 STOP PROFIT reached: Net +$${net.toFixed(2)} ≥ $${tp.toFixed(2)} — all bots stopped`;
@@ -11014,7 +11310,13 @@ window.NexusStrategies=exports;
         const eng = engines[id];
         if (!eng) return;
         if (id === 'differ') { if (eng.state.isArmed || eng.state.isRunning) { eng.abortTrades(); eng.disarmSystem(); } }
-        else { if (eng.state.active || eng.state.isLocked) eng.toggleEngine(); }
+        else {
+          if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
+          eng.executionGuard = false; eng.pendingTrade = null;
+          eng.state = { ...eng.state, active: false, isLocked: false, isCooldown: false, inRecovery: false, martingaleStep: 0, currentStake: eng.config.stake };
+          eng._hideCooldownOverlay && eng._hideCooldownOverlay();
+          eng.emit && eng.emit();
+        }
       });
       const msg = `🛑 STOP LOSS reached: Net -$${Math.abs(net).toFixed(2)} ≥ $${sl.toFixed(2)} — all bots stopped`;
       window.HubStore && window.HubStore.notifyTelegram(msg);
