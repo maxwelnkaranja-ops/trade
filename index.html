@@ -4376,7 +4376,7 @@ html body .journal-panel {
 
 /* Equity curve — shorter */
 html body .dash-equity-panel { padding: 18px 20px !important; }
-html body .equity-svg { height: 220px !important; }
+html body .equity-svg { height: 280px !important; }
 
 /* Engine overview — compact */
 html body .rank-table { gap: 8px !important; }
@@ -4703,12 +4703,13 @@ html body .dash-hero-row { display: grid !important; grid-template-columns: 1fr 
 html body .dash-stats-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; padding: 0 !important; }
 
 /* Body rows — stacked layout */
-html body .dash-row-top { display: grid !important; grid-template-columns: 340px 1fr !important; gap: 12px !important; padding: 0 !important; }
+html body .dash-row-top { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 14px !important; padding: 0 !important; min-height: 420px !important; }
+html body .dash-row-top > * { min-height: 420px !important; }
 html body .dash-row-full { padding: 0 !important; margin-top: 12px !important; }
 html body .dash-row-full .glass-panel { width: 100% !important; box-sizing: border-box !important; }
 /* Active engines panel — compact */
 html body .dash-row-top .exec-panel { padding: 12px 14px !important; }
-html body .exec-list { max-height: 220px !important; overflow-y: auto !important; }
+html body .exec-list { max-height: 320px !important; overflow-y: auto !important; }
 /* Journal — full width, nothing beside it */
 html body .dash-row-full .journal-panel { display: flex !important; flex-direction: column !important; padding: 14px !important; min-height: 240px !important; }
 html body .dash-row-full .journal-list { flex: 1 !important; overflow-y: auto !important; min-height: 160px !important; max-height: 300px !important; }
@@ -5494,13 +5495,13 @@ function calculateNextStake(
   step,
   maxStep
 ) {
-  if (step >= maxStep && maxStep !== 999) {
-    return { stake: currentStake, shouldStop: true };
-  }
-  
+  // ALWAYS apply the multiplier — the caller decides what to do with shouldStop.
+  // Returning the un-multiplied stake when step >= maxStep caused the last
+  // martingale trade to fire at the wrong (lower) amount before session abort.
+  const nextStake = parseFloat((currentStake * multiplier).toFixed(2));
   return {
-    stake: parseFloat((currentStake * multiplier).toFixed(2)),
-    shouldStop: false,
+    stake: nextStake,
+    shouldStop: maxStep !== 999 && step >= maxStep,
   };
 }
 
@@ -6714,13 +6715,11 @@ function calculateNextStake(
   step,
   maxStep
 ) {
-  if (step >= maxStep && maxStep !== 999) {
-    return { stake: currentStake, shouldStop: true };
-  }
-  
+  // ALWAYS apply the multiplier — shouldStop is just a signal for the caller.
+  const nextStake = parseFloat((currentStake * multiplier).toFixed(2));
   return {
-    stake: parseFloat((currentStake * multiplier).toFixed(2)),
-    shouldStop: false,
+    stake: nextStake,
+    shouldStop: maxStep !== 999 && step >= maxStep,
   };
 }
 
@@ -8403,8 +8402,13 @@ window.NexusStrategies=exports;
     executeBoltPurchase() {
       const st = this.state, cfg = this.config;
       if (!st.active || st.isCooldown) return;
+      // Prevent double-fire: bail if a trade is already pending or execution guard is up.
+      if (this.pendingTrade) { this.addLog('engine', 'GUARD', 'Trade in flight — skipping duplicate bolt'); return; }
+      if (this.executionGuard) { this.addLog('engine', 'GUARD', 'Execution guard up — skipping'); return; }
+      this.executionGuard = true;
       if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
         this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting...');
+        this.executionGuard = false; // release guard so engine isn't stuck if socket drops
         const token = window.HubStore.getState().apiToken;
         if (token) this.connect(token);
         return;
@@ -8688,6 +8692,8 @@ window.NexusStrategies=exports;
       if (isNaN(profitRaw)) this.addLog('error', 'DATA', 'Contract result had an unreadable profit value — treated as 0 for stats.');
       const exitDigit = contract.exit_tick_display_value?.slice(-1) || '?';
       const entryDigit = contract.entry_tick_display_value?.slice(-1) ?? null;
+      // Save pendingTrade BEFORE nulling it — journal entry below needs the barrier/contractType
+      const completedTrade = this.pendingTrade;
       this.pendingTrade = null;
       if (win) this.sound.playWin(); else this.sound.playLoss();
       this.addLog(win ? 'win' : 'loss', 'BOLT', `Exit: ${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
@@ -8704,7 +8710,13 @@ window.NexusStrategies=exports;
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
         contractId: contractKey,
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
-        market: contract.underlying || this.config.selectedMarket, barrier: contract.barrier ?? 0,
+        market: contract.underlying || this.config.selectedMarket,
+        // Use the pendingTrade barrier (recorded at fire time) as fallback for contracts
+        // that return barrier:null/0 in the Deriv WS response (common for digit contracts).
+        barrier: (contract.barrier != null && contract.barrier !== 0)
+          ? contract.barrier
+          : (completedTrade ? completedTrade.barrier : this.config.overBarrier ?? 0),
+        contract_type: (completedTrade && completedTrade.contractType) || contract.contract_type || null,
         exitDigit: exitDigitParsed, entryDigit: entryDigitParsed,
         profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
       }, ...this.journal].slice(0, 500);
@@ -8713,19 +8725,32 @@ window.NexusStrategies=exports;
       const stats = { ...this.state.stats, profit: this.state.stats.profit + profit, win: this.state.stats.win + (win ? 1 : 0), loss: this.state.stats.loss + (win ? 0 : 1) };
       let ns = { ...this.state, stats };
       if (win) {
-        ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = cfg.stake;
+        // WIN: reset everything back to base so the next trade starts clean
+        ns.currentRuns = this.state.currentRuns + 1;
+        ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = cfg.stake;
       } else {
+        // LOSS: always escalate stake first, then let _chainAfterResult decide
+        // whether to keep trading (recovery) or abort (stop-step reached).
         const nextStep = this.state.martingaleStep + 1;
         ns.martingaleStep = nextStep; ns.inRecovery = true;
         if (cfg.martingaleEnabled) {
-          // Always compute the escalated stake so the multiplier is applied correctly.
-          // The stop-step boundary is enforced in _chainAfterResult (triggers cooldown),
-          // NOT here — calculating the stake here does not mean the trade will fire.
-          const { stake } = this.T.calculateNextStake(this.state.currentStake, cfg.martingaleMultiplier, nextStep, cfg.martingaleStopStep);
+          // calculateNextStake ALWAYS multiplies now — shouldStop is just a signal.
+          // The old version returned un-multiplied stake when step >= maxStep which
+          // caused the final recovery trade to fire at the wrong (lower) amount.
+          const { stake, shouldStop } = this.T.calculateNextStake(
+            this.state.currentStake, cfg.martingaleMultiplier, nextStep, cfg.martingaleStopStep
+          );
           ns.currentStake = stake;
-          if (nextStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
-            this.addLog('loss', 'CRITICAL', `STEP ${cfg.martingaleStopStep} FAILED. COOLING DOWN.`);
+          if (shouldStop) {
+            this.addLog('loss', 'CRITICAL',
+              `STEP ${nextStep} HIT CAP (${cfg.martingaleStopStep}) — stake $${stake.toFixed(2)} — cooldown next`);
+          } else {
+            this.addLog('engine', 'MART',
+              `Loss step ${nextStep}: $${this.state.currentStake.toFixed(2)} → $${stake.toFixed(2)} (×${cfg.martingaleMultiplier})`);
           }
+        } else {
+          // Martingale OFF: replay at same stake
+          this.addLog('engine', 'MART', `Loss (mart OFF) — replaying $${ns.currentStake.toFixed(2)}`);
         }
       }
       this.state = ns;
@@ -8735,35 +8760,64 @@ window.NexusStrategies=exports;
 
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
+
+      // ── TP / SL guards (autoPilot only) ──────────────────────────────────────
       if (cfg.autoPilot && st.active) {
-        if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); showCongratulationsPopup(cfg.takeProfit); this.completeSession(); return; }
-        if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); this.completeSession(); return; }
+        if (cfg.takeProfit > 0 && st.stats.profit >= cfg.takeProfit) {
+          this.addLog('win', 'AUTO', `TAKE PROFIT $${cfg.takeProfit} REACHED`);
+          showCongratulationsPopup(cfg.takeProfit);
+          this.completeSession(); return;
+        }
+        if (cfg.stopLoss > 0 && st.stats.profit <= -cfg.stopLoss) {
+          this.addLog('loss', 'AUTO', `STOP LOSS $${cfg.stopLoss} REACHED`);
+          this.completeSession(); return;
+        }
       }
-      // REWAIT mode (documentary §3.2 Mode A): escalate stake but release lock, await fresh signal
-      if (st.isLocked && cfg.martingaleEnabled && cfg.martingaleStopStep === 1 && st.inRecovery) {
-        this.executionGuard = false;
-        this.state = { ...this.state, isLocked: false };
-        this.addLog('engine', 'REWAIT', `REWAIT: Loss → awaiting new entry @ $${st.currentStake.toFixed(2)}`);
+
+      // ── Stop / Recovery Rule logic ────────────────────────────────────────────
+      // Only applies on a LOSS (inRecovery=true). On a WIN this whole block is skipped
+      // because martingaleStep was reset to 0 in handleContractResult.
+      if (st.isLocked && st.inRecovery && cfg.martingaleEnabled) {
+        const step = st.martingaleStep; // already incremented (1-based)
+        const cap  = cfg.martingaleStopStep;
+
+        // ── Mode 1: REWAIT (stopStep=1) ───────────────────────────────────────
+        // "Stop at Step 1 — await fresh signal"
+        // On any loss: release the lock so the scanner can find a new entry signal.
+        // The escalated stake is kept — the NEXT win in the same session resets it.
+        if (cap === 1) {
+          this.executionGuard = false;
+          this.state = { ...this.state, isLocked: false };
+          this.addLog('engine', 'REWAIT', `REWAIT: step ${step} loss — unlocked, stake $${st.currentStake.toFixed(2)} held for next signal`);
+          return;
+        }
+
+        // ── Modes 2-5: abort once step >= cap ─────────────────────────────────
+        // Step cap is reached → cooldown + market switch.
+        // e.g. stopStep=2: aborts on 2nd loss; stopStep=3: aborts on 3rd loss, etc.
+        if (step >= cap) {
+          this.addLog('loss', 'CRITICAL',
+            `STOP RULE: step ${step} / ${cap} — session aborted, entering cooldown`);
+          this.completeSession(); return;
+        }
+
+        // ── Still under the cap → fire next recovery trade immediately ─────────
+        this.executionGuard = false; // release so executeBoltPurchase can set it again
+        this.addLog('engine', 'RECOVERY',
+          `Recovery step ${step} / ${cap - 1} allowed — stake $${st.currentStake.toFixed(2)}`);
+        setTimeout(() => this.executeBoltPurchase(), 350);
         return;
       }
-      // MAX RECOVERY STEP REACHED → cooldown (market switch needed)
-      if (st.isLocked && cfg.martingaleEnabled && st.martingaleStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
-        this.addLog('loss', 'CRITICAL', `MAX RECOVERY STEP ${cfg.martingaleStopStep} REACHED — accepting loss, entering cooldown for market switch`);
-        this.completeSession(); return;
-      }
-      if (st.active && st.isLocked && !st.isCooldown) {
-        if (st.inRecovery) {
-          // Loss: keep trading on martingale immediately — NO cooldown between recovery steps
-          this.executionGuard = false; // release guard so next bolt can fire
-          this.addLog('engine', 'RECOVERY', `Recovery step ${st.martingaleStep} — stake $${st.currentStake.toFixed(2)}`);
-          setTimeout(() => this.executeBoltPurchase(), 300); // small delay to let WS settle
-        } else if (st.currentRuns >= cfg.targetRuns) {
-          // WIN target reached → cooldown before next session
-          this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE! Entering cooldown.`);
+
+      // ── WIN path ─────────────────────────────────────────────────────────────
+      if (st.active && st.isLocked && !st.isCooldown && !st.inRecovery) {
+        if (st.currentRuns >= cfg.targetRuns) {
+          this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE — cooldown`);
           this.completeSession();
         } else if (st.currentRuns > 0) {
-          // More runs needed in same session
-          this.executeBoltPurchase();
+          // More runs still needed — fire next trade
+          this.executionGuard = false;
+          setTimeout(() => this.executeBoltPurchase(), 200);
         }
       }
     }
@@ -9280,7 +9334,13 @@ window.NexusStrategies=exports;
   }
 
   function renderLeft(engine, rootId, snap) {
-    const { config: c, analysis: a, scannerState, marketHealth } = snap;
+    const { config: c, analysis: aEngine, scannerState, marketHealth } = snap;
+    // ── Use scanner's stored analysis for the selected market (not a fresh restart).
+    // The scanner continuously tracks ALL markets in background. When the user
+    // selects a market from Top Markets, we show its already-computed analysis
+    // immediately without restarting — exactly the same % that was in the list.
+    const scannerMarket = engine.scanner && engine.scanner.marketData && engine.scanner.marketData.get(c.selectedMarket);
+    const a = (scannerMarket && scannerMarket.analysis) ? scannerMarket.analysis : aEngine;
     const prob = a ? a.probability : 0;
     const rec = a ? a.recommendation : '—';
     const mtf = a && a.mtfAligned !== false ? 'MTF ALIGNED' : 'MTF DIVERGENT';
@@ -9339,16 +9399,37 @@ window.NexusStrategies=exports;
       </div>
 
       <div class="analysis-hub-card" style="margin-bottom:8px">
-        <div class="analysis-hub-title">Signal Strength</div>
-        <div class="signal-ring-wrap">
-          <div class="signal-ring-labels" style="flex:1">
-            <div class="signal-ring-label">Probability</div>
-            <div class="signal-ring-value">${prob}%</div>
-            <div class="bar-track" style="margin-top:7px"><div class="bar-fill-primary" style="width:${prob}%"></div></div>
-            <div class="signal-ring-rec" style="margin-top:6px">${rec}</div>
-            <div class="mtf-badge ${a && a.mtfAligned !== false ? 'aligned' : 'divergent'}" style="margin-top:4px">${mtf}</div>
+        <div class="analysis-hub-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span style="display:flex;align-items:center;gap:5px">
+            <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 9V6M5 9V4M8 9V2M11 9V7"/></svg>
+            Signal Strength
+          </span>
+          <span class="mtf-badge ${a && a.mtfAligned !== false ? 'aligned' : 'divergent'}">${mtf}</span>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:8px;margin-bottom:8px">
+          <div style="font-family:'Outfit',sans-serif;font-size:2rem;font-weight:900;line-height:1;color:${prob >= 80 ? 'hsl(var(--win))' : prob >= 65 ? 'hsl(var(--primary))' : prob >= 50 ? 'hsl(var(--accent))' : 'hsl(var(--loss))'}">${prob}</div>
+          <div style="font-size:1.1rem;color:hsl(var(--muted-foreground));margin-bottom:4px">%</div>
+          <div style="margin-left:auto;text-align:right">
+            <div class="signal-ring-rec" style="font-size:9px;letter-spacing:1.5px">${rec}</div>
           </div>
         </div>
+        <div class="bar-track" style="margin-bottom:10px;height:5px;border-radius:3px">
+          <div style="height:100%;width:${prob}%;border-radius:3px;transition:width .5s;background:${prob >= 80 ? 'linear-gradient(90deg,hsl(var(--primary)),hsl(var(--win)))' : prob >= 65 ? 'hsl(var(--primary))' : prob >= 50 ? 'hsl(var(--accent))' : 'hsl(var(--loss))'};"></div>
+        </div>
+        ${a ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px">
+          ${[
+            ['Trend', a.trendScore || 0, 'var(--primary)'],
+            ['Momentum', a.momentumScore || 0, 'var(--secondary)'],
+            ['Volatility', a.volatilityIndex || 0, 'var(--accent)'],
+            ['Confidence', a.mtfConfidence ? Math.round(a.mtfConfidence * 100) : 0, 'var(--win)'],
+          ].map(([label, val, color]) => `<div style="background:hsl(var(--bg));border-radius:5px;padding:5px 7px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+              <span style="font-size:7.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${label}</span>
+              <span style="font-size:7.5px;font-weight:700;color:hsl(${color})">${Math.round(val)}%</span>
+            </div>
+            <div class="bar-track" style="height:2.5px"><div style="height:100%;width:${Math.min(100,Math.round(val))}%;background:hsl(${color});border-radius:2px"></div></div>
+          </div>`).join('')}
+        </div>` : ''}
         ${condChips}
       </div>
 
@@ -9366,27 +9447,61 @@ window.NexusStrategies=exports;
       <div class="analysis-hub-card">
         <div class="analysis-hub-title" style="display:flex;align-items:center;justify-content:space-between">
           <span>Top Markets</span>
-          ${scannerState.topThree && scannerState.topThree[0] ? `<button class="strategy-btn" title="Jump to best market" data-mkt="${scannerState.topThree[0].symbol}" style="padding:3px 8px;font-size:9px;letter-spacing:0.5px;width:auto">⚡ BEST</button>` : ''}
+          <span class="text-muted" style="font-size:8px;letter-spacing:1px">LIVE SCAN</span>
         </div>
-        ${(scannerState.topThree || []).map((m) => `<button class="strategy-btn ${m.symbol === c.selectedMarket ? 'active' : ''}" data-mkt="${m.symbol}" style="width:100%;text-align:left;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between">
-          <div>
-            <div style="font-size:11px">${m.name}</div>
-            <div class="text-muted" style="font-size:8.5px;margin-top:2px">${(m.health && m.health.longTerm) || m.longTerm || '—'} · ${(m.health && m.health.trend) || m.trend || '—'}</div>
-          </div>
-          <b class="text-accent" style="font-family:'Outfit',sans-serif;font-size:11px">${m.score}%</b>
-        </button>`).join('') || '<div class="text-muted" style="font-size:10px;padding:8px 0">Scanning markets…</div>'}
-        ${marketHealth ? `<div class="text-muted" style="font-size:9px;margin-top:6px;padding-top:6px;border-top:1px solid hsl(var(--border)/0.5)">Health: <b>${marketHealth.longTerm}</b> · Vol: ${marketHealth.volatility || '—'}</div>` : ''}
-      </div>`;
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">Scores update every tick · tap to select</div>
+        ${(scannerState.topThree || []).map((m, idx2) => {
+          const isSel = m.symbol === c.selectedMarket;
+          const health = (m.health && m.health.longTerm) || m.longTerm || '—';
+          const trend  = (m.health && m.health.trend) || m.trend || '—';
+          const vol    = (m.health && m.health.volatility) || m.volatility || '';
+          const rankColor = idx2 === 0 ? 'hsl(var(--win))' : idx2 === 1 ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
+          const healthColor = health === 'HEALTHY' ? 'hsl(var(--win))' : health === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))';
+          const trendArrow = trend === 'UP' ? '↑' : trend === 'DOWN' ? '↓' : trend !== '—' ? '→' : '';
+          return '<button class="strategy-btn ' + (isSel ? 'active' : '') + '" data-mkt="' + m.symbol + '"'
+            + ' style="width:100%;text-align:left;margin-bottom:6px;padding:9px 10px;display:block;border:' + (isSel ? '1px solid hsl(var(--primary)/0.6)' : '1px solid hsl(var(--border)/0.4)') + '">'
+            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">'
+            + '<div style="display:flex;align-items:center;gap:5px">'
+            + '<span style="font-size:8px;font-weight:900;color:' + rankColor + ';letter-spacing:1px">#' + (idx2+1) + '</span>'
+            + '<span style="font-size:10.5px;font-weight:700">' + m.name + '</span>'
+            + (isSel ? '<span style="font-size:7.5px;letter-spacing:1px;color:hsl(var(--primary));font-weight:800;margin-left:2px">● ACTIVE</span>' : '')
+            + '</div>'
+            + '<b style="font-size:12px;color:' + rankColor + '">' + m.score + '%</b>'
+            + '</div>'
+            + '<div class="bar-track" style="height:3px;margin-bottom:5px"><div style="height:100%;width:' + m.score + '%;background:' + rankColor + ';border-radius:2px;transition:width .4s"></div></div>'
+            + '<div style="display:flex;gap:6px;align-items:center">'
+            + '<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:hsl(var(--bg));color:' + healthColor + ';font-weight:700">' + health + '</span>'
+            + (trendArrow ? '<span style="font-size:8px;color:hsl(var(--muted-foreground))">' + trendArrow + ' ' + trend + '</span>' : '')
+            + (vol ? '<span style="font-size:8px;color:hsl(var(--muted-foreground));margin-left:auto">Vol:' + vol + '</span>' : '')
+            + '</div>'
+            + '</button>';
+        }).join('') || '<div class="text-muted" style="font-size:10px;padding:12px 0;text-align:center">⏳ Scanning markets…</div>'}
+        ${marketHealth ? '<div style="display:flex;gap:6px;margin-top:4px;padding-top:6px;border-top:1px solid hsl(var(--border)/0.3)">'
+          + '<span class="text-muted" style="font-size:8.5px">Active market:</span>'
+          + '<b style="font-size:8.5px;color:' + (marketHealth.longTerm === 'HEALTHY' ? 'hsl(var(--win))' : marketHealth.longTerm === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))') + '">' + marketHealth.longTerm + '</b>'
+          + '<span class="text-muted" style="font-size:8.5px;margin-left:auto">Vol:' + (marketHealth.volatility || '—') + '</span>'
+          + '</div>' : ''}
+      </div>      </div>`;
 
     el(`${rootId}-strategy`).onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
     el(`${rootId}-left`).querySelectorAll('[data-period]').forEach((b) => {
       b.onclick = () => { engine.setConfig({ tickPeriod: parseInt(b.dataset.period) }); engine.scanner && engine.scanner.setTickPeriod(parseInt(b.dataset.period)); };
     });
     el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
-      engine.changeMarket(b.dataset.mkt);
-      const centerCol = document.getElementById(`${rootId}-center`);
-      const centerScroll = centerCol && centerCol.closest('.benz-col');
-      if (centerScroll) { centerScroll.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); centerScroll.scrollTop = 0; }
+      const mkt = b.dataset.mkt;
+      // 1. Switch the engine's selected market (updates control panel dropdown too)
+      engine.changeMarket(mkt);
+      // 2. Immediately update the active state on all market buttons visually
+      el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.mkt === mkt);
+      });
+      // 3. Also update the market selector dropdown in the center config panel
+      const mktSel = document.getElementById(`${rootId}-market`);
+      if (mktSel) mktSel.value = mkt;
+      // 4. Re-render left panel to show the selected market's persisted analysis
+      //    (scanner already has it — no restart needed)
+      const snap2 = engine.getSnapshot();
+      renderLeft(engine, rootId, snap2);
     });
   }
 
@@ -9972,7 +10087,7 @@ window.NexusStrategies=exports;
         <!-- ═══ END HERO ROW ═══ -->
 
         <!-- ═══ MASTER CONTROL ═══ -->
-        <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+        <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-height:80px">
           <div style="flex:1;min-width:200px">
             <div style="font-family:'Outfit',sans-serif;font-size:8px;font-weight:900;letter-spacing:4px;text-transform:uppercase;color:hsl(var(--primary));margin-bottom:6px;display:flex;align-items:center;gap:8px">
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg>
@@ -9996,7 +10111,7 @@ window.NexusStrategies=exports;
               <input id="dash-master-sl" type="number" min="0" step="1" value="20" style="width:86px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
             </div>
           </div>
-          <button id="dash-master-toggle" style="margin:0;padding:12px 36px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden">
+          <button id="dash-master-toggle" style="margin:0;padding:14px 28px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden;align-self:flex-end;flex-shrink:0;min-width:160px;white-space:nowrap">
             ⚡ ENGAGE ALL
           </button>
 
@@ -10093,9 +10208,9 @@ window.NexusStrategies=exports;
   }
 
   function buildEquitySVG(points) {
-    const w = 680, h = 220, pad = 36;
+    const w = 780, h = 260, pad = 36;
     if (points.length < 2) {
-      return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
+      return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;overflow:visible">
         <defs>
           <linearGradient id="empty-grad" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stop-color="hsl(var(--primary))" stop-opacity="0.06"/>
@@ -10304,15 +10419,27 @@ window.NexusStrategies=exports;
     const perBotHtml = botIds.map((id) => {
       const meta = BOT_META[id]; const b = perBot[id];
       const wr2 = b.trades ? ((b.win / b.trades) * 100).toFixed(1) : '0.0';
-      return `<div class="glass-panel bot-card">
-        <div class="bot-card-head"><span class="bot-card-dot" style="background:${b.active ? meta.dot : 'hsl(var(--border))'}"></span>${meta.label}${b.active ? ' <span class=\"text-success\" style=\"font-size:9px;margin-left:auto\">● LIVE</span>' : ''}</div>
+      return `<div class="glass-panel bot-card" data-nav-bot="${id}" style="cursor:pointer" title="Open ${meta.label}">
+        <div class="bot-card-head">
+          <span class="bot-card-dot" style="background:${b.active ? meta.dot : 'hsl(var(--border))'}"></span>
+          ${meta.label}
+          ${b.active ? '<span class="text-success" style="font-size:9px;margin-left:auto">● LIVE</span>' : '<span class="text-muted" style="font-size:9px;margin-left:auto">OPEN →</span>'}
+        </div>
         <div class="bot-card-value ${b.profit >= 0 ? 'text-success' : 'text-destructive'}">${b.profit >= 0 ? '+' : ''}$${b.profit.toFixed(2)}</div>
         <div class="bot-card-meta"><span>${b.trades} trades</span><span>${wr2}% win</span></div>
         <div class="bar-track"><div class="bar-fill-win" style="width:${wr2}%"></div></div>
         <div class="bot-card-meta"><span class="text-success">W ${b.win}</span><span class="text-destructive">L ${b.loss}</span></div>
       </div>`;
     }).join('');
-    global.setHtmlIfChanged(el('dash-perbot', root), perBotHtml);
+    if (global.setHtmlIfChanged(el('dash-perbot', root), perBotHtml)) {
+      // Wire up click-to-navigate on bot cards
+      el('dash-perbot', root).querySelectorAll('[data-nav-bot]').forEach((card) => {
+        card.onclick = () => {
+          const botId = card.dataset.navBot;
+          if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(botId);
+        };
+      });
+    }
 
     if (!el('dash-bot-toggles', root).childElementCount) {
       el('dash-bot-toggles', root).innerHTML = botIds.map((id) => `
@@ -10421,7 +10548,7 @@ window.NexusStrategies=exports;
       execList.innerHTML = execDataList.map(({ id, isCd, cdSecs, cdMax, statusTag, statusClass, resultLabel, resultGlow, flow, botOn, plStr, plClass }) => {
         const total = (2 * Math.PI * 14).toFixed(1);
         const offset = (2 * Math.PI * 14 * (1 - Math.min(cdSecs / Math.max(cdMax, 1), 1))).toFixed(1);
-        return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" data-exec-id="${id}" style="${botOn ? '' : 'opacity:0.45'}">
+        return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" data-exec-id="${id}" data-nav-exec="${id}" style="cursor:pointer;${botOn ? '' : 'opacity:0.45'}" title="Open ${BOT_META[id].label} tab">
           <div class="exec-row-head">
             <span class="exec-bot-name">
               <span class="bot-card-dot exec-dot" style="background:${BOT_META[id].dot};box-shadow:0 0 8px ${BOT_META[id].dot}"></span>
@@ -10450,6 +10577,13 @@ window.NexusStrategies=exports;
           </div>
         </div>`;
       }).join('');
+      // Wire up click-to-navigate on exec-row bot cards
+      execList.querySelectorAll('[data-nav-exec]').forEach((row) => {
+        row.addEventListener('click', () => {
+          const botId = row.dataset.navExec;
+          if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(botId);
+        });
+      });
     } else if (execList) {
       // Patch only the ticking CD number and arc — no full re-render, no flicker
       execDataList.forEach(({ id, isCd, cdSecs, cdMax }) => {
@@ -10905,7 +11039,13 @@ window.NexusStrategies=exports;
         const eng = ensureTitanOrDifferForControl(id);
         if (!eng) return;
         if (id === 'differ') {
-          if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) eng.armSystem();
+          if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) {
+            // armSystem has its own guards (auth, coldDigit). We call it — it will notify
+            // the user if it can't arm (e.g. no token, analysis not ready).
+            // Also initialize the differ tab so it's ready to receive events.
+            if (window.BenzUI && !window.BenzUI._initialized) { try { window.BenzUI.renderFull(eng.state); window.BenzUI._initialized = true; } catch(_) {} }
+            eng.armSystem();
+          }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
         } else {
           const isOn = eng.state.active || eng.state.isLocked;
