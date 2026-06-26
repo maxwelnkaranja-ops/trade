@@ -5719,6 +5719,9 @@ window.EvenTrading = exports;
   }
 
   window.EvenSocket = { globalSocket: new GlobalSocketManager() };
+  // Odd bot gets its own independent socket — must be created here where
+  // GlobalSocketManager is in scope (it's private to this IIFE).
+  window.OddSocket = { globalSocket: new GlobalSocketManager() };
 })();
 
 (function () {
@@ -5839,6 +5842,8 @@ window.EvenTrading = exports;
   }
 
   createMarketScanner(window.EvenTrading, window.EvenSocket, 'EvenScanner');
+  // Odd bot scanner — uses OddSocket so it never shares state with Even
+  createMarketScanner(window.EvenTrading, window.OddSocket, 'OddScanner');
 })();
 
 (function(){
@@ -8237,6 +8242,7 @@ window.NexusStrategies=exports;
       };
       this.analysis = null; this.logs = []; this.journal = []; this.cooldownTime = 0;
       this._processedContracts = new Set();
+      this.ownContractIds = new Set();
       this.scannerState = { markets: [], bestMarket: null, topThree: [], isScanning: false, lastUpdate: 0 };
       this.marketHealth = null; this.liveDigit = -1; this.liveQuote = 0;
       this.analysisCountdown = 0; this.strategyPhase = 'idle'; this.strategyWaitReason = '';
@@ -8565,7 +8571,7 @@ window.NexusStrategies=exports;
         this.executionGuard = false;
         this.stuckWatchdog = null;
         this.emit();
-      }, 20000); // STUCK_WATCHDOG_MS = 45000 per documentary
+      }, 45000); // STUCK_WATCHDOG_MS = 45000 per documentary
       this.emit();
     }
 
@@ -8900,13 +8906,20 @@ window.NexusStrategies=exports;
             return;
           }
           if (data.msg_type === 'balance') _titan.state.balance = data.balance.balance;
-          if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract?.is_sold) _titan.handleContractResult(data.proposal_open_contract);
+          if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract?.is_sold) {
+            const _c = data.proposal_open_contract;
+            if (_c.contract_id && _titan.ownContractIds.has(_c.contract_id)) {
+              _titan.ownContractIds.delete(_c.contract_id);
+              _titan.handleContractResult(_c);
+            }
+          }
           if (data.msg_type === 'buy') {
             if (data.error) {
               _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})`);
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
-            } else if (data.buy) {
+            } else if (data.buy && data.buy.contract_id) {
+              _titan.ownContractIds.add(data.buy.contract_id);
               _titan.addLog('engine', 'CONFIRMED', `Contract #${data.buy.contract_id} accepted @ ${data.buy.buy_price}`);
             }
           }
@@ -10578,11 +10591,9 @@ window.NexusStrategies=exports;
           </div>
         </div>`;
       }).join('');
-      // Wire up click-to-navigate on exec-row bot cards
       execList.querySelectorAll('[data-nav-exec]').forEach((row) => {
         row.addEventListener('click', () => {
-          const botId = row.dataset.navExec;
-          if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(botId);
+          if (window.UnifiedHub) window.UnifiedHub.switchApp(row.dataset.navExec);
         });
       });
     } else if (execList) {
@@ -10715,7 +10726,9 @@ window.NexusStrategies=exports;
         }
       : {
           id, mode: 'evenodd', fixedTradeMode: id, botLabel: id === 'even' ? 'Even Bot' : 'Odd Bot',
-          trading: window.EvenTrading, socket: window.EvenSocket, scanner: window.EvenScanner,
+          trading: window.EvenTrading,
+          socket:  id === 'odd' ? window.OddSocket  : window.EvenSocket,
+          scanner: id === 'odd' ? window.OddScanner : window.EvenScanner,
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         };
     const eng = new window.TitanEngine(opts);
