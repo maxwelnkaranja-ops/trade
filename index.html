@@ -8524,9 +8524,17 @@ window.NexusStrategies=exports;
             setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
           } else { this.strategyPhase = 'waiting'; this.strategyWaitReason = entry.reason; }
         } else {
-          const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal,
-            this.mode === 'over' ? this.config.overBarrier : true);
-          if (canEnter) this.startChainExecution();
+          // Use the already-computed streak (from the mode-aware block above) instead of
+          // letting checkEntryConditions recount its own streak internally — that function
+          // always counts EVEN digits regardless of mode, which breaks the Even bot (which
+          // needs an ODD-digit streak) and the Nexus/Over bot (barrier-based streak).
+          const streakReady = this.state.streak >= this.config.minStreak;
+          if (streakReady) {
+            const result2 = this.analysis || result;
+            const probReady = result2.probability >= this.config.minSignal;
+            const notAvoid = result2.recommendation !== 'AVOID';
+            if (probReady && notAvoid) this.startChainExecution();
+          }
         }
         this.emit();
       });
@@ -8554,9 +8562,15 @@ window.NexusStrategies=exports;
       this.executionGuard = true;
       if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
         this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting...');
-        this.executionGuard = false; // release guard so engine isn't stuck if socket drops
+        // Release BOTH guards so the engine is not frozen in the FIRING state.
+        // isLocked must be cleared here — if left true the tick handler skips all
+        // entry checks (line: if (!active || isLocked || isCooldown) return) so
+        // the bot stays visually stuck at "⚡ FIRING" forever once the socket drops.
+        this.executionGuard = false;
+        this.state = { ...this.state, isLocked: false };
         const token = window.HubStore.getState().apiToken;
         if (token) this.connect(token);
+        this.emit();
         return;
       }
       let contractType, barrierValue = 0;
@@ -9712,7 +9726,7 @@ window.NexusStrategies=exports;
         <span class="font-fira text-muted" id="${rootId}-quote-small"></span>
       </div>
       <div style="display:flex;gap:8px;font-size:10px;margin-bottom:8px" class="font-fira">
-        <span>STREAK <b id="${rootId}-streak">${s.streak}</b>/${c.minStreak}</span>
+        <span>STREAK <b id="${rootId}-streak">${s.streak}</b>/<span id="${rootId}-min-streak">${c.minStreak}</span></span>
         <span>${isOver ? `OVER <b class="text-primary">${c.overBarrier}</b>` : `MODE <b class="text-primary">${(c.tradeMode || 'odd').toUpperCase()}</b>`}</span>
         <span>RUNS <b id="${rootId}-runs">${s.currentRuns}</b>/${c.targetRuns}</span>
       </div>
@@ -10081,6 +10095,8 @@ window.NexusStrategies=exports;
     if (sub) sub.textContent = `${c.selectedMarket} · ${snap.currentStrategyName}`;
     const streak = el(`${rootId}-streak`);
     if (streak) streak.textContent = s.streak;
+    const minStreakEl = el(`${rootId}-min-streak`);
+    if (minStreakEl) minStreakEl.textContent = c.minStreak;
     const runs = el(`${rootId}-runs`);
     if (runs) runs.textContent = s.currentRuns;
     const reason = el(`${rootId}-wait-reason`);
