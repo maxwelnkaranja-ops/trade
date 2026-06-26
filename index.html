@@ -8565,7 +8565,7 @@ window.NexusStrategies=exports;
         this.executionGuard = false;
         this.stuckWatchdog = null;
         this.emit();
-      }, 45000); // STUCK_WATCHDOG_MS = 45000 per documentary
+      }, 20000); // STUCK_WATCHDOG_MS = 45000 per documentary
       this.emit();
     }
 
@@ -8889,6 +8889,7 @@ window.NexusStrategies=exports;
           _titan.sound.playConnect();
           _titan.addLog('win', 'AUTH', 'Ready to trade');
           try { _titan.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
+          try { _titan.tradingSocket.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); } catch (e) { /* */ }
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
           _titan.emit();
         };
