@@ -8035,7 +8035,7 @@ window.NexusStrategies=exports;
       const fireOne = () => {
         this.socketT.send(JSON.stringify({
           buy: '1', price: stake,
-          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
+          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier: String(barrier), underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
         }));
       };
       if (speed <= 100) {
@@ -8294,8 +8294,9 @@ window.NexusStrategies=exports;
               }
             }
             if (d.msg_type === 'buy') {
-              if (d.error) _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message}`, ntype: 'loss' });
-              else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
+              if (d.error) {
+                _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+              } else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
             }
           } catch (e) { /* */ }
         };
@@ -8524,17 +8525,9 @@ window.NexusStrategies=exports;
             setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
           } else { this.strategyPhase = 'waiting'; this.strategyWaitReason = entry.reason; }
         } else {
-          // Use the already-computed streak (from the mode-aware block above) instead of
-          // letting checkEntryConditions recount its own streak internally — that function
-          // always counts EVEN digits regardless of mode, which breaks the Even bot (which
-          // needs an ODD-digit streak) and the Nexus/Over bot (barrier-based streak).
-          const streakReady = this.state.streak >= this.config.minStreak;
-          if (streakReady) {
-            const result2 = this.analysis || result;
-            const probReady = result2.probability >= this.config.minSignal;
-            const notAvoid = result2.recommendation !== 'AVOID';
-            if (probReady && notAvoid) this.startChainExecution();
-          }
+          const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal,
+            this.mode === 'over' ? this.config.overBarrier : true);
+          if (canEnter) this.startChainExecution();
         }
         this.emit();
       });
@@ -8562,15 +8555,9 @@ window.NexusStrategies=exports;
       this.executionGuard = true;
       if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
         this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting...');
-        // Release BOTH guards so the engine is not frozen in the FIRING state.
-        // isLocked must be cleared here — if left true the tick handler skips all
-        // entry checks (line: if (!active || isLocked || isCooldown) return) so
-        // the bot stays visually stuck at "⚡ FIRING" forever once the socket drops.
-        this.executionGuard = false;
-        this.state = { ...this.state, isLocked: false };
+        this.executionGuard = false; // release guard so engine isn't stuck if socket drops
         const token = window.HubStore.getState().apiToken;
         if (token) this.connect(token);
-        this.emit();
         return;
       }
       let contractType, barrierValue = 0;
@@ -8706,7 +8693,7 @@ window.NexusStrategies=exports;
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
         currency: accountCurrency, duration: 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
       };
-      if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER')) params.barrier = barrierValue;
+      if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER')) params.barrier = String(barrierValue);
       this.sound.playExecute();
       this.addLog('engine', 'BOLT', `${contractType} @ ${st.currentStake.toFixed(2)} ${accountCurrency}`);
       this.state.lastTradedDigit = st.currentDigit;
@@ -8720,12 +8707,13 @@ window.NexusStrategies=exports;
       if (this.stuckWatchdog) clearTimeout(this.stuckWatchdog);
       this.stuckWatchdog = setTimeout(() => {
         if (!this.pendingTrade) return; // already resolved normally
-        this.addLog('error', 'TRADE', 'No confirmation received for 20s — releasing trade lock so the engine can continue.');
+        this.addLog('error', 'TRADE', 'No buy confirmation in 20s — releasing trade lock. Check the engine logs for a "Buy rejected" error.');
         this.pendingTrade = null;
         this.executionGuard = false;
+        this.state = { ...this.state, isLocked: false };
         this.stuckWatchdog = null;
         this.emit();
-      }, 45000); // STUCK_WATCHDOG_MS = 45000 per documentary
+      }, 20000);
       this.emit();
     }
 
@@ -9071,6 +9059,12 @@ window.NexusStrategies=exports;
             return;
           }
           if (data.msg_type === 'balance') _titan.state.balance = data.balance.balance;
+          // Log every server reply that isn't a ping/balance/heartbeat so trade
+          // failures always appear in the engine log, not just swallowed silently.
+          if (data.msg_type && data.msg_type !== 'balance' && data.msg_type !== 'ping') {
+            const snippet = JSON.stringify(data).slice(0, 200);
+            _titan.addLog('engine', 'WS-MSG', `msg_type=${data.msg_type} ${data.error ? '❌ ERROR: ' + data.error.message : ''}`);
+          }
 
           if (data.msg_type === 'proposal_open_contract') {
             const _c = data.proposal_open_contract;
@@ -9093,6 +9087,9 @@ window.NexusStrategies=exports;
               _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})`);
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
+              // Also reset isLocked so bot re-enters scouting on next tick
+              _titan.state = { ..._titan.state, isLocked: false };
+              _titan.emit();
             } else if (data.buy && data.buy.contract_id) {
               const cid = data.buy.contract_id.toString();
               _titan.addLog('engine', 'CONFIRMED', `Contract #${cid} accepted @ ${data.buy.buy_price}`);
@@ -9726,7 +9723,7 @@ window.NexusStrategies=exports;
         <span class="font-fira text-muted" id="${rootId}-quote-small"></span>
       </div>
       <div style="display:flex;gap:8px;font-size:10px;margin-bottom:8px" class="font-fira">
-        <span>STREAK <b id="${rootId}-streak">${s.streak}</b>/<span id="${rootId}-min-streak">${c.minStreak}</span></span>
+        <span>STREAK <b id="${rootId}-streak">${s.streak}</b>/${c.minStreak}</span>
         <span>${isOver ? `OVER <b class="text-primary">${c.overBarrier}</b>` : `MODE <b class="text-primary">${(c.tradeMode || 'odd').toUpperCase()}</b>`}</span>
         <span>RUNS <b id="${rootId}-runs">${s.currentRuns}</b>/${c.targetRuns}</span>
       </div>
@@ -10095,8 +10092,6 @@ window.NexusStrategies=exports;
     if (sub) sub.textContent = `${c.selectedMarket} · ${snap.currentStrategyName}`;
     const streak = el(`${rootId}-streak`);
     if (streak) streak.textContent = s.streak;
-    const minStreakEl = el(`${rootId}-min-streak`);
-    if (minStreakEl) minStreakEl.textContent = c.minStreak;
     const runs = el(`${rootId}-runs`);
     if (runs) runs.textContent = s.currentRuns;
     const reason = el(`${rootId}-wait-reason`);
