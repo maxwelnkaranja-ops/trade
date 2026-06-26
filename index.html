@@ -8400,7 +8400,11 @@ window.NexusStrategies=exports;
       window.addEventListener('hub:token-changed', (e) => { if (e.detail.token) this.connect(e.detail.token); });
       window.addEventListener('hub:account-type-changed', () => {
         const t = window.HubStore.getState().apiToken;
-        if (t) setTimeout(() => this.connect(t), 500);
+        if (t) {
+          // Close old trading socket before reconnecting to avoid duplicate listeners
+          if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} this.tradingSocket = null; }
+          setTimeout(() => this.connect(t), 500);
+        }
       });
     }
 
@@ -8698,7 +8702,9 @@ window.NexusStrategies=exports;
       this.addLog('engine', 'BOLT', `${contractType} @ ${st.currentStake.toFixed(2)} ${accountCurrency}`);
       this.state.lastTradedDigit = st.currentDigit;
       // Deriv WS API requires buy value as string '1' for direct inline-parameter purchases
-      this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: st.currentStake, parameters: params }));
+      const buyPayload = { buy: '1', subscribe: 1, price: st.currentStake, parameters: params };
+      this.addLog('engine', 'WS-SEND', `Sending buy: ${contractType} $${st.currentStake.toFixed(2)} on socket readyState=${this.tradingSocket.readyState}`);
+      this.tradingSocket.send(JSON.stringify(buyPayload));
       // Stuck-trade watchdog: if neither a buy error nor a contract result
       // arrives within 20s (dropped message, server hiccup, dead socket),
       // unstick the engine instead of leaving executionGuard true forever —
@@ -9000,15 +9006,28 @@ window.NexusStrategies=exports;
         const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
         const headers = { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
 
-        // Resolve accountId
+        // Resolve accountId — wait up to 6s for HubStore to finish its own
+        // accounts fetch (which runs in parallel on page load / token save).
+        // This avoids a race condition where the Titan engine fires its own
+        // duplicate accounts+OTP fetch before HubStore has resolved the ID,
+        // resulting in mismatched sockets or OTP URL mismatches.
         let accountId = hub.accountId;
         if (!accountId) {
+          _titan.addLog('engine', 'AUTH', 'Waiting for HubStore accountId…');
+          for (let i = 0; i < 12; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            accountId = window.HubStore.getState().accountId;
+            if (accountId) break;
+          }
+        }
+        if (!accountId) {
+          // HubStore still hasn't resolved — fall back to our own fetch
           try {
             const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
             if (!r.ok) throw new Error(`Accounts ${r.status}`);
             const d = await r.json();
             const accounts = d.data || [];
-            const preferred = hub.accountType === 'real'
+            const preferred = window.HubStore.getState().accountType === 'real'
               ? accounts.find(a => !a.is_virtual) || accounts[0]
               : accounts.find(a => a.is_virtual) || accounts[0];
             if (!preferred) throw new Error('No accounts found');
