@@ -217,16 +217,228 @@
     </div>
   </div>
 
+<style>
+/* ══════════════════════════════════════════════════════════════════
+   FINAL FIXES — LAYOUT + UX IMPROVEMENTS
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Current digit box — huge digit, generous padding */
+.digit-pad {
+  font-size: 100px !important;
+  padding: 32px 24px !important;
+  line-height: 1 !important;
+  text-align: center !important;
+}
+
+/* Live tick cells — bigger digit display */
+.live-tick-cell {
+  padding: 22px 14px !important;
+}
+.live-tick-cell .cell-value {
+  font-size: 2.8rem !important;
+  line-height: 1 !important;
+}
+
+/* ── 3-column layout: analysis hub (left) bigger, control panel (center) shrink, journal (right) bigger ── */
+.benz-grid {
+  grid-template-columns: 360px 360px 1fr !important;
+}
+
+/* Journal in right column — bigger entries */
+#differ-right .journal-entry,
+#odd-root .journal-entry.differ-jentry,
+.benz-col .journal-entry {
+  padding: 14px 16px !important;
+  min-height: 68px !important;
+  font-size: 13px !important;
+  border-radius: 12px !important;
+  margin-bottom: 8px !important;
+}
+.benz-col .journal-list { gap: 8px !important; }
+.benz-col .journal-net, .benz-col .journal-amount { font-size: 15px !important; font-weight: 800 !important; }
+.benz-col .journal-digits { font-size: 12px !important; }
+
+/* Titan right panel journal entries bigger */
+#even-root .journal-entry, #odd-root .journal-entry, #nexus-root .journal-entry {
+  padding: 14px 16px !important;
+  min-height: 64px !important;
+  font-size: 12.5px !important;
+  gap: 10px !important;
+}
+#even-root .journal-entry span, #odd-root .journal-entry span, #nexus-root .journal-entry span {
+  font-size: 12px !important;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   BENZ CLUB — SUPER UPGRADE v6 · MEGA ANIMATION SYSTEM
+   ══════════════════════════════════════════════════════════════ */
+@keyframes aurora-shift {
+  0%,100%{opacity:.07;transform:scale(1) translateX(0)}
+  50%{opacity:.13;transform:scale(1.08) translateX(3%)}
+}
+@keyframes neon-scan-h {
+  0%{top:-2px;opacity:0} 5%{opacity:.5} 95%{opacity:.4} 100%{top:100vh;opacity:0}
+}
+@keyframes brand-beacon {
+  0%,100%{box-shadow:0 0 0 1px hsl(var(--primary)/.3),0 0 12px hsl(var(--primary)/.2)}
+  50%{box-shadow:0 0 0 2px hsl(var(--primary)/.6),0 0 30px hsl(var(--primary)/.4),0 0 60px hsl(var(--primary)/.1)}
+}
+@keyframes shimmer-sweep {
+  0%{background-position:-200% 0} 100%{background-position:200% 0}
+}
+@keyframes glow-pulse {
+  0%,100%{text-shadow:0 0 8px hsl(var(--primary)/.4),0 0 20px hsl(var(--primary)/.15)}
+  50%{text-shadow:0 0 18px hsl(var(--primary)/.8),0 0 45px hsl(var(--primary)/.3)}
+}
+@keyframes border-cycle {
+  0%,100%{border-color:hsl(var(--primary)/.22);box-shadow:0 0 8px hsl(var(--primary)/.08)}
+  33%{border-color:hsl(var(--secondary)/.3);box-shadow:0 0 14px hsl(var(--secondary)/.12)}
+  66%{border-color:hsl(var(--primary-2)/.25);box-shadow:0 0 10px hsl(var(--primary-2)/.1)}
+}
+@keyframes card-enter {
+  from{opacity:0;transform:translateY(16px) scale(.97);filter:blur(3px)}
+  to{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}
+}
+@keyframes btn-shine {
+  0%{background-position:-200% 0} 100%{background-position:200% 0}
+}
+@keyframes dot-beacon {
+  0%,100%{box-shadow:0 0 0 0 hsl(var(--win)/.7)}
+  50%{box-shadow:0 0 0 5px hsl(var(--win)/0)}
+}
+@keyframes holo-flicker {
+  0%,89%,91%,95%,97%,100%{opacity:1}
+  90%{opacity:.6} 96%{opacity:.75}
+}
+@keyframes col-float {
+  0%,100%{transform:translateY(0px)}
+  50%{transform:translateY(-3px)}
+}
+@keyframes win-ring {
+  0%{box-shadow:0 0 0 0 hsl(var(--win)/.7)}
+  100%{box-shadow:0 0 0 22px hsl(var(--win)/0),0 0 50px hsl(var(--win)/.2)}
+}
+@keyframes loss-shake {
+  0%,100%{transform:translateX(0)} 20%{transform:translateX(-3px)}
+  40%{transform:translateX(3px)} 60%{transform:translateX(-2px)} 80%{transform:translateX(2px)}
+}
+@keyframes pill-breathe {
+  0%,100%{box-shadow:0 0 8px hsl(var(--win)/.15)}
+  50%{box-shadow:0 0 20px hsl(var(--win)/.3)}
+}
+@keyframes settings-spin { to{transform:rotate(360deg)} }
+
+/* Aurora background */
+.hub-shell::before {
+  background:
+    radial-gradient(ellipse 65% 45% at 5% -5%, hsl(var(--primary)/.10) 0%,transparent 55%),
+    radial-gradient(ellipse 50% 35% at 95% 8%, hsl(var(--secondary)/.07) 0%,transparent 50%),
+    radial-gradient(ellipse 55% 38% at 55% 110%, hsl(var(--primary-2)/.06) 0%,transparent 55%) !important;
+  animation:aurora-shift 20s ease-in-out infinite !important;
+}
+/* Neon scan line */
+.hub-shell::after {
+  content:'';position:fixed;left:0;right:0;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,hsl(var(--primary)/.6) 30%,hsl(var(--secondary)/.8) 50%,hsl(var(--primary)/.6) 70%,transparent);
+  z-index:9998;pointer-events:none;
+  animation:neon-scan-h 14s linear 6s infinite;
+}
+/* Sidebar shimmer */
+.hub-sidebar{position:relative !important;overflow:hidden !important;}
+.hub-sidebar::after{
+  content:'';position:absolute;top:0;left:-180%;width:50%;height:100%;
+  background:linear-gradient(105deg,transparent 40%,hsl(var(--primary)/.04) 50%,transparent 60%);
+  animation:shimmer-sweep 10s linear infinite;pointer-events:none;
+}
+/* Brand beacon */
+.hub-brand-avatar{animation:brand-beacon 3s ease-in-out infinite !important;}
+/* Tabs */
+.hub-tab{position:relative !important;overflow:hidden !important;transition:all .22s cubic-bezier(.34,1.56,.64,1) !important;}
+.hub-tab:hover:not(.active){transform:translateX(3px) !important;border-left:2px solid hsl(var(--primary)/.4) !important;}
+.hub-tab.active{background:linear-gradient(135deg,hsl(var(--primary)/.13),hsl(var(--primary-2)/.08)) !important;border-color:hsl(var(--primary)/.35) !important;box-shadow:0 0 20px hsl(var(--primary)/.12),inset 0 1px 0 hsl(255 100% 100%/.05) !important;animation:border-cycle 5s ease infinite !important;}
+.hub-tab.active::before{content:'';position:absolute;left:0;top:20%;bottom:20%;width:2px;border-radius:2px;background:linear-gradient(180deg,hsl(var(--primary)),hsl(var(--primary-2)));box-shadow:0 0 8px hsl(var(--primary)/.7);}
+.hub-tab.active .hub-tab-icon{animation:glow-pulse 3s ease-in-out infinite !important;}
+.hub-tab .dot.live{animation:cooldown-pulse 1s infinite,dot-beacon 2s ease-out infinite !important;}
+/* Columns */
+.benz-col{animation:col-float 7s ease-in-out infinite !important;transition:transform .28s cubic-bezier(.34,1.56,.64,1),border-color .22s,box-shadow .22s !important;}
+.benz-col:nth-child(2){animation-delay:2s !important;}
+.benz-col:nth-child(3){animation-delay:4s !important;}
+.benz-col:hover{transform:translateY(-5px) !important;animation:none !important;border-color:hsl(var(--primary)/.5) !important;box-shadow:0 20px 50px hsl(var(--primary)/.15),0 0 0 1px hsl(var(--primary)/.2),var(--shadow-md) !important;}
+.benz-col::before{background:linear-gradient(90deg,transparent,hsl(var(--primary)/.9),hsl(var(--secondary)),transparent) !important;background-size:200% 100% !important;animation:shimmer-sweep 4s linear infinite !important;}
+/* Digit pad */
+.digit-pad{animation:holo-flicker 9s linear infinite !important;text-shadow:0 0 20px hsl(var(--primary)/.65),0 0 60px hsl(var(--primary)/.2) !important;}
+/* Live tick cells */
+.live-tick-cell{transition:all .2s cubic-bezier(.34,1.56,.64,1) !important;position:relative !important;overflow:hidden !important;}
+.live-tick-cell:hover{transform:scale(1.05) !important;z-index:2;box-shadow:0 0 22px hsl(var(--primary)/.22) !important;}
+/* Stat cards */
+.stat-card,.dash-stat-card,.bot-card{animation:card-enter .5s cubic-bezier(.34,1.56,.64,1) both !important;}
+.stat-card:nth-child(1){animation-delay:.05s !important;}
+.stat-card:nth-child(2){animation-delay:.10s !important;}
+.stat-card:nth-child(3){animation-delay:.15s !important;}
+.stat-card:hover,.dash-stat-card:hover{transform:translateY(-4px) scale(1.02) !important;box-shadow:0 14px 40px hsl(var(--primary)/.18),0 0 0 1px hsl(var(--primary)/.25) !important;border-color:hsl(var(--primary)/.4) !important;}
+/* Buttons */
+.btn-primary{position:relative !important;overflow:hidden !important;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2))) !important;box-shadow:0 4px 16px hsl(var(--primary)/.3),0 0 0 1px hsl(var(--primary)/.2) !important;transition:all .22s cubic-bezier(.34,1.56,.64,1) !important;}
+.btn-primary::before{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 30%,hsl(0 0% 100%/.18) 50%,transparent 70%);background-size:200% 100%;opacity:0;transition:opacity .15s;}
+.btn-primary:hover{transform:translateY(-2px) scale(1.03) !important;box-shadow:0 8px 28px hsl(var(--primary)/.45),0 0 40px hsl(var(--primary)/.15) !important;}
+.btn-primary:hover::before{opacity:1;animation:btn-shine 1.2s linear infinite;}
+.btn-primary:active{transform:scale(.97) !important;}
+/* Master toggle */
+#dash-master-toggle{transition:all .3s cubic-bezier(.34,1.56,.64,1) !important;letter-spacing:2px !important;}
+#dash-master-toggle:hover{transform:translateY(-3px) scale(1.04) !important;filter:brightness(1.15) !important;letter-spacing:3px !important;}
+/* Journal */
+.journal-entry{animation:card-enter .35s cubic-bezier(.34,1.56,.64,1) both !important;transition:all .2s cubic-bezier(.34,1.56,.64,1) !important;}
+.journal-entry:hover{transform:translateX(4px) !important;border-left:2px solid hsl(var(--win)/.5) !important;box-shadow:0 4px 20px hsl(var(--win)/.1) !important;}
+/* Win/Loss */
+.win-flash{animation:win-ring .8s ease-out forwards !important;}
+.loss-flash{animation:loss-shake .4s ease-out forwards !important;}
+/* Inputs */
+.input-field{transition:all .22s var(--ease) !important;}
+.input-field:focus{border-color:hsl(var(--primary)/.6) !important;box-shadow:0 0 0 3px hsl(var(--primary)/.12),0 0 20px hsl(var(--primary)/.1) !important;outline:none !important;}
+/* Header */
+.hub-header{backdrop-filter:blur(20px) saturate(1.3) !important;box-shadow:0 1px 0 hsl(255 100% 100%/.03),0 4px 20px hsl(0 0% 0%/.3) !important;}
+/* Live badge */
+.hub-live-badge.connected{animation:border-cycle 4s ease infinite !important;}
+.hub-live-badge.connected .dot{animation:dot-beacon 1.5s ease-out infinite !important;}
+/* Clock */
+.hub-clock{animation:glow-pulse 4s ease-in-out infinite !important;letter-spacing:0.12em !important;}
+/* Scrollbars */
+*::-webkit-scrollbar-thumb{background:linear-gradient(180deg,hsl(var(--primary)/.35),hsl(var(--primary-2)/.35)) !important;}
+*::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,hsl(var(--primary)/.65),hsl(var(--primary-2)/.65)) !important;}
+/* Settings */
+.hub-settings-btn:hover svg{animation:settings-spin .5s ease-out forwards !important;filter:drop-shadow(0 0 4px hsl(var(--primary)/.6)) !important;}
+/* Theme pills */
+.hub-theme-pills button,.theme-pill-btn{transition:all .2s cubic-bezier(.34,1.56,.64,1) !important;}
+.hub-theme-pills button:hover,.theme-pill-btn:hover{transform:translateY(-3px) scale(1.15) !important;box-shadow:0 6px 16px hsl(var(--primary)/.25) !important;}
+/* Toggles */
+.toggle.on{box-shadow:0 0 0 2px hsl(var(--win)/.3),0 0 16px hsl(var(--win)/.2) !important;}
+/* Barrier buttons */
+.barrier-btn{transition:all .2s cubic-bezier(.34,1.56,.64,1) !important;}
+.barrier-btn:hover{transform:translateY(-2px) scale(1.06) !important;box-shadow:0 6px 18px hsl(var(--primary)/.3) !important;}
+/* Balance pill */
+.hub-balance-pill{animation:pill-breathe 3s ease-in-out infinite !important;}
+.hub-balance-pill:hover{transform:scale(1.06) !important;}
+/* Brand name */
+.hub-brand-name{animation:holo-flicker 12s linear infinite !important;text-shadow:0 0 10px hsl(var(--primary)/.3) !important;}
+/* Glass glow */
+.glass-card-glow,.glass-panel-glow{animation:armed-breathe 5s ease-in-out infinite !important;}
+/* Panel transition */
+.app-panel.active{animation:panel-in .3s cubic-bezier(.34,1.56,.64,1) both !important;}
+/* Modal */
+.modal-card{animation:modal-enter .35s cubic-bezier(.34,1.56,.64,1) both !important;}
+/* Reduce motion */
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}}
+</style>
   <!-- Shared libs -->
   <!-- App engines -->
   <style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Outfit:wght@400;500;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap');
 /* ════════════════════════════════════════════════════════════════
    BENZ CLUB — Ultra Dark Luxury Trading Terminal  ·  v5
    "Black Obsidian" — dead-black voids, liquid-gold accents,
    surgical neon signals. Inspired by Bloomberg Terminal meets
    high-end private banking UI. Every surface earns its place.
    ════════════════════════════════════════════════════════════════ */
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Outfit:wght@400;500;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap');
 
 /* ──────────────────────────────────────────────────────────────
    QUANTIX PURE BLACK — void-black base, electric blue-violet
@@ -611,7 +823,7 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
    ────────────────────────────────────────────────────────────── */
 .benz-grid, .titan-grid {
   display: grid;
-  grid-template-columns: 320px 1fr 360px;
+  grid-template-columns: 360px 360px 1fr;
   gap: 8px; padding: 8px;
   flex: 1; min-height: 0; overflow: hidden;
 }
@@ -1038,7 +1250,7 @@ html.light .digit-pad { background: hsl(var(--muted) / .3); }
   transition: all .2s; text-transform: uppercase;
 }
 .flow-step.active { background: hsl(var(--primary) / .15); color: hsl(var(--primary)); box-shadow: 0 0 12px hsl(var(--primary) / .14); }
-.flow-step.fire { background: hsl(var(--win) / .18); color: hsl(var(--win)); box-shadow: 0 0 12px hsl(var(--win) / .16); }
+.flow-step.fire { background: hsl(var(--primary) / .12); color: hsl(var(--primary)); }
 
 /* ──────────────────────────────────────────────────────────────
    LOG / JOURNAL ENTRIES
@@ -4371,9 +4583,7 @@ html body #panel-dashboard .journal-panel {
   flex: 1 !important;
 }
 
-/* Equity curve — shorter */
-html body #panel-dashboard .dash-equity-panel { padding: 12px 14px !important; }
-html body #panel-dashboard .equity-svg { height: 140px !important; }
+/* Equity curve — handled below in row layout block */
 
 /* Engine overview — compact */
 html body #panel-dashboard .rank-table { gap: 8px !important; }
@@ -4528,13 +4738,6 @@ html body #panel-dashboard .exec-cd-fill {
 }
 .entry-conditions-panel.all-met::before {
   background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary)));
-  box-shadow: 0 0 16px hsl(var(--win)/0.4);
-  animation: cond-fire-glow 0.6s ease;
-}
-@keyframes cond-fire-glow {
-  0%   { box-shadow: 0 0 0px hsl(var(--win)/0); }
-  50%  { box-shadow: 0 0 30px hsl(var(--win)/0.8); }
-  100% { box-shadow: 0 0 16px hsl(var(--win)/0.4); }
 }
 .entry-cond-title {
   display: flex; align-items: center; gap: 7px;
@@ -4555,10 +4758,8 @@ html body #panel-dashboard .exec-cd-fill {
 .entry-cond-pulse.firing {
   background: hsl(var(--primary));
   box-shadow: 0 0 16px hsl(var(--primary)/0.9);
-  animation: pulse-fire 0.4s ease-in-out infinite alternate;
 }
 @keyframes pulse-dot  { 0%,100% { box-shadow: 0 0 6px hsl(var(--win)/0.5); } 50% { box-shadow: 0 0 14px hsl(var(--win)/0.9); } }
-@keyframes pulse-fire { 0% { box-shadow: 0 0 8px hsl(var(--primary)/0.7); } 100% { box-shadow: 0 0 24px hsl(var(--primary)); } }
 .entry-cond-status {
   margin-left: auto; font-size: 8px; font-weight: 900; letter-spacing: 1.5px;
   padding: 2px 7px; border-radius: 999px;
@@ -4566,7 +4767,7 @@ html body #panel-dashboard .exec-cd-fill {
   transition: all 0.3s;
 }
 .entry-cond-status.met { background: hsl(var(--win)/0.15); color: hsl(var(--win)); border: 1px solid hsl(var(--win)/0.3); }
-.entry-cond-status.fire { background: hsl(var(--primary)/0.2); color: hsl(var(--primary)); border: 1px solid hsl(var(--primary)/0.5); animation: shimmer-sweep 1s linear infinite; }
+.entry-cond-status.fire { background: hsl(var(--primary)/0.2); color: hsl(var(--primary)); border: 1px solid hsl(var(--primary)/0.5); }
 .entry-cond-list {
   display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;
 }
@@ -4621,14 +4822,18 @@ html body #panel-dashboard .exec-cd-fill {
 }
 
 /* ── Dashboard row layout (full-width redesign) ── */
-html body #panel-dashboard .dash-row-top { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 14px !important; padding: 0 !important; min-height: 420px !important; }
-html body #panel-dashboard .dash-row-top > * { min-height: 420px !important; }
-html body #panel-dashboard .dash-row-full { padding: 0 !important; margin-top: 12px !important; }
+html body #panel-dashboard .dash-row-top { display: none !important; }
+html body #panel-dashboard .dash-row-full { padding: 0 !important; margin-top: 0 !important; }
 html body #panel-dashboard .dash-row-full .glass-panel { width: 100% !important; box-sizing: border-box !important; }
-html body #panel-dashboard .dash-row-top .exec-panel { padding: 12px 14px !important; }
-html body #panel-dashboard .exec-list { max-height: 320px !important; overflow-y: auto !important; }
+/* Equity curve — full width, taller SVG */
+html body #panel-dashboard .dash-equity-panel { padding: 18px 20px !important; }
+html body #panel-dashboard .equity-svg { height: auto !important; width: 100% !important; min-height: 280px !important; }
+/* Active engines — compact horizontal layout */
+html body #panel-dashboard .exec-panel { padding: 14px 16px !important; }
+html body #panel-dashboard .exec-list { max-height: 200px !important; overflow-y: auto !important; display: grid !important; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)) !important; gap: 8px !important; }
+/* Journal */
 html body #panel-dashboard .dash-row-full .journal-panel { display: flex !important; flex-direction: column !important; padding: 14px !important; min-height: 240px !important; }
-html body #panel-dashboard .dash-row-full .journal-list { flex: 1 !important; overflow-y: auto !important; min-height: 160px !important; max-height: 300px !important; }
+html body #panel-dashboard .dash-row-full .journal-list { flex: 1 !important; overflow-y: auto !important; min-height: 160px !important; max-height: 320px !important; }
 @media (max-width: 1000px) {
   html body #panel-dashboard .dash-hero-row { grid-template-columns: 1fr !important; }
   html body #panel-dashboard .dash-row-top { grid-template-columns: 1fr !important; }
@@ -9138,41 +9343,157 @@ window.NexusStrategies=exports;
     const syncP = Math.min(100, (s.historyP.length / 100) * 100);
     const silentPct = s.silenceTrigger ? Math.min(100, (s.silenceCount / s.silenceTrigger) * 100) : 0;
     const silentClass = s.silenceCount >= s.silenceTrigger ? 'neon-text-win' : s.silenceCount >= s.silenceTrigger * 0.7 ? 'neon-text-accent' : '';
+    const confPct = s.analysisConfidence || 0;
+    const confColor = confPct >= 75 ? '#00e676' : confPct >= 50 ? '#ffd740' : '#ff5252';
+    const confCircumference = 2 * Math.PI * 44;
+    const confOffset = confCircumference - (confPct / 100) * confCircumference;
+    const dMaxP = Math.max(...s.freqP.map(f=>f.count), 1);
 
     el('differ-left').innerHTML = `
-      <div class="section-divider neon-text-secondary"><span>● Analysis Engine</span></div>
-      <div class="glass-panel" style="padding:10px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px"><span class="font-display" style="letter-spacing:2px">CONFIDENCE</span><span class="neon-text-secondary">${s.analysisConfidence}%</span></div>
-        <div class="bar-track"><div class="bar-fill-cyan" style="width:${s.analysisConfidence}%"></div></div>
+    <style>
+      @keyframes dahub-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.7;transform:scale(1.05)} }
+      @keyframes dahub-ping  { 0%{transform:scale(1);opacity:1} 80%,100%{transform:scale(2.2);opacity:0} }
+      @keyframes dahub-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+      @keyframes dahub-in    { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes dahub-bar   { from{transform:scaleY(0)} to{transform:scaleY(1)} }
+      @keyframes dahub-shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+      @keyframes dahub-sweep { to{stroke-dashoffset:${confOffset}} }
+      .dahub-card {
+        background:linear-gradient(135deg,hsl(var(--card)/0.9),hsl(var(--bg)/0.7));
+        border:1px solid hsl(var(--border)/0.5); border-radius:16px;
+        padding:14px; margin-bottom:10px;
+        backdrop-filter:blur(12px); animation:dahub-in .3s ease;
+        position:relative; overflow:hidden;
+      }
+      .dahub-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:1.5px;
+        background:linear-gradient(90deg,transparent,hsl(var(--primary)/0.7),hsl(var(--secondary)/0.5),transparent);
+        animation:dahub-shimmer 3s linear infinite; background-size:200% 100%;
+      }
+      .dahub-label {
+        font-family:'Outfit',sans-serif; font-size:9px; font-weight:800;
+        letter-spacing:2.5px; text-transform:uppercase;
+        color:hsl(var(--muted-foreground)); margin-bottom:10px;
+        display:flex; align-items:center; gap:6px;
+      }
+      .dahub-dot {
+        width:6px;height:6px;border-radius:50%;background:hsl(var(--primary));
+        box-shadow:0 0 8px hsl(var(--primary));animation:dahub-pulse 2s infinite;
+      }
+    </style>
+
+    <!-- header -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid hsl(var(--border)/0.3)">
+      <div style="position:relative;width:10px;height:10px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--primary));animation:dahub-pulse 1.5s infinite"></div>
+        <div style="position:absolute;inset:-4px;border-radius:50%;background:hsl(var(--primary)/0.2);animation:dahub-ping 1.5s infinite"></div>
       </div>
-      <div class="glass-panel" style="padding:10px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:6px"><span>PRIMARY: ${s.primaryMarket}</span><span>${s.historyP.length} ticks</span></div>
-        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:6px">
-          ${s.freqP.map((f) => `<div class="digit-cell ${f.digit === 0 ? 'is-zero' : ''} ${f.digit === s.coldDigit ? 'is-cold' : ''}"><div class="font-display" style="font-weight:700;${f.digit === s.coldDigit ? 'color:hsl(var(--primary))' : ''}">${f.digit}</div><div style="font-size:7px" class="font-mono-data">${f.count}</div><div class="bar-track" style="margin-top:2px;height:2px"><div class="bar-fill-primary" style="width:${(f.count / maxP) * 100}%"></div></div></div>`).join('')}
+      <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:3px;color:hsl(var(--primary));text-transform:uppercase">Analysis Engine</span>
+      <div style="flex:1"></div>
+      <span style="font-size:9px;color:hsl(var(--muted-foreground));animation:dahub-pulse 2s infinite">● LIVE</span>
+    </div>
+
+    <!-- Confidence ring -->
+    <div class="dahub-card">
+      <div class="dahub-label"><span class="dahub-dot"></span>Confidence</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="position:relative;width:110px;height:110px;flex-shrink:0;animation:dahub-float 3s ease-in-out infinite">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <defs>
+              <linearGradient id="dconf-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="${confColor}"/>
+                <stop offset="100%" stop-color="hsl(var(--secondary))"/>
+              </linearGradient>
+            </defs>
+            <circle cx="55" cy="55" r="44" fill="none" stroke="hsl(var(--border)/0.3)" stroke-width="8"/>
+            <circle cx="55" cy="55" r="44" fill="none" stroke="${confColor}" stroke-width="8" stroke-opacity="0.12" stroke-dasharray="${confCircumference}" stroke-dashoffset="0"/>
+            <circle cx="55" cy="55" r="44" fill="none" stroke="url(#dconf-grad)" stroke-width="8"
+              stroke-linecap="round" stroke-dasharray="${confCircumference}" stroke-dashoffset="${confOffset}"
+              style="transform:rotate(-90deg);transform-origin:55px 55px;filter:drop-shadow(0 0 6px ${confColor});transition:stroke-dashoffset .8s cubic-bezier(0.34,1.2,0.64,1)"/>
+            <text x="55" y="51" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="22" font-weight="900" fill="${confColor}">${confPct}</text>
+            <text x="55" y="65" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="9" fill="hsl(var(--muted-foreground))" letter-spacing="1">%</text>
+          </svg>
         </div>
-        <div class="bar-track"><div class="bar-fill-cyan" style="width:${syncP}%"></div></div>
-      </div>
-      <div class="glass-panel" style="padding:10px;margin-bottom:8px">
-        <div style="font-size:9px;margin-bottom:6px">GLOBAL: ${s.globalMarket} · ${s.historyG.length} ticks</div>
-        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px">
-          ${s.freqG.map((f) => `<div class="digit-cell ${f.digit === 0 ? 'is-zero' : ''}"><div class="font-display" style="font-weight:700">${f.digit}</div><div style="font-size:7px">${f.count}</div></div>`).join('')}
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:11px;font-weight:900;color:${confColor};text-shadow:0 0 12px ${confColor}80;font-family:'Outfit',sans-serif">${confPct>=75?'HIGH CONFIDENCE':confPct>=50?'MODERATE':'LOW SIGNAL'}</div>
+          <div style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">${s.historyP.length} ticks · ${s.primaryMarket}</div>
+          <div style="height:5px;background:hsl(var(--border)/0.3);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${syncP}%;background:linear-gradient(90deg,hsl(var(--secondary)),hsl(var(--primary)));border-radius:3px;box-shadow:0 0 8px hsl(var(--primary)/0.4);transition:width .6s"></div>
+          </div>
+          <div style="font-size:8px;color:hsl(var(--muted-foreground))">Data sync: ${syncP.toFixed(0)}%</div>
         </div>
       </div>
-      <div class="glass-panel" style="padding:10px;margin-bottom:8px">
-        <div class="section-divider neon-text-primary" style="margin-bottom:8px">Cold Rankings (excl. 0)</div>
-        ${sorted.slice(0, 5).map((f, i) => `<div style="display:flex;align-items:center;gap:8px;padding:6px;margin-bottom:4px;border-radius:8px;${i === 0 ? 'background:hsl(var(--primary)/0.06)' : ''}"><span class="font-display" style="width:20px;${i === 0 ? 'color:hsl(var(--primary))' : ''}">${i === 0 ? '⬥' : i === 1 ? '◆' : ''}${f.digit}</span><div class="bar-track" style="flex:1;height:3px"><div class="${i === 0 ? 'bar-fill-primary' : 'bar-fill-cyan'}" style="width:${Math.max(5, 100 - f.percentage)}%"></div></div><span class="font-mono-data" style="font-size:9px;width:24px;text-align:right">${f.count}</span></div>`).join('')}
+    </div>
+
+    <!-- Digit heatmap primary -->
+    <div class="dahub-card">
+      <div class="dahub-label"><span class="dahub-dot" style="background:hsl(var(--accent));box-shadow:0 0 8px hsl(var(--accent))"></span>Primary Heatmap · ${s.primaryMarket}</div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:80px;margin-bottom:4px">
+        ${s.freqP.map((f,i)=>{
+          const ht = Math.max(5,(f.count/dMaxP)*72);
+          const isZero = f.digit===0, isCold=f.digit===s.coldDigit;
+          const bc = isCold?'hsl(var(--primary))':isZero?'hsl(var(--loss)/0.5)':i%2===0?'hsl(var(--secondary)/0.7)':'hsl(var(--primary)/0.5)';
+          const gw = isCold?`0 0 14px hsl(var(--primary)/0.8),0 0 28px hsl(var(--primary)/0.4)`:`0 0 4px ${bc}60`;
+          return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1">
+            <div style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${f.count}</div>
+            <div style="width:100%;border-radius:4px 4px 0 0;height:${ht}px;background:${bc};box-shadow:${gw};transform-origin:bottom;animation:dahub-bar .5s cubic-bezier(0.34,1.56,0.64,1);transition:height .4s cubic-bezier(0.34,1.56,0.64,1)"></div>
+            <div style="font-size:11px;font-weight:800;color:${isCold?'hsl(var(--primary))':isZero?'hsl(var(--loss))':'hsl(var(--foreground)/0.7)'};${isCold?'text-shadow:0 0 8px hsl(var(--primary))':''}">${f.digit}</div>
+          </div>`;
+        }).join('')}
       </div>
-      <div class="glass-panel-glow" style="padding:16px;text-align:center">
-        <div class="section-divider neon-text-accent" style="justify-content:center;margin-bottom:8px">Silent Count</div>
-        <div class="stat-5xl ${silentClass}">${s.silenceCount}</div>
-        <div style="font-size:8px;letter-spacing:3px;margin-top:6px;color:hsl(var(--muted-foreground))">TRIGGER AT ${s.silenceTrigger}</div>
-        <div class="bar-track" style="margin-top:10px;height:6px"><div class="${s.silenceCount >= s.silenceTrigger ? 'bar-fill-win' : 'bar-fill-accent'}" style="width:${silentPct}%"></div></div>
-        ${s.coldDigit !== null ? `<div style="font-size:8px;margin-top:8px">Watching <span class="neon-text-primary">≠${s.coldDigit}</span>${s.thirdColdDigit !== null ? ` + alt <span class="neon-text-accent">${s.thirdColdDigit}</span>` : ''}</div>` : ''}
+    </div>
+
+    <!-- Cold rankings -->
+    <div class="dahub-card">
+      <div class="dahub-label"><span class="dahub-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Cold Rankings</div>
+      ${sorted.slice(0,5).map((f,i)=>{
+        const rankColors=['hsl(var(--primary))','hsl(var(--secondary))','hsl(var(--accent))'];
+        const rc=rankColors[i]||'hsl(var(--muted-foreground))';
+        const coldPct=Math.max(5,100-f.percentage);
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:7px 10px;border-radius:10px;background:${i===0?'hsl(var(--primary)/0.07)':'hsl(var(--bg)/0.4)'};border:1px solid ${i===0?'hsl(var(--primary)/0.25)':'hsl(var(--border)/0.2)'};transition:all .2s">
+          <span style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:900;color:${rc};width:22px;text-align:center;${i===0?'text-shadow:0 0 8px '+rc:''}">${f.digit}</span>
+          <div style="flex:1;height:4px;background:hsl(var(--border)/0.3);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${coldPct}%;background:${rc};border-radius:2px;box-shadow:0 0 6px ${rc}60;transition:width .6s cubic-bezier(0.34,1.2,0.64,1)"></div>
+          </div>
+          <span style="font-family:'DM Mono',monospace;font-size:9px;color:${rc};width:26px;text-align:right;font-weight:700">${f.count}</span>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Silent counter -->
+    <div class="dahub-card" style="text-align:center">
+      <div class="dahub-label" style="justify-content:center"><span class="dahub-dot" style="${s.silenceCount>=s.silenceTrigger?'background:hsl(var(--win));box-shadow:0 0 16px hsl(var(--win));animation:dahub-pulse .8s infinite':'background:hsl(var(--accent));box-shadow:0 0 8px hsl(var(--accent))'}"></span>Silent Count</div>
+      <div style="position:relative;width:120px;height:120px;margin:0 auto 10px;animation:dahub-float 3s ease-in-out infinite">
+        <svg width="120" height="120" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="50" fill="none" stroke="hsl(var(--border)/0.3)" stroke-width="8"/>
+          <circle cx="60" cy="60" r="50" fill="none"
+            stroke="${s.silenceCount>=s.silenceTrigger?'hsl(var(--win))':'hsl(var(--accent))'}"
+            stroke-width="8" stroke-linecap="round"
+            stroke-dasharray="${2*Math.PI*50}" stroke-dashoffset="${2*Math.PI*50 - (silentPct/100)*(2*Math.PI*50)}"
+            style="transform:rotate(-90deg);transform-origin:60px 60px;filter:drop-shadow(0 0 8px ${s.silenceCount>=s.silenceTrigger?'hsl(var(--win)/0.8)':'hsl(var(--accent)/0.6)'});transition:stroke-dashoffset .8s cubic-bezier(0.34,1.2,0.64,1)"/>
+          <text x="60" y="56" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="26" font-weight="900"
+            fill="${s.silenceCount>=s.silenceTrigger?'#00e676':s.silenceCount>=s.silenceTrigger*0.7?'#ffd740':'hsl(var(--foreground))'}">
+            ${s.silenceCount}
+          </text>
+          <text x="60" y="72" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="8" fill="hsl(var(--muted-foreground))" letter-spacing="1">OF ${s.silenceTrigger}</text>
+        </svg>
       </div>
-      <div class="glass-panel" style="padding:12px;margin-top:8px;display:flex;gap:8px">
-        <div class="glass-monitor" style="flex:1;text-align:center;padding:10px"><div class="stat-5xl neon-text-accent" style="font-size:2rem">${s.luckyNumber}</div><div style="font-size:7px;letter-spacing:2px">LUCKY #</div></div>
-        <div class="glass-monitor" style="flex:1;text-align:center;padding:10px"><div class="stat-5xl" style="font-size:2rem">${s.coldStreakHistory.length}</div><div style="font-size:7px;letter-spacing:2px">SAMPLES</div></div>
-      </div>`;
+      ${s.coldDigit!==null?`<div style="font-size:11px;padding:6px 14px;border-radius:999px;background:hsl(var(--primary)/0.1);border:1px solid hsl(var(--primary)/0.3);color:hsl(var(--primary));display:inline-block;margin-bottom:6px;font-weight:800">
+        Watching ≠<span style="font-size:14px;font-weight:900">${s.coldDigit}</span>${s.thirdColdDigit!==null?` + <span style="color:hsl(var(--accent))">${s.thirdColdDigit}</span>`:''}
+      </div>`:''}
+    </div>
+
+    <!-- Lucky + samples -->
+    <div class="dahub-card" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="text-align:center;padding:10px;background:hsl(var(--bg)/0.6);border-radius:10px;border:1px solid hsl(var(--accent)/0.25)">
+        <div style="font-family:'Outfit',sans-serif;font-size:28px;font-weight:900;color:hsl(var(--accent));text-shadow:0 0 16px hsl(var(--accent)/0.6);animation:dahub-float 2.5s ease-in-out infinite">${s.luckyNumber}</div>
+        <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">LUCKY #</div>
+      </div>
+      <div style="text-align:center;padding:10px;background:hsl(var(--bg)/0.6);border-radius:10px;border:1px solid hsl(var(--secondary)/0.25)">
+        <div style="font-family:'Outfit',sans-serif;font-size:28px;font-weight:900;color:hsl(var(--secondary));text-shadow:0 0 16px hsl(var(--secondary)/0.6)">${s.coldStreakHistory.length}</div>
+        <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">SAMPLES</div>
+      </div>
+    </div>`;
   }
 
   function renderCenterConfig(s) {
@@ -9432,96 +9753,340 @@ window.NexusStrategies=exports;
         ].map(([label, on]) => `<span class="chip ${on ? 'on' : 'off'}">${label}</span>`).join('')}
       </div>` : '';
 
+    // ── Upgraded Analysis Hub ──────────────────────────────────────
+    const probColor = prob >= 75 ? '#00e676' : prob >= 50 ? '#ffd740' : '#ff5252';
+    const probGlow  = prob >= 75 ? '0 0 24px #00e67688' : prob >= 50 ? '0 0 24px #ffd74088' : '0 0 24px #ff525288';
+    const circumference = 2 * Math.PI * 44;
+    const probOffset = circumference - (prob / 100) * circumference;
+    const freqData = (a && a.frequencies) ? a.frequencies : Array.from({length:10},(_,i)=>({digit:i,count:0,percentage:0}));
+    const maxCount = Math.max(...freqData.map(f=>f.count), 1);
+
+    // Radar polygon for condition chips
+    const radarConds = [
+      ['Stable',      a?.conditions?.stablePattern   || false],
+      ['Dominant',    a?.conditions?.dominantOdd      || false],
+      ['Momentum',    a?.conditions?.momentumUp       || false],
+      ['Low Vol',     a?.conditions?.lowVolatility    || false],
+      ['Compressed',  a?.conditions?.rareDigits       || false],
+    ];
+    const radarCount = radarConds.length;
+    const cx=80, cy=80, rMax=60;
+    function radarPt(idx, val) {
+      const angle = (idx / radarCount) * 2 * Math.PI - Math.PI / 2;
+      const r = val ? rMax : rMax * 0.18;
+      return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
+    }
+    const radarPoly = radarConds.map(([,v],i) => radarPt(i,v).join(',')).join(' ');
+    const radarGrid = [0.25,0.5,0.75,1].map(f=>{
+      const pts = radarConds.map((_,i) => radarPt(i, f*1).join(',')).join(' ');
+      return `<polygon points="${pts}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
+    }).join('');
+    const radarSpokes = radarConds.map(([label,v],i) => {
+      const [x1,y1] = radarPt(i, 1);
+      const [lx,ly] = [cx+(rMax+14)*Math.cos((i/radarCount)*2*Math.PI-Math.PI/2), cy+(rMax+14)*Math.sin((i/radarCount)*2*Math.PI-Math.PI/2)];
+      return `<line x1="${cx}" y1="${cy}" x2="${x1}" y2="${y1}" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+              <text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" fill="${v?'hsl(var(--win))':'rgba(255,255,255,0.28)'}" font-size="7" font-family="'Outfit',sans-serif" font-weight="700">${label}</text>`;
+    }).join('');
+
     el(`${rootId}-left`).innerHTML = `
-      <div class="analysis-hub-title"><span class="dot-indicator"></span>Analysis Hub</div>
+    <style>
+      @keyframes ahub-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.7;transform:scale(1.04)} }
+      @keyframes ahub-spin  { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+      @keyframes ahub-glow-in { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes ahub-bar-grow { from{transform:scaleY(0)} to{transform:scaleY(1)} }
+      @keyframes ahub-shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+      @keyframes ahub-ping { 0%{transform:scale(1);opacity:1} 80%,100%{transform:scale(2.2);opacity:0} }
+      @keyframes ahub-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+      @keyframes ahub-sweep { 0%{stroke-dashoffset:${circumference}} 100%{stroke-dashoffset:${probOffset}} }
+      @keyframes ahub-digit-pop { 0%{transform:scale(.85);opacity:0} 60%{transform:scale(1.08)} 100%{transform:scale(1);opacity:1} }
 
-      <div class="analysis-hub-card" style="margin-bottom:8px">
-        <div class="labeled-input" style="margin-bottom:0">
-          <span class="input-label">Active Strategy</span>
-          <select class="titan-input" id="${rootId}-strategy">
-            ${engine.STRATEGIES.map((st) => `<option value="${st.id}" ${st.id === c.currentStrategy ? 'selected' : ''}>${st.icon} ${st.name}</option>`).join('')}
-          </select>
+      .ahub-card {
+        background: linear-gradient(135deg, hsl(var(--card)/0.9), hsl(var(--bg)/0.7));
+        border: 1px solid hsl(var(--border)/0.5);
+        border-radius: 16px; padding: 14px 14px 12px;
+        margin-bottom: 10px;
+        backdrop-filter: blur(12px);
+        animation: ahub-glow-in .3s ease;
+        position: relative; overflow: hidden;
+      }
+      .ahub-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:1.5px;
+        background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.7), hsl(var(--secondary)/0.5), transparent);
+        animation: ahub-shimmer 3s linear infinite;
+        background-size: 200% 100%;
+      }
+      .ahub-label {
+        font-family:'Outfit',sans-serif; font-size:9px; font-weight:800;
+        letter-spacing:2.5px; text-transform:uppercase;
+        color:hsl(var(--muted-foreground)); margin-bottom:10px;
+        display:flex; align-items:center; gap:6px;
+      }
+      .ahub-label-dot {
+        width:6px; height:6px; border-radius:50%;
+        background:hsl(var(--primary));
+        box-shadow: 0 0 8px hsl(var(--primary));
+        animation: ahub-pulse 2s infinite;
+      }
+      .ahub-freq-bar {
+        display:flex; flex-direction:column; align-items:center; gap:3px;
+        flex:1; cursor:default; position:relative;
+      }
+      .ahub-freq-fill {
+        width:100%; border-radius:4px 4px 0 0;
+        transform-origin: bottom;
+        animation: ahub-bar-grow .5s cubic-bezier(0.34,1.56,0.64,1);
+        transition: height .4s cubic-bezier(0.34,1.56,0.64,1), background .3s;
+        min-height:4px;
+      }
+      .ahub-freq-fill:hover { filter: brightness(1.4); }
+      .ahub-freq-digit {
+        font-family:'Outfit',sans-serif; font-size:11px; font-weight:800;
+        transition: color .3s;
+      }
+      .ahub-freq-pct { font-family:'DM Mono',monospace; font-size:8px; color:hsl(var(--muted-foreground)); }
+      .ahub-mkt-card {
+        border-radius:12px; padding:10px 12px; margin-bottom:6px;
+        border: 1px solid hsl(var(--border)/0.4);
+        background: hsl(var(--bg)/0.6);
+        cursor:pointer; transition: all .2s;
+        position:relative; overflow:hidden;
+      }
+      .ahub-mkt-card:hover { border-color:hsl(var(--primary)/0.4); background:hsl(var(--primary)/0.04); transform:translateX(2px); }
+      .ahub-mkt-card.sel { border-color:hsl(var(--primary)/0.6); background:hsl(var(--primary)/0.08); box-shadow:0 0 16px hsl(var(--primary)/0.15); }
+      .ahub-mkt-card.sel::after {
+        content:''; position:absolute; inset:0; border-radius:12px;
+        background: linear-gradient(90deg, hsl(var(--primary)/0.04), transparent);
+        pointer-events:none;
+      }
+      .ahub-cond-chip {
+        padding:4px 10px; border-radius:999px; font-size:9px; font-weight:800;
+        font-family:'Outfit',sans-serif; letter-spacing:1px;
+        transition: all .25s;
+      }
+      .ahub-cond-chip.on {
+        background:hsl(var(--win)/0.15); color:hsl(var(--win));
+        border:1px solid hsl(var(--win)/0.35);
+        box-shadow:0 0 8px hsl(var(--win)/0.2);
+        animation:ahub-pulse 1.8s infinite;
+      }
+      .ahub-cond-chip.off {
+        background:hsl(var(--muted)/0.4); color:hsl(var(--muted-foreground)/0.5);
+        border:1px solid hsl(var(--border)/0.3);
+      }
+      .ahub-strategy-btn {
+        flex:1; padding:7px 4px; font-size:9px; font-weight:800;
+        font-family:'Outfit',sans-serif; letter-spacing:1px;
+        border-radius:8px; border:1px solid hsl(var(--border)/0.4);
+        background:hsl(var(--bg)/0.6); color:hsl(var(--muted-foreground));
+        cursor:pointer; transition:all .2s;
+      }
+      .ahub-strategy-btn.active, .ahub-strategy-btn:hover {
+        background:hsl(var(--primary)/0.12); color:hsl(var(--primary));
+        border-color:hsl(var(--primary)/0.4); box-shadow:0 0 10px hsl(var(--primary)/0.15);
+      }
+    </style>
+
+    <!-- ── HEADER ─────────────────────────────────────────── -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid hsl(var(--border)/0.3)">
+      <div style="position:relative;width:10px;height:10px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--primary));animation:ahub-pulse 1.5s infinite"></div>
+        <div style="position:absolute;inset:-4px;border-radius:50%;background:hsl(var(--primary)/0.2);animation:ahub-ping 1.5s infinite"></div>
+      </div>
+      <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:3px;color:hsl(var(--primary));text-transform:uppercase">Analysis Hub</span>
+      <div style="flex:1"></div>
+      <span style="font-family:'DM Mono',monospace;font-size:9px;color:hsl(var(--muted-foreground));animation:ahub-pulse 2s infinite">● LIVE</span>
+    </div>
+
+    <!-- ── SIGNAL STRENGTH RING ────────────────────────────── -->
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot"></span>Signal Strength</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="position:relative;width:110px;height:110px;flex-shrink:0;animation:ahub-float 3s ease-in-out infinite">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <defs>
+              <linearGradient id="sig-grad-${rootId}" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="${probColor}"/>
+                <stop offset="100%" stop-color="hsl(var(--secondary))"/>
+              </linearGradient>
+              <filter id="sig-glow-${rootId}">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <!-- Track -->
+            <circle cx="55" cy="55" r="44" fill="none" stroke="hsl(var(--border)/0.3)" stroke-width="8"/>
+            <!-- Glow ring -->
+            <circle cx="55" cy="55" r="44" fill="none" stroke="${probColor}" stroke-width="8" stroke-opacity="0.12"
+              stroke-dasharray="${circumference}" stroke-dashoffset="0"/>
+            <!-- Progress arc -->
+            <circle cx="55" cy="55" r="44" fill="none"
+              stroke="url(#sig-grad-${rootId})" stroke-width="8"
+              stroke-linecap="round"
+              stroke-dasharray="${circumference}" stroke-dashoffset="${probOffset}"
+              style="transform:rotate(-90deg);transform-origin:55px 55px;
+                     filter:drop-shadow(0 0 6px ${probColor});
+                     transition:stroke-dashoffset .8s cubic-bezier(0.34,1.2,0.64,1)"/>
+            <!-- Center value -->
+            <text x="55" y="51" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="22" font-weight="900" fill="${probColor}">${prob}</text>
+            <text x="55" y="65" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="9" fill="hsl(var(--muted-foreground))" letter-spacing="1">%</text>
+          </svg>
         </div>
-        <div class="text-muted" style="font-size:10px;margin-top:8px;line-height:1.5">${engine.getStrategy(c.currentStrategy).description.slice(0, 120)}…</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:8px;text-align:center">
-          <div style="padding:6px;background:hsl(var(--bg));border-radius:6px">
-            <div class="text-primary font-orbitron" style="font-size:11px">${engine.mode === 'over' ? 'OVR ' + c.overBarrier : (c.tradeMode?.toUpperCase() || '—')}</div>
-            <div class="text-muted" style="font-size:8px;margin-top:2px">MODE</div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;color:${probColor};text-shadow:${probGlow}">${rec || 'ANALYZING…'}</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <span style="font-size:9px;padding:3px 9px;border-radius:999px;font-weight:800;font-family:'Outfit',sans-serif;
+              background:${a?.mtfAligned !== false ? 'hsl(var(--win)/0.12)' : 'hsl(var(--accent)/0.12)'};
+              color:${a?.mtfAligned !== false ? 'hsl(var(--win))' : 'hsl(var(--accent))'};
+              border:1px solid ${a?.mtfAligned !== false ? 'hsl(var(--win)/0.3)' : 'hsl(var(--accent)/0.3)'};
+              box-shadow:0 0 8px ${a?.mtfAligned !== false ? 'hsl(var(--win)/0.2)' : 'hsl(var(--accent)/0.2)'}">
+              ${a?.mtfAligned !== false ? '⊕ MTF ALIGNED' : '⊘ MTF DIVERGENT'}</span>
           </div>
-          <div style="padding:6px;background:hsl(var(--bg));border-radius:6px">
-            <div class="text-primary font-orbitron" style="font-size:11px">${c.targetRuns}</div>
-            <div class="text-muted" style="font-size:8px;margin-top:2px">RUNS</div>
-          </div>
-          <div style="padding:6px;background:hsl(var(--bg));border-radius:6px">
-            <div class="text-primary font-orbitron" style="font-size:11px">${c.minSignal}%</div>
-            <div class="text-muted" style="font-size:8px;margin-top:2px">SIGNAL</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+            <div style="background:hsl(var(--bg)/0.8);border-radius:8px;padding:7px;text-align:center;border:1px solid hsl(var(--border)/0.4)">
+              <div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;color:hsl(var(--primary))">${engine.mode === 'over' ? 'OVR '+c.overBarrier : (c.tradeMode?.toUpperCase()||'—')}</div>
+              <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">MODE</div>
+            </div>
+            <div style="background:hsl(var(--bg)/0.8);border-radius:8px;padding:7px;text-align:center;border:1px solid hsl(var(--border)/0.4)">
+              <div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;color:hsl(var(--secondary))">${c.minSignal}%</div>
+              <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">MIN SIG</div>
+            </div>
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="analysis-hub-card" style="margin-bottom:8px">
-        <div class="analysis-hub-title">Signal Strength</div>
-        <div class="signal-ring-wrap">
-          <div class="signal-ring-labels" style="flex:1">
-            <div class="signal-ring-label">Probability</div>
-            <div class="signal-ring-value">${prob}%</div>
-            <div class="bar-track" style="margin-top:7px"><div class="bar-fill-primary" style="width:${prob}%"></div></div>
-            <div class="signal-ring-rec" style="margin-top:6px">${rec}</div>
-            <div class="mtf-badge ${a && a.mtfAligned !== false ? 'aligned' : 'divergent'}" style="margin-top:4px">${mtf}</div>
+    <!-- ── CONDITION RADAR ────────────────────────────────── -->
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Condition Radar</div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <svg width="160" height="160" viewBox="0 0 160 160" style="flex-shrink:0">
+          <defs>
+            <radialGradient id="radar-fill-${rootId}" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="hsl(var(--primary))" stop-opacity="0.35"/>
+              <stop offset="100%" stop-color="hsl(var(--secondary))" stop-opacity="0.1"/>
+            </radialGradient>
+          </defs>
+          ${radarGrid}
+          ${radarSpokes}
+          <polygon points="${radarPoly}" fill="url(#radar-fill-${rootId})" stroke="hsl(var(--primary))" stroke-width="1.5"
+            style="filter:drop-shadow(0 0 6px hsl(var(--primary)/0.6));transition:all .5s"/>
+          ${radarConds.map(([,v],i)=>{const [x,y]=radarPt(i,v);return `<circle cx="${x}" cy="${y}" r="${v?4.5:2.5}" fill="${v?'hsl(var(--win))':'hsl(var(--border))'}" stroke="${v?'hsl(var(--win)/0.4)':'none'}" stroke-width="4" style="filter:${v?'drop-shadow(0 0 5px hsl(var(--win)/0.8))':'none'};transition:all .4s"/>`;}).join('')}
+        </svg>
+        <div style="flex:1;display:flex;flex-direction:column;gap:5px">
+          ${radarConds.map(([label,on])=>`
+            <div style="display:flex;align-items:center;gap:7px">
+              <div style="width:8px;height:8px;border-radius:50%;flex-shrink:0;
+                background:${on?'hsl(var(--win))':'hsl(var(--border))'};
+                box-shadow:${on?'0 0 8px hsl(var(--win)/0.8)':'none'};
+                transition:all .3s;${on?'animation:ahub-pulse 1.5s infinite':''}"></div>
+              <span style="font-family:'DM Mono',monospace;font-size:10px;font-weight:700;
+                color:${on?'hsl(var(--foreground))':'hsl(var(--muted-foreground)/0.5)'};
+                transition:color .3s">${label}</span>
+              <span style="margin-left:auto;font-size:9px;font-weight:800;color:${on?'hsl(var(--win))':'hsl(var(--muted-foreground)/0.4)'}">${on?'✓':'✗'}</span>
+            </div>`).join('')}
+          <div style="margin-top:4px;padding-top:8px;border-top:1px solid hsl(var(--border)/0.3);font-family:'DM Mono',monospace;font-size:10px;color:hsl(var(--muted-foreground))">
+            Met: <span style="color:hsl(var(--win));font-weight:800">${radarConds.filter(([,v])=>v).length}</span> / ${radarConds.length}
           </div>
         </div>
-        ${condChips}
       </div>
+    </div>
 
-      <div class="analysis-hub-card" style="margin-bottom:8px">
-        <div class="analysis-hub-title">Digit Frequency</div>
-        <div style="display:flex;gap:4px;margin-bottom:6px">
-          ${[25, 50, 100].map((p) => `<button class="strategy-btn ${c.tickPeriod === p ? 'active' : ''}" data-period="${p}" style="flex:1;padding:6px;font-size:9px">${p}T</button>`).join('')}
-        </div>
-        <div class="freq-bar-grid">${freqBars}</div>
-        ${snap.liveQuote ? `<div class="font-fira text-muted" style="margin-top:8px;font-size:10px">
-          Quote: ${snap.liveQuote.toFixed(4).slice(0, -1)}<span class="text-accent" style="font-weight:700">${snap.liveDigit}</span>
-        </div>` : ''}
+    <!-- ── DIGIT HEATMAP ──────────────────────────────────── -->
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--accent));box-shadow:0 0 8px hsl(var(--accent))"></span>Digit Heatmap</div>
+      <div style="display:flex;gap:4px;margin-bottom:10px">
+        ${[25,50,100].map(p=>`<button class="ahub-strategy-btn ${c.tickPeriod===p?'active':''}" data-period="${p}" style="flex:1">${p}T</button>`).join('')}
       </div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:80px;padding-bottom:0">
+        ${freqData.map((f,i)=>{
+          const isLive = snap.liveDigit === f.digit;
+          const ht = Math.max(6, (f.count / maxCount) * 70);
+          const isOver = engine.mode==='over' && f.digit > c.overBarrier;
+          const isUnder = engine.mode==='over' && f.digit < c.overBarrier;
+          const barCol = isLive ? 'hsl(var(--accent))' : isOver ? 'hsl(var(--win)/0.8)' : isUnder ? 'hsl(var(--loss)/0.7)' : i%2===0?'hsl(var(--primary)/0.75)':'hsl(var(--secondary)/0.65)';
+          const glowCol = isLive ? 'hsl(var(--accent)/0.6)' : isOver ? 'hsl(var(--win)/0.3)' : 'hsl(var(--primary)/0.3)';
+          return `<div class="ahub-freq-bar" style="position:relative">
+            ${isLive?`<div style="position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:8px;color:hsl(var(--accent));font-weight:800;white-space:nowrap;animation:ahub-pulse 1s infinite">▼</div>`:''}
+            <div class="ahub-freq-pct">${f.percentage.toFixed(0)}%</div>
+            <div class="ahub-freq-fill" style="height:${ht}px;background:${barCol};box-shadow:${isLive?`0 0 12px ${glowCol},0 0 24px ${glowCol}`:`0 0 6px ${glowCol}`}"></div>
+            <div class="ahub-freq-digit" style="color:${isLive?'hsl(var(--accent))':isOver?'hsl(var(--win))':isUnder?'hsl(var(--loss))':'hsl(var(--foreground)/0.8)'};${isLive?'text-shadow:0 0 8px hsl(var(--accent))':''}">${f.digit}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${snap.liveQuote ? `<div style="margin-top:10px;padding:8px 10px;background:hsl(var(--bg)/0.8);border-radius:8px;border:1px solid hsl(var(--accent)/0.2);display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">LIVE QUOTE</span>
+        <span style="font-family:'DM Mono',monospace;font-size:12px;font-weight:700">
+          ${snap.liveQuote.toFixed(4).slice(0,-1)}<span style="color:hsl(var(--accent));font-weight:900;font-size:15px;text-shadow:0 0 8px hsl(var(--accent))">${snap.liveDigit}</span>
+        </span>
+      </div>` : ''}
+    </div>
 
-      <div class="analysis-hub-card">
-        <div class="analysis-hub-title" style="display:flex;align-items:center;justify-content:space-between">
-          <span>Top Markets</span>
-          <span class="text-muted" style="font-size:8px;letter-spacing:1px">LIVE SCAN</span>
+    <!-- ── STRATEGY SELECTOR ──────────────────────────────── -->
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Strategy</div>
+      <select class="titan-input" id="${rootId}-strategy" style="margin-bottom:10px;font-size:11px;font-weight:700">
+        ${engine.STRATEGIES.map(st=>`<option value="${st.id}" ${st.id===c.currentStrategy?'selected':''}>${st.icon} ${st.name}</option>`).join('')}
+      </select>
+      <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.6;padding:8px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid hsl(var(--primary)/0.4)">
+        ${engine.getStrategy(c.currentStrategy).description.slice(0,140)}…
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px">
+        <div style="padding:8px;background:hsl(var(--bg)/0.8);border-radius:8px;text-align:center;border:1px solid hsl(var(--primary)/0.2)">
+          <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:900;color:hsl(var(--primary))">${c.targetRuns}</div>
+          <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">RUNS</div>
         </div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">Scores update every tick · tap to select</div>
-        ${(scannerState.topThree || []).map((m, idx2) => {
-          const isSel = m.symbol === c.selectedMarket;
-          const health = (m.health && m.health.longTerm) || m.longTerm || '—';
-          const trend  = (m.health && m.health.trend) || m.trend || '—';
-          const vol    = (m.health && m.health.volatility) || m.volatility || '';
-          const rankColor = idx2 === 0 ? 'hsl(var(--win))' : idx2 === 1 ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
-          const healthColor = health === 'HEALTHY' ? 'hsl(var(--win))' : health === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))';
-          const trendArrow = trend === 'UP' ? '↑' : trend === 'DOWN' ? '↓' : trend !== '—' ? '→' : '';
-          return '<button class="strategy-btn ' + (isSel ? 'active' : '') + '" data-mkt="' + m.symbol + '"'
-            + ' style="width:100%;text-align:left;margin-bottom:6px;padding:9px 10px;display:block;border:' + (isSel ? '1px solid hsl(var(--primary)/0.6)' : '1px solid hsl(var(--border)/0.4)') + '">'
-            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">'
-            + '<div style="display:flex;align-items:center;gap:5px">'
-            + '<span style="font-size:8px;font-weight:900;color:' + rankColor + ';letter-spacing:1px">#' + (idx2+1) + '</span>'
-            + '<span style="font-size:10.5px;font-weight:700">' + m.name + '</span>'
-            + (isSel ? '<span style="font-size:7.5px;letter-spacing:1px;color:hsl(var(--primary));font-weight:800;margin-left:2px">● ACTIVE</span>' : '')
-            + '</div>'
-            + '<b style="font-size:12px;color:' + rankColor + '">' + m.score + '%</b>'
-            + '</div>'
-            + '<div class="bar-track" style="height:3px;margin-bottom:5px"><div style="height:100%;width:' + m.score + '%;background:' + rankColor + ';border-radius:2px;transition:width .4s"></div></div>'
-            + '<div style="display:flex;gap:6px;align-items:center">'
-            + '<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:hsl(var(--bg));color:' + healthColor + ';font-weight:700">' + health + '</span>'
-            + (trendArrow ? '<span style="font-size:8px;color:hsl(var(--muted-foreground))">' + trendArrow + ' ' + trend + '</span>' : '')
-            + (vol ? '<span style="font-size:8px;color:hsl(var(--muted-foreground));margin-left:auto">Vol:' + vol + '</span>' : '')
-            + '</div>'
-            + '</button>';
-        }).join('') || '<div class="text-muted" style="font-size:10px;padding:12px 0;text-align:center">⏳ Scanning markets…</div>'}
-        ${marketHealth ? '<div style="display:flex;gap:6px;margin-top:4px;padding-top:6px;border-top:1px solid hsl(var(--border)/0.3)">'
-          + '<span class="text-muted" style="font-size:8.5px">Active market:</span>'
-          + '<b style="font-size:8.5px;color:' + (marketHealth.longTerm === 'HEALTHY' ? 'hsl(var(--win))' : marketHealth.longTerm === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))') + '">' + marketHealth.longTerm + '</b>'
-          + '<span class="text-muted" style="font-size:8.5px;margin-left:auto">Vol:' + (marketHealth.volatility || '—') + '</span>'
-          + '</div>' : ''}
-      </div>`;
+        <div style="padding:8px;background:hsl(var(--bg)/0.8);border-radius:8px;text-align:center;border:1px solid hsl(var(--secondary)/0.2)">
+          <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:900;color:hsl(var(--secondary))">${c.minSignal}%</div>
+          <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">SIGNAL</div>
+        </div>
+        <div style="padding:8px;background:hsl(var(--bg)/0.8);border-radius:8px;text-align:center;border:1px solid hsl(var(--accent)/0.2)">
+          <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:900;color:hsl(var(--accent))">${c.minStreak||1}</div>
+          <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">STREAK</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TOP MARKETS LIVE SCAN ──────────────────────────── -->
+    <div class="ahub-card">
+      <div class="ahub-label" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:6px"><span class="ahub-label-dot" style="background:hsl(var(--win));box-shadow:0 0 8px hsl(var(--win))"></span>Top Markets</div>
+        <span style="font-size:8px;color:hsl(var(--win));animation:ahub-pulse 1.5s infinite">⬤ LIVE SCAN</span>
+      </div>
+      ${(scannerState.topThree||[]).map((m,idx2)=>{
+        const isSel = m.symbol===c.selectedMarket;
+        const health = (m.health&&m.health.longTerm)||m.longTerm||'—';
+        const trend  = (m.health&&m.health.trend)||m.trend||'—';
+        const vol    = (m.health&&m.health.volatility)||m.volatility||'';
+        const rankColors = ['hsl(var(--win))','hsl(var(--primary))','hsl(var(--secondary))'];
+        const rc = rankColors[idx2] || 'hsl(var(--muted-foreground))';
+        const hc = health==='HEALTHY'?'hsl(var(--win))':health==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))';
+        const trendArrow = trend==='UP'?'↑':trend==='DOWN'?'↓':trend!=='—'?'→':'';
+        const medals = ['🥇','🥈','🥉'];
+        return `<button class="ahub-mkt-card ${isSel?'sel':''}" data-mkt="${m.symbol}" style="width:100%;text-align:left;background:none;font:inherit;cursor:pointer">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:14px">${medals[idx2]||''}</span>
+              <span style="font-size:11px;font-weight:800;color:hsl(var(--foreground))">${m.name}</span>
+              ${isSel?`<span style="font-size:8px;font-weight:900;color:hsl(var(--primary));animation:ahub-pulse 1.5s infinite">● ACTIVE</span>`:''}
+            </div>
+            <div style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:900;color:${rc};text-shadow:0 0 10px ${rc}40">${m.score}%</div>
+          </div>
+          <div style="height:4px;background:hsl(var(--border)/0.3);border-radius:2px;overflow:hidden;margin-bottom:7px">
+            <div style="height:100%;width:${m.score}%;background:${rc};border-radius:2px;box-shadow:0 0 6px ${rc}80;transition:width .6s cubic-bezier(0.34,1.2,0.64,1)"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:8px;padding:2px 7px;border-radius:999px;background:${hc}15;color:${hc};border:1px solid ${hc}40;font-weight:800">${health}</span>
+            ${trendArrow?`<span style="font-size:9px;color:hsl(var(--muted-foreground))">${trendArrow} ${trend}</span>`:''}
+            ${vol?`<span style="font-size:8px;color:hsl(var(--muted-foreground));margin-left:auto">Vol: ${vol}</span>`:''}
+          </div>
+        </button>`;
+      }).join('')||`<div style="text-align:center;padding:20px;color:hsl(var(--muted-foreground));font-size:10px;animation:ahub-pulse 1.5s infinite">⏳ Scanning markets…</div>`}
+      ${marketHealth?`<div style="margin-top:6px;padding:8px 10px;background:hsl(var(--bg)/0.6);border-radius:8px;border:1px solid hsl(var(--border)/0.3);display:flex;align-items:center;gap:8px">
+        <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Active:</span>
+        <b style="font-size:8.5px;color:${marketHealth.longTerm==='HEALTHY'?'hsl(var(--win))':marketHealth.longTerm==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))'}">${marketHealth.longTerm}</b>
+        <span style="margin-left:auto;font-size:8.5px;color:hsl(var(--muted-foreground))">Vol: ${marketHealth.volatility||'—'}</span>
+      </div>`:''}
+    </div>`;
 
     el(`${rootId}-strategy`).onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
     el(`${rootId}-left`).querySelectorAll('[data-period]').forEach((b) => {
@@ -9546,181 +10111,317 @@ window.NexusStrategies=exports;
     const markets = engine.T.MARKETS.map((m) => `<option value="${m.symbol}" ${m.symbol === c.selectedMarket ? 'selected' : ''}>${m.name}</option>`).join('');
     const winChance = isOver ? (9 - c.overBarrier) * 10 : 50;
 
+    const cpStreak = s.streak || 0;
+    const cpRuns = s.currentRuns || 0;
+    const streakPct = Math.min(100, (cpStreak / Math.max(1, c.minStreak)) * 100);
+    const runsPct = Math.min(100, (cpRuns / Math.max(1, c.targetRuns)) * 100);
+    const isArmed = s.active;
+    const phaseLabel = s.strategyPhase === 'firing' ? 'FIRING' : s.strategyPhase === 'waiting' ? 'WAITING' : 'ANALYZE';
+    const phaseColor = s.strategyPhase === 'firing' ? '#00e676' : s.strategyPhase === 'waiting' ? '#ffd740' : 'hsl(var(--primary))';
+
     el(`${rootId}-center`).innerHTML = `
-      <div class="digit-pad text-primary" id="${rootId}-digit">—</div>
-      <div style="display:flex;justify-content:space-between;font-size:10px;margin:6px 0" class="font-orbitron">
-        <span id="${rootId}-badge" class="text-muted">IDLE</span>
-        <span class="font-fira text-muted" id="${rootId}-quote-small"></span>
-      </div>
-      <div style="display:flex;gap:8px;font-size:10px;margin-bottom:8px" class="font-fira">
-        <span>STREAK <b id="${rootId}-streak">${s.streak}</b>/${c.minStreak}</span>
-        <span>${isOver ? `OVER <b class="text-primary">${c.overBarrier}</b>` : `MODE <b class="text-primary">${(c.tradeMode || 'odd').toUpperCase()}</b>`}</span>
-        <span>RUNS <b id="${rootId}-runs">${s.currentRuns}</b>/${c.targetRuns}</span>
-      </div>
-      <div class="flow-track">
-        <div class="flow-step active" id="${rootId}-flow-analyze">ANALYZE</div>
-        <div class="flow-step" id="${rootId}-flow-wait">WAIT</div>
-        <div class="flow-step" id="${rootId}-flow-fire">FIRE</div>
-      </div>
-      <div class="text-muted" style="font-size:10px;min-height:28px;margin-bottom:10px" id="${rootId}-wait-reason"></div>
+    <style>
+      @keyframes cp-pulse   { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.06)} }
+      @keyframes cp-ping    { 0%{transform:scale(1);opacity:1} 80%,100%{transform:scale(2.4);opacity:0} }
+      @keyframes cp-in      { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes cp-shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+      @keyframes cp-digit   { 0%{transform:scale(.7);opacity:0} 60%{transform:scale(1.12)} 100%{transform:scale(1);opacity:1} }
+      @keyframes cp-flow-active { 0%,100%{box-shadow:0 0 8px hsl(var(--primary)/0.5)} 50%{box-shadow:0 0 20px hsl(var(--primary)/0.9),0 0 40px hsl(var(--primary)/0.3)} }
+      @keyframes cp-flow-fire { 0%,100%{box-shadow:0 0 8px #00e67660} 50%{box-shadow:0 0 24px #00e676cc,0 0 48px #00e67640} }
+      @keyframes cp-bar-fill { from{width:0%} to{width:var(--target-w)} }
+      @keyframes cp-glow-border { 0%,100%{border-color:hsl(var(--primary)/0.3)} 50%{border-color:hsl(var(--primary)/0.8)} }
+      @keyframes cp-engage-idle { 0%,100%{box-shadow:0 0 0 0 hsl(var(--primary)/0)} 50%{box-shadow:0 0 0 8px hsl(var(--primary)/0.15)} }
+      @keyframes cp-engage-on { 0%,100%{box-shadow:0 0 20px hsl(var(--win)/0.4),inset 0 0 20px hsl(var(--win)/0.05)} 50%{box-shadow:0 0 40px hsl(var(--win)/0.7),inset 0 0 30px hsl(var(--win)/0.1)} }
+      .cp-card {
+        background:linear-gradient(135deg,hsl(var(--card)/0.95),hsl(var(--bg)/0.8));
+        border:1px solid hsl(var(--border)/0.5); border-radius:16px;
+        padding:14px 16px; margin-bottom:10px;
+        position:relative; overflow:hidden; animation:cp-in .25s ease;
+      }
+      .cp-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:1.5px;
+        background:linear-gradient(90deg,transparent,hsl(var(--primary)/0.8),hsl(var(--secondary)/0.5),transparent);
+        animation:cp-shimmer 3.5s linear infinite; background-size:200% 100%;
+      }
+      .cp-section-label {
+        font-family:'Outfit',sans-serif; font-size:8.5px; font-weight:900;
+        letter-spacing:3px; text-transform:uppercase;
+        color:hsl(var(--muted-foreground)); margin-bottom:10px;
+        display:flex; align-items:center; gap:7px;
+      }
+      .cp-section-label::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,hsl(var(--border)/0.5),transparent); }
+      .cp-input-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+      .cp-input-group { display:flex; flex-direction:column; gap:4px; }
+      .cp-input-label { font-family:'DM Mono',monospace; font-size:8px; font-weight:700; letter-spacing:1.5px; color:hsl(var(--muted-foreground)); text-transform:uppercase; }
+      .cp-input {
+        width:100%; padding:9px 11px; border-radius:10px; box-sizing:border-box;
+        background:hsl(var(--bg)/0.8); border:1px solid hsl(var(--border)/0.6);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:13px; font-weight:700;
+        transition:border-color .2s, box-shadow .2s;
+      }
+      .cp-input:focus { outline:none; border-color:hsl(var(--primary)/0.7); box-shadow:0 0 0 3px hsl(var(--primary)/0.12), 0 0 12px hsl(var(--primary)/0.2); }
+      .cp-mode-btn {
+        flex:1; padding:11px 8px; border-radius:12px; font-size:12px; font-weight:900;
+        font-family:'Outfit',sans-serif; letter-spacing:2px;
+        border:1px solid hsl(var(--border)/0.5);
+        background:hsl(var(--bg)/0.6); color:hsl(var(--muted-foreground));
+        cursor:pointer; transition:all .2s;
+      }
+      .cp-mode-btn.active {
+        background:linear-gradient(135deg,hsl(var(--primary)/0.2),hsl(var(--primary)/0.1));
+        color:hsl(var(--primary)); border-color:hsl(var(--primary)/0.6);
+        box-shadow:0 0 16px hsl(var(--primary)/0.25),inset 0 0 16px hsl(var(--primary)/0.05);
+        animation:cp-glow-border 2.5s infinite;
+      }
+      .cp-barrier-btn {
+        aspect-ratio:1; border-radius:10px; font-size:13px; font-weight:900;
+        font-family:'Outfit',sans-serif; border:1px solid hsl(var(--border)/0.4);
+        background:hsl(var(--bg)/0.6); color:hsl(var(--muted-foreground));
+        cursor:pointer; transition:all .2s; display:flex; align-items:center; justify-content:center;
+      }
+      .cp-barrier-btn.selected {
+        background:linear-gradient(135deg,hsl(var(--primary)/0.25),hsl(var(--primary)/0.1));
+        color:hsl(var(--primary)); border-color:hsl(var(--primary)/0.7);
+        box-shadow:0 0 14px hsl(var(--primary)/0.4); font-size:15px;
+      }
+      .cp-barrier-btn:hover:not(.selected) { background:hsl(var(--primary)/0.08); border-color:hsl(var(--primary)/0.3); color:hsl(var(--foreground)); }
+      .cp-toggle-row {
+        display:flex; align-items:center; justify-content:space-between;
+        padding:10px 12px; border-radius:12px;
+        background:hsl(var(--bg)/0.5); border:1px solid hsl(var(--border)/0.4);
+        cursor:pointer; transition:all .2s; margin-bottom:6px;
+      }
+      .cp-toggle-row:hover { background:hsl(var(--primary)/0.05); border-color:hsl(var(--primary)/0.3); }
+      .cp-engage-btn {
+        width:100%; padding:16px; border-radius:16px; font-size:13px; font-weight:900;
+        font-family:'Outfit',sans-serif; letter-spacing:3px; cursor:pointer;
+        border:1.5px solid hsl(var(--primary)/0.5);
+        background:linear-gradient(135deg,hsl(var(--primary)/0.15),hsl(var(--primary)/0.05));
+        color:hsl(var(--primary)); transition:all .25s;
+        animation:cp-engage-idle 3s infinite;
+        position:relative; overflow:hidden;
+      }
+      .cp-engage-btn::before {
+        content:''; position:absolute; inset:0;
+        background:linear-gradient(90deg,transparent,hsl(var(--primary)/0.08),transparent);
+        animation:cp-shimmer 2.5s linear infinite; background-size:200% 100%;
+      }
+      .cp-engage-btn.active {
+        border-color:hsl(var(--win)/0.7);
+        background:linear-gradient(135deg,hsl(var(--win)/0.18),hsl(var(--win)/0.06));
+        color:hsl(var(--win)); animation:cp-engage-on 2s infinite;
+      }
+      .cp-engage-btn.active::before { background:linear-gradient(90deg,transparent,hsl(var(--win)/0.08),transparent); }
+      .cp-flow-step {
+        flex:1; padding:10px 6px; border-radius:10px; text-align:center;
+        font-family:'Outfit',sans-serif; font-size:9px; font-weight:900; letter-spacing:2px;
+        border:1px solid hsl(var(--border)/0.3);
+        background:hsl(var(--bg)/0.4); color:hsl(var(--muted-foreground)/0.5);
+        transition:all .3s; position:relative; overflow:hidden;
+      }
+      .cp-flow-step.active {
+        background:hsl(var(--primary)/0.12); color:hsl(var(--primary));
+        border-color:hsl(var(--primary)/0.5); animation:cp-flow-active 2s infinite;
+      }
+      .cp-flow-step.done { background:hsl(var(--win)/0.08); color:hsl(var(--win)); border-color:hsl(var(--win)/0.4); }
+      .cp-flow-step.fire-active { background:hsl(var(--win)/0.18); color:hsl(var(--win)); border-color:hsl(var(--win)/0.7); animation:cp-flow-fire 1s infinite; }
+      .cp-mart-card {
+        border-radius:10px; padding:9px 12px; margin-bottom:5px; cursor:pointer;
+        border:1px solid hsl(var(--border)/0.4); background:hsl(var(--bg)/0.5);
+        transition:all .2s;
+      }
+      .cp-mart-card.selected { border-color:hsl(var(--primary)/0.6); background:hsl(var(--primary)/0.08); box-shadow:0 0 10px hsl(var(--primary)/0.15); }
+      .cp-mart-card:hover:not(.selected) { border-color:hsl(var(--border)); background:hsl(var(--primary)/0.03); }
+      .cp-mart-card-title { font-family:'Outfit',sans-serif; font-size:10px; font-weight:800; color:hsl(var(--foreground)); margin-bottom:3px; }
+      .cp-mart-card-desc { font-family:'DM Mono',monospace; font-size:8.5px; color:hsl(var(--muted-foreground)); line-height:1.5; }
+      .cp-stat-pill {
+        flex:1; padding:10px 8px; border-radius:12px; text-align:center;
+        background:hsl(var(--bg)/0.7); border:1px solid hsl(var(--border)/0.4);
+      }
+      .cp-stat-pill-val { font-family:'Outfit',sans-serif; font-size:18px; font-weight:900; line-height:1; margin-bottom:3px; }
+      .cp-stat-pill-label { font-size:8px; font-family:'DM Mono',monospace; color:hsl(var(--muted-foreground)); letter-spacing:1px; }
+      .cp-progress-bar { height:5px; background:hsl(var(--border)/0.3); border-radius:3px; overflow:hidden; margin-top:5px; }
+      .cp-progress-fill { height:100%; border-radius:3px; transition:width .5s cubic-bezier(0.34,1.2,0.64,1); }
+    </style>
 
-      <!-- ⚡ LIVE ENTRY CONDITIONS PANEL -->
-      <div class="entry-conditions-panel" id="${rootId}-conditions">
-        <div class="entry-cond-title">
-          <span class="entry-cond-pulse" id="${rootId}-cond-pulse"></span>
-          <span>FIRE CONDITIONS</span>
-          <span class="entry-cond-status" id="${rootId}-cond-status">WAITING</span>
-        </div>
-        <div class="entry-cond-list" id="${rootId}-cond-list">
-          <div class="entry-cond-row loading"><span class="entry-cond-icon">⏳</span><span>Loading analysis…</span></div>
-        </div>
-        <div class="entry-cond-progress" id="${rootId}-cond-progress">
-          <div class="entry-cond-fill" id="${rootId}-cond-fill" style="width:0%"></div>
-        </div>
-        <div class="entry-cond-pct" id="${rootId}-cond-pct">0 / 0 conditions met</div>
+    <!-- ── LIVE DIGIT DISPLAY ─────────────────────────────────────── -->
+    <div class="cp-card" style="text-align:center;padding:20px 16px 16px">
+      <div style="position:relative;display:inline-block">
+        <div id="${rootId}-digit" style="font-family:'Outfit',sans-serif;font-size:88px;font-weight:900;line-height:1;
+          color:hsl(var(--primary));text-shadow:0 0 40px hsl(var(--primary)/0.6),0 0 80px hsl(var(--primary)/0.2);
+          animation:cp-digit .25s ease;transition:all .15s;letter-spacing:-4px">—</div>
+        <div style="position:absolute;inset:-8px;border-radius:50%;background:hsl(var(--primary)/0.06);pointer-events:none;animation:cp-pulse 2s infinite"></div>
       </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">
+        <span id="${rootId}-badge" style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:2.5px;color:hsl(var(--muted-foreground))">IDLE</span>
+        <span id="${rootId}-quote-small" style="font-family:'DM Mono',monospace;font-size:11px;color:hsl(var(--muted-foreground))"></span>
+      </div>
+    </div>
 
-      <div class="font-orbitron text-primary" style="font-size:10px;letter-spacing:2px;margin-bottom:6px">CONTROL PANEL</div>
-      <label class="text-muted" style="font-size:9px">MARKET</label>
-      <select class="titan-input" id="${rootId}-market" style="margin-bottom:8px">${markets}</select>
+    <!-- ── LIVE STATS ROW ──────────────────────────────────────────── -->
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div class="cp-stat-pill">
+        <div class="cp-stat-pill-val" style="color:hsl(var(--accent))" id="${rootId}-streak">${cpStreak}</div>
+        <div class="cp-stat-pill-label">STREAK / ${c.minStreak}</div>
+        <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${streakPct}%;background:hsl(var(--accent));box-shadow:0 0 6px hsl(var(--accent)/0.5)"></div></div>
+      </div>
+      <div class="cp-stat-pill">
+        <div class="cp-stat-pill-val" style="color:hsl(var(--secondary))" id="${rootId}-runs">${cpRuns}</div>
+        <div class="cp-stat-pill-label">RUNS / ${c.targetRuns}</div>
+        <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${runsPct}%;background:hsl(var(--secondary));box-shadow:0 0 6px hsl(var(--secondary)/0.5)"></div></div>
+      </div>
+      <div class="cp-stat-pill">
+        <div class="cp-stat-pill-val" style="color:${phaseColor};font-size:11px;letter-spacing:1px;margin-top:4px">${isOver ? `OVR ${c.overBarrier}` : (c.tradeMode||'ODD').toUpperCase()}</div>
+        <div class="cp-stat-pill-label">MODE</div>
+      </div>
+    </div>
+
+    <!-- ── FLOW TRACK ─────────────────────────────────────────────── -->
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <div class="cp-flow-step active" id="${rootId}-flow-analyze">ANALYZE</div>
+      <div style="display:flex;align-items:center;color:hsl(var(--border)/0.5);font-size:10px">→</div>
+      <div class="cp-flow-step" id="${rootId}-flow-wait">WAIT</div>
+      <div style="display:flex;align-items:center;color:hsl(var(--border)/0.5);font-size:10px">→</div>
+      <div class="cp-flow-step" id="${rootId}-flow-fire">FIRE</div>
+    </div>
+    <div id="${rootId}-wait-reason" style="font-size:10px;color:hsl(var(--muted-foreground));min-height:22px;padding:4px 0 8px;font-family:'DM Mono',monospace"></div>
+
+    <!-- ── CONTROL PANEL ─────────────────────────────────────────── -->
+    <div class="cp-card">
+      <div class="cp-section-label">Market</div>
+      <select class="cp-input" id="${rootId}-market" style="margin-bottom:12px;font-size:11px">${markets}</select>
+
       ${isOver ? `
-        <label class="text-muted" style="font-size:9px">SELECT OVER BARRIER · Win ${winChance}%</label>
-        <div class="barrier-grid" style="margin:6px 0 10px" id="${rootId}-barriers">
-          ${[0, 1, 2, 3, 4, 5, 6, 7, 8].map((b) => `<button class="barrier-btn ${b === c.overBarrier ? 'selected' : ''}" data-barrier="${b}">${b}</button>`).join('')}
-        </div>` : engine.fixedTradeMode ? `
-        <div class="glass-monitor" style="padding:9px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
-          <span class="font-orbitron text-muted" style="font-size:9px;letter-spacing:2px">DEDICATED ENGINE</span>
-          <span class="font-orbitron text-primary" style="font-size:11px;letter-spacing:2px">${engine.fixedTradeMode.toUpperCase()}</span>
-        </div>` : `
-        <div style="display:flex;gap:6px;margin-bottom:8px">
-          <button class="strategy-btn ${c.tradeMode === 'odd' ? 'active' : ''}" id="${rootId}-odd" style="flex:1">ODD</button>
-          <button class="strategy-btn ${c.tradeMode === 'even' ? 'active' : ''}" id="${rootId}-even" style="flex:1">EVEN</button>
-        </div>`}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-        <div><label class="text-muted" style="font-size:9px">STAKE</label><input class="titan-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}"></div>
-        <div><label class="text-muted" style="font-size:9px">TARGET RUNS</label><input class="titan-input" type="number" id="${rootId}-runs-in" value="${c.targetRuns}"></div>
-        <div><label class="text-muted" style="font-size:9px">MIN SIGNAL %</label><input class="titan-input" type="number" id="${rootId}-signal" value="${c.minSignal}"></div>
-        <div><label class="text-muted" style="font-size:9px">MIN STREAK</label><input class="titan-input" type="number" id="${rootId}-streak-in" value="${c.minStreak}"></div>
-      </div>
-      <div class="mart-section">
-        <div class="mart-header" id="${rootId}-mart-header">
-          <div class="mart-header-left">
-            <button class="titan-toggle ${c.martingaleEnabled ? 'on' : ''}" id="${rootId}-mart" onclick="event.stopPropagation()"></button>
-            <span class="mart-header-title">⟳ Martingale Engine</span>
-          </div>
-          <span class="mart-header-chevron ${c.martingaleEnabled ? 'open' : ''}" id="${rootId}-mart-chevron">▾</span>
+      <div class="cp-section-label">Over Barrier · Win ${winChance}%</div>
+      <div id="${rootId}-barriers" style="display:grid;grid-template-columns:repeat(9,1fr);gap:5px;margin-bottom:12px">
+        ${[0,1,2,3,4,5,6,7,8].map(b=>`<button class="cp-barrier-btn ${b===c.overBarrier?'selected':''}" data-barrier="${b}">${b}</button>`).join('')}
+      </div>` : engine.fixedTradeMode ? `
+      <div style="padding:12px;border-radius:12px;background:hsl(var(--primary)/0.08);border:1px solid hsl(var(--primary)/0.3);text-align:center;margin-bottom:12px">
+        <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">DEDICATED ENGINE</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:18px;font-weight:900;color:hsl(var(--primary));margin-top:4px">${engine.fixedTradeMode.toUpperCase()}</div>
+      </div>` : `
+      <div class="cp-section-label">Trade Mode</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="cp-mode-btn ${c.tradeMode==='odd'?'active':''}" id="${rootId}-odd">⚡ ODD</button>
+        <button class="cp-mode-btn ${c.tradeMode==='even'?'active':''}" id="${rootId}-even">◈ EVEN</button>
+      </div>`}
+
+      <div class="cp-section-label">Parameters</div>
+      <div class="cp-input-row">
+        <div class="cp-input-group">
+          <span class="cp-input-label">Stake $</span>
+          <input class="cp-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}">
         </div>
-        <div class="mart-body ${c.martingaleEnabled ? 'open' : ''}" id="${rootId}-mart-panel">
-
-          <div class="mart-field" style="margin-bottom:10px">
-            <span class="mart-field-label">Stake Multiplier</span>
-            <input class="titan-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier}">
-            <span class="mart-field-hint">After each loss: new stake = previous stake × this. Default 1.8×</span>
+        <div class="cp-input-group">
+          <span class="cp-input-label">Target Runs</span>
+          <input class="cp-input" type="number" id="${rootId}-runs-in" value="${c.targetRuns}">
+        </div>
+        <div class="cp-input-group">
+          <span class="cp-input-label">Min Signal %</span>
+          <input class="cp-input" type="number" id="${rootId}-signal" value="${c.minSignal}">
+        </div>
+        <div class="cp-input-group">
+          <span class="cp-input-label">Min Streak</span>
+          <input class="cp-input" type="number" id="${rootId}-streak-in" value="${c.minStreak}">
+        </div>
+      </div>
+    </div>
+    <!-- ── MARTINGALE ENGINE ─────────────────────────────────────── -->
+    <div class="cp-card">
+      <div class="cp-section-label">Martingale Engine</div>
+      <div class="cp-toggle-row" id="${rootId}-mart-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="titan-toggle ${c.martingaleEnabled?'on':''}" id="${rootId}-mart" onclick="event.stopPropagation()"></button>
+          <div>
+            <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">⟳ Martingale Recovery</div>
+            <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Auto-escalate stake on loss</div>
           </div>
+        </div>
+        <span id="${rootId}-mart-chevron" style="color:hsl(var(--muted-foreground));transition:transform .3s;${c.martingaleEnabled?'transform:rotate(180deg)':''}">▾</span>
+      </div>
 
+      <div class="mart-body ${c.martingaleEnabled?'open':''}" id="${rootId}-mart-panel">
+        <div class="cp-input-row" style="margin-top:10px">
+          <div class="cp-input-group">
+            <span class="cp-input-label">Multiplier ×</span>
+            <input class="cp-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier}">
+          </div>
           ${isOver ? `
-          <div class="mart-field" style="margin-bottom:10px">
-            <span class="mart-field-label">Recovery Barrier — Trade UNDER after loss</span>
-            <select class="titan-input" id="${rootId}-rec-barrier-sel" style="margin-top:4px">
-              ${[0,1,2,3,4,5,6,7,8,9].map(b => {
-                const winPct = (9 - b) * 10;
-                return `<option value="${b}" ${b === c.recoveryBarrier ? 'selected' : ''}>Under ${b} (${winPct}% win chance)</option>`;
-              }).join('')}
+          <div class="cp-input-group">
+            <span class="cp-input-label">Recovery Barrier</span>
+            <select class="cp-input" id="${rootId}-rec-barrier-sel" style="font-size:11px">
+              ${[0,1,2,3,4,5,6,7,8,9].map(b=>`<option value="${b}" ${b===c.recoveryBarrier?'selected':''}>Under ${b} (${(9-b)*10}% win)</option>`).join('')}
             </select>
-            <span class="mart-field-hint">On loss, switches to UNDER [digit]. Lower = higher win %. Default: Under 4 (50%)</span>
           </div>` : `
-          <div class="mart-field" style="margin-bottom:10px">
-            <span class="mart-field-label">Recovery Direction</span>
-            <div class="mart-field-hint" style="margin-top:4px;padding:8px;background:hsl(var(--bg));border-radius:6px;border:1px solid hsl(var(--border)/0.5)">
-              After a loss on <b style="color:hsl(var(--primary))">${(c.tradeMode||'odd').toUpperCase()}</b>, recovery fires <b style="color:hsl(var(--accent))">${(c.tradeMode||'odd')==='odd'?'EVEN':'ODD'}</b> at higher stake (opposite parity)
+          <div class="cp-input-group" style="justify-content:center">
+            <span class="cp-input-label">Recovery Dir</span>
+            <div style="padding:9px;border-radius:10px;background:hsl(var(--primary)/0.08);border:1px solid hsl(var(--primary)/0.3);font-size:10px;font-weight:800;color:hsl(var(--primary));text-align:center;font-family:'Outfit',sans-serif">
+              ${(c.tradeMode||'odd')==='odd'?'→ EVEN':'→ ODD'}
             </div>
           </div>`}
+        </div>
 
-          <div class="mart-field" style="margin-bottom:10px">
-            <span class="mart-field-label">Stop / Recovery Rule</span>
-            <select class="titan-input" id="${rootId}-stop-select" style="margin-top:4px">
-              ${[
-                {v:1, label:'🔁 Rewait — Stop at Step 1 (await fresh signal)'},
-                {v:2, label:'⏸ Cooldown — Stop at Step 2'},
-                {v:3, label:'⏱ 30s Cooldown — Stop at Step 3'},
-                {v:4, label:'🔄 Deep Recovery — Recover on barrier at Step 4'},
-                {v:5, label:'💪 Max Recovery — Step 5 before abort'},
-                {v:999, label:'♾ Always Recover — keep doubling until a win'},
-              ].map(o => `<option value="${o.v}" ${c.martingaleStopStep===o.v?'selected':''}>${o.label}</option>`).join('')}
-            </select>
-            <div class="mart-field-hint" style="margin-top:4px" id="${rootId}-stopstep-desc">${
-              c.martingaleStopStep===1 ? '1 loss → stop, await fresh signal' :
-              c.martingaleStopStep===2 ? '2 losses → stop + cooldown' :
-              c.martingaleStopStep===3 ? '3 losses → 30s forced pause' :
-              c.martingaleStopStep===4 ? '4 losses → switches to recovery barrier' :
-              c.martingaleStopStep===999 ? '♾ Always recovering — doubles stake every loss until a win' :
-              '5 losses before session aborts'
-            }</div>
+        <div class="cp-input-group" style="margin-bottom:10px">
+          <span class="cp-input-label">Stop / Recovery Rule</span>
+          <select class="cp-input" id="${rootId}-stop-select" style="margin-top:4px;font-size:11px">
+            ${[{v:1,label:'🔁 Rewait — await fresh signal'},{v:2,label:'⏸ Stop at Step 2'},{v:3,label:'⏱ 30s pause at Step 3'},{v:4,label:'🔄 Deep Recovery Step 4'},{v:5,label:'💪 Max Recovery Step 5'},{v:999,label:'♾ Always Recover'}]
+              .map(o=>`<option value="${o.v}" ${c.martingaleStopStep===o.v?'selected':''}>${o.label}</option>`).join('')}
+          </select>
+          <div id="${rootId}-stopstep-desc" style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:4px;padding:6px 8px;background:hsl(var(--bg)/0.5);border-radius:7px;font-family:'DM Mono',monospace">${
+            c.martingaleStopStep===1?'1 loss → stop, await fresh signal':c.martingaleStopStep===2?'2 losses → stop + cooldown':c.martingaleStopStep===3?'3 losses → 30s forced pause':c.martingaleStopStep===4?'4 losses → recovery barrier switch':c.martingaleStopStep===999?'♾ Always recovering — doubles until a win':'5 losses before session aborts'
+          }</div>
+        </div>
+
+        <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          ${[
+            {id:'plain', icon:'💡', title:'Standard', desc:isOver?`UNDER ${c.recoveryBarrier} every step`:`Stays on ${(c.tradeMode||'odd').toUpperCase()}`, sel:!c.alternatingRecovery&&!c.alternatingRecoveryB&&!c.smartRecovery},
+            {id:'altA',  icon:'🔄', title:'Alt Mode A', desc:'Staggered flip every 3rd step', sel:c.alternatingRecovery&&!c.smartRecovery},
+            {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:'EVEN/UNDER-first block pattern', sel:c.alternatingRecoveryB&&!c.smartRecovery},
+            {id:'smart', icon:'🧠', title:'Smart', desc:'Tick-adaptive per step', sel:c.smartRecovery},
+          ].map(rm=>`
+          <div class="cp-mart-card ${rm.sel?'selected':''}" data-rmode="${rm.id}" id="${rootId}-rmode-${rm.id}">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:14px">${rm.icon}</span>
+              <div>
+                <div class="cp-mart-card-title">${rm.title}</div>
+                <div class="cp-mart-card-desc">${rm.desc}</div>
+              </div>
+              ${rm.sel?`<div style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:hsl(var(--primary));box-shadow:0 0 8px hsl(var(--primary));animation:cp-pulse 1.5s infinite"></div>`:''}
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── AUTOMATION ─────────────────────────────────────────────── -->
+    <div class="cp-card">
+      <div class="cp-toggle-row" id="${rootId}-auto-header" style="margin-bottom:0">
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="titan-toggle ${c.autoPilot?'on':''}" id="${rootId}-auto" onclick="event.stopPropagation()"></button>
+          <div>
+            <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">⚙ Full Automation</div>
+            <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Auto-rescans GOLDEN markets each run</div>
           </div>
-
-          <div class="mart-field">
-            <span class="mart-field-label">Recovery Mode</span>
-            <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
-
-              <div class="recovery-mode-card ${!c.alternatingRecovery && !c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="plain" id="${rootId}-rmode-plain">
-                <div class="rec-card-title">💡 Standard Recovery</div>
-                <div class="rec-card-desc">${isOver
-                  ? `UNDER ${c.recoveryBarrier} on every recovery step — consistent high-win-chance direction`
-                  : `Stays on ${(c.tradeMode||'odd').toUpperCase()} at escalated stake — no direction change`
-                }</div>
-              </div>
-
-              <div class="recovery-mode-card ${c.alternatingRecovery && !c.smartRecovery ? 'selected' : ''}" data-rmode="altA" id="${rootId}-rmode-altA">
-                <div class="rec-card-title">🔄 Alt Mode A — Staggered flip</div>
-                <div class="rec-card-desc">${isOver
-                  ? `Step 1: UNDER ${c.recoveryBarrier} → Step 2: OVER ${c.recoveryBarrier} → Steps 3-4: OVER → Step 5: UNDER … (flips every 3rd)`
-                  : (c.tradeMode||'odd')==='odd'
-                    ? 'Step 1: EVEN → Step 2: ODD → Steps 3-4: ODD → Step 5: EVEN … (flips every 3rd)'
-                    : 'Step 1: ODD → Step 2: EVEN → Steps 3-4: EVEN → Step 5: ODD … (flips every 3rd)'
-                }</div>
-              </div>
-
-              <div class="recovery-mode-card ${c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="altB" id="${rootId}-rmode-altB">
-                <div class="rec-card-title">🔁 Alt Mode B — EVEN/UNDER-first</div>
-                <div class="rec-card-desc">${isOver
-                  ? `Step 1: UNDER ${c.recoveryBarrier} → Steps 2-3: OVER ${c.recoveryBarrier} → Step 4: UNDER … (repeating 1→2 block)`
-                  : 'Step 1: EVEN → Steps 2-3: ODD → Step 4: EVEN … (always starts EVEN regardless of base mode)'
-                }</div>
-              </div>
-
-              <div class="recovery-mode-card ${c.smartRecovery ? 'selected' : ''}" data-rmode="smart" id="${rootId}-rmode-smart">
-                <div class="rec-card-title">🧠 Smart Recovery — Tick-adaptive</div>
-                <div class="rec-card-desc">${isOver
-                  ? `Scans last 20 ticks: if OVER% &gt;50% → bets UNDER ${c.recoveryBarrier}. If UNDER-dominant → bets OVER ${c.recoveryBarrier}. Adapts each step.`
-                  : 'Scans last 20 ticks: if ODD% >50% → bets EVEN. If EVEN-dominant → bets ODD. Adapts each step.'
-                }</div>
-              </div>
-
+        </div>
+      </div>
+      <div id="${rootId}-auto-panel" style="${c.autoPilot?'':'display:none'};margin-top:10px;padding-top:10px;border-top:1px solid hsl(var(--border)/0.3)">
+        <div class="cp-toggle-row" style="margin-bottom:0">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="titan-toggle ${c.autoRefresh?'on':''}" id="${rootId}-autorefresh"></button>
+            <div>
+              <div style="font-size:10px;font-weight:700;font-family:'Outfit',sans-serif">♻️ Auto-Refresh</div>
+              <div style="font-size:8.5px;color:hsl(var(--muted-foreground))">Reconnects every 4 runs + stuck-detection</div>
             </div>
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="auto-section">
-        <div class="auto-header" style="cursor:pointer" id="${rootId}-auto-header">
-          <span class="auto-header-title">⚙ Full Automation</span>
-          <button class="titan-toggle ${c.autoPilot ? 'on' : ''}" id="${rootId}-auto" onclick="event.stopPropagation()"></button>
-        </div>
-        <div id="${rootId}-auto-panel" class="auto-body" style="${c.autoPilot ? '' : 'display:none'}">
-
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-row-label">
-                <span class="label-title">♻️ Auto-Refresh</span>
-                <span class="label-sub">Reconnects every 4 runs + on stuck-detection</span>
-              </div>
-              <button class="titan-toggle ${c.autoRefresh ? 'on' : ''}" id="${rootId}-autorefresh"></button>
-            </div>
-          </div>
-          <div class="auto-rescan-note">🤖 Auto-rescans for GOLDEN markets after each run</div>
-        </div>
-      </div>
-      <button class="btn-omega ${s.active ? 'stop' : ''}" id="${rootId}-toggle">${s.active ? 'TERMINATE SESSION' : 'ENGAGE OMEGA'}</button>`;
+    <!-- ── ENGAGE BUTTON ─────────────────────────────────────────── -->
+    <button class="cp-engage-btn ${s.active?'active':''}" id="${rootId}-toggle">
+      ${s.active ? '⬛ TERMINATE SESSION' : '▶ ENGAGE OMEGA'}
+    </button>`;
 
     el(`${rootId}-market`).onchange = (e) => engine.changeMarket(e.target.value);
     el(`${rootId}-stake`).onchange = (e) => engine.setConfig({ stake: Math.max(0.35, parseFloat(e.target.value) || 0.35) });
@@ -9795,23 +10496,209 @@ window.NexusStrategies=exports;
     const total = s.stats.win + s.stats.loss;
     const wr = total ? ((s.stats.win / total) * 100).toFixed(1) : '0.0';
     const journal = engine.journal || [];
+    const totalPayout = journal.filter(j=>j.type==='win').reduce((sum,j)=>sum+(j.profit||0),0);
+    const totalLost   = journal.filter(j=>j.type==='loss').reduce((sum,j)=>sum+Math.abs(j.profit||0),0);
+    const wrPct = total ? (s.stats.win/total)*100 : 0;
+    const wrArc = 2*Math.PI*36;
+    const wrOffset = wrArc - (wrPct/100)*wrArc;
+    const wrColor = wrPct>=65?'#00e676':wrPct>=45?'#ffd740':'#ff5252';
+    const recentWins  = journal.slice(0,10).filter(j=>j.type==='win').length;
+    const recentTotal = Math.min(10,journal.length);
+    const recentStreak = (() => { let n=0; for(const j of journal){ if(j.type==='win')n++; else break; } return n; })();
+
     const rightHtml = `
-      <div class="font-orbitron text-success" style="font-size:10px;letter-spacing:2px;margin-bottom:8px">● JOURNAL</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;text-align:center">
-        <div class="panel" style="padding:10px"><div class="text-success font-orbitron" style="font-size:1.5rem">${s.stats.win}</div><div class="text-muted" style="font-size:8px">WINS</div></div>
-        <div class="panel" style="padding:10px"><div class="text-destructive font-orbitron" style="font-size:1.5rem">${s.stats.loss}</div><div class="text-muted" style="font-size:8px">LOSSES</div></div>
-        <div class="panel" style="padding:10px"><div class="${s.stats.profit >= 0 ? 'text-success' : 'text-destructive'} font-fira" style="font-size:1.2rem">${s.stats.profit.toFixed(2)}</div><div class="text-muted" style="font-size:8px">PROFIT</div></div>
+    <style>
+      @keyframes jnl-in    { from{opacity:0;transform:translateX(10px)} to{opacity:1;transform:translateX(0)} }
+      @keyframes jnl-win   { 0%{box-shadow:0 0 0 0 hsl(var(--win)/0)} 30%{box-shadow:0 0 0 6px hsl(var(--win)/0.3)} 100%{box-shadow:0 0 0 0 hsl(var(--win)/0)} }
+      @keyframes jnl-loss  { 0%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} 30%{box-shadow:0 0 0 6px hsl(var(--loss)/0.3)} 100%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} }
+      @keyframes jnl-pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+      @keyframes jnl-slide { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes jnl-shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+      .jnl-header-card {
+        background:linear-gradient(135deg,hsl(var(--card)/0.95),hsl(var(--bg)/0.8));
+        border:1px solid hsl(var(--border)/0.5); border-radius:16px;
+        padding:16px; margin-bottom:10px; position:relative; overflow:hidden;
+      }
+      .jnl-header-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:1.5px;
+        background:linear-gradient(90deg,transparent,hsl(var(--win)/0.7),hsl(var(--secondary)/0.4),transparent);
+        animation:jnl-shimmer 3s linear infinite; background-size:200% 100%;
+      }
+      .jnl-stat-box {
+        border-radius:12px; padding:12px 10px; text-align:center;
+        position:relative; overflow:hidden;
+      }
+      .jnl-stat-val { font-family:'Outfit',sans-serif; font-size:24px; font-weight:900; line-height:1; }
+      .jnl-stat-label { font-size:8px; font-family:'DM Mono',monospace; letter-spacing:1.5px; color:hsl(var(--muted-foreground)); margin-top:4px; }
+      .jnl-entry {
+        border-radius:14px; padding:13px 14px; margin-bottom:7px;
+        display:flex; align-items:center; gap:12px;
+        position:relative; overflow:hidden;
+        animation:jnl-slide .2s ease;
+        transition:transform .2s, box-shadow .2s;
+        cursor:default;
+      }
+      .jnl-entry:hover { transform:translateX(3px); }
+      .jnl-entry.win {
+        background:linear-gradient(135deg,hsl(var(--win)/0.1),hsl(var(--win)/0.04));
+        border:1px solid hsl(var(--win)/0.25);
+        box-shadow:0 2px 12px hsl(var(--win)/0.1);
+      }
+      .jnl-entry.win:hover { box-shadow:0 4px 20px hsl(var(--win)/0.2); }
+      .jnl-entry.loss {
+        background:linear-gradient(135deg,hsl(var(--loss)/0.1),hsl(var(--loss)/0.04));
+        border:1px solid hsl(var(--loss)/0.25);
+        box-shadow:0 2px 12px hsl(var(--loss)/0.1);
+      }
+      .jnl-entry.loss:hover { box-shadow:0 4px 20px hsl(var(--loss)/0.2); }
+      .jnl-entry::before {
+        content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+        border-radius:2px 0 0 2px;
+      }
+      .jnl-entry.win::before { background:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.6); }
+      .jnl-entry.loss::before { background:hsl(var(--loss)); box-shadow:0 0 8px hsl(var(--loss)/0.6); }
+      .jnl-badge {
+        width:38px; height:38px; border-radius:12px; flex-shrink:0;
+        display:flex; align-items:center; justify-content:center;
+        font-family:'Outfit',sans-serif; font-size:15px; font-weight:900;
+      }
+      .jnl-badge.win { background:hsl(var(--win)/0.18); color:hsl(var(--win)); border:1px solid hsl(var(--win)/0.3); }
+      .jnl-badge.loss { background:hsl(var(--loss)/0.18); color:hsl(var(--loss)); border:1px solid hsl(var(--loss)/0.3); }
+      .jnl-digit-pill {
+        display:inline-flex; align-items:center; gap:5px;
+        padding:3px 9px; border-radius:999px; font-size:10px;
+        font-family:'DM Mono',monospace; font-weight:700;
+        background:hsl(var(--bg)/0.8); border:1px solid hsl(var(--border)/0.4);
+      }
+      .jnl-dot-row { display:flex; gap:3px; margin-top:6px; }
+      .jnl-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+      .jnl-dot.w { background:hsl(var(--win)); box-shadow:0 0 4px hsl(var(--win)/0.6); }
+      .jnl-dot.l { background:hsl(var(--loss)); box-shadow:0 0 4px hsl(var(--loss)/0.4); }
+      .jnl-dot.e { background:hsl(var(--border)/0.4); }
+    </style>
+
+    <!-- ── STATS HEADER ─────────────────────────────────────────── -->
+    <div class="jnl-header-card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <div style="position:relative;width:8px;height:8px">
+          <div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--win));animation:jnl-pulse 1.5s infinite"></div>
+        </div>
+        <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:3px;color:hsl(var(--win))">TRADE JOURNAL</span>
+        <span style="margin-left:auto;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${journal.length} trades</span>
       </div>
-      <div class="text-muted" style="font-size:10px;margin-bottom:8px">Win rate ${wr}% · Net ${s.stats.win - s.stats.loss} contracts</div>
-      <div class="journal-list" style="max-height:240px;margin-bottom:12px">
-        ${journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
-          <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
-          <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
-          <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
-          <span class="journal-net ${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
-        </div>`).join('') || '<div class="text-muted" style="text-align:center;padding:20px;font-size:10px">NO TRADES RECORDED</div>'}
+
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+        <!-- Win rate ring -->
+        <div style="position:relative;width:86px;height:86px;flex-shrink:0">
+          <svg width="86" height="86" viewBox="0 0 86 86">
+            <defs><linearGradient id="wr-grad-${rootId}" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="${wrColor}"/>
+              <stop offset="100%" stop-color="hsl(var(--secondary))"/>
+            </linearGradient></defs>
+            <circle cx="43" cy="43" r="36" fill="none" stroke="hsl(var(--border)/0.25)" stroke-width="7"/>
+            <circle cx="43" cy="43" r="36" fill="none" stroke="url(#wr-grad-${rootId})" stroke-width="7" stroke-linecap="round"
+              stroke-dasharray="${wrArc}" stroke-dashoffset="${wrOffset}"
+              style="transform:rotate(-90deg);transform-origin:43px 43px;filter:drop-shadow(0 0 5px ${wrColor}60);transition:stroke-dashoffset .8s cubic-bezier(0.34,1.2,0.64,1)"/>
+            <text x="43" y="39" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="16" font-weight="900" fill="${wrColor}">${wrPct.toFixed(0)}</text>
+            <text x="43" y="52" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="8" fill="hsl(var(--muted-foreground))">WIN %</text>
+          </svg>
+        </div>
+        <!-- Stats -->
+        <div style="flex:1;display:flex;flex-direction:column;gap:7px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">WINS</span>
+            <span style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:hsl(var(--win));text-shadow:0 0 12px hsl(var(--win)/0.5)">${s.stats.win}</span>
+          </div>
+          <div style="height:3px;background:hsl(var(--border)/0.3);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${total?((s.stats.win/total)*100).toFixed(0):0}%;background:hsl(var(--win));transition:width .6s;box-shadow:0 0 6px hsl(var(--win)/0.5)"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">LOSSES</span>
+            <span style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:hsl(var(--loss));text-shadow:0 0 12px hsl(var(--loss)/0.4)">${s.stats.loss}</span>
+          </div>
+          <div style="height:3px;background:hsl(var(--border)/0.3);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${total?((s.stats.loss/total)*100).toFixed(0):0}%;background:hsl(var(--loss));transition:width .6s"></div>
+          </div>
+        </div>
       </div>
-      <button class="strategy-btn" id="${rootId}-clear" style="width:100%;margin-top:8px;color:hsl(var(--destructive))">✕ CLEAR STATS</button>
+
+      <!-- P&L + Payout row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+        <div class="jnl-stat-box" style="background:${s.stats.profit>=0?'hsl(var(--win)/0.08)':'hsl(var(--loss)/0.08)'};border:1px solid ${s.stats.profit>=0?'hsl(var(--win)/0.25)':'hsl(var(--loss)/0.25)'}">
+          <div class="jnl-stat-val" style="font-size:16px;color:${s.stats.profit>=0?'hsl(var(--win))':'hsl(var(--loss))'}">${s.stats.profit>=0?'+':''}${s.stats.profit.toFixed(2)}</div>
+          <div class="jnl-stat-label">NET P&L</div>
+        </div>
+        <div class="jnl-stat-box" style="background:hsl(var(--win)/0.06);border:1px solid hsl(var(--win)/0.2)">
+          <div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--win))">+${totalPayout.toFixed(2)}</div>
+          <div class="jnl-stat-label">PAYOUT</div>
+        </div>
+        <div class="jnl-stat-box" style="background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.2)">
+          <div class="jnl-stat-val" style="font-size:18px;color:hsl(var(--accent))">${recentStreak}</div>
+          <div class="jnl-stat-label">STREAK</div>
+        </div>
+      </div>
+
+      <!-- Recent 10 dots -->
+      ${journal.length ? `
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid hsl(var(--border)/0.3)">
+        <div style="font-size:8px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));margin-bottom:6px;letter-spacing:1px">RECENT 10</div>
+        <div class="jnl-dot-row">
+          ${journal.slice(0,10).map(j=>`<div class="jnl-dot ${j.type==='win'?'w':'l'}" title="${j.type==='win'?'+'+j.profit.toFixed(2):j.profit.toFixed(2)}"></div>`).join('')}
+          ${Array.from({length:Math.max(0,10-Math.min(10,journal.length))},()=>`<div class="jnl-dot e"></div>`).join('')}
+          <span style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));margin-left:6px">${recentWins}/${recentTotal} wins</span>
+        </div>
+      </div>` : ''}
+    </div>
+
+    <!-- ── JOURNAL ENTRIES ────────────────────────────────────────── -->
+    <div style="flex:1;overflow-y:auto;padding-right:2px">
+      ${journal.length === 0 ? `
+      <div style="text-align:center;padding:40px 20px;color:hsl(var(--muted-foreground))">
+        <div style="font-size:28px;margin-bottom:10px;opacity:0.3">📋</div>
+        <div style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:2px">NO TRADES RECORDED</div>
+        <div style="font-size:9px;margin-top:6px;opacity:0.6">Engage the engine to start</div>
+      </div>` :
+      journal.map(j => {
+        const isWin = j.type === 'win';
+        const winColor = isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+        const entD = j.entryDigit ?? '—';
+        const exiD = j.exitDigit ?? '—';
+        const pl = (j.profit >= 0 ? '+' : '') + '$' + Math.abs(j.profit).toFixed(2);
+        return `<div class="jnl-entry ${j.type}">
+          <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+              <span class="jnl-digit-pill">
+                <span style="color:hsl(var(--muted-foreground));font-size:9px">Entry</span>
+                <b style="font-size:13px">${entD}</b>
+                <span style="color:hsl(var(--muted-foreground))">→</span>
+                <b style="font-size:15px;color:${winColor};text-shadow:0 0 8px ${winColor}80">${exiD}</b>
+              </span>
+              ${j.barrier != null ? `<span style="font-size:8.5px;padding:2px 7px;border-radius:5px;background:hsl(var(--bg)/0.8);color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">B:${j.barrier}</span>` : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:9px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">${j.time || ''}</span>
+              <span style="font-size:8.5px;padding:2px 7px;border-radius:999px;font-weight:800;font-family:'Outfit',sans-serif;
+                background:${isWin?'hsl(var(--win)/0.12)':'hsl(var(--loss)/0.12)'};
+                color:${winColor};border:1px solid ${isWin?'hsl(var(--win)/0.3)':'hsl(var(--loss)/0.3)'}">
+                ${isWin?'▲ WIN':'▼ LOSS'}</span>
+              <span style="font-size:8px;color:hsl(var(--muted-foreground)/0.6);margin-left:auto">Net Payout</span>
+            </div>
+          </div>
+          <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${winColor};
+            text-shadow:0 0 10px ${winColor}60;letter-spacing:-0.5px;flex-shrink:0">
+            ${pl}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <button style="width:100%;margin-top:10px;padding:11px;border-radius:12px;
+      border:1px solid hsl(var(--loss)/0.3);background:hsl(var(--loss)/0.06);
+      color:hsl(var(--loss));font-family:'Outfit',sans-serif;font-size:9px;font-weight:800;letter-spacing:2px;cursor:pointer;
+      transition:all .2s;" id="${rootId}-clear"
+      onmouseover="this.style.background='hsl(var(--loss)/0.12)'" onmouseout="this.style.background='hsl(var(--loss)/0.06)'">
+      ✕ CLEAR JOURNAL
+    </button>`;
       <div style="margin-top:14px">
         <button id="${rootId}-audit-toggle" style="width:100%;background:hsl(var(--card));border:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));border-radius:var(--radius-sm);padding:8px 12px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;text-align:left;display:flex;align-items:center;justify-content:space-between" onclick="(function(btn){const p=btn.nextElementSibling;const open=p.style.display!=='none';p.style.display=open?'none':'block';btn.querySelector('.audit-arrow').textContent=open?'▶':'▼';})(this)">
           <span>🔍 ENGINE LOGIC AUDIT</span><span class="audit-arrow">▶</span>
@@ -9933,7 +10820,7 @@ window.NexusStrategies=exports;
     if (fa && fw && ff) {
       fa.className = 'flow-step' + (strategyPhase !== 'firing' ? ' active' : '');
       fw.className = 'flow-step' + (strategyWaitReason && s.active ? ' active' : '');
-      ff.className = 'flow-step' + (strategyPhase === 'firing' ? ' fire active' : '');
+      ff.className = 'flow-step' + (strategyPhase === 'firing' ? ' active' : '');
     }
     const bal = el(`${rootId}-balance`);
     if (bal && s.connected) {
@@ -10304,22 +11191,8 @@ window.NexusStrategies=exports;
           </div>
         </div>
 
-        <!-- ═══ ROW 1: Active Engines + Equity Curve side by side ═══ -->
-        <div class="dash-row-top">
-          <!-- Active engines -->
-          <div class="glass-panel exec-panel">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
-              <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
-                <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
-                <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
-              </label>
-            </div>
-            <div id="dash-bot-toggles" class="bot-toggles"></div>
-            <div id="dash-exec-list" class="exec-list"></div>
-          </div>
-
-          <!-- Equity chart -->
+        <!-- ═══ ROW 1: Equity Curve — full width, tall ═══ -->
+        <div class="dash-row-full" style="margin-bottom:10px">
           <div class="glass-panel dash-equity-panel" style="padding:18px 20px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
               <div>
@@ -10335,7 +11208,22 @@ window.NexusStrategies=exports;
           </div>
         </div>
 
-        <!-- ═══ ROW 2: Engine Overview — full width ═══ -->
+        <!-- ═══ ROW 2: Active Engines — full width, compact ═══ -->
+        <div class="dash-row-full" style="margin-bottom:10px">
+          <div class="glass-panel exec-panel" style="padding:14px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
+              <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
+                <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
+                <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
+              </label>
+            </div>
+            <div id="dash-bot-toggles" class="bot-toggles" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
+            <div id="dash-exec-list" class="exec-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;max-height:200px;overflow-y:auto"></div>
+          </div>
+        </div>
+
+        <!-- ═══ ROW 3: Engine Overview — full width ═══ -->
         <div class="dash-row-full">
           <div class="glass-panel" style="padding:14px 16px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -10346,7 +11234,7 @@ window.NexusStrategies=exports;
           </div>
         </div>
 
-        <!-- ═══ ROW 3: Trade Journal — full width ═══ -->
+        <!-- ═══ ROW 4: Trade Journal — full width ═══ -->
         <div class="dash-row-full">
           <div class="glass-panel journal-panel">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -10361,9 +11249,9 @@ window.NexusStrategies=exports;
   }
 
   function buildEquitySVG(points) {
-    const w = 780, h = 260, pad = 36;
+    const w = 780, h = 320, pad = 36;
     if (points.length < 2) {
-      return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;overflow:visible">
+      return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;min-height:${h}px;overflow:visible">
         <defs>
           <linearGradient id="empty-grad" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stop-color="hsl(var(--primary))" stop-opacity="0.06"/>
@@ -10436,7 +11324,7 @@ window.NexusStrategies=exports;
 
     const endX = xAt(points.length-1).toFixed(1), endY = yAt(last).toFixed(1);
 
-    return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
+    return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;min-height:${h}px">
       <defs>
         <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.32"/>
@@ -10806,26 +11694,29 @@ window.NexusStrategies=exports;
       const botDot = j.isHistory ? 'hsl(var(--secondary))' : (BOT_META[j.botId] ? BOT_META[j.botId].dot : 'hsl(var(--muted-foreground))');
       const hasDigits = j.entryDigit != null || j.exitDigit != null;
       const plStr = (j.profit >= 0 ? '+' : '') + '$' + j.profit.toFixed(2);
-      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}">
+      const exitD = j.exitDigit != null ? j.exitDigit : '—';
+      const entryD = j.entryDigit != null ? j.entryDigit : '—';
+      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}" style="padding:16px 18px;min-height:76px;gap:14px">
         <div class="journal-badge-wrap">
-          <span class="journal-badge ${j.type}">${isWin ? 'W' : 'L'}</span>
+          <span class="journal-badge ${j.type}" style="width:36px;height:36px;font-size:14px;font-weight:900;border-radius:10px">${isWin ? 'W' : 'L'}</span>
         </div>
-        <div class="journal-entry-body">
-          <div class="journal-entry-top">
-            <span class="journal-bot-label" style="color:${botDot}">
-              <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${botDot};box-shadow:0 0 6px ${botDot};margin-right:4px;vertical-align:middle"></span>
+        <div class="journal-entry-body" style="flex:1">
+          <div class="journal-entry-top" style="margin-bottom:6px">
+            <span class="journal-bot-label" style="color:${botDot};font-size:12px;font-weight:700">
+              <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${botDot};box-shadow:0 0 6px ${botDot};margin-right:5px;vertical-align:middle"></span>
               ${botLabel}
             </span>
-            ${hasDigits ? `<span class="journal-digits-pill"><b>${j.entryDigit ?? '—'}</b> → <b>${j.exitDigit ?? '—'}</b></span>` : ''}
-            <span class="journal-time-stamp">${j.time || ''}</span>
+            ${hasDigits ? `<span class="journal-digits-pill" style="font-size:11px;padding:2px 8px">Entry <b>${entryD}</b> → Exit <b style="font-size:13px;color:${isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))'};">${exitD}</b></span>` : ''}
+            <span class="journal-time-stamp" style="font-size:10px">${j.time || ''}</span>
           </div>
-          <div class="journal-entry-bottom">
-            <span class="journal-type-label ${j.type}">${isWin ? '▲ Win' : '▼ Loss'}</span>
-            ${j.barrier != null ? `<span class="journal-barrier">Barrier ${j.barrier}</span>` : ''}
-            ${j.contract_type ? `<span class="journal-barrier">${j.contract_type}</span>` : ''}
+          <div class="journal-entry-bottom" style="gap:8px">
+            <span class="journal-type-label ${j.type}" style="font-size:11px;font-weight:800">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
+            ${j.barrier != null ? `<span class="journal-barrier" style="font-size:10px">Barrier ${j.barrier}</span>` : ''}
+            ${j.contract_type ? `<span class="journal-barrier" style="font-size:10px">${j.contract_type}</span>` : ''}
+            <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">Net Payout</span>
           </div>
         </div>
-        <div class="journal-pl ${isWin ? 'win' : 'loss'}">${plStr}</div>
+        <div class="journal-pl ${isWin ? 'win' : 'loss'}" style="font-size:18px;font-weight:900;text-align:right;letter-spacing:-0.02em">${plStr}</div>
       </div>`;
     }).join('') : '<div class="exec-empty">No trades yet — connect your account in Settings</div>';
     global.setHtmlIfChanged(el('dash-journal-list', root), journalHtml);
@@ -10890,9 +11781,9 @@ window.NexusStrategies=exports;
     const isOver = id === 'nexus';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
-    const safeSocket = (isOver ? window.NexusSocket : (id === 'odd' ? window.OddSocket : window.EvenSocket))
+    const safeSocket = (isOver ? window.NexusSocket : window.EvenSocket)
       || { globalSocket: null };
-    const safeScanner = (isOver ? window.NexusScanner : (id === 'odd' ? window.OddScanner : window.EvenScanner))
+    const safeScanner = (isOver ? window.NexusScanner : window.EvenScanner)
       || { MarketScanner: class { constructor(cb){this._cb=cb;} setTickPeriod(){} async start(){} getBestMarket(){return null;} getGoldenMarkets(){return [];} } };
     const opts = isOver
       ? {
@@ -11186,7 +12077,12 @@ window.NexusStrategies=exports;
         if (id === 'differ') {
           if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) {
             if (window.BenzUI && !window.BenzUI._initialized) { try { window.BenzUI.renderFull(eng.state); window.BenzUI._initialized = true; } catch(_) {} }
-            eng.armSystem();
+            if (!eng.state.isAuthenticated && window.HubStore && window.HubStore.getState().apiToken) {
+              eng.authenticate();
+              setTimeout(() => { try { eng.armSystem(); } catch(_) {} queueDashboardRender(); }, 3000);
+            } else {
+              eng.armSystem();
+            }
           }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
         } else {
