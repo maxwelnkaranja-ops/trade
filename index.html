@@ -239,9 +239,9 @@
   line-height: 1 !important;
 }
 
-/* ── 3-column layout: analysis hub (left) bigger, control panel (center) shrink, journal (right) bigger ── */
+/* ── 3-column layout: all three columns equal width ── */
 .benz-grid {
-  grid-template-columns: 360px 360px 1fr !important;
+  grid-template-columns: 1fr 1fr 1fr !important;
 }
 
 /* Journal in right column — bigger entries */
@@ -337,13 +337,7 @@
     radial-gradient(ellipse 55% 38% at 55% 110%, hsl(var(--primary-2)/.06) 0%,transparent 55%) !important;
   animation:aurora-shift 20s ease-in-out infinite !important;
 }
-/* Neon scan line */
-.hub-shell::after {
-  content:'';position:fixed;left:0;right:0;top:0;height:1px;
-  background:linear-gradient(90deg,transparent,hsl(var(--primary)/.6) 30%,hsl(var(--secondary)/.8) 50%,hsl(var(--primary)/.6) 70%,transparent);
-  z-index:9998;pointer-events:none;
-  animation:neon-scan-h 14s linear 6s infinite;
-}
+/* Neon scan line — removed to prevent flickering */
 /* Sidebar shimmer */
 .hub-sidebar{position:relative !important;overflow:hidden !important;}
 .hub-sidebar::after{
@@ -361,13 +355,13 @@
 .hub-tab.active .hub-tab-icon{animation:glow-pulse 3s ease-in-out infinite !important;}
 .hub-tab .dot.live{animation:cooldown-pulse 1s infinite,dot-beacon 2s ease-out infinite !important;}
 /* Columns */
-.benz-col{animation:col-float 7s ease-in-out infinite !important;transition:transform .28s cubic-bezier(.34,1.56,.64,1),border-color .22s,box-shadow .22s !important;}
-.benz-col:nth-child(2){animation-delay:2s !important;}
-.benz-col:nth-child(3){animation-delay:4s !important;}
+.benz-col{transition:transform .28s cubic-bezier(.34,1.56,.64,1),border-color .22s,box-shadow .22s !important;}
+.benz-col:nth-child(2){}
+.benz-col:nth-child(3){}
 .benz-col:hover{transform:translateY(-5px) !important;animation:none !important;border-color:hsl(var(--primary)/.5) !important;box-shadow:0 20px 50px hsl(var(--primary)/.15),0 0 0 1px hsl(var(--primary)/.2),var(--shadow-md) !important;}
-.benz-col::before{background:linear-gradient(90deg,transparent,hsl(var(--primary)/.9),hsl(var(--secondary)),transparent) !important;background-size:200% 100% !important;animation:shimmer-sweep 4s linear infinite !important;}
+.benz-col::before{background:linear-gradient(90deg,transparent,hsl(var(--primary)/.15),transparent) !important;background-size:200% 100% !important;}
 /* Digit pad */
-.digit-pad{animation:holo-flicker 9s linear infinite !important;text-shadow:0 0 20px hsl(var(--primary)/.65),0 0 60px hsl(var(--primary)/.2) !important;}
+.digit-pad{text-shadow:0 0 20px hsl(var(--primary)/.65),0 0 60px hsl(var(--primary)/.2) !important;}
 /* Live tick cells */
 .live-tick-cell{transition:all .2s cubic-bezier(.34,1.56,.64,1) !important;position:relative !important;overflow:hidden !important;}
 .live-tick-cell:hover{transform:scale(1.05) !important;z-index:2;box-shadow:0 0 22px hsl(var(--primary)/.22) !important;}
@@ -419,7 +413,7 @@
 .hub-balance-pill{animation:pill-breathe 3s ease-in-out infinite !important;}
 .hub-balance-pill:hover{transform:scale(1.06) !important;}
 /* Brand name */
-.hub-brand-name{animation:holo-flicker 12s linear infinite !important;text-shadow:0 0 10px hsl(var(--primary)/.3) !important;}
+.hub-brand-name{text-shadow:0 0 10px hsl(var(--primary)/.3) !important;}
 /* Glass glow */
 .glass-card-glow,.glass-panel-glow{animation:armed-breathe 5s ease-in-out infinite !important;}
 /* Panel transition */
@@ -823,7 +817,7 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
    ────────────────────────────────────────────────────────────── */
 .benz-grid, .titan-grid {
   display: grid;
-  grid-template-columns: 360px 360px 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px; padding: 8px;
   flex: 1; min-height: 0; overflow: hidden;
 }
@@ -8981,7 +8975,7 @@ window.NexusStrategies=exports;
         contractId: contractKey,
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
         market: contract.underlying || this.config.selectedMarket, barrier: contract.barrier ?? 0,
-        exitDigit: parseInt(exitDigit) || 0, entryDigit: entryDigit !== null ? (parseInt(entryDigit) || 0) : null,
+        exitDigit: exitDigit !== '?' && exitDigit !== undefined && exitDigit !== '' ? parseInt(exitDigit) : null, entryDigit: entryDigit !== null && entryDigit !== undefined && entryDigit !== '' ? parseInt(entryDigit) : null,
         profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
       }, ...this.journal].slice(0, 500);
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
@@ -10442,6 +10436,7 @@ window.NexusStrategies=exports;
     if (autoHdr) autoHdr.onclick = () => { const p = el(`${rootId}-auto-panel`); if (p) { p.style.display = p.style.display === 'none' ? '' : 'none'; } };
     el(`${rootId}-auto`).onclick = (e) => { e.stopPropagation(); engine.setConfig({ autoPilot: !c.autoPilot }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     el(`${rootId}-mult`) && (el(`${rootId}-mult`).onchange = (e) => engine.setConfig({ martingaleMultiplier: Math.max(1.01, parseFloat(e.target.value) || c.martingaleMultiplier) }));
+    el(`${rootId}-mult`) && (el(`${rootId}-mult`).oninput = (e) => { const v = parseFloat(e.target.value); if (v >= 1.01) engine.setConfig({ martingaleMultiplier: v }); });
     el(`${rootId}-tp`) && (el(`${rootId}-tp`).onchange = (e) => engine.setConfig({ takeProfit: Math.max(0, parseFloat(e.target.value) || 0) }));
     el(`${rootId}-sl`) && (el(`${rootId}-sl`).onchange = (e) => engine.setConfig({ stopLoss: Math.max(0, parseFloat(e.target.value) || 0) }));
     el(`${rootId}-autorefresh`) && (el(`${rootId}-autorefresh`).onclick = () => { engine.setConfig({ autoRefresh: !c.autoRefresh }); renderCenterConfig(engine, rootId, engine.getSnapshot()); });
@@ -11191,9 +11186,9 @@ window.NexusStrategies=exports;
           </div>
         </div>
 
-        <!-- ═══ ROW 1: Equity Curve — full width, tall ═══ -->
-        <div class="dash-row-full" style="margin-bottom:10px">
-          <div class="glass-panel dash-equity-panel" style="padding:18px 20px">
+        <!-- ═══ ROW 1: Equity Curve + Trade Journal — side by side ═══ -->
+        <div class="dash-row-full" style="margin-bottom:10px;display:flex;gap:10px;align-items:stretch">
+          <div class="glass-panel dash-equity-panel" style="padding:18px 20px;flex:3;min-width:0">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
               <div>
                 <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
@@ -11205,6 +11200,13 @@ window.NexusStrategies=exports;
               </div>
             </div>
             <div id="dash-equity-wrap"></div>
+          </div>
+          <div class="glass-panel journal-panel" style="flex:2;min-width:0;display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:14px 14px 0">
+              <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
+            </div>
+            <div class="journal-tabs" id="dash-journal-tabs" style="padding:0 14px"></div>
+            <div class="journal-list" id="dash-journal-list" style="flex:1;overflow-y:auto;padding:0 14px 14px"></div>
           </div>
         </div>
 
@@ -11234,17 +11236,7 @@ window.NexusStrategies=exports;
           </div>
         </div>
 
-        <!-- ═══ ROW 4: Trade Journal — full width ═══ -->
-        <div class="dash-row-full">
-          <div class="glass-panel journal-panel">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
-            </div>
-            <div class="journal-tabs" id="dash-journal-tabs"></div>
-            <div class="journal-list" id="dash-journal-list"></div>
-          </div>
-        </div>
-
+        
       </div>`;
   }
 
