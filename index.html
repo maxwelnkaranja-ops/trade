@@ -9446,7 +9446,8 @@ window.NexusStrategies=exports;
                   entry: {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
                     time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'differ',
-                    barrier: c.barrier ?? 0, exitDigit: exitDigitParsed, profit, entryDigit,
+                    barrier: _self.state.coldDigit ?? (c.barrier !== undefined && c.barrier !== null && c.barrier !== '' ? parseInt(c.barrier) : 0),
+                    exitDigit: exitDigitParsed, profit, entryDigit,
                     market: c.underlying || _self.state.primaryMarket, stake: parseFloat(c.buy_price) || _self.state.stake,
                   },
                 });
@@ -9861,6 +9862,8 @@ window.NexusStrategies=exports;
         }
       }
       this.pendingTrade = { contractType, barrier: barrierValue, entryTime: Date.now() };
+      this._lastTradedBarrier = barrierValue;
+      this._lastTradedContractType = contractType;
       this.lastTradeTime = Date.now();
       const accountCurrency = window.HubStore.getState().currency || 'USD';
       const params = {
@@ -10030,7 +10033,9 @@ window.NexusStrategies=exports;
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
         contractId: contractKey,
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
-        market: contract.underlying || this.config.selectedMarket, barrier: contract.barrier ?? 0,
+        market: contract.underlying || this.config.selectedMarket,
+        barrier: this._lastTradedBarrier != null ? this._lastTradedBarrier : (contract.barrier !== undefined && contract.barrier !== null && contract.barrier !== '' ? parseInt(contract.barrier) : (this.config.overBarrier ?? 0)),
+        contractType: this._lastTradedContractType || '',
         exitDigit: exitDigit !== '?' && exitDigit !== undefined && exitDigit !== '' ? parseInt(exitDigit) : null, entryDigit: entryDigit !== null && entryDigit !== undefined && entryDigit !== '' ? parseInt(entryDigit) : null,
         profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
         martingaleStep: this.state.martingaleStep,
@@ -11684,9 +11689,36 @@ window.NexusStrategies=exports;
         const exiD = j.exitDigit ?? '—';
         const pl = (j.profit >= 0 ? '+' : '') + '$' + Math.abs(j.profit).toFixed(2);
         // Determine recovery step info if available
-        const isRecovery = j.martingaleStep > 0 || j.inRecovery;
         const recoveryMode = j.recoveryMode || '';
-        const barrierVal = j.barrier != null ? j.barrier : '—';
+        // Barrier chip: for ODD/EVEN contracts show the mode label instead of "B:0"
+        const ctRaw = (j.contractType || '').toUpperCase();
+        const isOddEven = ctRaw === 'DIGITODD' || ctRaw === 'DIGITEVEN';
+        let barrierChip = '';
+        if (isOddEven) {
+          const modeLabel = ctRaw === 'DIGITODD' ? 'ODD' : 'EVEN';
+          const modeColor = ctRaw === 'DIGITODD' ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
+          barrierChip = `<span style="
+            display:inline-flex;align-items:center;gap:3px;
+            font-size:13px;font-weight:900;font-family:'Outfit',sans-serif;
+            padding:3px 10px;border-radius:8px;
+            background:${modeColor}18;
+            color:${modeColor};
+            border:1.5px solid ${modeColor}55;
+            text-shadow:0 0 8px ${modeColor}80;
+            letter-spacing:1px;
+          ">${modeLabel}</span>`;
+        } else if (j.barrier != null) {
+          barrierChip = `<span style="
+            display:inline-flex;align-items:center;gap:3px;
+            font-size:15px;font-weight:900;font-family:'Outfit',sans-serif;
+            padding:3px 10px;border-radius:8px;
+            background:hsl(var(--accent)/0.15);
+            color:hsl(var(--accent));
+            border:1.5px solid hsl(var(--accent)/0.45);
+            text-shadow:0 0 10px hsl(var(--accent)/0.7);
+            letter-spacing:0px;
+          "><span style="font-size:9px;font-family:'DM Mono',monospace;font-weight:700;opacity:0.7">B:</span>${j.barrier}</span>`;
+        }
         return `<div class="jnl-entry ${j.type}">
           <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
           <div style="flex:1;min-width:0">
@@ -11695,18 +11727,9 @@ window.NexusStrategies=exports;
                 <span style="color:hsl(var(--muted-foreground));font-size:9px">Ent</span>
                 <b style="font-size:13px">${entD}</b>
                 <span style="color:hsl(var(--muted-foreground));font-size:11px">→</span>
-                <b style="font-size:22px;font-weight:900;color:${winColor};text-shadow:0 0 12px ${winColor};letter-spacing:-1px;line-height:1">${exiD}</b>
+                <b style="font-size:24px;font-weight:900;color:${winColor};text-shadow:0 0 16px ${winColor},0 0 32px ${winColor}50;letter-spacing:-1px;line-height:1">${exiD}</b>
               </span>
-              ${j.barrier != null ? `<span style="
-                display:inline-flex;align-items:center;gap:3px;
-                font-size:14px;font-weight:900;font-family:'Outfit',sans-serif;
-                padding:3px 9px;border-radius:8px;
-                background:hsl(var(--accent)/0.15);
-                color:hsl(var(--accent));
-                border:1px solid hsl(var(--accent)/0.4);
-                text-shadow:0 0 8px hsl(var(--accent)/0.6);
-                letter-spacing:0px;
-              "><span style="font-size:9px;font-family:'DM Mono',monospace;font-weight:700;opacity:0.75">B:</span>${barrierVal}</span>` : ''}
+              ${barrierChip}
             </div>
             <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
               <span style="font-size:9px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">${j.time || ''}</span>
@@ -12727,24 +12750,45 @@ window.NexusStrategies=exports;
       const plStr = (j.profit >= 0 ? '+' : '') + '$' + j.profit.toFixed(2);
       const exitD = j.exitDigit != null ? j.exitDigit : '—';
       const entryD = j.entryDigit != null ? j.entryDigit : '—';
-      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}" style="padding:16px 18px;min-height:76px;gap:14px">
+      const winColor = isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+      // Build barrier/mode chip
+      const ctRaw = (j.contractType || '').toUpperCase();
+      const isDiff = j.botId === 'differ';
+      const isOddEven = ctRaw === 'DIGITODD' || ctRaw === 'DIGITEVEN';
+      let barrierChip = '';
+      if (isOddEven) {
+        const ml = ctRaw === 'DIGITODD' ? 'ODD' : 'EVEN';
+        const mc = ctRaw === 'DIGITODD' ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
+        barrierChip = `<span style="font-size:11px;font-weight:900;padding:2px 9px;border-radius:6px;background:${mc}18;color:${mc};border:1px solid ${mc}50;font-family:'Outfit',sans-serif">${ml}</span>`;
+      } else if (isDiff && j.barrier != null) {
+        barrierChip = `<span style="font-size:11px;font-weight:900;padding:2px 9px;border-radius:6px;background:hsl(var(--primary)/0.12);color:hsl(var(--primary));border:1px solid hsl(var(--primary)/0.4);font-family:'Outfit',sans-serif">≠${j.barrier}</span>`;
+      } else if (j.barrier != null && j.barrier !== 0) {
+        barrierChip = `<span style="font-size:11px;font-weight:900;padding:2px 9px;border-radius:6px;background:hsl(var(--accent)/0.12);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.4);font-family:'Outfit',sans-serif">B:${j.barrier}</span>`;
+      }
+      const recoveryChip = j.recoveryMode ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--accent)/0.08);color:hsl(var(--accent)/0.8);border:1px solid hsl(var(--accent)/0.25);font-family:'DM Mono',monospace">${j.recoveryMode}</span>` : '';
+      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}" style="padding:14px 16px;min-height:72px;gap:12px">
         <div class="journal-badge-wrap">
           <span class="journal-badge ${j.type}" style="width:36px;height:36px;font-size:14px;font-weight:900;border-radius:10px">${isWin ? 'W' : 'L'}</span>
         </div>
         <div class="journal-entry-body" style="flex:1">
-          <div class="journal-entry-top" style="margin-bottom:6px">
-            <span class="journal-bot-label" style="color:${botDot};font-size:12px;font-weight:700">
+          <div class="journal-entry-top" style="margin-bottom:5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="journal-bot-label" style="color:${botDot};font-size:11.5px;font-weight:700">
               <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${botDot};box-shadow:0 0 6px ${botDot};margin-right:5px;vertical-align:middle"></span>
               ${botLabel}
             </span>
-            ${hasDigits ? `<span class="journal-digits-pill" style="font-size:11px;padding:2px 8px">Entry <b>${entryD}</b> → Exit <b style="font-size:13px;color:${isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))'};">${exitD}</b></span>` : ''}
-            <span class="journal-time-stamp" style="font-size:10px">${j.time || ''}</span>
+            ${hasDigits ? `<span class="journal-digits-pill" style="font-size:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:5px">
+              <span style="opacity:0.6">Ent</span>
+              <b>${entryD}</b>
+              <span style="opacity:0.5">→</span>
+              <b style="font-size:20px;font-weight:900;color:${winColor};text-shadow:0 0 10px ${winColor}70;line-height:1;letter-spacing:-0.5px">${exitD}</b>
+            </span>` : ''}
+            ${barrierChip}
+            <span class="journal-time-stamp" style="font-size:10px;margin-left:auto">${j.time || ''}</span>
           </div>
-          <div class="journal-entry-bottom" style="gap:8px">
-            <span class="journal-type-label ${j.type}" style="font-size:11px;font-weight:800">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
-            ${j.barrier != null ? `<span class="journal-barrier" style="font-size:10px">Barrier ${j.barrier}</span>` : ''}
-            ${j.contract_type ? `<span class="journal-barrier" style="font-size:10px">${j.contract_type}</span>` : ''}
-            <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">Net Payout</span>
+          <div class="journal-entry-bottom" style="gap:7px;display:flex;align-items:center;flex-wrap:wrap">
+            <span class="journal-type-label ${j.type}" style="font-size:10.5px;font-weight:800">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
+            ${recoveryChip}
+            <span style="font-size:9.5px;color:hsl(var(--muted-foreground)/0.6);font-family:'DM Mono',monospace;margin-left:auto">Net Payout</span>
           </div>
         </div>
         <div class="journal-pl ${isWin ? 'win' : 'loss'}" style="font-size:18px;font-weight:900;text-align:right;letter-spacing:-0.02em">${plStr}</div>
