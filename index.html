@@ -10033,6 +10033,14 @@ window.NexusStrategies=exports;
         market: contract.underlying || this.config.selectedMarket, barrier: contract.barrier ?? 0,
         exitDigit: exitDigit !== '?' && exitDigit !== undefined && exitDigit !== '' ? parseInt(exitDigit) : null, entryDigit: entryDigit !== null && entryDigit !== undefined && entryDigit !== '' ? parseInt(entryDigit) : null,
         profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
+        martingaleStep: this.state.martingaleStep,
+        inRecovery: this.state.inRecovery,
+        recoveryMode: this.state.inRecovery ? (
+          this.config.smartRecovery ? 'SMART-REC' :
+          this.config.alternatingRecovery ? 'ALT-A' :
+          this.config.alternatingRecoveryB ? 'ALT-B' :
+          `STEP-${this.state.martingaleStep}`
+        ) : '',
       }, ...this.journal].slice(0, 500);
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
       const cfg = this.config;
@@ -10071,6 +10079,13 @@ window.NexusStrategies=exports;
         this.addLog('engine', 'REWAIT', `REWAIT: Loss → awaiting new entry @ $${st.currentStake.toFixed(2)}`);
         return;
       }
+      // MARTINGALE DISABLED: after any loss, release lock so bot picks up next signal naturally
+      if (st.isLocked && !cfg.martingaleEnabled && !st.inRecovery) {
+        this.executionGuard = false;
+        this.state = { ...this.state, isLocked: false };
+        this.addLog('engine', 'REWAIT', `Martingale OFF: Loss accepted → awaiting next entry signal`);
+        return;
+      }
       // MAX RECOVERY STEP REACHED → cooldown (market switch needed)
       if (st.isLocked && cfg.martingaleEnabled && st.martingaleStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
         this.addLog('loss', 'CRITICAL', `MAX RECOVERY STEP ${cfg.martingaleStopStep} REACHED — accepting loss, entering cooldown for market switch`);
@@ -10083,6 +10098,8 @@ window.NexusStrategies=exports;
           this.completeSession();
         } else if (st.inRecovery) {
           // Still in recovery (loss, not at max step) → keep trading on martingale, NO cooldown
+          const recMode = cfg.smartRecovery ? 'SMART' : cfg.alternatingRecovery ? 'ALT-A' : cfg.alternatingRecoveryB ? 'ALT-B' : 'PLAIN';
+          this.addLog('engine', 'RECOVERY', `🔄 Step ${st.martingaleStep} | $${st.currentStake.toFixed(2)} | Mode: ${recMode}`);
           this.executionGuard = false;
           this.executeBoltPurchase();
         } else if (st.currentRuns > 0) {
@@ -10634,8 +10651,11 @@ window.NexusStrategies=exports;
       </div>
       <div style="margin-top:8px" class="journal-list">${s.journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
         <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
-        <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
-        <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
+        <span style="color:hsl(var(--muted-foreground));font-size:9px;font-family:'DM Mono',monospace">${j.time}</span>
+        <span class="journal-digits" style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:9px;color:hsl(var(--muted-foreground))">B:</span><b style="font-size:18px;font-weight:900;color:hsl(var(--accent));text-shadow:0 0 8px hsl(var(--accent)/0.6)">${j.barrier}</b>
+          <span style="color:hsl(var(--muted-foreground));font-size:10px;margin:0 2px">${j.entryDigit ?? '—'}<span class="arrow">→</span></span><b style="font-size:22px;font-weight:900;color:${j.type==='win'?'hsl(var(--win))':'hsl(var(--loss))'};text-shadow:0 0 10px ${j.type==='win'?'hsl(var(--win)/0.7)':'hsl(var(--loss)/0.7)'}">${j.exitDigit}</b>
+        </span>
         <span class="journal-net ${j.type === 'win' ? 'neon-text-win' : 'neon-text-loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
       </div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
       <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:'Outfit',sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
@@ -11097,9 +11117,23 @@ window.NexusStrategies=exports;
       <select class="cp-input" id="${rootId}-market" style="margin-bottom:12px;font-size:11px">${markets}</select>
 
       ${isOver ? `
-      <div class="cp-section-label">Over Barrier · Win ${winChance}%</div>
-      <div id="${rootId}-barriers" style="display:grid;grid-template-columns:repeat(9,1fr);gap:5px;margin-bottom:12px">
-        ${[0,1,2,3,4,5,6,7,8].map(b=>`<button class="cp-barrier-btn ${b===c.overBarrier?'selected':''}" data-barrier="${b}">${b}</button>`).join('')}
+      <div class="cp-section-label">Over Barrier · Win ${winChance}% · <span style="color:hsl(var(--primary));font-weight:900">Active: ${c.overBarrier}</span></div>
+      <div id="${rootId}-barriers" style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-bottom:14px">
+        ${[0,1,2,3,4,5,6,7,8].map(b=>`<button class="cp-barrier-btn ${b===c.overBarrier?'selected':''}" data-barrier="${b}" style="
+          font-family:'Outfit',sans-serif;
+          font-size:${b===c.overBarrier?'22px':'18px'};
+          font-weight:900;
+          padding:10px 4px;
+          border-radius:10px;
+          border:2px solid ${b===c.overBarrier?'hsl(var(--primary))':'hsl(var(--border)/0.5)'};
+          background:${b===c.overBarrier?'linear-gradient(135deg,hsl(var(--primary)/0.25),hsl(var(--primary)/0.1))':'hsl(var(--bg)/0.5)'};
+          color:${b===c.overBarrier?'hsl(var(--primary))':'hsl(var(--foreground)/0.7)'};
+          box-shadow:${b===c.overBarrier?'0 0 16px hsl(var(--primary)/0.5),inset 0 1px 0 hsl(255 100% 100%/0.1)':'none'};
+          text-shadow:${b===c.overBarrier?'0 0 10px hsl(var(--primary)/0.8)':'none'};
+          cursor:pointer;
+          transition:all .18s cubic-bezier(.34,1.56,.64,1);
+          transform:${b===c.overBarrier?'scale(1.08)':'scale(1)'};
+        ">${b}</button>`).join('')}
       </div>` : engine.fixedTradeMode ? `
       <div style="padding:12px;border-radius:12px;background:hsl(var(--primary)/0.08);border:1px solid hsl(var(--primary)/0.3);text-align:center;margin-bottom:12px">
         <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">DEDICATED ENGINE</div>
@@ -11649,24 +11683,38 @@ window.NexusStrategies=exports;
         const entD = j.entryDigit ?? '—';
         const exiD = j.exitDigit ?? '—';
         const pl = (j.profit >= 0 ? '+' : '') + '$' + Math.abs(j.profit).toFixed(2);
+        // Determine recovery step info if available
+        const isRecovery = j.martingaleStep > 0 || j.inRecovery;
+        const recoveryMode = j.recoveryMode || '';
+        const barrierVal = j.barrier != null ? j.barrier : '—';
         return `<div class="jnl-entry ${j.type}">
           <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
           <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
-              <span class="jnl-digit-pill">
-                <span style="color:hsl(var(--muted-foreground));font-size:9px">Entry</span>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
+              <span class="jnl-digit-pill" style="background:hsl(var(--bg));border:1px solid hsl(var(--border)/0.5)">
+                <span style="color:hsl(var(--muted-foreground));font-size:9px">Ent</span>
                 <b style="font-size:13px">${entD}</b>
-                <span style="color:hsl(var(--muted-foreground))">→</span>
-                <b style="font-size:15px;color:${winColor};text-shadow:0 0 8px ${winColor}80">${exiD}</b>
+                <span style="color:hsl(var(--muted-foreground));font-size:11px">→</span>
+                <b style="font-size:22px;font-weight:900;color:${winColor};text-shadow:0 0 12px ${winColor};letter-spacing:-1px;line-height:1">${exiD}</b>
               </span>
-              ${j.barrier != null ? `<span style="font-size:8.5px;padding:2px 7px;border-radius:5px;background:hsl(var(--bg)/0.8);color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">B:${j.barrier}</span>` : ''}
+              ${j.barrier != null ? `<span style="
+                display:inline-flex;align-items:center;gap:3px;
+                font-size:14px;font-weight:900;font-family:'Outfit',sans-serif;
+                padding:3px 9px;border-radius:8px;
+                background:hsl(var(--accent)/0.15);
+                color:hsl(var(--accent));
+                border:1px solid hsl(var(--accent)/0.4);
+                text-shadow:0 0 8px hsl(var(--accent)/0.6);
+                letter-spacing:0px;
+              "><span style="font-size:9px;font-family:'DM Mono',monospace;font-weight:700;opacity:0.75">B:</span>${barrierVal}</span>` : ''}
             </div>
-            <div style="display:flex;align-items:center;gap:8px">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
               <span style="font-size:9px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">${j.time || ''}</span>
               <span style="font-size:8.5px;padding:2px 7px;border-radius:999px;font-weight:800;font-family:'Outfit',sans-serif;
                 background:${isWin?'hsl(var(--win)/0.12)':'hsl(var(--loss)/0.12)'};
                 color:${winColor};border:1px solid ${isWin?'hsl(var(--win)/0.3)':'hsl(var(--loss)/0.3)'}">
                 ${isWin?'▲ WIN':'▼ LOSS'}</span>
+              ${recoveryMode ? `<span style="font-size:8px;padding:1px 6px;border-radius:999px;background:hsl(var(--accent)/0.1);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.3);font-family:'DM Mono',monospace">${recoveryMode}</span>` : ''}
               <span style="font-size:8px;color:hsl(var(--muted-foreground)/0.6);margin-left:auto">Net Payout</span>
             </div>
           </div>
