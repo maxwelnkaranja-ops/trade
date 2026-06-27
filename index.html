@@ -10698,7 +10698,7 @@ window.NexusStrategies=exports;
       transition:all .2s;" id="${rootId}-clear"
       onmouseover="this.style.background='hsl(var(--loss)/0.12)'" onmouseout="this.style.background='hsl(var(--loss)/0.06)'">
       ✕ CLEAR JOURNAL
-    </button>`;
+    </button>
       <div style="margin-top:14px">
         <button id="${rootId}-audit-toggle" style="width:100%;background:hsl(var(--card));border:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));border-radius:var(--radius-sm);padding:8px 12px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;text-align:left;display:flex;align-items:center;justify-content:space-between" onclick="(function(btn){const p=btn.nextElementSibling;const open=p.style.display!=='none';p.style.display=open?'none':'block';btn.querySelector('.audit-arrow').textContent=open?'▶':'▼';})(this)">
           <span>🔍 ENGINE LOGIC AUDIT</span><span class="audit-arrow">▶</span>
