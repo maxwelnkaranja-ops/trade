@@ -5876,224 +5876,217 @@ html body .font-mono { font-size: 12.5px !important; }
 html body .modal-title { font-size: 16px !important; }
 html body .modal-body { font-size: 13.5px !important; }
 
-/* ── Settings modal scroll fix ── */
+/* ═══════════════════════════════════════════════════════════════════
+   SETTINGS MODAL — scrollable, never clips content
+   ═══════════════════════════════════════════════════════════════════ */
 .modal-card {
   overflow-y: auto !important;
   overflow-x: hidden !important;
-  overscroll-behavior: contain;
+  overscroll-behavior: contain !important;
+  max-height: 90vh !important;
 }
-/* The earlier block that sets overflow:hidden on modal-card is overridden above */
+/* Sticky header stays visible while body scrolls */
+.modal-header {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 2 !important;
+}
 
-/* ══════════════════════════════════════════════════════════════
-   DIGIT HEATMAP · STAT PILLS · FLOW STEPS · BARRIER BUTTONS
-   — Covers all tabs: Control Panel, AHUB, and any future panels
-   ══════════════════════════════════════════════════════════════ */
-
-/* ── ahub digit heatmap bars ── */
+/* ═══════════════════════════════════════════════════════════════════
+   DIGIT HEATMAP — ahub-freq bars, period buttons (25T 50T 100T)
+   ═══════════════════════════════════════════════════════════════════ */
 .ahub-freq-bar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  flex: 1;
-  min-width: 0;
-  padding: 0 2px;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 3px !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+  padding: 0 2px !important;
 }
 .ahub-freq-pct {
-  font-family: 'DM Mono', monospace;
-  font-size: 7.5px;
-  font-weight: 700;
-  color: hsl(var(--muted-foreground) / 0.75);
-  line-height: 1;
-  letter-spacing: -0.3px;
+  font-family: 'DM Mono', monospace !important;
+  font-size: 7.5px !important;
+  font-weight: 700 !important;
+  color: hsl(var(--muted-foreground) / 0.75) !important;
+  line-height: 1 !important;
+  letter-spacing: -0.3px !important;
+  text-align: center !important;
 }
 .ahub-freq-fill {
-  width: 100%;
-  border-radius: 4px 4px 0 0;
-  min-height: 4px;
-  transform-origin: bottom;
-  animation: dahub-bar .5s cubic-bezier(0.34,1.56,0.64,1);
-  transition: height .4s cubic-bezier(0.34,1.56,0.64,1);
+  width: 100% !important;
+  border-radius: 4px 4px 0 0 !important;
+  min-height: 4px !important;
+  transition: height 0.4s cubic-bezier(0.34,1.2,0.64,1) !important;
 }
 .ahub-freq-digit {
-  font-family: 'Outfit', sans-serif;
-  font-size: 10px;
-  font-weight: 900;
-  line-height: 1;
-  margin-top: 2px;
+  font-family: 'Outfit', sans-serif !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  margin-top: 2px !important;
+  text-align: center !important;
 }
 
-/* ── ahub period buttons (25T 50T 100T) ── */
+/* Period toggle buttons: 25T 50T 100T */
 .ahub-strategy-btn {
-  background: hsl(var(--bg) / 0.6);
-  border: 1px solid hsl(var(--border) / 0.45);
-  border-radius: 9px;
-  color: hsl(var(--muted-foreground));
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 1.5px;
-  padding: 6px 4px;
-  cursor: pointer;
-  transition: all .18s cubic-bezier(.34,1.56,.64,1);
+  background: hsl(var(--bg) / 0.55) !important;
+  border: 1px solid hsl(var(--border) / 0.4) !important;
+  border-radius: 9px !important;
+  color: hsl(var(--muted-foreground)) !important;
+  font-family: 'Space Grotesk', sans-serif !important;
+  font-size: 9.5px !important;
+  font-weight: 800 !important;
+  letter-spacing: 1.5px !important;
+  padding: 6px 4px !important;
+  cursor: pointer !important;
+  transition: all 0.18s cubic-bezier(0.34,1.56,0.64,1) !important;
 }
 .ahub-strategy-btn:hover {
-  border-color: hsl(var(--primary) / 0.5);
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.07);
+  border-color: hsl(var(--primary) / 0.5) !important;
+  color: hsl(var(--primary)) !important;
+  background: hsl(var(--primary) / 0.07) !important;
 }
 .ahub-strategy-btn.active {
-  background: linear-gradient(135deg, hsl(var(--primary) / 0.18), hsl(var(--primary-2) / 0.1));
-  border-color: hsl(var(--primary) / 0.55);
-  color: hsl(var(--primary));
-  box-shadow: 0 0 14px hsl(var(--primary) / 0.18), inset 0 1px 0 hsl(255 100% 100% / 0.06);
+  background: linear-gradient(135deg, hsl(var(--primary)/0.18), hsl(var(--primary-2)/0.1)) !important;
+  border-color: hsl(var(--primary) / 0.55) !important;
+  color: hsl(var(--primary)) !important;
+  box-shadow: 0 0 14px hsl(var(--primary)/0.18), inset 0 1px 0 hsl(255 100% 100%/0.06) !important;
 }
 
-/* ── cp stat pills (0 STREAK / 3 · 0 RUNS / 1 · OVR 3 MODE) ── */
+/* ═══════════════════════════════════════════════════════════════════
+   STAT PILLS — 0 STREAK / 3   0 RUNS / 1   OVR 3 MODE
+   ═══════════════════════════════════════════════════════════════════ */
 .cp-stat-pill {
-  flex: 1;
-  background: hsl(var(--bg) / 0.55);
-  border: 1px solid hsl(var(--border) / 0.4);
-  border-radius: 14px;
-  padding: 10px 10px 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  position: relative;
-  overflow: hidden;
-  transition: border-color .18s, box-shadow .18s;
+  flex: 1 !important;
+  background: hsl(var(--bg) / 0.55) !important;
+  border: 1px solid hsl(var(--border) / 0.4) !important;
+  border-radius: 14px !important;
+  padding: 10px 10px 8px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 3px !important;
+  position: relative !important;
+  overflow: hidden !important;
+  transition: border-color .18s, box-shadow .18s !important;
+  min-width: 0 !important;
 }
 .cp-stat-pill::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.3), transparent);
-}
-.cp-stat-pill:hover {
-  border-color: hsl(var(--border-bright) / 0.5);
-  box-shadow: 0 2px 12px hsl(0 0% 0% / 0.18);
+  content: '' !important;
+  position: absolute !important;
+  top: 0; left: 0; right: 0 !important;
+  height: 1px !important;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.3), transparent) !important;
 }
 .cp-stat-pill-val {
-  font-family: 'Outfit', sans-serif;
-  font-size: 20px;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: -0.5px;
+  font-family: 'Outfit', sans-serif !important;
+  font-size: 20px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  letter-spacing: -0.5px !important;
 }
 .cp-stat-pill-label {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 7.5px;
-  font-weight: 800;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: hsl(var(--muted-foreground) / 0.6);
-  text-align: center;
-  line-height: 1.2;
+  font-family: 'Space Grotesk', sans-serif !important;
+  font-size: 7.5px !important;
+  font-weight: 800 !important;
+  letter-spacing: 1.5px !important;
+  text-transform: uppercase !important;
+  color: hsl(var(--muted-foreground) / 0.6) !important;
+  text-align: center !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
 }
-
-/* ── cp progress bar (inside stat pill) ── */
 .cp-progress-bar {
-  width: 100%;
-  height: 3px;
-  background: hsl(var(--border) / 0.35);
-  border-radius: 99px;
-  overflow: hidden;
-  margin-top: 4px;
+  width: 100% !important;
+  height: 3px !important;
+  background: hsl(var(--border) / 0.35) !important;
+  border-radius: 99px !important;
+  overflow: hidden !important;
+  margin-top: 4px !important;
 }
 .cp-progress-fill {
-  height: 100%;
-  border-radius: 99px;
-  transition: width .5s cubic-bezier(.34,1.2,.64,1);
-  min-width: 2px;
+  height: 100% !important;
+  border-radius: 99px !important;
+  transition: width 0.5s cubic-bezier(0.34,1.2,0.64,1) !important;
+  min-width: 2px !important;
 }
 
-/* ── cp flow steps (ANALYZE → WAIT → FIRE) ── */
+/* ═══════════════════════════════════════════════════════════════════
+   FLOW STEPS — ANALYZE → WAIT → FIRE
+   ═══════════════════════════════════════════════════════════════════ */
 .cp-flow-step {
-  flex: 1;
-  padding: 7px 4px;
-  text-align: center;
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 8.5px;
-  font-weight: 800;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: hsl(var(--muted-foreground) / 0.45);
-  background: hsl(var(--bg) / 0.4);
-  border: 1px solid hsl(var(--border) / 0.3);
-  border-radius: 10px;
-  transition: all .22s cubic-bezier(.34,1.56,.64,1);
-  cursor: default;
-  user-select: none;
+  flex: 1 !important;
+  padding: 7px 4px !important;
+  text-align: center !important;
+  font-family: 'Space Grotesk', sans-serif !important;
+  font-size: 8.5px !important;
+  font-weight: 800 !important;
+  letter-spacing: 1.5px !important;
+  text-transform: uppercase !important;
+  color: hsl(var(--muted-foreground) / 0.4) !important;
+  background: hsl(var(--bg) / 0.4) !important;
+  border: 1px solid hsl(var(--border) / 0.3) !important;
+  border-radius: 10px !important;
+  transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1) !important;
+  cursor: default !important;
+  user-select: none !important;
 }
 .cp-flow-step.active {
-  color: hsl(var(--accent));
-  background: hsl(var(--accent) / 0.1);
-  border-color: hsl(var(--accent) / 0.45);
-  box-shadow: 0 0 14px hsl(var(--accent) / 0.18), inset 0 1px 0 hsl(255 100% 100% / 0.04);
-}
-.cp-flow-step.done {
-  color: hsl(var(--win));
-  background: hsl(var(--win) / 0.08);
-  border-color: hsl(var(--win) / 0.35);
-}
-.cp-flow-step.fire {
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
-  border-color: hsl(var(--primary) / 0.45);
-  box-shadow: 0 0 16px hsl(var(--primary) / 0.22);
-  animation: cp-fire-pulse 1s ease-in-out infinite;
-}
-@keyframes cp-fire-pulse {
-  0%, 100% { box-shadow: 0 0 12px hsl(var(--primary) / 0.2); }
-  50%       { box-shadow: 0 0 24px hsl(var(--primary) / 0.42); }
+  color: hsl(var(--accent)) !important;
+  background: hsl(var(--accent) / 0.1) !important;
+  border-color: hsl(var(--accent) / 0.45) !important;
+  box-shadow: 0 0 14px hsl(var(--accent)/0.18), inset 0 1px 0 hsl(255 100% 100%/0.04) !important;
 }
 
-/* ── cp barrier buttons (Over Barrier · Win 60% — 0 1 2 3…8) ── */
+/* ═══════════════════════════════════════════════════════════════════
+   BARRIER BUTTONS — Over Barrier grid  0 1 2 … 8
+   ═══════════════════════════════════════════════════════════════════ */
 .cp-barrier-btn {
-  padding: 7px 2px;
-  font-family: 'Outfit', sans-serif;
-  font-size: 11px;
-  font-weight: 900;
-  text-align: center;
-  background: hsl(var(--bg) / 0.55);
-  border: 1px solid hsl(var(--border) / 0.4);
-  border-radius: 9px;
-  color: hsl(var(--muted-foreground));
-  cursor: pointer;
-  transition: all .18s cubic-bezier(.34,1.56,.64,1);
+  padding: 7px 2px !important;
+  font-family: 'Outfit', sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+  background: hsl(var(--bg) / 0.55) !important;
+  border: 1px solid hsl(var(--border) / 0.4) !important;
+  border-radius: 9px !important;
+  color: hsl(var(--muted-foreground)) !important;
+  cursor: pointer !important;
+  transition: all 0.18s cubic-bezier(0.34,1.56,0.64,1) !important;
 }
 .cp-barrier-btn:hover {
-  border-color: hsl(var(--primary) / 0.55);
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.08);
-  transform: translateY(-1px);
+  border-color: hsl(var(--primary) / 0.55) !important;
+  color: hsl(var(--primary)) !important;
+  background: hsl(var(--primary) / 0.08) !important;
+  transform: translateY(-1px) !important;
 }
 .cp-barrier-btn.selected {
-  background: linear-gradient(135deg, hsl(var(--primary) / 0.2), hsl(var(--primary-2) / 0.1));
-  border-color: hsl(var(--primary) / 0.65);
-  color: hsl(var(--primary));
-  box-shadow: 0 0 16px hsl(var(--primary) / 0.22), inset 0 1px 0 hsl(255 100% 100% / 0.06);
-  transform: translateY(-1px);
+  background: linear-gradient(135deg, hsl(var(--primary)/0.2), hsl(var(--primary-2)/0.1)) !important;
+  border-color: hsl(var(--primary) / 0.65) !important;
+  color: hsl(var(--primary)) !important;
+  box-shadow: 0 0 16px hsl(var(--primary)/0.22), inset 0 1px 0 hsl(255 100% 100%/0.06) !important;
+  transform: translateY(-1px) !important;
 }
 
-/* ── NEXUS / panel col-header upgrade ── */
+/* ═══════════════════════════════════════════════════════════════════
+   PANEL COLUMN HEADERS — NEXUS PROFIT FINDER · 1HZ100V · NORMAL
+   ═══════════════════════════════════════════════════════════════════ */
 .col-header {
-  background: linear-gradient(135deg, hsl(var(--card) / 0.8), hsl(var(--bg-soft) / 0.6)) !important;
-  border: 1px solid hsl(var(--border) / 0.45) !important;
+  background: linear-gradient(135deg, hsl(var(--card)/0.8), hsl(var(--bg-soft)/0.6)) !important;
+  border: 1px solid hsl(var(--border)/0.45) !important;
   border-radius: 16px !important;
   padding: 14px 16px !important;
   position: relative !important;
-  overflow: hidden !important;
   backdrop-filter: blur(8px) !important;
 }
 .col-header::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.35) 40%, hsl(var(--secondary) / 0.25) 65%, transparent);
+  content: '' !important;
+  position: absolute !important;
+  top: 0; left: 0; right: 0 !important;
+  height: 1px !important;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.35) 40%, hsl(var(--secondary)/0.25) 65%, transparent) !important;
 }
 .col-header-title {
   font-family: 'Space Grotesk', sans-serif !important;
@@ -6101,48 +6094,84 @@ html body .modal-body { font-size: 13.5px !important; }
   font-weight: 800 !important;
   letter-spacing: 2.5px !important;
   text-transform: uppercase !important;
-  color: hsl(var(--foreground) / 0.85) !important;
+  color: hsl(var(--foreground)/0.85) !important;
   display: flex !important;
   align-items: center !important;
   gap: 7px !important;
 }
-.col-header-title .dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: hsl(var(--primary));
-  box-shadow: 0 0 8px hsl(var(--primary) / 0.7);
-  animation: dot-pulse 2s ease-in-out infinite;
-  flex-shrink: 0;
+
+/* ═══════════════════════════════════════════════════════════════════
+   DASHBOARD JOURNAL — align padding with Net P&L stat card above
+   The stat card uses padding: 20px 22px. Journal header matches that.
+   No size increase — just alignment.
+   ═══════════════════════════════════════════════════════════════════ */
+html body #panel-dashboard .journal-panel {
+  flex: 2 !important;          /* keep original ratio — do NOT inflate */
 }
-@keyframes dot-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.6; transform: scale(0.8); }
+html body #panel-dashboard .dash-equity-panel {
+  flex: 3 !important;          /* keep original ratio */
+}
+/* Match the journal header padding to stat-card: 20px 22px */
+html body #panel-dashboard .journal-panel > div:first-child {
+  padding: 20px 22px 0 !important;
+}
+/* Journal tab row — same horizontal indent */
+html body #panel-dashboard #dash-journal-tabs {
+  padding: 8px 22px 0 !important;
+}
+/* Journal list — same horizontal indent */
+html body #panel-dashboard #dash-journal-list {
+  padding: 8px 22px 16px !important;
+}
+/* Entry rows — natural size, no inflation */
+html body #panel-dashboard .journal-entry {
+  padding: 12px 14px !important;
+  min-height: 62px !important;
+  border-radius: 12px !important;
+  margin-bottom: 5px !important;
 }
 
-/* ── IDLE status badge ── */
-.cp-idle-badge, [class*="idle-badge"] {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 10px 3px 6px;
-  background: hsl(var(--muted) / 0.3);
-  border: 1px solid hsl(var(--border) / 0.4);
-  border-radius: 99px;
-  font-family: 'DM Mono', monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  color: hsl(var(--muted-foreground) / 0.7);
+/* ═══════════════════════════════════════════════════════════════════
+   MASTER CONTROL + ENGAGE ALL — fix overlap / clipping
+   Panel must not clip the button. Use align-items:stretch so
+   the button row flows naturally and the button is always visible.
+   ═══════════════════════════════════════════════════════════════════ */
+#dash-master-panel {
+  padding: 16px 22px !important;    /* matches stat-card horizontal 22px */
+  min-height: 0 !important;
+  overflow: visible !important;     /* stop clipping the ENGAGE ALL button */
+  align-items: center !important;
+  flex-wrap: nowrap !important;     /* prevent wrapping that hides the button */
+  gap: 14px !important;
+}
+/* On narrow screens allow wrap but keep minimum visible */
+@media (max-width: 860px) {
+  #dash-master-panel { flex-wrap: wrap !important; }
+}
+#dash-master-toggle {
+  padding: 12px 24px !important;
+  font-size: 9.5px !important;
+  letter-spacing: 2.5px !important;
+  border-radius: 11px !important;
+  min-width: 148px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  align-self: center !important;   /* vertically centre in the row */
+}
+/* Stop Profit / Stop Loss inputs — tighter */
+#dash-master-tp,
+#dash-master-sl {
+  width: 82px !important;
+  padding: 7px 8px !important;
+  font-size: 12px !important;
+  border-radius: 9px !important;
 }
 
-/* ── Luminous theme overrides ── */
+/* Luminous / Void theme overrides */
 html.luminous .cp-stat-pill { background: rgba(20,20,28,0.6) !important; border-color: rgba(0,242,254,0.1) !important; }
-html.luminous .cp-stat-pill::before { background: linear-gradient(90deg, transparent, rgba(0,242,254,0.2), transparent) !important; }
 html.luminous .cp-flow-step.active { color: #00f2fe !important; background: rgba(0,242,254,0.1) !important; border-color: rgba(0,242,254,0.4) !important; }
 html.luminous .cp-barrier-btn.selected { background: rgba(0,242,254,0.1) !important; border-color: rgba(0,242,254,0.45) !important; color: #00f2fe !important; }
 html.luminous .ahub-strategy-btn.active { background: rgba(0,242,254,0.1) !important; border-color: rgba(0,242,254,0.45) !important; color: #00f2fe !important; }
-
-/* ── Void theme overrides ── */
 html.void .cp-stat-pill { background: rgba(4,4,6,0.7) !important; border-color: rgba(255,255,255,0.07) !important; }
 html.void .cp-flow-step.active { color: #e0e0ef !important; background: rgba(255,255,255,0.06) !important; border-color: rgba(255,255,255,0.2) !important; }
 html.void .cp-barrier-btn.selected { background: rgba(255,255,255,0.08) !important; border-color: rgba(255,255,255,0.25) !important; color: #fff !important; }
