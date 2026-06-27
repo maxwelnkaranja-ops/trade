@@ -102,7 +102,7 @@
     </aside>
 
     <div class="hub-main">
-      <header class="hub-header">
+      <header class="hub-header" style="display:none">
         <div class="hub-breadcrumb font-mono">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/></svg>
           <span>Overview</span>
@@ -593,9 +593,9 @@ html.light .hub-header { background: hsl(0 0% 100% / .9); }
 .app-panel { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .app-panel.active { display: flex; flex-direction: column; animation: panel-in .2s ease; min-height: 0; overflow: hidden; }
 .app-root { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-/* Dashboard panel gets its own scroll container */
-#panel-dashboard { overflow-y: auto !important; }
-#panel-dashboard #dashboard-root { overflow: visible !important; min-height: min-content; }
+/* Dashboard panel: pass flex height to dash-scroll — do NOT scroll here */
+#panel-dashboard { overflow: hidden !important; display: flex !important; flex-direction: column !important; }
+#panel-dashboard #dashboard-root { overflow: hidden !important; display: flex !important; flex-direction: column !important; flex: 1 !important; min-height: 0 !important; }
 
 @media (max-width: 880px) {
   .hub-sidebar { width: 72px; }
@@ -4349,45 +4349,45 @@ body::before {
    ═══════════════════════════════════════════════════════════════ */
 
 /* Sidebar — column order already swapped in HTML */
-html body .dash-sidebar {
+html body #panel-dashboard .dash-sidebar {
   gap: 10px !important;
   overflow-y: auto !important;
   max-height: calc(100vh - 200px) !important;
 }
-html body .dash-sidebar::-webkit-scrollbar { width: 3px !important; }
-html body .dash-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1) !important; border-radius: 3px !important; }
+html body #panel-dashboard .dash-sidebar::-webkit-scrollbar { width: 3px !important; }
+html body #panel-dashboard .dash-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1) !important; border-radius: 3px !important; }
 
-/* Exec panel — fatter padding */
-html body .exec-panel { padding: 18px 20px 20px !important; }
+/* Exec panel — fatter padding (dashboard only) */
+html body #panel-dashboard .exec-panel { padding: 18px 20px 20px !important; }
 
-/* Exec rows — wider feel */
-html body .exec-row { padding: 15px 16px !important; }
-html body .exec-flow-box { padding: 8px 6px !important; font-size: 9.5px !important; }
+/* Exec rows — wider feel (dashboard only) */
+html body #panel-dashboard .exec-row { padding: 15px 16px !important; }
+html body #panel-dashboard .exec-flow-box { padding: 8px 6px !important; font-size: 9.5px !important; }
 
-/* Journal panel — fatter padding */
-html body .journal-panel {
+/* Journal panel — fatter padding (dashboard only) */
+html body #panel-dashboard .journal-panel {
   padding: 18px 20px 20px !important;
   max-height: none !important;
   flex: 1 !important;
 }
 
 /* Equity curve — shorter */
-html body .dash-equity-panel { padding: 12px 14px !important; }
-html body .equity-svg { height: 140px !important; }
+html body #panel-dashboard .dash-equity-panel { padding: 12px 14px !important; }
+html body #panel-dashboard .equity-svg { height: 140px !important; }
 
 /* Engine overview — compact */
-html body .rank-table { gap: 8px !important; }
+html body #panel-dashboard .rank-table { gap: 8px !important; }
 
 /* ═══════════════════════════════════════════════════════════════
    EXEC ROWS — BIGGER + COOLDOWN COUNTDOWN
    ═══════════════════════════════════════════════════════════════ */
-html body .exec-panel { padding: 16px 16px !important; }
-html body .exec-list {
+html body #panel-dashboard .exec-panel { padding: 16px 16px !important; }
+html body #panel-dashboard .exec-list {
   display: flex !important; flex-direction: column !important;
   gap: 10px !important; max-height: none !important;
   overflow: visible !important; margin-top: 8px !important;
 }
-html body .exec-row {
+html body #panel-dashboard .exec-row {
   padding: 13px 14px !important;
   border-radius: 12px !important;
   border: 1px solid rgba(255,255,255,0.07) !important;
@@ -4395,34 +4395,34 @@ html body .exec-row {
   display: flex !important; flex-direction: column !important; gap: 10px !important;
   transition: border-color .2s, background .2s !important;
 }
-html body .exec-row:hover {
+html body #panel-dashboard .exec-row:hover {
   background: rgba(255,255,255,0.04) !important;
   border-color: rgba(255,255,255,0.11) !important;
 }
-html body .exec-row.exec-row-cd {
+html body #panel-dashboard .exec-row.exec-row-cd {
   border-color: rgba(255,170,0,0.25) !important;
   background: rgba(255,150,0,0.04) !important;
 }
-html body .exec-row-head {
+html body #panel-dashboard .exec-row-head {
   display: flex !important; align-items: center !important;
   justify-content: space-between !important; gap: 8px !important;
 }
-html body .exec-bot-name {
+html body #panel-dashboard .exec-bot-name {
   display: flex !important; align-items: center !important; gap: 8px !important;
   font-size: 12.5px !important; font-weight: 700 !important;
   color: rgba(220,225,240,0.9) !important;
 }
-html body .exec-dot {
+html body #panel-dashboard .exec-dot {
   width: 8px !important; height: 8px !important; border-radius: 50% !important; flex-shrink: 0 !important;
 }
-html body .exec-row-right {
+html body #panel-dashboard .exec-row-right {
   display: flex !important; align-items: center !important; gap: 8px !important;
 }
-html body .exec-pl {
+html body #panel-dashboard .exec-pl {
   font-family: 'DM Mono', monospace !important;
   font-size: 12px !important; font-weight: 700 !important;
 }
-html body .exec-status-tag {
+html body #panel-dashboard .exec-status-tag {
   font-family: 'DM Mono', monospace !important;
   font-size: 9px !important; font-weight: 700 !important;
   letter-spacing: 1.5px !important; text-transform: uppercase !important;
@@ -4431,13 +4431,13 @@ html body .exec-status-tag {
   background: rgba(255,255,255,0.04) !important;
   color: rgba(150,160,185,0.7) !important;
 }
-html body .exec-status-tag.is-on {
+html body #panel-dashboard .exec-status-tag.is-on {
   color: hsl(var(--win)) !important;
   background: hsl(var(--win) / .1) !important;
   border-color: hsl(var(--win) / .3) !important;
   box-shadow: 0 0 10px hsl(var(--win) / .15) !important;
 }
-html body .exec-status-tag.is-cd {
+html body #panel-dashboard .exec-status-tag.is-cd {
   color: #ffaa00 !important;
   background: rgba(255,170,0,0.12) !important;
   border-color: rgba(255,170,0,0.5) !important;
@@ -4481,11 +4481,11 @@ html body .exec-status-tag.is-cd {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
-html body .exec-cd-bar {
+html body #panel-dashboard .exec-cd-bar {
   height: 3px !important; border-radius: 999px !important;
   background: rgba(255,170,0,0.12) !important; overflow: hidden !important;
 }
-html body .exec-cd-fill {
+html body #panel-dashboard .exec-cd-fill {
   height: 100% !important; border-radius: 999px !important;
   background: linear-gradient(90deg, #ffaa00, #ff6600) !important;
   box-shadow: 0 0 8px rgba(255,170,0,0.5) !important;
@@ -4510,59 +4510,187 @@ html body .exec-cd-fill {
   color: #ffaa00; letter-spacing: -0.5px; line-height: 1;
 }
 
+/* ── Live Entry Conditions Panel ── */
+.entry-conditions-panel {
+  background: linear-gradient(135deg, hsl(var(--card)), hsl(var(--bg)));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+}
+.entry-conditions-panel::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, hsl(var(--primary)/0.6), hsl(var(--secondary)/0.4), transparent);
+  transition: background 0.4s;
+}
+.entry-conditions-panel.all-met::before {
+  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary)));
+  box-shadow: 0 0 16px hsl(var(--win)/0.4);
+  animation: cond-fire-glow 0.6s ease;
+}
+@keyframes cond-fire-glow {
+  0%   { box-shadow: 0 0 0px hsl(var(--win)/0); }
+  50%  { box-shadow: 0 0 30px hsl(var(--win)/0.8); }
+  100% { box-shadow: 0 0 16px hsl(var(--win)/0.4); }
+}
+.entry-cond-title {
+  display: flex; align-items: center; gap: 7px;
+  font-family: 'Outfit', sans-serif; font-size: 9px; font-weight: 800;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: hsl(var(--muted-foreground)); margin-bottom: 10px;
+}
+.entry-cond-pulse {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: hsl(var(--muted-foreground));
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.entry-cond-pulse.active {
+  background: hsl(var(--win));
+  box-shadow: 0 0 10px hsl(var(--win)/0.7);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+.entry-cond-pulse.firing {
+  background: hsl(var(--primary));
+  box-shadow: 0 0 16px hsl(var(--primary)/0.9);
+  animation: pulse-fire 0.4s ease-in-out infinite alternate;
+}
+@keyframes pulse-dot  { 0%,100% { box-shadow: 0 0 6px hsl(var(--win)/0.5); } 50% { box-shadow: 0 0 14px hsl(var(--win)/0.9); } }
+@keyframes pulse-fire { 0% { box-shadow: 0 0 8px hsl(var(--primary)/0.7); } 100% { box-shadow: 0 0 24px hsl(var(--primary)); } }
+.entry-cond-status {
+  margin-left: auto; font-size: 8px; font-weight: 900; letter-spacing: 1.5px;
+  padding: 2px 7px; border-radius: 999px;
+  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
+  transition: all 0.3s;
+}
+.entry-cond-status.met { background: hsl(var(--win)/0.15); color: hsl(var(--win)); border: 1px solid hsl(var(--win)/0.3); }
+.entry-cond-status.fire { background: hsl(var(--primary)/0.2); color: hsl(var(--primary)); border: 1px solid hsl(var(--primary)/0.5); animation: shimmer-sweep 1s linear infinite; }
+.entry-cond-list {
+  display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;
+}
+.entry-cond-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px; border-radius: 9px;
+  background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+  font-size: 10.5px; font-family: 'DM Mono', monospace;
+  transition: all 0.25s cubic-bezier(0.16,1,0.3,1);
+  position: relative; overflow: hidden;
+}
+.entry-cond-row.met {
+  background: hsl(var(--win)/0.06); border-color: hsl(var(--win)/0.35);
+  box-shadow: 0 0 8px hsl(var(--win)/0.1);
+}
+.entry-cond-row.pending {
+  background: hsl(var(--primary)/0.04); border-color: hsl(var(--border));
+}
+.entry-cond-row.loading { opacity: 0.5; }
+.entry-cond-row::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, hsl(var(--win)/0.08), transparent);
+  opacity: 0; transition: opacity 0.3s;
+}
+.entry-cond-row.met::after { opacity: 1; }
+.entry-cond-icon { font-size: 11px; flex-shrink: 0; width: 16px; text-align: center; }
+.entry-cond-label { flex: 1; color: hsl(var(--foreground)/0.8); }
+.entry-cond-value {
+  font-size: 9.5px; font-weight: 700; color: hsl(var(--muted-foreground));
+  background: hsl(var(--bg)); padding: 1px 6px; border-radius: 5px;
+  border: 1px solid hsl(var(--border)/0.5);
+  min-width: 32px; text-align: center;
+  transition: all 0.2s;
+}
+.entry-cond-row.met .entry-cond-value { color: hsl(var(--win)); border-color: hsl(var(--win)/0.3); }
+.entry-cond-progress {
+  height: 4px; background: hsl(var(--muted)); border-radius: 99px; overflow: hidden; margin-bottom: 5px;
+}
+.entry-cond-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--secondary)));
+  transition: width 0.4s cubic-bezier(0.16,1,0.3,1);
+  box-shadow: 0 0 6px hsl(var(--primary)/0.5);
+}
+.entry-cond-fill.full {
+  background: linear-gradient(90deg, hsl(var(--win)), hsl(var(--secondary)));
+  box-shadow: 0 0 12px hsl(var(--win)/0.6);
+}
+.entry-cond-pct {
+  font-size: 9px; color: hsl(var(--muted-foreground));
+  font-family: 'DM Mono', monospace; text-align: right; letter-spacing: 0.5px;
+}
+
+/* ── Dashboard row layout (full-width redesign) ── */
+html body #panel-dashboard .dash-row-top { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 14px !important; padding: 0 !important; min-height: 420px !important; }
+html body #panel-dashboard .dash-row-top > * { min-height: 420px !important; }
+html body #panel-dashboard .dash-row-full { padding: 0 !important; margin-top: 12px !important; }
+html body #panel-dashboard .dash-row-full .glass-panel { width: 100% !important; box-sizing: border-box !important; }
+html body #panel-dashboard .dash-row-top .exec-panel { padding: 12px 14px !important; }
+html body #panel-dashboard .exec-list { max-height: 320px !important; overflow-y: auto !important; }
+html body #panel-dashboard .dash-row-full .journal-panel { display: flex !important; flex-direction: column !important; padding: 14px !important; min-height: 240px !important; }
+html body #panel-dashboard .dash-row-full .journal-list { flex: 1 !important; overflow-y: auto !important; min-height: 160px !important; max-height: 300px !important; }
+@media (max-width: 1000px) {
+  html body #panel-dashboard .dash-hero-row { grid-template-columns: 1fr !important; }
+  html body #panel-dashboard .dash-row-top { grid-template-columns: 1fr !important; }
+  html body #panel-dashboard .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
 /* ── Titan Cooldown Overlay ──────────────────────────────────────── */
 .titan-cd-overlay {
   position: absolute; inset: 0; z-index: 50;
-  background: hsl(var(--bg) / .85); backdrop-filter: blur(16px);
+  background: hsl(var(--bg) / .92); backdrop-filter: blur(20px);
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius);
   transition: opacity .4s ease;
 }
 .titan-cd-popup {
-  display: flex; flex-direction: column; align-items: center; gap: 14px;
-  padding: 32px 40px;
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  padding: 40px 52px;
   background: hsl(var(--card));
-  border: 1px solid hsl(var(--primary) / .3);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 0 60px hsl(var(--primary) / .15), var(--shadow-lg);
+  border: 1px solid hsl(var(--primary) / .4);
+  border-radius: 28px;
+  box-shadow: 0 0 80px hsl(var(--primary) / .22), 0 0 30px hsl(var(--primary) / .1), var(--shadow-lg);
 }
 .titan-cd-ring {
-  position: relative; width: 140px; height: 140px;
+  position: relative; width: 160px; height: 160px;
 }
-.titan-cd-svg { width: 140px; height: 140px; }
+.titan-cd-svg { width: 160px; height: 160px; }
 .titan-cd-track { stroke: hsl(var(--border)); }
 .titan-cd-arc {
   stroke: hsl(var(--primary));
-  filter: drop-shadow(0 0 10px hsl(var(--primary) / .8));
-  animation: none;
+  filter: drop-shadow(0 0 14px hsl(var(--primary) / .9)) drop-shadow(0 0 5px hsl(var(--primary) / .6));
+  animation: cd-arc-glow 2s ease-in-out infinite alternate;
 }
 @keyframes cd-arc-glow {
-  from { filter: drop-shadow(0 0 4px hsl(var(--primary) / .4)); }
-  to   { filter: drop-shadow(0 0 16px hsl(var(--primary) / .9)); }
+  from { filter: drop-shadow(0 0 6px hsl(var(--primary) / .5)) drop-shadow(0 0 2px hsl(var(--primary) / .3)); }
+  to   { filter: drop-shadow(0 0 20px hsl(var(--primary) / 1)) drop-shadow(0 0 8px hsl(var(--primary) / .7)); }
 }
 .titan-cd-num {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Outfit', sans-serif; font-size: 2.8rem; font-weight: 800;
-  color: hsl(var(--primary)); letter-spacing: -1px;
+  font-family: 'Outfit', sans-serif; font-size: 3.2rem; font-weight: 900;
+  color: hsl(var(--primary)); letter-spacing: -2px;
+  text-shadow: 0 0 20px hsl(var(--primary) / .7);
 }
 .titan-cd-title {
   font-family: 'Outfit', sans-serif; font-size: 11px; font-weight: 800;
-  letter-spacing: 4px; color: hsl(var(--primary)); text-transform: uppercase;
+  letter-spacing: 5px; color: hsl(var(--primary)); text-transform: uppercase;
+  text-shadow: 0 0 14px hsl(var(--primary) / .5);
 }
 .titan-cd-sub {
   font-size: 11px; color: hsl(var(--muted-foreground)); text-align: center; line-height: 1.5;
 }
 .titan-cd-market {
   font-size: 10px; color: hsl(var(--win)); letter-spacing: 1px; text-align: center;
-  padding: 4px 12px; border-radius: 999px;
+  padding: 6px 16px; border-radius: 999px;
   background: hsl(var(--win) / .08); border: 1px solid hsl(var(--win) / .2);
+  box-shadow: 0 0 12px hsl(var(--win) / .15);
 }
-/* ── Dashboard exec-cd-bar ───────────────────────────────────────── */
-html body .exec-flow {
+/* ── Dashboard exec-flow + journal (scoped to dashboard only) ────── */
+html body #panel-dashboard .exec-flow {
   display: flex !important; align-items: center !important; gap: 6px !important;
 }
-html body .exec-flow-box {
+html body #panel-dashboard .exec-flow-box {
   flex: 1 !important; text-align: center !important;
   padding: 7px 6px !important; border-radius: 8px !important;
   font-family: 'DM Mono', monospace !important;
@@ -4572,31 +4700,31 @@ html body .exec-flow-box {
   background: rgba(255,255,255,0.025) !important;
   color: rgba(140,150,175,0.6) !important;
 }
-html body .exec-flow-arrow {
+html body #panel-dashboard .exec-flow-arrow {
   color: rgba(100,110,135,0.4) !important;
   font-size: 12px !important; flex-shrink: 0 !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   JOURNAL — SCROLLABLE, BIGGER RICHER ENTRIES
+   JOURNAL — SCROLLABLE, BIGGER RICHER ENTRIES (dashboard only)
    ═══════════════════════════════════════════════════════════════ */
-html body .journal-panel {
+html body #panel-dashboard .journal-panel {
   flex: 1 !important; min-height: 0 !important;
   display: flex !important; flex-direction: column !important;
   padding: 16px !important; max-height: 520px !important;
 }
-html body .journal-tabs {
+html body #panel-dashboard .journal-tabs {
   display: flex !important; gap: 5px !important;
   flex-wrap: wrap !important; margin-bottom: 10px !important; flex-shrink: 0 !important;
 }
-html body .journal-list {
+html body #panel-dashboard .journal-list {
   flex: 1 !important; overflow-y: auto !important; min-height: 0 !important;
   display: flex !important; flex-direction: column !important; gap: 7px !important;
   padding-right: 2px !important;
 }
-html body .journal-list::-webkit-scrollbar { width: 3px !important; }
-html body .journal-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12) !important; border-radius: 3px !important; }
-html body .journal-entry {
+html body #panel-dashboard .journal-list::-webkit-scrollbar { width: 3px !important; }
+html body #panel-dashboard .journal-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12) !important; border-radius: 3px !important; }
+html body #panel-dashboard .journal-entry {
   display: flex !important; align-items: center !important; gap: 10px !important;
   padding: 12px 14px !important; border-radius: 12px !important;
   border: 1px solid rgba(255,255,255,0.06) !important;
@@ -4605,32 +4733,32 @@ html body .journal-entry {
   transition: all .18s !important;
   min-height: 58px !important;
 }
-html body .journal-entry:hover {
+html body #panel-dashboard .journal-entry:hover {
   background: rgba(255,255,255,0.04) !important;
   transform: translateX(3px) !important;
 }
-html body .journal-entry.win { border-left-color: hsl(var(--win)) !important; background: hsl(var(--win) / .04) !important; }
-html body .journal-entry.loss { border-left-color: hsl(var(--loss)) !important; background: hsl(var(--loss) / .04) !important; }
-html body .journal-badge-wrap { flex-shrink: 0 !important; }
-html body .journal-badge {
+html body #panel-dashboard .journal-entry.win { border-left-color: hsl(var(--win)) !important; background: hsl(var(--win) / .04) !important; }
+html body #panel-dashboard .journal-entry.loss { border-left-color: hsl(var(--loss)) !important; background: hsl(var(--loss) / .04) !important; }
+html body #panel-dashboard .journal-badge-wrap { flex-shrink: 0 !important; }
+html body #panel-dashboard .journal-badge {
   width: 28px !important; height: 28px !important;
   border-radius: 8px !important; font-size: 12px !important; font-weight: 800 !important;
   display: inline-flex !important; align-items: center !important; justify-content: center !important;
 }
-html body .journal-badge.win { background: hsl(var(--win) / .15) !important; color: hsl(var(--win)) !important; }
-html body .journal-badge.loss { background: hsl(var(--loss) / .15) !important; color: hsl(var(--loss)) !important; }
-html body .journal-entry-body {
+html body #panel-dashboard .journal-badge.win { background: hsl(var(--win) / .15) !important; color: hsl(var(--win)) !important; }
+html body #panel-dashboard .journal-badge.loss { background: hsl(var(--loss) / .15) !important; color: hsl(var(--loss)) !important; }
+html body #panel-dashboard .journal-entry-body {
   flex: 1 !important; min-width: 0 !important;
   display: flex !important; flex-direction: column !important; gap: 4px !important;
 }
-html body .journal-entry-top {
+html body #panel-dashboard .journal-entry-top {
   display: flex !important; align-items: center !important; gap: 6px !important;
   flex-wrap: wrap !important;
 }
-html body .journal-bot-label {
+html body #panel-dashboard .journal-bot-label {
   font-size: 11px !important; font-weight: 700 !important;
 }
-html body .journal-digits-pill {
+html body #panel-dashboard .journal-digits-pill {
   font-family: 'DM Mono', monospace !important;
   font-size: 10px !important; font-weight: 600 !important;
   color: rgba(160,170,200,0.7) !important;
@@ -4638,31 +4766,31 @@ html body .journal-digits-pill {
   border: 1px solid rgba(255,255,255,0.08) !important;
   border-radius: 5px !important; padding: 1px 6px !important;
 }
-html body .journal-time-stamp {
+html body #panel-dashboard .journal-time-stamp {
   font-family: 'DM Mono', monospace !important;
   font-size: 9px !important; color: rgba(130,140,165,0.55) !important;
   margin-left: auto !important; white-space: nowrap !important;
 }
-html body .journal-entry-bottom {
+html body #panel-dashboard .journal-entry-bottom {
   display: flex !important; align-items: center !important; gap: 6px !important;
 }
-html body .journal-type-label {
+html body #panel-dashboard .journal-type-label {
   font-family: 'DM Mono', monospace !important;
   font-size: 9.5px !important; font-weight: 700 !important; letter-spacing: 0.8px !important;
 }
-html body .journal-type-label.win { color: hsl(var(--win)) !important; }
-html body .journal-type-label.loss { color: hsl(var(--loss)) !important; }
-html body .journal-barrier {
+html body #panel-dashboard .journal-type-label.win { color: hsl(var(--win)) !important; }
+html body #panel-dashboard .journal-type-label.loss { color: hsl(var(--loss)) !important; }
+html body #panel-dashboard .journal-barrier {
   font-family: 'DM Mono', monospace !important;
   font-size: 9px !important; color: rgba(130,140,165,0.5) !important;
 }
-html body .journal-pl {
+html body #panel-dashboard .journal-pl {
   font-family: 'DM Mono', monospace !important;
   font-size: 14px !important; font-weight: 800 !important;
   flex-shrink: 0 !important; text-align: right !important;
 }
-html body .journal-pl.win { color: hsl(var(--win)) !important; }
-html body .journal-pl.loss { color: hsl(var(--loss)) !important; }
+html body #panel-dashboard .journal-pl.win { color: hsl(var(--win)) !important; }
+html body #panel-dashboard .journal-pl.loss { color: hsl(var(--loss)) !important; }
 
 /* =====================================================================
    FINAL OVERRIDE — SCROLL FIX + CLEAN LAYOUT (maximum specificity)
@@ -4677,33 +4805,33 @@ html body .app-panel.active { display: flex !important; flex-direction: column !
 html body #panel-dashboard { overflow: hidden !important; }
 html body #panel-dashboard #dashboard-root { overflow: hidden !important; }
 html body .app-root { flex: 1 !important; min-height: 0 !important; overflow: hidden !important; display: flex !important; flex-direction: column !important; }
-html body .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
+html body #panel-dashboard .dash-scroll { flex: 1 !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 12px 14px !important; gap: 12px !important; display: flex !important; flex-direction: column !important; }
 
 /* Hide the old hero title row — balance card IS the hero */
-html body .dash-hero { display: none !important; }
+html body #panel-dashboard .dash-hero { display: none !important; }
 
 /* Balance hero flush, no extra top gap */
-html body .dash-balance-hero { padding: 18px 22px 110px !important; border-radius: 18px !important; }
-html body .dash-balance-meta { margin-bottom: 4px !important; font-size: 8px !important; }
-html body .dash-balance-amount { font-size: clamp(2rem, 4vw, 3.2rem) !important; }
+html body #panel-dashboard .dash-balance-hero { padding: 18px 22px 110px !important; border-radius: 18px !important; }
+html body #panel-dashboard .dash-balance-meta { margin-bottom: 4px !important; font-size: 8px !important; }
+html body #panel-dashboard .dash-balance-amount { font-size: clamp(2rem, 4vw, 3.2rem) !important; }
 
 /* Two-column hero row */
-html body .dash-hero-row { display: grid !important; grid-template-columns: 1fr 260px !important; gap: 12px !important; }
+html body #panel-dashboard .dash-hero-row { display: grid !important; grid-template-columns: 1fr 260px !important; gap: 12px !important; }
 
 /* 3-column stat row */
-html body .dash-stats-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; padding: 0 !important; }
+html body #panel-dashboard .dash-stats-row { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; padding: 0 !important; }
 
 /* Body */
-html body .dash-body { display: grid !important; grid-template-columns: 380px 1fr !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
-html body .dash-main { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
-html body .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
-html body .dash-sidebar .journal-panel { flex: 1 1 auto !important; min-height: 300px !important; }
-html body .dash-sidebar .journal-list { overflow-y: auto !important; max-height: 320px !important; }
+html body #panel-dashboard .dash-body { display: grid !important; grid-template-columns: 380px 1fr !important; gap: 12px !important; padding: 0 !important; overflow: visible !important; min-height: 0 !important; }
+html body #panel-dashboard .dash-main { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
+html body #panel-dashboard .dash-sidebar { display: flex !important; flex-direction: column !important; gap: 12px !important; overflow: visible !important; }
+html body #panel-dashboard .dash-sidebar .journal-panel { flex: 1 1 auto !important; min-height: 300px !important; }
+html body #panel-dashboard .dash-sidebar .journal-list { overflow-y: auto !important; max-height: 320px !important; }
 
 @media (max-width: 1000px) {
-  html body .dash-hero-row { grid-template-columns: 1fr !important; }
-  html body .dash-body { grid-template-columns: 1fr !important; }
-  html body .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
+  html body #panel-dashboard .dash-hero-row { grid-template-columns: 1fr !important; }
+  html body #panel-dashboard .dash-body { grid-template-columns: 1fr !important; }
+  html body #panel-dashboard .dash-stats-row { grid-template-columns: repeat(2, 1fr) !important; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -4730,35 +4858,35 @@ html body .section-label { font-size: 10.5px !important; }
 html.luminous .section-divider, html.void .section-divider { font-size: 10.5px !important; }
 
 /* ── Stat cards (dashboard top row) ── */
-html body .stat-card-label { font-size: 9.5px !important; letter-spacing: 2px !important; }
-html body .stat-card-value { font-size: 2rem !important; }
-html body .stat-card-sub { font-size: 12px !important; }
+html body #panel-dashboard .stat-card-label { font-size: 9.5px !important; letter-spacing: 2px !important; }
+html body #panel-dashboard .stat-card-value { font-size: 2rem !important; }
+html body #panel-dashboard .stat-card-sub { font-size: 12px !important; }
 
 /* ── Balance hero ── */
-html body .dash-balance-meta { font-size: 9.5px !important; }
-html body .dash-balance-amount { font-size: clamp(2.4rem, 4.5vw, 3.6rem) !important; }
+html body #panel-dashboard .dash-balance-meta { font-size: 9.5px !important; }
+html body #panel-dashboard .dash-balance-amount { font-size: clamp(2.4rem, 4.5vw, 3.6rem) !important; }
 
 /* ── Bot cards (engine overview rank table) ── */
-html body .bot-card-head { font-size: 12px !important; }
-html body .bot-card-value { font-size: 1.6rem !important; }
-html body .bot-card-meta { font-size: 12px !important; }
+html body #panel-dashboard .bot-card-head { font-size: 12px !important; }
+html body #panel-dashboard .bot-card-value { font-size: 1.6rem !important; }
+html body #panel-dashboard .bot-card-meta { font-size: 12px !important; }
 
 /* ── Exec rows (active engines) ── */
-html body .exec-bot-name { font-size: 14px !important; }
-html body .exec-pl { font-size: 13px !important; }
-html body .exec-status-tag { font-size: 10px !important; }
-html body .exec-flow-box { font-size: 10.5px !important; }
-html body .exec-flow-arrow { font-size: 13px !important; }
+html body #panel-dashboard .exec-bot-name { font-size: 14px !important; }
+html body #panel-dashboard .exec-pl { font-size: 13px !important; }
+html body #panel-dashboard .exec-status-tag { font-size: 10px !important; }
+html body #panel-dashboard .exec-flow-box { font-size: 10.5px !important; }
+html body #panel-dashboard .exec-flow-arrow { font-size: 13px !important; }
 
 /* ── Journal ── */
-html body .journal-bot-label { font-size: 12.5px !important; }
-html body .journal-digits-pill { font-size: 11.5px !important; }
-html body .journal-time-stamp { font-size: 10.5px !important; }
-html body .journal-type-label { font-size: 11px !important; }
-html body .journal-barrier { font-size: 10.5px !important; }
-html body .journal-pl { font-size: 15.5px !important; }
-html body .journal-badge { font-size: 13px !important; width: 30px !important; height: 30px !important; }
-html body .journal-tab { font-size: 11px !important; }
+html body #panel-dashboard .journal-bot-label { font-size: 12.5px !important; }
+html body #panel-dashboard .journal-digits-pill { font-size: 11.5px !important; }
+html body #panel-dashboard .journal-time-stamp { font-size: 10.5px !important; }
+html body #panel-dashboard .journal-type-label { font-size: 11px !important; }
+html body #panel-dashboard .journal-barrier { font-size: 10.5px !important; }
+html body #panel-dashboard .journal-pl { font-size: 15.5px !important; }
+html body #panel-dashboard .journal-badge { font-size: 13px !important; width: 30px !important; height: 30px !important; }
+html body #panel-dashboard .journal-tab { font-size: 11px !important; }
 
 /* ── Settings panel ── */
 html body .settings-label { font-size: 11px !important; }
@@ -8116,11 +8244,11 @@ window.NexusStrategies=exports;
       overlay.innerHTML = `
         <div class="titan-cd-popup">
           <div class="titan-cd-ring">
-            <svg class="titan-cd-svg" viewBox="0 0 140 140">
-              <circle class="titan-cd-track" cx="70" cy="70" r="58" fill="none" stroke-width="7"/>
-              <circle class="titan-cd-arc" cx="70" cy="70" r="58" fill="none" stroke-width="7"
-                stroke-dasharray="${2*Math.PI*58}" stroke-dashoffset="0"
-                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:70px 70px"/>
+            <svg class="titan-cd-svg" viewBox="0 0 160 160">
+              <circle class="titan-cd-track" cx="80" cy="80" r="66" fill="none" stroke-width="7"/>
+              <circle class="titan-cd-arc" cx="80" cy="80" r="66" fill="none" stroke-width="7"
+                stroke-dasharray="${(2*Math.PI*66).toFixed(1)}" stroke-dashoffset="0"
+                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:80px 80px"/>
             </svg>
             <div class="titan-cd-num" id="differ-cd-popup-num">${duration}</div>
           </div>
@@ -8131,7 +8259,7 @@ window.NexusStrategies=exports;
       // Start arc animation draining over duration
       const arc = overlay.querySelector('.titan-cd-arc');
       if (arc) {
-        const total = 2 * Math.PI * 58;
+        const total = 2 * Math.PI * 66;
         arc.style.strokeDashoffset = '0';
         setTimeout(() => {
           arc.style.strokeDashoffset = total.toFixed(1);
@@ -8579,11 +8707,11 @@ window.NexusStrategies=exports;
       overlay.innerHTML = `
         <div class="titan-cd-popup">
           <div class="titan-cd-ring">
-            <svg class="titan-cd-svg" viewBox="0 0 140 140">
-              <circle class="titan-cd-track" cx="70" cy="70" r="58" fill="none" stroke-width="7"/>
-              <circle class="titan-cd-arc" cx="70" cy="70" r="58" fill="none" stroke-width="7"
-                stroke-dasharray="${2*Math.PI*58}" stroke-dashoffset="0"
-                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:70px 70px"/>
+            <svg class="titan-cd-svg" viewBox="0 0 160 160">
+              <circle class="titan-cd-track" cx="80" cy="80" r="66" fill="none" stroke-width="7"/>
+              <circle class="titan-cd-arc" cx="80" cy="80" r="66" fill="none" stroke-width="7"
+                stroke-dasharray="${(2*Math.PI*66).toFixed(1)}" stroke-dashoffset="0"
+                style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:80px 80px"/>
             </svg>
             <div class="titan-cd-num">${duration}</div>
           </div>
@@ -8595,7 +8723,7 @@ window.NexusStrategies=exports;
       // Start arc animation
       const arc = overlay.querySelector('.titan-cd-arc');
       if (arc) {
-        const total = 2 * Math.PI * 58;
+        const total = 2 * Math.PI * 66;
         arc.style.strokeDashoffset = '0';
         setTimeout(() => { arc.style.strokeDashoffset = total.toFixed(1); arc.style.transition = `stroke-dashoffset ${duration}s linear`; }, 50);
       }
@@ -9362,16 +9490,40 @@ window.NexusStrategies=exports;
       <div class="analysis-hub-card">
         <div class="analysis-hub-title" style="display:flex;align-items:center;justify-content:space-between">
           <span>Top Markets</span>
-          ${scannerState.topThree && scannerState.topThree[0] ? `<button class="strategy-btn" title="Jump to best market" data-mkt="${scannerState.topThree[0].symbol}" style="padding:3px 8px;font-size:9px;letter-spacing:0.5px;width:auto">⚡ BEST</button>` : ''}
+          <span class="text-muted" style="font-size:8px;letter-spacing:1px">LIVE SCAN</span>
         </div>
-        ${(scannerState.topThree || []).map((m) => `<button class="strategy-btn ${m.symbol === c.selectedMarket ? 'active' : ''}" data-mkt="${m.symbol}" style="width:100%;text-align:left;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between">
-          <div>
-            <div style="font-size:11px">${m.name}</div>
-            <div class="text-muted" style="font-size:8.5px;margin-top:2px">${(m.health && m.health.longTerm) || m.longTerm || '—'} · ${(m.health && m.health.trend) || m.trend || '—'}</div>
-          </div>
-          <b class="text-accent" style="font-family:'Outfit',sans-serif;font-size:11px">${m.score}%</b>
-        </button>`).join('') || '<div class="text-muted" style="font-size:10px;padding:8px 0">Scanning markets…</div>'}
-        ${marketHealth ? `<div class="text-muted" style="font-size:9px;margin-top:6px;padding-top:6px;border-top:1px solid hsl(var(--border)/0.5)">Health: <b>${marketHealth.longTerm}</b> · Vol: ${marketHealth.volatility || '—'}</div>` : ''}
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">Scores update every tick · tap to select</div>
+        ${(scannerState.topThree || []).map((m, idx2) => {
+          const isSel = m.symbol === c.selectedMarket;
+          const health = (m.health && m.health.longTerm) || m.longTerm || '—';
+          const trend  = (m.health && m.health.trend) || m.trend || '—';
+          const vol    = (m.health && m.health.volatility) || m.volatility || '';
+          const rankColor = idx2 === 0 ? 'hsl(var(--win))' : idx2 === 1 ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
+          const healthColor = health === 'HEALTHY' ? 'hsl(var(--win))' : health === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))';
+          const trendArrow = trend === 'UP' ? '↑' : trend === 'DOWN' ? '↓' : trend !== '—' ? '→' : '';
+          return '<button class="strategy-btn ' + (isSel ? 'active' : '') + '" data-mkt="' + m.symbol + '"'
+            + ' style="width:100%;text-align:left;margin-bottom:6px;padding:9px 10px;display:block;border:' + (isSel ? '1px solid hsl(var(--primary)/0.6)' : '1px solid hsl(var(--border)/0.4)') + '">'
+            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">'
+            + '<div style="display:flex;align-items:center;gap:5px">'
+            + '<span style="font-size:8px;font-weight:900;color:' + rankColor + ';letter-spacing:1px">#' + (idx2+1) + '</span>'
+            + '<span style="font-size:10.5px;font-weight:700">' + m.name + '</span>'
+            + (isSel ? '<span style="font-size:7.5px;letter-spacing:1px;color:hsl(var(--primary));font-weight:800;margin-left:2px">● ACTIVE</span>' : '')
+            + '</div>'
+            + '<b style="font-size:12px;color:' + rankColor + '">' + m.score + '%</b>'
+            + '</div>'
+            + '<div class="bar-track" style="height:3px;margin-bottom:5px"><div style="height:100%;width:' + m.score + '%;background:' + rankColor + ';border-radius:2px;transition:width .4s"></div></div>'
+            + '<div style="display:flex;gap:6px;align-items:center">'
+            + '<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:hsl(var(--bg));color:' + healthColor + ';font-weight:700">' + health + '</span>'
+            + (trendArrow ? '<span style="font-size:8px;color:hsl(var(--muted-foreground))">' + trendArrow + ' ' + trend + '</span>' : '')
+            + (vol ? '<span style="font-size:8px;color:hsl(var(--muted-foreground));margin-left:auto">Vol:' + vol + '</span>' : '')
+            + '</div>'
+            + '</button>';
+        }).join('') || '<div class="text-muted" style="font-size:10px;padding:12px 0;text-align:center">⏳ Scanning markets…</div>'}
+        ${marketHealth ? '<div style="display:flex;gap:6px;margin-top:4px;padding-top:6px;border-top:1px solid hsl(var(--border)/0.3)">'
+          + '<span class="text-muted" style="font-size:8.5px">Active market:</span>'
+          + '<b style="font-size:8.5px;color:' + (marketHealth.longTerm === 'HEALTHY' ? 'hsl(var(--win))' : marketHealth.longTerm === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))') + '">' + marketHealth.longTerm + '</b>'
+          + '<span class="text-muted" style="font-size:8.5px;margin-left:auto">Vol:' + (marketHealth.volatility || '—') + '</span>'
+          + '</div>' : ''}
       </div>`;
 
     el(`${rootId}-strategy`).onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
@@ -9379,10 +9531,15 @@ window.NexusStrategies=exports;
       b.onclick = () => { engine.setConfig({ tickPeriod: parseInt(b.dataset.period) }); engine.scanner && engine.scanner.setTickPeriod(parseInt(b.dataset.period)); };
     });
     el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
-      engine.changeMarket(b.dataset.mkt);
-      const centerCol = document.getElementById(`${rootId}-center`);
-      const centerScroll = centerCol && centerCol.closest('.benz-col');
-      if (centerScroll) { centerScroll.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); centerScroll.scrollTop = 0; }
+      const mkt = b.dataset.mkt;
+      engine.changeMarket(mkt);
+      el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.mkt === mkt);
+      });
+      const mktSel = document.getElementById(`${rootId}-market`);
+      if (mktSel) mktSel.value = mkt;
+      const snap2 = engine.getSnapshot();
+      renderLeft(engine, rootId, snap2);
     });
   }
 
@@ -9409,6 +9566,23 @@ window.NexusStrategies=exports;
         <div class="flow-step" id="${rootId}-flow-fire">FIRE</div>
       </div>
       <div class="text-muted" style="font-size:10px;min-height:28px;margin-bottom:10px" id="${rootId}-wait-reason"></div>
+
+      <!-- ⚡ LIVE ENTRY CONDITIONS PANEL -->
+      <div class="entry-conditions-panel" id="${rootId}-conditions">
+        <div class="entry-cond-title">
+          <span class="entry-cond-pulse" id="${rootId}-cond-pulse"></span>
+          <span>FIRE CONDITIONS</span>
+          <span class="entry-cond-status" id="${rootId}-cond-status">WAITING</span>
+        </div>
+        <div class="entry-cond-list" id="${rootId}-cond-list">
+          <div class="entry-cond-row loading"><span class="entry-cond-icon">⏳</span><span>Loading analysis…</span></div>
+        </div>
+        <div class="entry-cond-progress" id="${rootId}-cond-progress">
+          <div class="entry-cond-fill" id="${rootId}-cond-fill" style="width:0%"></div>
+        </div>
+        <div class="entry-cond-pct" id="${rootId}-cond-pct">0 / 0 conditions met</div>
+      </div>
+
       <div class="font-orbitron text-primary" style="font-size:10px;letter-spacing:2px;margin-bottom:6px">CONTROL PANEL</div>
       <label class="text-muted" style="font-size:9px">MARKET</label>
       <select class="titan-input" id="${rootId}-market" style="margin-bottom:8px">${markets}</select>
@@ -9491,32 +9665,36 @@ window.NexusStrategies=exports;
 
               <div class="recovery-mode-card ${!c.alternatingRecovery && !c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="plain" id="${rootId}-rmode-plain">
                 <div class="rec-card-title">💡 Standard Recovery</div>
-                <div class="rec-card-desc">${isOver ? 'Switches to recovery barrier UNDER after loss' : `Continues with ${(c.tradeMode||'odd').toUpperCase()} at increased stake`}</div>
+                <div class="rec-card-desc">${isOver
+                  ? `UNDER ${c.recoveryBarrier} on every recovery step — consistent high-win-chance direction`
+                  : `Stays on ${(c.tradeMode||'odd').toUpperCase()} at escalated stake — no direction change`
+                }</div>
               </div>
 
               <div class="recovery-mode-card ${c.alternatingRecovery && !c.smartRecovery ? 'selected' : ''}" data-rmode="altA" id="${rootId}-rmode-altA">
-                <div class="rec-card-title">🔄 Alt Mode A</div>
+                <div class="rec-card-title">🔄 Alt Mode A — Staggered flip</div>
                 <div class="rec-card-desc">${isOver
-                  ? 'Over → Under → Over×2 → Under → …'
+                  ? `Step 1: UNDER ${c.recoveryBarrier} → Step 2: OVER ${c.recoveryBarrier} → Steps 3-4: OVER → Step 5: UNDER … (flips every 3rd)`
                   : (c.tradeMode||'odd')==='odd'
-                    ? 'ODD → EVEN → ODD×2 → EVEN → …'
-                    : 'EVEN → ODD → EVEN×2 → ODD → …'
+                    ? 'Step 1: EVEN → Step 2: ODD → Steps 3-4: ODD → Step 5: EVEN … (flips every 3rd)'
+                    : 'Step 1: ODD → Step 2: EVEN → Steps 3-4: EVEN → Step 5: ODD … (flips every 3rd)'
                 }</div>
               </div>
 
               <div class="recovery-mode-card ${c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="altB" id="${rootId}-rmode-altB">
-                <div class="rec-card-title">🔁 Alt Mode B</div>
+                <div class="rec-card-title">🔁 Alt Mode B — EVEN/UNDER-first</div>
                 <div class="rec-card-desc">${isOver
-                  ? 'Under → Over×2 → Under → Over×2 → …'
-                  : (c.tradeMode||'odd')==='odd'
-                    ? 'EVEN → ODD×2 → EVEN → ODD×2 → …'
-                    : 'ODD → EVEN×2 → ODD → EVEN×2 → …'
+                  ? `Step 1: UNDER ${c.recoveryBarrier} → Steps 2-3: OVER ${c.recoveryBarrier} → Step 4: UNDER … (repeating 1→2 block)`
+                  : 'Step 1: EVEN → Steps 2-3: ODD → Step 4: EVEN … (always starts EVEN regardless of base mode)'
                 }</div>
               </div>
 
               <div class="recovery-mode-card ${c.smartRecovery ? 'selected' : ''}" data-rmode="smart" id="${rootId}-rmode-smart">
-                <div class="rec-card-title">🧠 Smart Recovery</div>
-                <div class="rec-card-desc">Analyzes last 20 ticks → fires opposite of dominant ${isOver ? 'over/under trend' : 'parity'} for higher win odds</div>
+                <div class="rec-card-title">🧠 Smart Recovery — Tick-adaptive</div>
+                <div class="rec-card-desc">${isOver
+                  ? `Scans last 20 ticks: if OVER% &gt;50% → bets UNDER ${c.recoveryBarrier}. If UNDER-dominant → bets OVER ${c.recoveryBarrier}. Adapts each step.`
+                  : 'Scans last 20 ticks: if ODD% >50% → bets EVEN. If EVEN-dominant → bets ODD. Adapts each step.'
+                }</div>
               </div>
 
             </div>
@@ -9594,11 +9772,21 @@ window.NexusStrategies=exports;
     el(`${rootId}-toggle`).onclick = () => engine.toggleEngine();
     if (isOver) {
       el(`${rootId}-barriers`) && el(`${rootId}-barriers`).querySelectorAll('[data-barrier]').forEach((b) => {
-        b.onclick = () => engine.setConfig({ overBarrier: parseInt(b.dataset.barrier) });
+        b.onclick = () => {
+          const newBarrier = parseInt(b.dataset.barrier);
+          engine.setConfig({ overBarrier: newBarrier });
+          // Immediately update selected highlight without waiting for next render cycle
+          const barrierGrid = el(`${rootId}-barriers`);
+          if (barrierGrid) barrierGrid.querySelectorAll('[data-barrier]').forEach((btn) => {
+            btn.classList.toggle('selected', parseInt(btn.dataset.barrier) === newBarrier);
+          });
+          // Force center config re-render so win-chance label, display, etc. update instantly
+          renderCenterConfig(engine, rootId, engine.getSnapshot());
+        };
       });
     } else if (!engine.fixedTradeMode) {
-      el(`${rootId}-odd`).onclick = () => engine.switchTradeMode('odd');
-      el(`${rootId}-even`).onclick = () => engine.switchTradeMode('even');
+      el(`${rootId}-odd`).onclick = () => { engine.switchTradeMode('odd'); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
+      el(`${rootId}-even`).onclick = () => { engine.switchTradeMode('even'); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     }
     shells[rootId].configBuilt = true;
   }
@@ -9703,8 +9891,9 @@ window.NexusStrategies=exports;
     const { state: s, config: c, strategyPhase, strategyWaitReason, liveDigit, liveQuote, cooldownTime } = snap;
     const digit = el(`${rootId}-digit`);
     if (digit) {
-      digit.textContent = liveDigit >= 0 ? liveDigit : '—';
-      digit.className = 'digit-pad text-primary';
+      const newDigitText = liveDigit >= 0 ? String(liveDigit) : '—';
+      if (digit.textContent !== newDigitText) digit.textContent = newDigitText;
+      if (digit.className !== 'digit-pad text-primary') digit.className = 'digit-pad text-primary';
     }
     const badge = el(`${rootId}-badge`);
     if (badge) {
@@ -9762,6 +9951,98 @@ window.NexusStrategies=exports;
       toggle.className = 'btn-omega' + (s.active ? ' stop' : '');
       toggle.disabled = s.isCooldown || snap.isStrategyTransitioning;
     }
+
+    // ── Live Entry Conditions Panel ───────────────────────────────────────────
+    const condPanel = document.getElementById(`${rootId}-conditions`);
+    const condList  = document.getElementById(`${rootId}-cond-list`);
+    const condFill  = document.getElementById(`${rootId}-cond-fill`);
+    const condPct   = document.getElementById(`${rootId}-cond-pct`);
+    const condPulse = document.getElementById(`${rootId}-cond-pulse`);
+    const condStatus= document.getElementById(`${rootId}-cond-status`);
+    if (condPanel && condList) {
+      const a = snap.analysis;
+      const isOver = c.overBarrier !== undefined && snap.fixedTradeMode === null;
+
+      // Build conditions list
+      const conditions = [];
+
+      conditions.push({
+        label: 'Engine Armed',
+        met: s.active && !s.isCooldown,
+        value: s.active ? (s.isCooldown ? 'CD' : 'ON') : 'OFF',
+      });
+      conditions.push({
+        label: 'Trading Connected',
+        met: !!s.connected,
+        value: s.connected ? 'YES' : 'NO',
+      });
+      const analysisReady = !!a && a.probability > 0;
+      conditions.push({
+        label: 'Analysis Ready',
+        met: analysisReady,
+        value: analysisReady ? `${a.probability}%` : '—',
+      });
+      const sigMet = a && a.probability >= c.minSignal;
+      conditions.push({
+        label: `Signal ≥ ${c.minSignal}%`,
+        met: !!sigMet,
+        value: a ? `${a.probability}%` : '—',
+      });
+      const streakMet = s.streak >= c.minStreak;
+      conditions.push({
+        label: `Streak ≥ ${c.minStreak}`,
+        met: streakMet,
+        value: `${s.streak}`,
+      });
+      const notAvoid = !a || a.recommendation !== 'AVOID';
+      conditions.push({
+        label: 'Signal not AVOID',
+        met: notAvoid,
+        value: a ? a.recommendation : '—',
+      });
+      const health = snap.marketHealth;
+      const healthOk = !health || health.longTerm !== 'POOR';
+      conditions.push({
+        label: 'Market Health',
+        met: healthOk,
+        value: health ? health.longTerm : 'SCAN',
+      });
+      const noLock = !s.isLocked || s.inRecovery;
+      conditions.push({
+        label: 'No active trade',
+        met: noLock,
+        value: s.isLocked ? (s.inRecovery ? 'REC' : 'WAIT') : 'CLEAR',
+      });
+
+      const metCount = conditions.filter(cd => cd.met).length;
+      const total = conditions.length;
+      const allMet = metCount === total;
+      const pct = total > 0 ? Math.round((metCount / total) * 100) : 0;
+      const isFiring = s.isLocked && !s.inRecovery;
+
+      condPanel.classList.toggle('all-met', allMet);
+      if (condPulse) {
+        condPulse.className = 'entry-cond-pulse' + (isFiring ? ' firing' : allMet ? ' active' : '');
+      }
+      if (condStatus) {
+        condStatus.textContent = isFiring ? '⚡ FIRING' : allMet ? '✓ READY' : 'WAITING';
+        condStatus.className = 'entry-cond-status' + (isFiring ? ' fire' : allMet ? ' met' : '');
+      }
+      const newHtml = conditions.map(cd => {
+        const icon = cd.met ? '✓' : '○';
+        return `<div class="entry-cond-row ${cd.met ? 'met' : 'pending'}">
+          <span class="entry-cond-icon" style="color:${cd.met ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">` + icon + `</span>
+          <span class="entry-cond-label">${cd.label}</span>
+          <span class="entry-cond-value">${cd.value}</span>
+        </div>`;
+      }).join('');
+      if (condList.__lastConds !== newHtml) { condList.innerHTML = newHtml; condList.__lastConds = newHtml; }
+      if (condFill) {
+        condFill.style.width = pct + '%';
+        condFill.className = 'entry-cond-fill' + (allMet ? ' full' : '');
+      }
+      if (condPct) condPct.textContent = `${metCount} / ${total} conditions met`;
+    }
   }
 
   global.TitanUI = {
@@ -9771,9 +10052,11 @@ window.NexusStrategies=exports;
       const snap = engine.getSnapshot();
       const sh = shells[rootId];
       renderLeft(engine, rootId, snap);
-      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy) {
+      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy || sh.lastOverBarrier !== snap.config.overBarrier || sh.lastTradeMode !== snap.config.tradeMode) {
         renderCenterConfig(engine, rootId, snap);
         sh.lastStrategy = snap.config.currentStrategy;
+        sh.lastOverBarrier = snap.config.overBarrier;
+        sh.lastTradeMode = snap.config.tradeMode;
       }
       renderRight(engine, rootId, snap);
       updateLive(rootId, snap);
@@ -9787,6 +10070,15 @@ window.NexusStrategies=exports;
       // Update left panel (signal strength, digit frequency, etc.) every ~4 seconds
       const sh = shells[rootId];
       const now = Date.now();
+      // Re-render center config if any key config values changed (barrier, strategy, tradeMode, streak, signal)
+      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy || sh.lastOverBarrier !== snap.config.overBarrier || sh.lastTradeMode !== snap.config.tradeMode || sh.lastMinStreak !== snap.config.minStreak || sh.lastMinSignal !== snap.config.minSignal) {
+        renderCenterConfig(engine, rootId, snap);
+        sh.lastStrategy = snap.config.currentStrategy;
+        sh.lastOverBarrier = snap.config.overBarrier;
+        sh.lastTradeMode = snap.config.tradeMode;
+        sh.lastMinStreak = snap.config.minStreak;
+        sh.lastMinSignal = snap.config.minSignal;
+      }
       if (!sh._lastLeftRender || (now - sh._lastLeftRender) >= 4000) {
         // Only rebuild if no dropdown is focused (avoid interrupting user interaction)
         const focused = document.activeElement;
@@ -9950,7 +10242,7 @@ window.NexusStrategies=exports;
         <!-- ═══ END HERO ROW ═══ -->
 
         <!-- ═══ MASTER CONTROL ═══ -->
-        <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+        <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-height:80px">
           <div style="flex:1;min-width:200px">
             <div style="font-family:'Outfit',sans-serif;font-size:8px;font-weight:900;letter-spacing:4px;text-transform:uppercase;color:hsl(var(--primary));margin-bottom:6px;display:flex;align-items:center;gap:8px">
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg>
@@ -9974,7 +10266,7 @@ window.NexusStrategies=exports;
               <input id="dash-master-sl" type="number" min="0" step="1" value="20" style="width:86px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
             </div>
           </div>
-          <button id="dash-master-toggle" style="margin:0;padding:12px 36px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden">
+          <button id="dash-master-toggle" style="margin:0;padding:14px 28px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden;align-self:flex-end;flex-shrink:0;min-width:160px;white-space:nowrap">
             ⚡ ENGAGE ALL
           </button>
         </div>
@@ -10013,70 +10305,66 @@ window.NexusStrategies=exports;
           </div>
         </div>
 
-        <!-- ═══ MAIN BODY ═══ -->
-        <div class="dash-body">
-          <!-- ═══ SIDEBAR (now LEFT) ═══ -->
-          <div class="dash-sidebar">
-
-            <!-- Active engines -->
-            <div class="glass-panel exec-panel">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
-                <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
-                  <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
-                  <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
-                </label>
-              </div>
-              <div id="dash-bot-toggles" class="bot-toggles"></div>
-              <div id="dash-exec-list" class="exec-list"></div>
+        <!-- ═══ ROW 1: Active Engines + Equity Curve side by side ═══ -->
+        <div class="dash-row-top">
+          <!-- Active engines -->
+          <div class="glass-panel exec-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">ACTIVE ENGINES</div>
+              <label id="dash-full-auto-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;flex-shrink:0;margin-left:10px">
+                <span style="font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;font-weight:700;color:rgba(150,165,200,0.7)" id="dash-full-auto-txt">FULL AUTO</span>
+                <div id="dash-full-auto-toggle" class="dash-auto-toggle" aria-label="Toggle full automation"></div>
+              </label>
             </div>
-
-            <!-- Trade journal -->
-            <div class="glass-panel journal-panel">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
-              </div>
-              <div class="journal-tabs" id="dash-journal-tabs"></div>
-              <div class="journal-list" id="dash-journal-list"></div>
-            </div>
-
+            <div id="dash-bot-toggles" class="bot-toggles"></div>
+            <div id="dash-exec-list" class="exec-list"></div>
           </div>
 
-          <div class="dash-main">
-
-            <!-- Equity chart -->
-            <div class="glass-panel dash-equity-panel">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-                <div>
-                  <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
-                  <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · all engines · most recent last</div>
-                </div>
-                <div style="display:flex;align-items:center;gap:6px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
-                  <span style="width:20px;height:2px;background:linear-gradient(90deg,hsl(var(--win)),hsl(var(--secondary)));border-radius:2px;display:inline-block"></span>
-                  P&amp;L
-                </div>
+          <!-- Equity chart -->
+          <div class="glass-panel dash-equity-panel" style="padding:18px 20px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <div>
+                <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
+                <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · all engines · most recent last</div>
               </div>
-              <div id="dash-equity-wrap"></div>
-            </div>
-
-            <!-- Engine overview -->
-            <div class="glass-panel" style="padding:14px 16px">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <div class="section-divider" style="margin-bottom:0;flex:1">ENGINE OVERVIEW</div>
-                <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">4 BOTS</div>
+              <div style="display:flex;align-items:center;gap:12px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
+                <span style="display:flex;align-items:center;gap:5px"><span style="width:20px;height:2px;background:linear-gradient(90deg,hsl(var(--secondary)),hsl(var(--win)));border-radius:2px;display:inline-block"></span>P&amp;L Line</span>
+                <span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:hsl(var(--win));display:inline-block;box-shadow:0 0 6px hsl(var(--win))"></span>Live</span>
               </div>
-              <div class="rank-table" id="dash-perbot"></div>
             </div>
-
+            <div id="dash-equity-wrap"></div>
           </div>
         </div>
+
+        <!-- ═══ ROW 2: Engine Overview — full width ═══ -->
+        <div class="dash-row-full">
+          <div class="glass-panel" style="padding:14px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">ENGINE OVERVIEW</div>
+              <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">4 BOTS</div>
+            </div>
+            <div class="rank-table" id="dash-perbot"></div>
+          </div>
+        </div>
+
+        <!-- ═══ ROW 3: Trade Journal — full width ═══ -->
+        <div class="dash-row-full">
+          <div class="glass-panel journal-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
+            </div>
+            <div class="journal-tabs" id="dash-journal-tabs"></div>
+            <div class="journal-list" id="dash-journal-list"></div>
+          </div>
+        </div>
+
       </div>`;
   }
 
   function buildEquitySVG(points) {
-    const w = 680, h = 200, pad = 28;
+    const w = 780, h = 260, pad = 36;
     if (points.length < 2) {
-      return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
+      return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;overflow:visible">
         <defs>
           <linearGradient id="empty-grad" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stop-color="hsl(var(--primary))" stop-opacity="0.06"/>
@@ -10086,7 +10374,7 @@ window.NexusStrategies=exports;
         <rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}"
           fill="url(#empty-grad)" stroke="hsl(var(--border))" stroke-width="0.5" stroke-dasharray="4,4" rx="10"/>
         <text x="${w/2}" y="${h/2-10}" text-anchor="middle" fill="hsl(var(--muted-foreground))"
-          font-size="11" font-family="Outfit,sans-serif" letter-spacing="3" font-weight="700" text-transform="uppercase">NO EQUITY DATA</text>
+          font-size="11" font-family="Outfit,sans-serif" letter-spacing="3" font-weight="700">NO EQUITY DATA</text>
         <text x="${w/2}" y="${h/2+12}" text-anchor="middle" fill="hsl(var(--muted-foreground))"
           font-size="9" font-family="DM Mono,monospace" opacity="0.6">Curve appears after first closed trade</text>
       </svg>`;
@@ -10094,47 +10382,105 @@ window.NexusStrategies=exports;
     const values = points.map((p) => p.cumulative);
     const min = Math.min(0, ...values), max = Math.max(0, ...values);
     const range = max - min || 1;
-    const stepX = (w - pad * 2) / (points.length - 1);
+    const stepX = (w - pad * 2) / Math.max(points.length - 1, 1);
     const xAt = (i) => pad + i * stepX;
     const yAt = (v) => h - pad - ((v - min) / range) * (h - pad * 2);
     const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(p.cumulative).toFixed(1)}`).join(' ');
-    const area = `${line} L${xAt(points.length - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`;
+    const area = `${line} L${xAt(points.length - 1).toFixed(1)},${h - pad} L${xAt(0).toFixed(1)},${h - pad} Z`;
     const zeroY = yAt(0).toFixed(1);
     const last = values[values.length - 1];
     const isPos = last >= 0;
-    const lineColor = isPos ? 'hsl(var(--win))' : 'hsl(var(--primary))';
-    const lineColor2 = isPos ? 'hsl(var(--secondary))' : 'hsl(var(--loss))';
-    // Grid lines
-    const gridLines = [0.25, 0.5, 0.75].map(t => {
+    const peakVal = Math.max(...values);
+    const troughVal = Math.min(...values);
+    const peakIdx = values.lastIndexOf(peakVal);
+    const troughIdx = values.lastIndexOf(troughVal);
+    const lineColor = isPos ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+    const lineColor2 = isPos ? 'hsl(var(--secondary))' : 'hsl(var(--primary))';
+
+    // Y-axis grid lines with labels
+    const gridCount = 4;
+    const gridLines = Array.from({length: gridCount + 1}, (_, i) => {
+      const t = i / gridCount;
       const y = (pad + t * (h - pad*2)).toFixed(1);
-      return `<line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}" stroke="hsl(var(--border))" stroke-width="0.5" opacity="0.4"/>`;
+      const val = (max - t * range).toFixed(2);
+      const isZero = Math.abs(parseFloat(val)) < range * 0.03;
+      return `
+        <line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}"
+          stroke="${isZero ? 'hsl(var(--border-bright))' : 'hsl(var(--border))'}"
+          stroke-width="${isZero ? 1 : 0.4}" stroke-dasharray="${isZero ? '3,4' : '2,6'}" opacity="${isZero ? 0.7 : 0.35}"/>
+        <text x="${pad - 5}" y="${parseFloat(y) + 3.5}" text-anchor="end"
+          fill="hsl(var(--muted-foreground))" font-size="8" font-family="DM Mono,monospace" opacity="0.6">${parseFloat(val) >= 0 ? '+' : ''}${parseFloat(val).toFixed(2)}</text>`;
     }).join('');
+
+    // Trade count ticks along X axis
+    const tickCount = Math.min(8, points.length);
+    const tickStep = Math.floor(points.length / tickCount);
+    const xTicks = Array.from({length: tickCount}, (_, i) => {
+      const idx = i * tickStep;
+      const x = xAt(idx).toFixed(1);
+      return `<line x1="${x}" y1="${h - pad}" x2="${x}" y2="${h - pad + 4}" stroke="hsl(var(--border))" stroke-width="0.5" opacity="0.4"/>
+              <text x="${x}" y="${h - pad + 13}" text-anchor="middle" fill="hsl(var(--muted-foreground))" font-size="7.5" font-family="DM Mono,monospace" opacity="0.5">#${idx+1}</text>`;
+    }).join('');
+
+    // Peak marker
+    const peakX = xAt(peakIdx).toFixed(1), peakY = yAt(peakVal).toFixed(1);
+    const peakLabel = peakVal !== last ? `
+      <line x1="${peakX}" y1="${peakY}" x2="${peakX}" y2="${parseFloat(peakY)+28}" stroke="hsl(var(--win))" stroke-width="0.8" stroke-dasharray="2,2" opacity="0.5"/>
+      <circle cx="${peakX}" cy="${peakY}" r="3" fill="hsl(var(--win))" opacity="0.7" style="filter:drop-shadow(0 0 4px hsl(var(--win)))"/>
+      <text x="${peakX}" y="${parseFloat(peakY)-7}" text-anchor="middle" fill="hsl(var(--win))" font-size="8" font-family="DM Mono,monospace" font-weight="700" opacity="0.8">▲ +${peakVal.toFixed(2)}</text>` : '';
+
+    // Trough marker
+    const troughX = xAt(troughIdx).toFixed(1), troughY = yAt(troughVal).toFixed(1);
+    const troughLabel = troughVal < 0 && troughVal !== last ? `
+      <circle cx="${troughX}" cy="${troughY}" r="3" fill="hsl(var(--loss))" opacity="0.6" style="filter:drop-shadow(0 0 4px hsl(var(--loss)))"/>
+      <text x="${troughX}" y="${parseFloat(troughY)+16}" text-anchor="middle" fill="hsl(var(--loss))" font-size="8" font-family="DM Mono,monospace" font-weight="700" opacity="0.7">▼ ${troughVal.toFixed(2)}</text>` : '';
+
+    const endX = xAt(points.length-1).toFixed(1), endY = yAt(last).toFixed(1);
+
     return `<svg class="equity-svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
       <defs>
         <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.28"/>
-          <stop offset="70%" stop-color="${lineColor}" stop-opacity="0.06"/>
+          <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.32"/>
+          <stop offset="60%" stop-color="${lineColor}" stop-opacity="0.08"/>
           <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
         </linearGradient>
         <linearGradient id="eqline" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="${lineColor}"/>
-          <stop offset="100%" stop-color="${lineColor2}"/>
+          <stop offset="0%" stop-color="${lineColor2}"/>
+          <stop offset="100%" stop-color="${lineColor}"/>
         </linearGradient>
         <filter id="eq-glow">
-          <feGaussianBlur stdDeviation="2" result="blur"/>
+          <feGaussianBlur stdDeviation="2.5" result="blur"/>
           <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
+        <filter id="dot-glow">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <clipPath id="eq-clip">
+          <rect x="${pad}" y="${pad}" width="${w-pad*2}" height="${h-pad*2}"/>
+        </clipPath>
       </defs>
       ${gridLines}
+      ${xTicks}
+      <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="hsl(var(--border))" stroke-width="0.6" opacity="0.5"/>
+      <line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="hsl(var(--border))" stroke-width="0.6" opacity="0.5"/>
       <line x1="${pad}" y1="${zeroY}" x2="${w - pad}" y2="${zeroY}"
-        stroke="hsl(var(--border-bright))" stroke-width="1" stroke-dasharray="3,4" opacity="0.6"/>
-      <path d="${area}" fill="url(#eqfill)" stroke="none"/>
-      <path d="${line}" fill="none" stroke="url(#eqline)" stroke-width="2.5"
-        stroke-linejoin="round" stroke-linecap="round" filter="url(#eq-glow)"/>
-      <!-- End dot -->
-      <circle cx="${xAt(points.length-1).toFixed(1)}" cy="${yAt(last).toFixed(1)}" r="4"
-        fill="${lineColor}" stroke="hsl(var(--bg))" stroke-width="2"
-        style="filter:drop-shadow(0 0 6px ${lineColor})"/>
+        stroke="${lineColor}" stroke-width="0.8" stroke-dasharray="3,5" opacity="0.45"/>
+      <g clip-path="url(#eq-clip)">
+        <path d="${area}" fill="url(#eqfill)" stroke="none"/>
+      </g>
+      <path d="${line}" fill="none" stroke="url(#eqline)" stroke-width="2.2"
+        stroke-linejoin="round" stroke-linecap="round" filter="url(#eq-glow)" clip-path="url(#eq-clip)"/>
+      ${peakLabel}
+      ${troughLabel}
+      <circle cx="${endX}" cy="${endY}" r="7" fill="${lineColor}" opacity="0.12" filter="url(#dot-glow)">
+        <animate attributeName="r" values="5;10;5" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.18;0.06;0.18" dur="2.4s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="${endX}" cy="${endY}" r="4.5" fill="${lineColor}" stroke="hsl(var(--bg))" stroke-width="2" filter="url(#dot-glow)"/>
+      <circle cx="${endX}" cy="${endY}" r="2" fill="hsl(var(--bg))"/>
+      <rect x="${parseFloat(endX) - 22}" y="${parseFloat(endY) - 22}" width="44" height="14" rx="4" fill="hsl(var(--bg))" opacity="0.75"/>
+      <text x="${endX}" y="${parseFloat(endY) - 12}" text-anchor="middle" fill="${lineColor}" font-size="9" font-family="DM Mono,monospace" font-weight="700">${last >= 0 ? '+' : ''}${last.toFixed(2)}</text>
     </svg>`;
   }
 
@@ -10191,6 +10537,42 @@ window.NexusStrategies=exports;
     if (yieldWrEl) yieldWrEl.textContent = `${wr}%`;
     if (yieldPfEl) yieldPfEl.textContent = `${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`;
 
+    // ── Master control status ──
+    const masterStatus = el('dash-master-status', root);
+    const masterBtn = el('dash-master-toggle', root);
+    const engagedNow = botIds.filter(id => {
+      const eng = engines[id];
+      if (!eng) return false;
+      return id === 'differ' ? (eng.state && (eng.state.isArmed || eng.state.isRunning)) : (eng.state && (eng.state.active || eng.state.isLocked));
+    }).length;
+    if (masterStatus) {
+      const coolingCount = botIds.filter(id => {
+        const eng = engines[id];
+        if (!eng) return false;
+        return id === 'differ' ? (eng.state && eng.state.isCooldown) : (eng.state && eng.state.isCooldown);
+      }).length;
+      const isAutoOn = botIds.some(id => { const eng = engines[id]; if (!eng) return false; return id === 'differ' ? (eng.state && eng.state.autoMode) : (eng.config && eng.config.autoPilot); });
+      if (coolingCount > 0) {
+        masterStatus.textContent = `${engagedNow} / ${botIds.length} engaged · 🔄 ${coolingCount} cooling down`;
+        masterStatus.style.color = '#ffaa00';
+      } else if (isAutoOn) {
+        masterStatus.textContent = `${engagedNow} / ${botIds.length} engaged · ⚡ FULL AUTO ON`;
+        masterStatus.style.color = 'hsl(var(--primary))';
+      } else {
+        masterStatus.textContent = `${engagedNow} / ${botIds.length} engines engaged`;
+        masterStatus.style.color = '';
+      }
+    }
+    if (masterBtn) {
+      if (engagedNow > 0) {
+        masterBtn.textContent = '⛔ TERMINATE ALL';
+        masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--loss)),hsl(350 60% 38%))';
+      } else {
+        masterBtn.textContent = '⚡ ENGAGE ALL';
+        masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)))';
+      }
+    }
+
     // Deduplicate entries by id to prevent double-counting from multiple socket listeners
     const seenIds = new Set();
     const dedupedEntries = allEntries.filter(e => {
@@ -10218,8 +10600,8 @@ window.NexusStrategies=exports;
     const perBotHtml = botIds.map((id) => {
       const meta = BOT_META[id]; const b = perBot[id];
       const wr2 = b.trades ? ((b.win / b.trades) * 100).toFixed(1) : '0.0';
-      return `<div class="glass-panel bot-card">
-        <div class="bot-card-head"><span class="bot-card-dot" style="background:${b.active ? meta.dot : 'hsl(var(--border))'}"></span>${meta.label}${b.active ? ' <span class=\"text-success\" style=\"font-size:9px;margin-left:auto\">● LIVE</span>' : ''}</div>
+      return `<div class="glass-panel bot-card" data-nav-bot="${id}" style="cursor:pointer" title="Open ${meta.label}">
+        <div class="bot-card-head"><span class="bot-card-dot" style="background:${b.active ? meta.dot : 'hsl(var(--border))'}"></span>${meta.label}${b.active ? ' <span class=\"text-success\" style=\"font-size:9px;margin-left:auto\">● LIVE</span>' : '<span class=\"text-muted\" style=\"font-size:9px;margin-left:auto\">OPEN →</span>'}</div>
         <div class="bot-card-value ${b.profit >= 0 ? 'text-success' : 'text-destructive'}">${b.profit >= 0 ? '+' : ''}$${b.profit.toFixed(2)}</div>
         <div class="bot-card-meta"><span>${b.trades} trades</span><span>${wr2}% win</span></div>
         <div class="bar-track"><div class="bar-fill-win" style="width:${wr2}%"></div></div>
@@ -10284,10 +10666,17 @@ window.NexusStrategies=exports;
               }
             }
           });
-          // For differ engine
+          // For differ engine - use dispatch with TOGGLE_AUTO or SET_AUTO_MODE
           const differ = engines['differ'];
-          if (differ && differ.setConfig) {
-            differ.setConfig ? differ.setConfig({ autoPilot: nowOn }) : null;
+          if (differ && differ.dispatch) {
+            const differCurrentlyAuto = differ.state && differ.state.autoMode;
+            if (differCurrentlyAuto !== nowOn) {
+              differ.dispatch({ type: 'TOGGLE_AUTO' });
+            }
+            // If turning on and differ is not armed, arm it
+            if (nowOn && differ.state && !differ.state.isArmed && !differ.state.isRunning && !differ.state.isCooldown) {
+              differ.armSystem && differ.armSystem();
+            }
           }
         };
       }
@@ -10303,7 +10692,7 @@ window.NexusStrategies=exports;
     const autoToggle2 = root.querySelector('#dash-full-auto-toggle');
     const autoTxt2 = root.querySelector('#dash-full-auto-txt');
     if (autoToggle2) {
-      const isAutoOn = botIds.some(id => { const eng = engines[id]; return id !== 'differ' && eng && eng.config && eng.config.autoPilot; });
+      const isAutoOn = botIds.some(id => { const eng = engines[id]; if (!eng) return false; return id === 'differ' ? (eng.state && eng.state.autoMode) : (eng.config && eng.config.autoPilot); });
       autoToggle2.classList.toggle('on', isAutoOn);
       if (autoTxt2) autoTxt2.style.color = isAutoOn ? 'hsl(var(--primary))' : 'rgba(150,165,200,0.7)';
     }
@@ -10342,7 +10731,7 @@ window.NexusStrategies=exports;
       execList.innerHTML = execDataList.map(({ id, isCd, cdSecs, cdMax, statusTag, statusClass, resultLabel, resultGlow, flow, botOn, plStr, plClass }) => {
         const total = (2 * Math.PI * 14).toFixed(1);
         const offset = (2 * Math.PI * 14 * (1 - Math.min(cdSecs / Math.max(cdMax, 1), 1))).toFixed(1);
-        return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" data-exec-id="${id}" style="${botOn ? '' : 'opacity:0.45'}">
+        return `<div class="exec-row${isCd ? ' exec-row-cd' : ''}" data-exec-id="${id}" data-nav-exec="${id}" style="cursor:pointer;${botOn ? '' : 'opacity:0.45'}" title="Open ${BOT_META[id].label} tab">
           <div class="exec-row-head">
             <span class="exec-bot-name">
               <span class="bot-card-dot exec-dot" style="background:${BOT_META[id].dot};box-shadow:0 0 8px ${BOT_META[id].dot}"></span>
@@ -10371,6 +10760,11 @@ window.NexusStrategies=exports;
           </div>
         </div>`;
       }).join('');
+      execList.querySelectorAll('[data-nav-exec]').forEach((row) => {
+        row.addEventListener('click', () => {
+          if (window.UnifiedHub) window.UnifiedHub.switchApp(row.dataset.navExec);
+        });
+      });
     } else if (execList) {
       // Patch only the ticking CD number and arc — no full re-render, no flicker
       execDataList.forEach(({ id, isCd, cdSecs, cdMax }) => {
@@ -10791,7 +11185,10 @@ window.NexusStrategies=exports;
         const eng = ensureTitanOrDifferForControl(id);
         if (!eng) return;
         if (id === 'differ') {
-          if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) eng.armSystem();
+          if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) {
+            if (window.BenzUI && !window.BenzUI._initialized) { try { window.BenzUI.renderFull(eng.state); window.BenzUI._initialized = true; } catch(_) {} }
+            eng.armSystem();
+          }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
         } else {
           const isOn = eng.state.active || eng.state.isLocked;
@@ -10799,6 +11196,24 @@ window.NexusStrategies=exports;
           if (!turnOn && isOn) eng.toggleEngine();
         }
       });
+      // Update button label immediately after click
+      setTimeout(() => {
+        const masterBtn = document.getElementById('dash-master-toggle');
+        if (masterBtn) {
+          const nowEngaged = BOT_IDS.filter((id) => {
+            const eng = engines[id];
+            if (!eng) return false;
+            return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+          }).length;
+          if (nowEngaged > 0) {
+            masterBtn.textContent = '⛔ TERMINATE ALL';
+            masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--loss)),hsl(350 60% 38%))';
+          } else {
+            masterBtn.textContent = '⚡ ENGAGE ALL';
+            masterBtn.style.background = 'linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)))';
+          }
+        }
+      }, 200);
       queueDashboardRender();
     });
     // Apply TP/SL when values change
