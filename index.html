@@ -3,10 +3,222 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Benz Club — Dashboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Outfit:wght@400;500;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <title>Benz Club — Unified Trading Hub</title>
+  </head>
+<body>
+  <div id="file-protocol-banner" style="display:none;background:#7a1f1f;color:#fff;padding:10px 16px;font-family:DM Mono',monospace;font-size:12px;text-align:center;line-height:1.5">
+    ⚠️ You opened this file directly from disk (file://). Deriv's servers reject WebSocket connections from local files, so trading and account login will always fail here.
+    Host this page — e.g. run a local server (<code>python3 -m http.server</code> in its folder, then open <code>http://localhost:8000/...</code>) or upload it to any static host — and reload it from that URL instead.
+  </div>
+  <script>
+    if (window.location.protocol === 'file:') {
+      document.addEventListener('DOMContentLoaded', () => {
+        const b = document.getElementById('file-protocol-banner');
+        if (b) b.style.display = 'block';
+      });
+    }
+  </script>
+  <div id="global-error-toast" class="global-error-toast" role="alert" aria-live="assertive"></div>
+  <script>
+    // Surface uncaught errors instead of failing silently — vital on a
+    // live-trading terminal where a silent JS exception could leave the
+    // user thinking an engine is still working when it has actually died.
+    (function () {
+      let lastShown = 0;
+      function showErrorToast(message) {
+        const now = Date.now();
+        if (now - lastShown < 4000) return; // avoid spamming on repeated/cascading errors
+        lastShown = now;
+        const el = document.getElementById('global-error-toast');
+        if (!el) return;
+        el.textContent = '⚠ ' + message + ' — your engines keep running; this is a display-layer error. Reload if things look stuck.';
+        el.classList.add('show');
+        clearTimeout(el._hideTimer);
+        el._hideTimer = setTimeout(() => el.classList.remove('show'), 7000);
+      }
+      window.addEventListener('error', (e) => {
+        showErrorToast((e?.message || 'An unexpected error occurred').slice(0, 160));
+      });
+      window.addEventListener('unhandledrejection', (e) => {
+        const msg = e?.reason?.message || (typeof e?.reason === 'string' ? e.reason : 'A background task failed');
+        showErrorToast(String(msg).slice(0, 160));
+      });
+    })();
+  </script>
+  <div class="hub-shell">
+    <aside class="hub-sidebar" id="hub-sidebar">
+      <div class="hub-sidebar-top">
+        <div class="hub-brand">
+          <div class="hub-brand-avatar font-display">B</div>
+          <div class="hub-brand-text">
+            <div class="hub-brand-name font-display">BENZ <span>CLUB</span></div>
+            <div class="hub-brand-sub font-mono" id="hub-account-id">No account linked</div>
+          </div>
+        </div>
+        <button type="button" class="hub-sidebar-collapse" id="hub-sidebar-collapse" title="Collapse sidebar" aria-label="Collapse sidebar">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+      </div>
+
+      <nav class="hub-tabs" aria-label="App switcher">
+        <div class="hub-nav-label">Overview</div>
+        <button type="button" class="hub-tab active" data-app="dashboard" data-label="Dashboard" title="Account overview">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></span>
+          <span class="hub-tab-label">Dashboard</span>
+          <span class="dot live"></span>
+        </button>
+        <div class="hub-nav-label">Engines</div>
+        <button type="button" class="hub-tab" data-app="differ" data-label="Differ Terminal" title="Atomic Differ Terminal">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></span>
+          <span class="hub-tab-label">Differ</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="even" data-label="Even Omega" title="Even Omega Engine">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="7" height="11" rx="1.5"/><rect x="13" y="3" width="7" height="17" rx="1.5"/></svg></span>
+          <span class="hub-tab-label">Even</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="odd" data-label="Odd Omega" title="Odd Omega Engine">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="7" height="17" rx="1.5"/><rect x="13" y="9" width="7" height="11" rx="1.5"/></svg></span>
+          <span class="hub-tab-label">Odd</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="nexus" data-label="Over / Under" title="Nexus Profit Finder — Over/Under">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14l5 6 5-6M7 10l5-6 5 6"/></svg></span>
+          <span class="hub-tab-label">Over / Under</span>
+          <span class="dot live"></span>
+        </button>
+        <div class="hub-nav-label">Account</div>
+        <div class="hub-balance-pill glass-pill font-mono" id="hub-balance-pill" style="display:none;width:100%;box-sizing:border-box;justify-content:center"></div>
+      </nav>
+
+      <div class="hub-sidebar-bottom">
+        <div class="hub-theme-pills" id="hub-theme-pills"></div>
+        <button type="button" class="hub-settings-btn font-display" id="hub-settings-btn">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Settings</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="hub-main">
+      <header class="hub-header" style="display:none">
+        <div class="hub-breadcrumb font-mono">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/></svg>
+          <span>Overview</span>
+          <span class="crumb-sep">/</span>
+          <span class="crumb-current" id="hub-breadcrumb-current">Dashboard</span>
+        </div>
+        <div class="hub-header-right">
+          <div class="hub-clock font-mono" id="hub-clock">--:--:--</div>
+          <div class="hub-live-badge" id="hub-live-badge"><span class="dot"></span><span id="hub-live-text">Offline</span></div>
+        </div>
+      </header>
+
+    <!-- All apps stay mounted — engines run in background when hidden -->
+    <section id="panel-dashboard" class="app-panel active" aria-label="Dashboard">
+      <div id="dashboard-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-differ" class="app-panel" aria-label="Differ terminal">
+      <div id="differ-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-even" class="app-panel" aria-label="Even dashboard">
+      <div id="even-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-odd" class="app-panel" aria-label="Odd dashboard">
+      <div id="odd-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-nexus" class="app-panel" aria-label="Over/Under dashboard">
+      <div id="nexus-root" class="app-root"></div>
+    </section>
+    </div>
+
+    <div class="modal-overlay" id="settings-modal" aria-hidden="true">
+      <div class="modal-card glass-card-glow">
+        <div class="modal-header">
+          <h2 class="font-display">Settings</h2>
+          <button type="button" class="modal-close" id="settings-close" aria-label="Close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="settings-section">
+            <label class="settings-label font-display">Deriv App ID <span style="font-size:10px;opacity:0.6;">(REST / Trading)</span></label>
+            <p class="settings-hint">Your <strong>alphanumeric</strong> App ID from <strong>developers.deriv.com</strong> → Dashboard → Applications (e.g. <code>33ADPhDZXR2F60qhPudXB</code>). Used in REST API headers for trading authentication. Register a PAT-type app if you don't have one.</p>
+            <div class="settings-row">
+              <input type="text" class="input-field font-mono" id="settings-appid" placeholder="e.g. 33ADPhDZXR2F60qhPudXB">
+              <button type="button" class="btn-primary font-display" id="settings-appid-save">Save</button>
+            </div>
+          </div>
+          <div class="settings-section">
+            <label class="settings-label font-display">WS App ID <span style="font-size:10px;opacity:0.6;">(Analysis / Digits)</span></label>
+            <p class="settings-hint">Your <strong>numeric</strong> App ID for <code>ws.derivws.com</code> public sockets — used for live digit/tick analysis only, not trading. Register at <strong>api.deriv.com</strong> → Applications. Default is <code>1089</code> (Deriv test ID).</p>
+            <div class="settings-row">
+              <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
+              <button type="button" class="btn-primary font-display" id="settings-wsappid-save">Save</button>
+            </div>
+          </div>
+          <div class="settings-section">
+            <label class="settings-label font-display">Deriv API Token</label>
+            <p class="settings-hint">Your Personal Access Token (PAT) from <strong>developers.deriv.com</strong> → Dashboard → API tokens. Create a PAT with <em>trade</em> and <em>account_manage</em> scopes. This is used as a Bearer token to authenticate all REST and WebSocket calls.</p>
+            <div class="settings-row">
+              <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token…">
+              <button type="button" class="btn-primary font-display" id="settings-save">Save &amp; Connect</button>
+            </div>
+            <p class="settings-status" id="settings-status">Checking…</p>
+          </div>
+          <div class="settings-section">
+            <label class="settings-label font-display">Account Type</label>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-row-label">
+                <div class="label-title font-display">Demo Account</div>
+                <div class="label-sub">For practicing with virtual funds</div>
+              </div>
+              <button type="button" class="toggle" id="settings-account-type"></button>
+              <div class="settings-toggle-row-label" style="text-align: right;">
+                <div class="label-title font-display">Real Account</div>
+                <div class="label-sub">For trading with real money</div>
+              </div>
+            </div>
+          </div>
+          <div class="settings-section">
+            <label class="settings-label font-display">Appearance</label>
+            <p class="settings-hint">Choose your visual theme. <strong>Theme 1 (Luminous)</strong> features cyan/magenta glassmorphism. <strong>Theme 2 (Void)</strong> uses ultra-black surfaces with zero ambient color. Settings are saved automatically.</p>
+            <div class="theme-pill-row" id="settings-theme-pills" style="flex-wrap:wrap;gap:6px;margin-top:4px"></div>
+          </div>
+          <div class="settings-section">
+            <label class="settings-label font-display">Telegram Alerts</label>
+            <div class="settings-grid-2">
+              <input class="input-field font-mono" id="settings-tg-token" placeholder="Bot token">
+              <input class="input-field font-mono" id="settings-tg-chat" placeholder="Chat ID">
+            </div>
+            <div class="settings-toggle-row">
+              <span>Send win / loss / TP / SL alerts to Telegram</span>
+              <button type="button" class="toggle" id="settings-tg-toggle"></button>
+            </div>
+          </div>
+          <div class="settings-section">
+            <label class="settings-label font-display">System Sound</label>
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-row-label">
+                <div class="label-title font-display" style="display:flex;align-items:center;gap:8px;">
+                  <span id="mute-icon" style="font-size:18px;">🔊</span>
+                  <span id="mute-label">Sound On</span>
+                </div>
+                <div class="label-sub">Mutes all audio across every tab instantly</div>
+              </div>
+              <button type="button" class="toggle" id="settings-mute-toggle"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shared libs -->
+  <!-- App engines -->
   <style>
 /* ════════════════════════════════════════════════════════════════
    BENZ CLUB — Ultra Dark Luxury Trading Terminal  ·  v5
@@ -14,6 +226,8 @@
    surgical neon signals. Inspired by Bloomberg Terminal meets
    high-end private banking UI. Every surface earns its place.
    ════════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Outfit:wght@400;500;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap');
+
 /* ──────────────────────────────────────────────────────────────
    QUANTIX PURE BLACK — void-black base, electric blue-violet
    accent, razor-clean surfaces. Every surface earns its place.
@@ -1310,6 +1524,8 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
    ════════════════════════════════════════════════════════════════ */
 
 /* ── Import Syne + Space Grotesk for even more display weight ── */
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 /* ── New keyframes ── */
 @keyframes sine-flow {
   0%   { stroke-dashoffset: 1200; }
@@ -1837,6 +2053,8 @@ html.luminous .stat-card {
 /* ════════════════════════════════════════════════════════════════
    BENZ CLUB — THEME ONE: LUMINOUS (Cyan/Magenta Glass)
    ════════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Share+Tech+Mono&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
 /* Theme pill named variants (shared UI, always visible) */
 .theme-pill-named {
   display: flex !important;
@@ -4704,177 +4922,9 @@ html body .font-mono { font-size: 12.5px !important; }
 html body .modal-title { font-size: 16px !important; }
 html body .modal-body { font-size: 13.5px !important; }
 
-
-  </style>
-</head>
-<body>
-<body>
-  <div id="file-protocol-banner" style="display:none;background:#7a1f1f;color:#fff;padding:10px 16px;font-family:DM Mono',monospace;font-size:12px;text-align:center;line-height:1.5">
-    ⚠️ You opened this file directly from disk (file://). Deriv's servers reject WebSocket connections from local files, so trading and account login will always fail here.
-    Host this page — e.g. run a local server (<code>python3 -m http.server</code> in its folder, then open <code>http://localhost:8000/...</code>) or upload it to any static host — and reload it from that URL instead.
-  </div>
-  <script>
-    if (window.location.protocol === 'file:') {
-      document.addEventListener('DOMContentLoaded', () => {
-        const b = document.getElementById('file-protocol-banner');
-        if (b) b.style.display = 'block';
-      });
-    }
-  </script>
-  <div id="global-error-toast" class="global-error-toast" role="alert" aria-live="assertive"></div>
-  <script>
-    // Surface uncaught errors instead of failing silently — vital on a
-    // live-trading terminal where a silent JS exception could leave the
-    // user thinking an engine is still working when it has actually died.
-    (function () {
-      let lastShown = 0;
-      function showErrorToast(message) {
-        const now = Date.now();
-        if (now - lastShown < 4000) return; // avoid spamming on repeated/cascading errors
-        lastShown = now;
-        const el = document.getElementById('global-error-toast');
-        if (!el) return;
-        el.textContent = '⚠ ' + message + ' — your engines keep running; this is a display-layer error. Reload if things look stuck.';
-        el.classList.add('show');
-        clearTimeout(el._hideTimer);
-        el._hideTimer = setTimeout(() => el.classList.remove('show'), 7000);
-      }
-      window.addEventListener('error', (e) => {
-        showErrorToast((e?.message || 'An unexpected error occurred').slice(0, 160));
-      });
-      window.addEventListener('unhandledrejection', (e) => {
-        const msg = e?.reason?.message || (typeof e?.reason === 'string' ? e.reason : 'A background task failed');
-        showErrorToast(String(msg).slice(0, 160));
-      });
-    })();
-  </script>
-
-  <div class="hub-shell">
-  <aside class="hub-sidebar" id="hub-sidebar">
-      <div class="hub-sidebar-top">
-        <div class="hub-brand">
-          <div class="hub-brand-avatar font-display">B</div>
-          <div class="hub-brand-text">
-            <div class="hub-brand-name font-display">BENZ <span>CLUB</span></div>
-            <div class="hub-brand-sub font-mono" id="hub-account-id">No account linked</div>
-          </div>
-        </div>
-        <button type="button" class="hub-sidebar-collapse" id="hub-sidebar-collapse" title="Collapse sidebar" aria-label="Collapse sidebar">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-        </button>
-      </div>
-      <nav class="hub-tabs" aria-label="App switcher">
-        <div class="hub-nav-label">Overview</div>
-        <a class="hub-tab active" href="index.html" data-label="Dashboard" title="Account overview">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></span>
-          <span class="hub-tab-label">Dashboard</span>
-          <span class="dot live"></span>
-        </a>
-        <div class="hub-nav-label">Engines</div>
-        <a class="hub-tab " href="differ.html" data-label="Differ Terminal" title="Atomic Differ Terminal">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></span>
-          <span class="hub-tab-label">Differ</span>
-          <span class="dot"></span>
-        </a>
-        <a class="hub-tab " href="even.html" data-label="Even Omega" title="Even Omega Engine">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="7" height="11" rx="1.5"/><rect x="13" y="3" width="7" height="17" rx="1.5"/></svg></span>
-          <span class="hub-tab-label">Even</span>
-          <span class="dot"></span>
-        </a>
-        <a class="hub-tab " href="odd.html" data-label="Odd Omega" title="Odd Omega Engine">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="7" height="17" rx="1.5"/><rect x="13" y="9" width="7" height="11" rx="1.5"/></svg></span>
-          <span class="hub-tab-label">Odd</span>
-          <span class="dot"></span>
-        </a>
-        <a class="hub-tab " href="nexus.html" data-label="Over / Under" title="Nexus Profit Finder — Over/Under">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14l5 6 5-6M7 10l5-6 5 6"/></svg></span>
-          <span class="hub-tab-label">Over / Under</span>
-          <span class="dot"></span>
-        </a>
-        <div class="hub-nav-label">Account</div>
-        <div class="hub-balance-pill glass-pill font-mono" id="hub-balance-pill" style="display:none;width:100%;box-sizing:border-box;justify-content:center"></div>
-      </nav>
-      <div class="hub-sidebar-bottom">
-        <div class="hub-theme-pills" id="hub-theme-pills"></div>
-        <button type="button" class="hub-settings-btn font-display" id="hub-settings-btn">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-          <span>Settings</span>
-        </button>
-      </div>
-    </aside>
-    <div class="hub-main">
-      <section id="panel-dashboard" class="app-panel active" aria-label="Dashboard">
-        <div id="dashboard-root" class="app-root"></div>
-      </section>
-    </div>
-    <div class="modal-overlay" id="settings-modal" aria-hidden="true">
-      <div class="modal-card glass-card-glow">
-        <div class="modal-header">
-          <h2 class="font-display">Settings</h2>
-          <button type="button" class="modal-close" id="settings-close" aria-label="Close">&#x2715;</button>
-        </div>
-        <div class="modal-body">
-          <div class="settings-section">
-            <label class="settings-label font-display">Deriv App ID</label>
-            <div class="settings-row">
-              <input type="text" class="input-field font-mono" id="settings-appid" placeholder="e.g. 33ADPhDZXR2F60qhPudXB">
-              <button type="button" class="btn-primary font-display" id="settings-appid-save">Save</button>
-            </div>
-          </div>
-          <div class="settings-section">
-            <label class="settings-label font-display">WS App ID</label>
-            <div class="settings-row">
-              <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
-              <button type="button" class="btn-primary font-display" id="settings-wsappid-save">Save</button>
-            </div>
-          </div>
-          <div class="settings-section">
-            <label class="settings-label font-display">Deriv API Token</label>
-            <div class="settings-row">
-              <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token">
-              <button type="button" class="btn-primary font-display" id="settings-save">Save &amp; Connect</button>
-            </div>
-            <p class="settings-status" id="settings-status">Checking...</p>
-          </div>
-          <div class="settings-section">
-            <label class="settings-label font-display">Account Type</label>
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-row-label"><div class="label-title font-display">Demo</div></div>
-              <button type="button" class="toggle" id="settings-account-type"></button>
-              <div class="settings-toggle-row-label" style="text-align:right;"><div class="label-title font-display">Real</div></div>
-            </div>
-          </div>
-          <div class="settings-section">
-            <label class="settings-label font-display">Appearance</label>
-            <div class="theme-pill-row" id="settings-theme-pills" style="flex-wrap:wrap;gap:6px;margin-top:4px"></div>
-          </div>
-          <div class="settings-section">
-            <label class="settings-label font-display">Telegram Alerts</label>
-            <div class="settings-grid-2">
-              <input class="input-field font-mono" id="settings-tg-token" placeholder="Bot token">
-              <input class="input-field font-mono" id="settings-tg-chat" placeholder="Chat ID">
-            </div>
-            <div class="settings-toggle-row">
-              <span>Send win/loss/TP/SL alerts</span>
-              <button type="button" class="toggle" id="settings-tg-toggle"></button>
-            </div>
-          </div>
-          <div class="settings-section">
-            <label class="settings-label font-display">System Sound</label>
-            <div class="settings-toggle-row">
-              <div class="settings-toggle-row-label">
-                <div class="label-title font-display" style="display:flex;align-items:center;gap:8px;">
-                  <span id="mute-icon">&#x1F50A;</span><span id="mute-label">Sound On</span>
-                </div>
-              </div>
-              <button type="button" class="toggle" id="settings-mute-toggle"></button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-<script>/* ============================================================
+</style>
+<script>
+/* ============================================================
    HubStore — single source of truth for the whole site.
    One API token, one theme, one Telegram config. Every engine
    (Differ, Even, Odd, Over/Under) and the Dashboard reads from
@@ -5148,8 +5198,7 @@ html body .modal-body { font-size: 13.5px !important; }
 
   setTimeout(connectAccount, 300);
 })(window);
-</script>
-<script>
+
 (function () {
   'use strict';
   class SoundEngine {
@@ -5251,8 +5300,7 @@ html body .modal-body { font-size: 13.5px !important; }
   document.addEventListener('keydown', unlockAudio);
   document.addEventListener('touchstart', unlockAudio);
 })();
-</script>
-<script>
+
 (function(){
 'use strict';
 
@@ -5603,7 +5651,6 @@ exports.createLogEntry = createLogEntry;
 window.EvenTrading = exports;
 })();
 
-
 (function () {
   'use strict';
   function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
@@ -5786,7 +5833,6 @@ window.EvenTrading = exports;
   window.EvenSocket = { globalSocket: new GlobalSocketManager() };
 })();
 
-
 (function () {
   'use strict';
   function createMarketScanner(Trading, Socket, ns) {
@@ -5906,7 +5952,6 @@ window.EvenTrading = exports;
 
   createMarketScanner(window.EvenTrading, window.EvenSocket, 'EvenScanner');
 })();
-
 
 (function(){
 'use strict';
@@ -6475,8 +6520,7 @@ exports.getStrategy=getStrategy;
 exports.getStrategyDefaults=getStrategyDefaults;
 window.EvenStrategies=exports;
 })();
-</script>
-<script>
+
 (function(){
 'use strict';
 
@@ -6823,7 +6867,6 @@ exports.createLogEntry = createLogEntry;
 window.NexusTrading = exports;
 })();
 
-
 (function () {
   'use strict';
   function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
@@ -6993,7 +7036,6 @@ window.NexusTrading = exports;
   window.NexusSocket = { globalSocket: new GlobalSocketManager() };
 })();
 
-
 (function () {
   'use strict';
   function createMarketScanner(Trading, Socket, ns) {
@@ -7085,7 +7127,6 @@ window.NexusTrading = exports;
 
   createMarketScanner(window.NexusTrading, window.NexusSocket, 'NexusScanner');
 })();
-
 
 (function(){
 'use strict';
@@ -7713,8 +7754,7 @@ exports.getStrategy=getStrategy;
 exports.getStrategyDefaults=getStrategyDefaults;
 window.NexusStrategies=exports;
 })();
-</script>
-<script>
+
 (function () {
   'use strict';
 
@@ -8266,8 +8306,7 @@ window.NexusStrategies=exports;
   window.BenzEngine = BenzEngine;
   window.BenzConstants = { MARKETS, getGlobalMarket };
 })();
-</script>
-<script>
+
 (function () {
   'use strict';
   function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
@@ -9033,8 +9072,1028 @@ window.NexusStrategies=exports;
 
   window.TitanEngine = TitanEngine;
 })();
-</script>
-<script>(function (global) {
+
+(function (global) {
+  'use strict';
+  const MARKETS = global.BenzConstants.MARKETS;
+
+  function el(id, parent) { return (parent || document).querySelector(id.startsWith('#') ? id : '#' + id); }
+
+  // Only touches the DOM when the generated HTML actually changed.
+  // Re-running the same innerHTML every tick is what was causing the
+  // journal panels to flicker (the browser re-paints + drops scroll/hover
+  // state on every assignment, even if the content is identical).
+  function setHtmlIfChanged(node, html) {
+    if (!node) return false;
+    if (node.__lastHtml === html) return false;
+    node.innerHTML = html;
+    node.__lastHtml = html;
+    return true;
+  }
+  global.setHtmlIfChanged = setHtmlIfChanged;
+
+  let shellBuilt = false;
+
+  function buildShell(root) {
+    if (shellBuilt) return;
+    root.innerHTML = `
+      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0">
+        <div>
+          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.2rem;letter-spacing:6px">DIFFER TERMINAL</h1>
+          <div style="font-size:8px;letter-spacing:3px;color:hsl(var(--muted-foreground))">ATOMIC BOLT ENGINE · V3.0 SUPERSONIC</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="glass-panel" id="differ-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
+        <div id="differ-conn-dot" style="width:10px;height:10px;border-radius:50%"></div>
+      </header>
+      <div class="benz-grid">
+        <div class="benz-col"><div class="benz-scroll" id="differ-left"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="differ-center"></div></div>
+        <div class="benz-col">
+          <div style="display:flex;border-bottom:1px solid hsl(var(--border)/0.4)">
+            <button class="differ-subtab font-display active" data-tab="journal" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;background:none;border:none;color:hsl(var(--primary));cursor:pointer">JOURNAL</button>
+            <button class="differ-subtab font-display" data-tab="lab" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;background:none;border:none;color:hsl(var(--muted-foreground));cursor:pointer">🧪 LAB</button>
+          </div>
+          <div class="benz-scroll" id="differ-right"></div>
+        </div>
+      </div>
+      <div class="glass-monitor" id="differ-statusbar" style="text-align:center;padding:10px;font-family:monospace;font-size:13px;border-top:1px solid hsl(var(--border)/0.5);border-radius:0;flex-shrink:0"></div>`;
+
+    root.querySelectorAll('.differ-subtab').forEach((btn) => {
+      btn.onclick = () => {
+        root.querySelectorAll('.differ-subtab').forEach((b) => { b.classList.remove('active'); b.style.color = 'hsl(var(--muted-foreground))'; });
+        btn.classList.add('active'); btn.style.color = 'hsl(var(--primary))';
+        renderRight(global.benzEngine.state, btn.dataset.tab);
+      };
+    });
+
+    shellBuilt = true;
+    renderCenterConfig(global.benzEngine.state);
+  }
+
+  function renderLeft(s) {
+    const maxP = Math.max(...s.freqP.map((f) => f.count), 1);
+    const nonZero = s.freqP.filter((f) => f.digit !== 0);
+    const sorted = [...nonZero].sort((a, b) => a.count - b.count);
+    const syncP = Math.min(100, (s.historyP.length / 100) * 100);
+    const silentPct = s.silenceTrigger ? Math.min(100, (s.silenceCount / s.silenceTrigger) * 100) : 0;
+    const silentClass = s.silenceCount >= s.silenceTrigger ? 'neon-text-win' : s.silenceCount >= s.silenceTrigger * 0.7 ? 'neon-text-accent' : '';
+
+    el('differ-left').innerHTML = `
+      <div class="section-divider neon-text-secondary"><span>● Analysis Engine</span></div>
+      <div class="glass-panel" style="padding:10px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px"><span class="font-display" style="letter-spacing:2px">CONFIDENCE</span><span class="neon-text-secondary">${s.analysisConfidence}%</span></div>
+        <div class="bar-track"><div class="bar-fill-cyan" style="width:${s.analysisConfidence}%"></div></div>
+      </div>
+      <div class="glass-panel" style="padding:10px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:6px"><span>PRIMARY: ${s.primaryMarket}</span><span>${s.historyP.length} ticks</span></div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:6px">
+          ${s.freqP.map((f) => `<div class="digit-cell ${f.digit === 0 ? 'is-zero' : ''} ${f.digit === s.coldDigit ? 'is-cold' : ''}"><div class="font-display" style="font-weight:700;${f.digit === s.coldDigit ? 'color:hsl(var(--primary))' : ''}">${f.digit}</div><div style="font-size:7px" class="font-mono-data">${f.count}</div><div class="bar-track" style="margin-top:2px;height:2px"><div class="bar-fill-primary" style="width:${(f.count / maxP) * 100}%"></div></div></div>`).join('')}
+        </div>
+        <div class="bar-track"><div class="bar-fill-cyan" style="width:${syncP}%"></div></div>
+      </div>
+      <div class="glass-panel" style="padding:10px;margin-bottom:8px">
+        <div style="font-size:9px;margin-bottom:6px">GLOBAL: ${s.globalMarket} · ${s.historyG.length} ticks</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px">
+          ${s.freqG.map((f) => `<div class="digit-cell ${f.digit === 0 ? 'is-zero' : ''}"><div class="font-display" style="font-weight:700">${f.digit}</div><div style="font-size:7px">${f.count}</div></div>`).join('')}
+        </div>
+      </div>
+      <div class="glass-panel" style="padding:10px;margin-bottom:8px">
+        <div class="section-divider neon-text-primary" style="margin-bottom:8px">Cold Rankings (excl. 0)</div>
+        ${sorted.slice(0, 5).map((f, i) => `<div style="display:flex;align-items:center;gap:8px;padding:6px;margin-bottom:4px;border-radius:8px;${i === 0 ? 'background:hsl(var(--primary)/0.06)' : ''}"><span class="font-display" style="width:20px;${i === 0 ? 'color:hsl(var(--primary))' : ''}">${i === 0 ? '⬥' : i === 1 ? '◆' : ''}${f.digit}</span><div class="bar-track" style="flex:1;height:3px"><div class="${i === 0 ? 'bar-fill-primary' : 'bar-fill-cyan'}" style="width:${Math.max(5, 100 - f.percentage)}%"></div></div><span class="font-mono-data" style="font-size:9px;width:24px;text-align:right">${f.count}</span></div>`).join('')}
+      </div>
+      <div class="glass-panel-glow" style="padding:16px;text-align:center">
+        <div class="section-divider neon-text-accent" style="justify-content:center;margin-bottom:8px">Silent Count</div>
+        <div class="stat-5xl ${silentClass}">${s.silenceCount}</div>
+        <div style="font-size:8px;letter-spacing:3px;margin-top:6px;color:hsl(var(--muted-foreground))">TRIGGER AT ${s.silenceTrigger}</div>
+        <div class="bar-track" style="margin-top:10px;height:6px"><div class="${s.silenceCount >= s.silenceTrigger ? 'bar-fill-win' : 'bar-fill-accent'}" style="width:${silentPct}%"></div></div>
+        ${s.coldDigit !== null ? `<div style="font-size:8px;margin-top:8px">Watching <span class="neon-text-primary">≠${s.coldDigit}</span>${s.thirdColdDigit !== null ? ` + alt <span class="neon-text-accent">${s.thirdColdDigit}</span>` : ''}</div>` : ''}
+      </div>
+      <div class="glass-panel" style="padding:12px;margin-top:8px;display:flex;gap:8px">
+        <div class="glass-monitor" style="flex:1;text-align:center;padding:10px"><div class="stat-5xl neon-text-accent" style="font-size:2rem">${s.luckyNumber}</div><div style="font-size:7px;letter-spacing:2px">LUCKY #</div></div>
+        <div class="glass-monitor" style="flex:1;text-align:center;padding:10px"><div class="stat-5xl" style="font-size:2rem">${s.coldStreakHistory.length}</div><div style="font-size:7px;letter-spacing:2px">SAMPLES</div></div>
+      </div>`;
+  }
+
+  function renderCenterConfig(s) {
+    const markets = MARKETS.map((m) => `<option value="${m.value}" ${m.value === s.primaryMarket ? 'selected' : ''}>${m.label}</option>`).join('');
+    const speedLabel = s.speed <= 100 ? 'SUPERSONIC' : s.speed <= 300 ? 'FAST' : s.speed <= 600 ? 'NORMAL' : 'SLOW';
+    const batchPayout = (s.autoMode ? s.autoBatchSize : s.batchSize) * s.stake * 1.95;
+
+    el('differ-center').innerHTML = `
+      <div class="section-divider">Priority Monitor</div>
+      <div class="live-tick-display">
+        <div class="live-tick-cell">
+          <div class="cell-label">Current Tick</div>
+          <div id="differ-live-tick" class="cell-value text-primary">${s.currentTick ?? '—'}</div>
+        </div>
+        <div class="live-tick-cell" style="border-color:hsl(var(--primary)/0.3)">
+          <div class="cell-label">Differ Digit</div>
+          <div id="differ-live-cold" class="cell-value neon-text-primary">${s.coldDigit ?? '—'}</div>
+        </div>
+      </div>
+      <div class="section-divider">Configuration</div>
+      <div class="glass-panel" style="padding:12px">
+        <div class="labeled-input" style="margin-bottom:10px">
+          <span class="input-label">Market Index</span>
+          <select class="terminal-select" id="differ-market">${markets}</select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div class="labeled-input">
+            <span class="input-label">Stake ($)</span>
+            <input type="number" step="0.01" class="terminal-input" id="differ-stake" value="${s.stake}">
+          </div>
+          <div class="labeled-input">
+            <span class="input-label">Batch Size</span>
+            <input type="number" class="terminal-input" id="differ-batch" value="${s.batchSize}">
+          </div>
+        </div>
+        <div class="glass-monitor" style="padding:8px;text-align:center;margin:0 0 10px;font-size:11px">BATCH PAYOUT (ALL WIN) <span class="neon-text-win font-mono-data">${batchPayout.toFixed(2)}</span></div>
+        <div class="burst-speed-row" style="margin-bottom:10px">
+          <div class="burst-speed-header">
+            <span>Burst Speed</span>
+            <span class="burst-speed-label" id="differ-speed-label">${speedLabel} · ${s.speed}ms</span>
+          </div>
+          <input type="range" id="differ-speed" min="50" max="1000" step="50" value="${s.speed}">
+          <div style="display:flex;justify-content:space-between;font-size:9px;color:hsl(var(--muted-foreground));margin-top:2px"><span>50ms (Fast)</span><span>1000ms (Slow)</span></div>
+        </div>
+        <div class="labeled-input">
+          <span class="input-label">Silence Trigger · Lucky: ${s.luckyNumber}</span>
+          <input type="number" class="terminal-input" id="differ-trigger" value="${s.silenceTrigger}" min="5" max="30">
+          <span class="input-hint">Number of ticks the target digit must be silent before firing</span>
+        </div>
+      </div>
+      <div class="glass-panel" style="padding:12px;margin-top:8px">
+        <div class="settings-toggle-row">
+          <div class="settings-toggle-row-label">
+            <span class="label-title" style="color:hsl(var(--loss))">Abort on Loss</span>
+            <span class="label-sub">Stop all remaining contracts after first loss</span>
+          </div>
+          <button class="toggle-pill ${s.abortOnLoss ? 'on' : ''}" id="differ-abortonloss"></button>
+        </div>
+      </div>
+      <div class="auto-section" style="margin-top:8px">
+        <div class="auto-header" id="differ-auto-header">
+          <span class="auto-header-title">⚙ Full Automation</span>
+          <button class="toggle-pill ${s.autoMode ? 'on' : ''}" id="differ-auto"></button>
+        </div>
+        <div id="differ-auto-panel" style="${s.autoMode ? '' : 'display:none'};padding:12px;background:hsl(var(--bg-soft)/0.6);border-top:1px solid hsl(var(--border)/0.5)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="labeled-input" style="grid-column:1/-1">
+              <span class="input-label">Auto Batch Size</span>
+              <input type="number" class="terminal-input" id="differ-autobatch" value="${s.autoBatchSize}">
+              <span class="input-hint">Number of contracts to fire per auto-trigger cycle</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <button class="btn-engage ${s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : ''}" id="differ-engage" style="margin-top:12px">
+        ${s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT'}
+      </button>
+      <button id="differ-abort" style="display:${s.isArmed || s.isRunning ? 'block' : 'none'};width:100%;margin-top:6px;padding:12px;border:1px solid hsl(var(--loss)/0.5);border-radius:10px;background:transparent;color:hsl(var(--loss));font-family:'Outfit',sans-serif;cursor:pointer">⛔ ABORT TRADES</button>`;
+
+    const eng = global.benzEngine;
+    el('differ-market').onchange = (e) => { eng.dispatch({ type: 'SET_MARKET', market: e.target.value }); setTimeout(() => eng.connectAnalysis(), 100); };
+    el('differ-stake').onchange = (e) => eng.dispatch({ type: 'SET_STAKE', value: Math.max(0.35, parseFloat(e.target.value) || 1) });
+    el('differ-batch').onchange = (e) => eng.dispatch({ type: 'SET_BATCH', value: Math.max(1, parseInt(e.target.value) || 1) });
+    el('differ-speed').oninput = (e) => { eng.dispatch({ type: 'SET_SPEED', value: parseInt(e.target.value) }); const sl = el('differ-speed-label'); if (sl) { const v = parseInt(e.target.value); sl.textContent = (v <= 100 ? 'SUPERSONIC' : v <= 300 ? 'FAST' : v <= 600 ? 'NORMAL' : 'SLOW') + ` (${v}ms)`; } };
+    el('differ-trigger').onchange = (e) => eng.dispatch({ type: 'SET_TRIGGER', value: Math.max(1, parseInt(e.target.value) || 12) });
+    el('differ-abortonloss').onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' });
+    el('differ-auto').onclick = () => { eng.dispatch({ type: 'TOGGLE_AUTO' }); renderCenterConfig(eng.state); };
+    el('differ-tp') && (el('differ-tp').onchange = (e) => eng.dispatch({ type: 'SET_TP', value: Math.max(0, parseFloat(e.target.value) || 0) }));
+    el('differ-sl') && (el('differ-sl').onchange = (e) => eng.dispatch({ type: 'SET_SL', value: Math.max(0, parseFloat(e.target.value) || 0) }));
+    el('differ-autobatch') && (el('differ-autobatch').onchange = (e) => eng.dispatch({ type: 'SET_AUTO_BATCH', value: Math.max(1, parseInt(e.target.value) || 1) }));
+    el('differ-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
+    el('differ-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
+  }
+
+  function renderRight(s, tab) {
+    if (tab === 'lab') {
+      el('differ-right').innerHTML = `<div class="section-divider neon-text-accent">🧪 Experiment Lab</div>
+        <div class="glass-panel" style="padding:12px"><p style="font-size:11px;color:hsl(var(--muted-foreground))">Start a timed experiment from the original Lab tab. Net P/L chart uses ${s.plHistory.length} data points.</p>
+        <div style="display:flex;gap:6px;margin-top:8px">${[15, 30, 60].map((d) => `<button class="glass-monitor" style="flex:1;padding:8px;cursor:pointer" data-exp="${d}">${d}m</button>`).join('')}</div>
+        <button id="differ-stop-exp" style="margin-top:8px;width:100%;padding:8px;cursor:pointer">Stop Experiment</button></div>`;
+      el('differ-right').querySelectorAll('[data-exp]').forEach((b) => b.onclick = () => global.benzEngine.dispatch({ type: 'START_EXPERIMENT', durationMinutes: parseInt(b.dataset.exp) }));
+      el('differ-stop-exp').onclick = () => global.benzEngine.dispatch({ type: 'STOP_EXPERIMENT' });
+      return;
+    }
+    const total = s.totalWins + s.totalLoss;
+    const wr = total ? ((s.totalWins / total) * 100).toFixed(1) : '0.0';
+    const rightHtml = `
+      <div style="text-align:center;padding:12px" class="glass-panel-glow">
+        <div style="font-size:10px;letter-spacing:3px">NET PROFIT</div>
+        <div class="stat-5xl ${s.totalProfit >= 0 ? 'neon-text-win' : 'neon-text-loss'}" style="font-size:2.5rem">${s.totalProfit >= 0 ? '+' : ''}${s.totalProfit.toFixed(2)}</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;font-size:12px">
+          <div class="glass-monitor" style="padding:8px"><div class="neon-text-win font-mono-data">${s.totalWins}</div>WINS</div>
+          <div class="glass-monitor" style="padding:8px"><div class="neon-text-loss font-mono-data">${s.totalLoss}</div>LOSSES</div>
+          <div class="glass-monitor" style="padding:8px"><div class="font-mono-data">${wr}%</div>WIN RATE</div>
+        </div>
+      </div>
+      <div style="margin-top:8px" class="journal-list">${s.journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
+        <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
+        <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
+        <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
+        <span class="journal-net ${j.type === 'win' ? 'neon-text-win' : 'neon-text-loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
+      </div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
+      <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:'Outfit',sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
+    if (setHtmlIfChanged(el('differ-right'), rightHtml)) {
+      el('differ-reset').onclick = () => global.benzEngine.dispatch({ type: 'RESET_JOURNAL' });
+    }
+  }
+
+  function updateStatusBar(s) {
+    const bar = el('differ-statusbar');
+    if (!bar) return;
+    const txt = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s — Re-analyzing...` : s.isRunning ? `⚡ FIRING BATCH...` : s.isArmed ? `🔋 ARMED — Silence: ${s.silenceCount}/${s.silenceTrigger}` : s.isAuthenticated ? '✓ READY — Press ENGAGE' : 'OFFLINE — Add API Token in Settings';
+    bar.textContent = txt;
+    bar.className = 'glass-monitor ' + (s.isCooldown ? 'neon-text-accent' : s.isRunning ? 'neon-text-win' : s.isArmed ? 'neon-text-primary' : '');
+    bar.style.cssText = 'text-align:center;padding:10px;font-family:monospace;font-size:13px;border-top:1px solid hsl(var(--border)/0.5)';
+
+    const tick = el('differ-live-tick');
+    if (tick) tick.textContent = s.currentTick ?? '—';
+    const cold = el('differ-live-cold');
+    if (cold) cold.textContent = s.coldDigit ?? '—';
+
+    const bal = el('differ-balance');
+    if (bal && s.isAuthenticated) {
+      bal.style.display = 'block';
+      bal.innerHTML = `USD <span class="neon-text-win font-mono-data">${s.balanceUSD.toFixed(2)}</span> · KSH <span class="neon-text-accent font-mono-data">${(s.balanceUSD * 129.5).toFixed(2)}</span>`;
+    }
+    const dot = el('differ-conn-dot');
+    if (dot) dot.style.background = s.connectionStatus === 'connected' ? 'hsl(var(--win))' : s.connectionStatus === 'connecting' ? 'hsl(var(--accent))' : 'hsl(var(--loss)/0.5)';
+
+    const engage = el('differ-engage');
+    if (engage) {
+      engage.className = 'btn-engage ' + (s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : '');
+      engage.textContent = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT';
+    }
+    const abort = el('differ-abort');
+    if (abort) abort.style.display = s.isArmed || s.isRunning ? 'block' : 'none';
+  }
+
+  let lastTab = 'journal';
+  global.BenzUI = {
+    render(s) {
+      const root = el('differ-root');
+      if (!root) return;
+      buildShell(root);
+      renderLeft(s);
+      updateStatusBar(s);
+      const activeSub = document.querySelector('#panel-differ .differ-subtab.active');
+      lastTab = activeSub ? activeSub.dataset.tab : lastTab;
+      renderRight(s, lastTab);
+    },
+    renderFull(s) {
+      shellBuilt = false;
+      this.render(s);
+      renderCenterConfig(s);
+    },
+  };
+})(window);
+
+(function (global) {
+  'use strict';
+
+  const shells = {};
+
+  function el(id, parent) {
+    const sel = id.startsWith('#') ? id : '#' + id;
+    return (parent || document).querySelector(sel);
+  }
+
+  function buildShell(engine, rootId, label) {
+    const root = document.getElementById(rootId);
+    if (!root || shells[rootId]) return root;
+    root.innerHTML = `
+      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0">
+        <div>
+          <h1 class="font-orbitron text-primary" style="margin:0;font-size:1.1rem;letter-spacing:4px">${label}</h1>
+          <div class="text-muted" style="font-size:9px;letter-spacing:2px" id="${rootId}-subtitle">TITAN OMEGA · ANALYSIS HUB · MARTINGALE ENGINE · FULL AUTOMATION · ANTI-PREDICTION LOGIC</div>
+        </div>
+        <div style="flex:1"></div>
+        <!-- Cooldown ring shown in tab header during cooldown -->
+        <div id="${rootId}-tab-cd-ring" style="display:none;align-items:center;gap:8px;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.3);border-radius:999px;padding:5px 14px 5px 8px;box-shadow:0 0 16px rgba(255,170,0,0.25)">
+          <div style="position:relative;width:32px;height:32px;flex-shrink:0">
+            <svg viewBox="0 0 36 36" width="32" height="32" style="position:absolute;inset:0">
+              <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,170,0,0.18)" stroke-width="2.5"/>
+              <circle id="${rootId}-tab-cd-arc" cx="18" cy="18" r="14" fill="none" stroke="#ffaa00" stroke-width="2.5"
+                stroke-dasharray="${(2*Math.PI*14).toFixed(1)}" stroke-dashoffset="0"
+                style="transform:rotate(-90deg);transform-origin:18px 18px;transition:stroke-dashoffset 1s linear;filter:drop-shadow(0 0 4px rgba(255,170,0,0.7))"/>
+            </svg>
+            <div id="${rootId}-tab-cd-num" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Outfit',sans-serif;font-size:9px;font-weight:800;color:#ffaa00;line-height:1">—</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:1px">
+            <span style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:800;letter-spacing:2px;color:#ffaa00;text-transform:uppercase">Cooldown</span>
+            <span style="font-size:8px;color:rgba(255,170,0,0.65);letter-spacing:0.5px">Scanning markets…</span>
+          </div>
+        </div>
+        <div class="panel" id="${rootId}-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
+        <div id="${rootId}-conn" style="width:10px;height:10px;border-radius:50%"></div>
+      </header>
+      <div class="titan-grid">
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-left"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-center"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-right"></div></div>
+      </div>`;
+
+    shells[rootId] = { configBuilt: false, lastStrategy: null };
+    return root;
+  }
+
+  function renderLeft(engine, rootId, snap) {
+    const { config: c, analysis: a, scannerState, marketHealth } = snap;
+    const prob = a ? a.probability : 0;
+    const rec = a ? a.recommendation : '—';
+    const mtf = a && a.mtfAligned !== false ? 'MTF ALIGNED' : 'MTF DIVERGENT';
+    const mtfClass = a && a.mtfAligned !== false ? 'text-success' : 'text-accent';
+
+    const freqBars = a && a.frequencies
+      ? a.frequencies.map((f) => {
+          const isLive = snap.liveDigit === f.digit;
+          const overZone = engine.mode === 'over' && f.digit > c.overBarrier;
+          const underZone = engine.mode === 'over' && f.digit < c.overBarrier;
+          const barColor = overZone ? 'hsl(var(--win)/0.7)' : underZone ? 'hsl(var(--loss)/0.6)' : f.digit === c.overBarrier ? 'hsl(var(--accent)/0.7)' : isLive ? 'hsl(var(--accent))' : 'hsl(var(--primary)/0.65)';
+          return `<div class="freq-bar-col">
+            <div class="freq-bar-pct">${f.percentage.toFixed(0)}%</div>
+            <div class="freq-bar-fill" style="height:${Math.max(4, f.percentage * 0.7)}px;background:${barColor};margin:auto 0 0;"></div>
+            <div class="freq-bar-digit" style="${isLive ? 'color:hsl(var(--accent))' : ''}">${f.digit}</div>
+          </div>`;
+        }).join('')
+      : Array.from({ length: 10 }, (_, i) => `<div class="freq-bar-col"><div class="freq-bar-digit" style="opacity:.4">${i}</div></div>`).join('');
+
+    const condChips = a && a.conditions ? `
+      <div class="condition-chips" style="margin-top:6px">
+        ${[
+          ['Stable', a.conditions.stablePattern],
+          ['Dom.Odd', a.conditions.dominantOdd],
+          ['Momentum', a.conditions.momentumUp],
+          ['Low Vol', a.conditions.lowVolatility],
+          ['Compressed', a.conditions.rareDigits],
+        ].map(([label, on]) => `<span class="chip ${on ? 'on' : 'off'}">${label}</span>`).join('')}
+      </div>` : '';
+
+    el(`${rootId}-left`).innerHTML = `
+      <div class="analysis-hub-title"><span class="dot-indicator"></span>Analysis Hub</div>
+
+      <div class="analysis-hub-card" style="margin-bottom:8px">
+        <div class="labeled-input" style="margin-bottom:0">
+          <span class="input-label">Active Strategy</span>
+          <select class="titan-input" id="${rootId}-strategy">
+            ${engine.STRATEGIES.map((st) => `<option value="${st.id}" ${st.id === c.currentStrategy ? 'selected' : ''}>${st.icon} ${st.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="text-muted" style="font-size:10px;margin-top:8px;line-height:1.5">${engine.getStrategy(c.currentStrategy).description.slice(0, 120)}…</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:8px;text-align:center">
+          <div style="padding:6px;background:hsl(var(--bg));border-radius:6px">
+            <div class="text-primary font-orbitron" style="font-size:11px">${engine.mode === 'over' ? 'OVR ' + c.overBarrier : (c.tradeMode?.toUpperCase() || '—')}</div>
+            <div class="text-muted" style="font-size:8px;margin-top:2px">MODE</div>
+          </div>
+          <div style="padding:6px;background:hsl(var(--bg));border-radius:6px">
+            <div class="text-primary font-orbitron" style="font-size:11px">${c.targetRuns}</div>
+            <div class="text-muted" style="font-size:8px;margin-top:2px">RUNS</div>
+          </div>
+          <div style="padding:6px;background:hsl(var(--bg));border-radius:6px">
+            <div class="text-primary font-orbitron" style="font-size:11px">${c.minSignal}%</div>
+            <div class="text-muted" style="font-size:8px;margin-top:2px">SIGNAL</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="analysis-hub-card" style="margin-bottom:8px">
+        <div class="analysis-hub-title">Signal Strength</div>
+        <div class="signal-ring-wrap">
+          <div class="signal-ring-labels" style="flex:1">
+            <div class="signal-ring-label">Probability</div>
+            <div class="signal-ring-value">${prob}%</div>
+            <div class="bar-track" style="margin-top:7px"><div class="bar-fill-primary" style="width:${prob}%"></div></div>
+            <div class="signal-ring-rec" style="margin-top:6px">${rec}</div>
+            <div class="mtf-badge ${a && a.mtfAligned !== false ? 'aligned' : 'divergent'}" style="margin-top:4px">${mtf}</div>
+          </div>
+        </div>
+        ${condChips}
+      </div>
+
+      <div class="analysis-hub-card" style="margin-bottom:8px">
+        <div class="analysis-hub-title">Digit Frequency</div>
+        <div style="display:flex;gap:4px;margin-bottom:6px">
+          ${[25, 50, 100].map((p) => `<button class="strategy-btn ${c.tickPeriod === p ? 'active' : ''}" data-period="${p}" style="flex:1;padding:6px;font-size:9px">${p}T</button>`).join('')}
+        </div>
+        <div class="freq-bar-grid">${freqBars}</div>
+        ${snap.liveQuote ? `<div class="font-fira text-muted" style="margin-top:8px;font-size:10px">
+          Quote: ${snap.liveQuote.toFixed(4).slice(0, -1)}<span class="text-accent" style="font-weight:700">${snap.liveDigit}</span>
+        </div>` : ''}
+      </div>
+
+      <div class="analysis-hub-card">
+        <div class="analysis-hub-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Top Markets</span>
+          <span class="text-muted" style="font-size:8px;letter-spacing:1px">LIVE SCAN</span>
+        </div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">Scores update every tick · tap to select</div>
+        ${(scannerState.topThree || []).map((m, idx2) => {
+          const isSel = m.symbol === c.selectedMarket;
+          const health = (m.health && m.health.longTerm) || m.longTerm || '—';
+          const trend  = (m.health && m.health.trend) || m.trend || '—';
+          const vol    = (m.health && m.health.volatility) || m.volatility || '';
+          const rankColor = idx2 === 0 ? 'hsl(var(--win))' : idx2 === 1 ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
+          const healthColor = health === 'HEALTHY' ? 'hsl(var(--win))' : health === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))';
+          const trendArrow = trend === 'UP' ? '↑' : trend === 'DOWN' ? '↓' : trend !== '—' ? '→' : '';
+          return '<button class="strategy-btn ' + (isSel ? 'active' : '') + '" data-mkt="' + m.symbol + '"'
+            + ' style="width:100%;text-align:left;margin-bottom:6px;padding:9px 10px;display:block;border:' + (isSel ? '1px solid hsl(var(--primary)/0.6)' : '1px solid hsl(var(--border)/0.4)') + '">'
+            + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">'
+            + '<div style="display:flex;align-items:center;gap:5px">'
+            + '<span style="font-size:8px;font-weight:900;color:' + rankColor + ';letter-spacing:1px">#' + (idx2+1) + '</span>'
+            + '<span style="font-size:10.5px;font-weight:700">' + m.name + '</span>'
+            + (isSel ? '<span style="font-size:7.5px;letter-spacing:1px;color:hsl(var(--primary));font-weight:800;margin-left:2px">● ACTIVE</span>' : '')
+            + '</div>'
+            + '<b style="font-size:12px;color:' + rankColor + '">' + m.score + '%</b>'
+            + '</div>'
+            + '<div class="bar-track" style="height:3px;margin-bottom:5px"><div style="height:100%;width:' + m.score + '%;background:' + rankColor + ';border-radius:2px;transition:width .4s"></div></div>'
+            + '<div style="display:flex;gap:6px;align-items:center">'
+            + '<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:hsl(var(--bg));color:' + healthColor + ';font-weight:700">' + health + '</span>'
+            + (trendArrow ? '<span style="font-size:8px;color:hsl(var(--muted-foreground))">' + trendArrow + ' ' + trend + '</span>' : '')
+            + (vol ? '<span style="font-size:8px;color:hsl(var(--muted-foreground));margin-left:auto">Vol:' + vol + '</span>' : '')
+            + '</div>'
+            + '</button>';
+        }).join('') || '<div class="text-muted" style="font-size:10px;padding:12px 0;text-align:center">⏳ Scanning markets…</div>'}
+        ${marketHealth ? '<div style="display:flex;gap:6px;margin-top:4px;padding-top:6px;border-top:1px solid hsl(var(--border)/0.3)">'
+          + '<span class="text-muted" style="font-size:8.5px">Active market:</span>'
+          + '<b style="font-size:8.5px;color:' + (marketHealth.longTerm === 'HEALTHY' ? 'hsl(var(--win))' : marketHealth.longTerm === 'MODERATE' ? 'hsl(var(--accent))' : 'hsl(var(--loss))') + '">' + marketHealth.longTerm + '</b>'
+          + '<span class="text-muted" style="font-size:8.5px;margin-left:auto">Vol:' + (marketHealth.volatility || '—') + '</span>'
+          + '</div>' : ''}
+      </div>`;
+
+    el(`${rootId}-strategy`).onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
+    el(`${rootId}-left`).querySelectorAll('[data-period]').forEach((b) => {
+      b.onclick = () => { engine.setConfig({ tickPeriod: parseInt(b.dataset.period) }); engine.scanner && engine.scanner.setTickPeriod(parseInt(b.dataset.period)); };
+    });
+    el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
+      const mkt = b.dataset.mkt;
+      engine.changeMarket(mkt);
+      el(`${rootId}-left`).querySelectorAll('[data-mkt]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.mkt === mkt);
+      });
+      const mktSel = document.getElementById(`${rootId}-market`);
+      if (mktSel) mktSel.value = mkt;
+      const snap2 = engine.getSnapshot();
+      renderLeft(engine, rootId, snap2);
+    });
+  }
+
+  function renderCenterConfig(engine, rootId, snap) {
+    const { config: c, state: s } = snap;
+    const isOver = engine.mode === 'over';
+    const markets = engine.T.MARKETS.map((m) => `<option value="${m.symbol}" ${m.symbol === c.selectedMarket ? 'selected' : ''}>${m.name}</option>`).join('');
+    const winChance = isOver ? (9 - c.overBarrier) * 10 : 50;
+
+    el(`${rootId}-center`).innerHTML = `
+      <div class="digit-pad text-primary" id="${rootId}-digit">—</div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;margin:6px 0" class="font-orbitron">
+        <span id="${rootId}-badge" class="text-muted">IDLE</span>
+        <span class="font-fira text-muted" id="${rootId}-quote-small"></span>
+      </div>
+      <div style="display:flex;gap:8px;font-size:10px;margin-bottom:8px" class="font-fira">
+        <span>STREAK <b id="${rootId}-streak">${s.streak}</b>/${c.minStreak}</span>
+        <span>${isOver ? `OVER <b class="text-primary">${c.overBarrier}</b>` : `MODE <b class="text-primary">${(c.tradeMode || 'odd').toUpperCase()}</b>`}</span>
+        <span>RUNS <b id="${rootId}-runs">${s.currentRuns}</b>/${c.targetRuns}</span>
+      </div>
+      <div class="flow-track">
+        <div class="flow-step active" id="${rootId}-flow-analyze">ANALYZE</div>
+        <div class="flow-step" id="${rootId}-flow-wait">WAIT</div>
+        <div class="flow-step" id="${rootId}-flow-fire">FIRE</div>
+      </div>
+      <div class="text-muted" style="font-size:10px;min-height:28px;margin-bottom:10px" id="${rootId}-wait-reason"></div>
+
+      <!-- ⚡ LIVE ENTRY CONDITIONS PANEL -->
+      <div class="entry-conditions-panel" id="${rootId}-conditions">
+        <div class="entry-cond-title">
+          <span class="entry-cond-pulse" id="${rootId}-cond-pulse"></span>
+          <span>FIRE CONDITIONS</span>
+          <span class="entry-cond-status" id="${rootId}-cond-status">WAITING</span>
+        </div>
+        <div class="entry-cond-list" id="${rootId}-cond-list">
+          <div class="entry-cond-row loading"><span class="entry-cond-icon">⏳</span><span>Loading analysis…</span></div>
+        </div>
+        <div class="entry-cond-progress" id="${rootId}-cond-progress">
+          <div class="entry-cond-fill" id="${rootId}-cond-fill" style="width:0%"></div>
+        </div>
+        <div class="entry-cond-pct" id="${rootId}-cond-pct">0 / 0 conditions met</div>
+      </div>
+
+      <div class="font-orbitron text-primary" style="font-size:10px;letter-spacing:2px;margin-bottom:6px">CONTROL PANEL</div>
+      <label class="text-muted" style="font-size:9px">MARKET</label>
+      <select class="titan-input" id="${rootId}-market" style="margin-bottom:8px">${markets}</select>
+      ${isOver ? `
+        <label class="text-muted" style="font-size:9px">SELECT OVER BARRIER · Win ${winChance}%</label>
+        <div class="barrier-grid" style="margin:6px 0 10px" id="${rootId}-barriers">
+          ${[0, 1, 2, 3, 4, 5, 6, 7, 8].map((b) => `<button class="barrier-btn ${b === c.overBarrier ? 'selected' : ''}" data-barrier="${b}">${b}</button>`).join('')}
+        </div>` : engine.fixedTradeMode ? `
+        <div class="glass-monitor" style="padding:9px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+          <span class="font-orbitron text-muted" style="font-size:9px;letter-spacing:2px">DEDICATED ENGINE</span>
+          <span class="font-orbitron text-primary" style="font-size:11px;letter-spacing:2px">${engine.fixedTradeMode.toUpperCase()}</span>
+        </div>` : `
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button class="strategy-btn ${c.tradeMode === 'odd' ? 'active' : ''}" id="${rootId}-odd" style="flex:1">ODD</button>
+          <button class="strategy-btn ${c.tradeMode === 'even' ? 'active' : ''}" id="${rootId}-even" style="flex:1">EVEN</button>
+        </div>`}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+        <div><label class="text-muted" style="font-size:9px">STAKE</label><input class="titan-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}"></div>
+        <div><label class="text-muted" style="font-size:9px">TARGET RUNS</label><input class="titan-input" type="number" id="${rootId}-runs-in" value="${c.targetRuns}"></div>
+        <div><label class="text-muted" style="font-size:9px">MIN SIGNAL %</label><input class="titan-input" type="number" id="${rootId}-signal" value="${c.minSignal}"></div>
+        <div><label class="text-muted" style="font-size:9px">MIN STREAK</label><input class="titan-input" type="number" id="${rootId}-streak-in" value="${c.minStreak}"></div>
+      </div>
+      <div class="mart-section">
+        <div class="mart-header" id="${rootId}-mart-header">
+          <div class="mart-header-left">
+            <button class="titan-toggle ${c.martingaleEnabled ? 'on' : ''}" id="${rootId}-mart" onclick="event.stopPropagation()"></button>
+            <span class="mart-header-title">⟳ Martingale Engine</span>
+          </div>
+          <span class="mart-header-chevron ${c.martingaleEnabled ? 'open' : ''}" id="${rootId}-mart-chevron">▾</span>
+        </div>
+        <div class="mart-body ${c.martingaleEnabled ? 'open' : ''}" id="${rootId}-mart-panel">
+
+          <div class="mart-field" style="margin-bottom:10px">
+            <span class="mart-field-label">Stake Multiplier</span>
+            <input class="titan-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier}">
+            <span class="mart-field-hint">After each loss: new stake = previous stake × this. Default 1.8×</span>
+          </div>
+
+          ${isOver ? `
+          <div class="mart-field" style="margin-bottom:10px">
+            <span class="mart-field-label">Recovery Barrier — Trade UNDER after loss</span>
+            <select class="titan-input" id="${rootId}-rec-barrier-sel" style="margin-top:4px">
+              ${[0,1,2,3,4,5,6,7,8,9].map(b => {
+                const winPct = (9 - b) * 10;
+                return `<option value="${b}" ${b === c.recoveryBarrier ? 'selected' : ''}>Under ${b} (${winPct}% win chance)</option>`;
+              }).join('')}
+            </select>
+            <span class="mart-field-hint">On loss, switches to UNDER [digit]. Lower = higher win %. Default: Under 4 (50%)</span>
+          </div>` : `
+          <div class="mart-field" style="margin-bottom:10px">
+            <span class="mart-field-label">Recovery Direction</span>
+            <div class="mart-field-hint" style="margin-top:4px;padding:8px;background:hsl(var(--bg));border-radius:6px;border:1px solid hsl(var(--border)/0.5)">
+              After a loss on <b style="color:hsl(var(--primary))">${(c.tradeMode||'odd').toUpperCase()}</b>, recovery fires <b style="color:hsl(var(--accent))">${(c.tradeMode||'odd')==='odd'?'EVEN':'ODD'}</b> at higher stake (opposite parity)
+            </div>
+          </div>`}
+
+          <div class="mart-field" style="margin-bottom:10px">
+            <span class="mart-field-label">Stop / Recovery Rule</span>
+            <select class="titan-input" id="${rootId}-stop-select" style="margin-top:4px">
+              ${[
+                {v:1, label:'🔁 Rewait — Stop at Step 1 (await fresh signal)'},
+                {v:2, label:'⏸ Cooldown — Stop at Step 2'},
+                {v:3, label:'⏱ 30s Cooldown — Stop at Step 3'},
+                {v:4, label:'🔄 Deep Recovery — Recover on barrier at Step 4'},
+                {v:5, label:'💪 Max Recovery — Step 5 before abort'},
+                {v:999, label:'♾ Always Recover — keep doubling until a win'},
+              ].map(o => `<option value="${o.v}" ${c.martingaleStopStep===o.v?'selected':''}>${o.label}</option>`).join('')}
+            </select>
+            <div class="mart-field-hint" style="margin-top:4px" id="${rootId}-stopstep-desc">${
+              c.martingaleStopStep===1 ? '1 loss → stop, await fresh signal' :
+              c.martingaleStopStep===2 ? '2 losses → stop + cooldown' :
+              c.martingaleStopStep===3 ? '3 losses → 30s forced pause' :
+              c.martingaleStopStep===4 ? '4 losses → switches to recovery barrier' :
+              c.martingaleStopStep===999 ? '♾ Always recovering — doubles stake every loss until a win' :
+              '5 losses before session aborts'
+            }</div>
+          </div>
+
+          <div class="mart-field">
+            <span class="mart-field-label">Recovery Mode</span>
+            <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+
+              <div class="recovery-mode-card ${!c.alternatingRecovery && !c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="plain" id="${rootId}-rmode-plain">
+                <div class="rec-card-title">💡 Standard Recovery</div>
+                <div class="rec-card-desc">${isOver
+                  ? `UNDER ${c.recoveryBarrier} on every recovery step — consistent high-win-chance direction`
+                  : `Stays on ${(c.tradeMode||'odd').toUpperCase()} at escalated stake — no direction change`
+                }</div>
+              </div>
+
+              <div class="recovery-mode-card ${c.alternatingRecovery && !c.smartRecovery ? 'selected' : ''}" data-rmode="altA" id="${rootId}-rmode-altA">
+                <div class="rec-card-title">🔄 Alt Mode A — Staggered flip</div>
+                <div class="rec-card-desc">${isOver
+                  ? `Step 1: UNDER ${c.recoveryBarrier} → Step 2: OVER ${c.recoveryBarrier} → Steps 3-4: OVER → Step 5: UNDER … (flips every 3rd)`
+                  : (c.tradeMode||'odd')==='odd'
+                    ? 'Step 1: EVEN → Step 2: ODD → Steps 3-4: ODD → Step 5: EVEN … (flips every 3rd)'
+                    : 'Step 1: ODD → Step 2: EVEN → Steps 3-4: EVEN → Step 5: ODD … (flips every 3rd)'
+                }</div>
+              </div>
+
+              <div class="recovery-mode-card ${c.alternatingRecoveryB && !c.smartRecovery ? 'selected' : ''}" data-rmode="altB" id="${rootId}-rmode-altB">
+                <div class="rec-card-title">🔁 Alt Mode B — EVEN/UNDER-first</div>
+                <div class="rec-card-desc">${isOver
+                  ? `Step 1: UNDER ${c.recoveryBarrier} → Steps 2-3: OVER ${c.recoveryBarrier} → Step 4: UNDER … (repeating 1→2 block)`
+                  : 'Step 1: EVEN → Steps 2-3: ODD → Step 4: EVEN … (always starts EVEN regardless of base mode)'
+                }</div>
+              </div>
+
+              <div class="recovery-mode-card ${c.smartRecovery ? 'selected' : ''}" data-rmode="smart" id="${rootId}-rmode-smart">
+                <div class="rec-card-title">🧠 Smart Recovery — Tick-adaptive</div>
+                <div class="rec-card-desc">${isOver
+                  ? `Scans last 20 ticks: if OVER% &gt;50% → bets UNDER ${c.recoveryBarrier}. If UNDER-dominant → bets OVER ${c.recoveryBarrier}. Adapts each step.`
+                  : 'Scans last 20 ticks: if ODD% >50% → bets EVEN. If EVEN-dominant → bets ODD. Adapts each step.'
+                }</div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="auto-section">
+        <div class="auto-header" style="cursor:pointer" id="${rootId}-auto-header">
+          <span class="auto-header-title">⚙ Full Automation</span>
+          <button class="titan-toggle ${c.autoPilot ? 'on' : ''}" id="${rootId}-auto" onclick="event.stopPropagation()"></button>
+        </div>
+        <div id="${rootId}-auto-panel" class="auto-body" style="${c.autoPilot ? '' : 'display:none'}">
+
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div class="settings-toggle-row">
+              <div class="settings-toggle-row-label">
+                <span class="label-title">♻️ Auto-Refresh</span>
+                <span class="label-sub">Reconnects every 4 runs + on stuck-detection</span>
+              </div>
+              <button class="titan-toggle ${c.autoRefresh ? 'on' : ''}" id="${rootId}-autorefresh"></button>
+            </div>
+          </div>
+          <div class="auto-rescan-note">🤖 Auto-rescans for GOLDEN markets after each run</div>
+        </div>
+      </div>
+      <button class="btn-omega ${s.active ? 'stop' : ''}" id="${rootId}-toggle">${s.active ? 'TERMINATE SESSION' : 'ENGAGE OMEGA'}</button>`;
+
+    el(`${rootId}-market`).onchange = (e) => engine.changeMarket(e.target.value);
+    el(`${rootId}-stake`).onchange = (e) => engine.setConfig({ stake: Math.max(0.35, parseFloat(e.target.value) || 0.35) });
+    el(`${rootId}-runs-in`).onchange = (e) => engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) });
+    el(`${rootId}-signal`).onchange = (e) => engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 70)) });
+    el(`${rootId}-streak-in`).onchange = (e) => engine.setConfig({ minStreak: Math.max(1, parseInt(e.target.value) || 2) });
+    el(`${rootId}-mart`).onclick = (e) => { e.stopPropagation(); const en = !c.martingaleEnabled; engine.setConfig({ martingaleEnabled: en }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
+    const martHeader = el(`${rootId}-mart-header`);
+    if (martHeader) {
+      martHeader.onclick = () => {
+        const body = el(`${rootId}-mart-panel`); const chev = el(`${rootId}-mart-chevron`);
+        if (body) body.classList.toggle('open');
+        if (chev) chev.classList.toggle('open');
+      };
+    }
+    // Auto header accordion
+    const autoHdr = el(`${rootId}-auto-header`);
+    if (autoHdr) autoHdr.onclick = () => { const p = el(`${rootId}-auto-panel`); if (p) { p.style.display = p.style.display === 'none' ? '' : 'none'; } };
+    el(`${rootId}-auto`).onclick = (e) => { e.stopPropagation(); engine.setConfig({ autoPilot: !c.autoPilot }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
+    el(`${rootId}-mult`) && (el(`${rootId}-mult`).onchange = (e) => engine.setConfig({ martingaleMultiplier: Math.max(1.01, parseFloat(e.target.value) || c.martingaleMultiplier) }));
+    el(`${rootId}-tp`) && (el(`${rootId}-tp`).onchange = (e) => engine.setConfig({ takeProfit: Math.max(0, parseFloat(e.target.value) || 0) }));
+    el(`${rootId}-sl`) && (el(`${rootId}-sl`).onchange = (e) => engine.setConfig({ stopLoss: Math.max(0, parseFloat(e.target.value) || 0) }));
+    el(`${rootId}-autorefresh`) && (el(`${rootId}-autorefresh`).onclick = () => { engine.setConfig({ autoRefresh: !c.autoRefresh }); renderCenterConfig(engine, rootId, engine.getSnapshot()); });
+    // Stop step dropdown
+    const stopSel = el(`${rootId}-stop-select`);
+    if (stopSel) stopSel.onchange = (e) => {
+      const v = parseInt(e.target.value);
+      engine.setConfig({ martingaleStopStep: v });
+      const desc = el(`${rootId}-stopstep-desc`);
+      if (desc) desc.textContent = v===1?'1 loss → stop, await fresh signal':v===2?'2 losses → stop + cooldown':v===3?'3 losses → 30s forced pause':v===4?'4 losses → switches to recovery barrier':v===999?'♾ Always recovering — doubles stake every loss until a win':'5 losses before session aborts';
+    };
+    // Recovery barrier dropdown (over mode)
+    const recBarrierSel = el(`${rootId}-rec-barrier-sel`);
+    if (recBarrierSel) recBarrierSel.onchange = (e) => { engine.setConfig({ recoveryBarrier: parseInt(e.target.value) }); };
+    // Recovery mode cards
+    ['plain','altA','altB','smart'].forEach(mode => {
+      const card = el(`${rootId}-rmode-${mode}`);
+      if (!card) return;
+      card.onclick = () => {
+        engine.setConfig({
+          smartRecovery: mode === 'smart',
+          alternatingRecovery: mode === 'altA',
+          alternatingRecoveryB: mode === 'altB',
+        });
+        renderCenterConfig(engine, rootId, engine.getSnapshot());
+      };
+    });
+    el(`${rootId}-toggle`).onclick = () => engine.toggleEngine();
+    if (isOver) {
+      el(`${rootId}-barriers`) && el(`${rootId}-barriers`).querySelectorAll('[data-barrier]').forEach((b) => {
+        b.onclick = () => {
+          const newBarrier = parseInt(b.dataset.barrier);
+          engine.setConfig({ overBarrier: newBarrier });
+          // Immediately update selected highlight without waiting for next render cycle
+          const barrierGrid = el(`${rootId}-barriers`);
+          if (barrierGrid) barrierGrid.querySelectorAll('[data-barrier]').forEach((btn) => {
+            btn.classList.toggle('selected', parseInt(btn.dataset.barrier) === newBarrier);
+          });
+          // Force center config re-render so win-chance label, display, etc. update instantly
+          renderCenterConfig(engine, rootId, engine.getSnapshot());
+        };
+      });
+    } else if (!engine.fixedTradeMode) {
+      el(`${rootId}-odd`).onclick = () => { engine.switchTradeMode('odd'); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
+      el(`${rootId}-even`).onclick = () => { engine.switchTradeMode('even'); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
+    }
+    shells[rootId].configBuilt = true;
+  }
+
+  function renderRight(engine, rootId, snap) {
+    const { state: s, logs } = snap;
+    const total = s.stats.win + s.stats.loss;
+    const wr = total ? ((s.stats.win / total) * 100).toFixed(1) : '0.0';
+    const journal = engine.journal || [];
+    const rightHtml = `
+      <div class="font-orbitron text-success" style="font-size:10px;letter-spacing:2px;margin-bottom:8px">● JOURNAL</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;text-align:center">
+        <div class="panel" style="padding:10px"><div class="text-success font-orbitron" style="font-size:1.5rem">${s.stats.win}</div><div class="text-muted" style="font-size:8px">WINS</div></div>
+        <div class="panel" style="padding:10px"><div class="text-destructive font-orbitron" style="font-size:1.5rem">${s.stats.loss}</div><div class="text-muted" style="font-size:8px">LOSSES</div></div>
+        <div class="panel" style="padding:10px"><div class="${s.stats.profit >= 0 ? 'text-success' : 'text-destructive'} font-fira" style="font-size:1.2rem">${s.stats.profit.toFixed(2)}</div><div class="text-muted" style="font-size:8px">PROFIT</div></div>
+      </div>
+      <div class="text-muted" style="font-size:10px;margin-bottom:8px">Win rate ${wr}% · Net ${s.stats.win - s.stats.loss} contracts</div>
+      <div class="journal-list" style="max-height:240px;margin-bottom:12px">
+        ${journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
+          <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
+          <span style="color:hsl(var(--muted-foreground))">${j.time}</span>
+          <span class="journal-digits">B:${j.barrier} <b>${j.entryDigit ?? '—'}</b><span class="arrow">→</span><b>${j.exitDigit}</b></span>
+          <span class="journal-net ${j.type === 'win' ? 'text-success' : 'text-destructive'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
+        </div>`).join('') || '<div class="text-muted" style="text-align:center;padding:20px;font-size:10px">NO TRADES RECORDED</div>'}
+      </div>
+      <button class="strategy-btn" id="${rootId}-clear" style="width:100%;margin-top:8px;color:hsl(var(--destructive))">✕ CLEAR STATS</button>
+      <div style="margin-top:14px">
+        <button id="${rootId}-audit-toggle" style="width:100%;background:hsl(var(--card));border:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));border-radius:var(--radius-sm);padding:8px 12px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;text-align:left;display:flex;align-items:center;justify-content:space-between" onclick="(function(btn){const p=btn.nextElementSibling;const open=p.style.display!=='none';p.style.display=open?'none':'block';btn.querySelector('.audit-arrow').textContent=open?'▶':'▼';})(this)">
+          <span>🔍 ENGINE LOGIC AUDIT</span><span class="audit-arrow">▶</span>
+        </button>
+        <div style="display:none;margin-top:8px;padding:10px 12px;background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:var(--radius-sm);font-family:'DM Mono',monospace;font-size:9px;line-height:1.9;color:hsl(var(--muted-foreground))">
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin-bottom:6px;font-weight:700">PART I — ANALYSIS HUB</div>
+          <div>✅ Singleton WebSocket — all engines share one socket</div>
+          <div>✅ Digit extracted via quote.toFixed(2) last char</div>
+          <div>✅ Short-term buffer: 200 ticks · Long-term: 120 ticks</div>
+          <div>✅ analyzeDigits — hot &gt;15%, cold &lt;8% thresholds</div>
+          <div>✅ Weighted trend: older half ×1, newer half ×3</div>
+          <div>✅ Momentum: last 10 vs prev 10, normalised 0–100</div>
+          <div>✅ Volatility: mean |d[i]−d[i−1]|, scaled from 100</div>
+          <div>✅ oddDigitWeight — sum pct of digits 1,3,5,7,9</div>
+          <div>✅ rareDigits: 4+ digits under 8% of window</div>
+          <div>✅ dominantOdd: odd weight &gt; 55%</div>
+          <div>✅ stablePattern: window ≥ 25 ticks</div>
+          <div>✅ momentumUp: score &gt; 55</div>
+          <div>✅ lowVolatility: volatilityIndex &gt; 50</div>
+          <div>✅ Probability formula: additive, capped at 100</div>
+          <div>✅ STRONG_BUY ≥85 · BUY ≥70 · AVOID &lt;50 · HOLD else</div>
+          <div>✅ MTF: short×0.6 + long×0.4 confidence</div>
+          <div>✅ ANALYSIS_HOLD = 20s snapshot freeze</div>
+          <div>✅ Market health gate: POOR blocks chain start</div>
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin:8px 0 6px;font-weight:700">PART I — 9 STRATEGIES</div>
+          <div>✅ S1 NORMAL: minSignal 80, minEvenStreak 3 → ODD</div>
+          <div>✅ S2 EVEN FLOOD: 60%+ even/30T AND last 5 all even</div>
+          <div>✅ S3 ODD BOUNCE: E→O→E pattern, 3+ confirms ≥40%</div>
+          <div>✅ S4 PARITY SWITCH: 5 consec evens + odd &lt;30% in 20T</div>
+          <div>✅ S5 GHOST DIGIT: odd 4T ago, 3 even gap, 2+ confirms</div>
+          <div>✅ S6 DOUBLE TAP: same odd 2× in 5T gap≥2, 3+ in 20T</div>
+          <div>✅ S7 RAPID SCALP: last 5 all even, ≤2 odds/15T, no consec</div>
+          <div>✅ S8 ODD STARVATION: odd &lt;35% in 100T, absent 8 ticks</div>
+          <div>✅ S9 EVEN AVALANCHE: inverts contract type (EVEN ride)</div>
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin:8px 0 6px;font-weight:700">PART II — MARTINGALE ENGINE</div>
+          <div>✅ Multiplier: 1.8× (not pure 2.0×)</div>
+          <div>✅ Default stopStep: 2 · Unlimited mode: 999</div>
+          <div>✅ calculateNextStake: toFixed(2) two-decimal precision</div>
+          <div>✅ WIN resets: step→0, inRecovery→false, stake→base</div>
+          <div>✅ LOSS: step++, stake×=multiplier, inRecovery=true</div>
+          <div>✅ stepCap hit → CRITICAL log → completeSession()</div>
+          <div>✅ Smart Recovery: odd &lt;50% in 20T → bet ODD (contrarian)</div>
+          <div>✅ ALT-A flips at steps 2,5,8… ((step-2)%3===0)</div>
+          <div>✅ ALT-B flips at step 1 and steps 4,7,10… (default ON)</div>
+          <div>✅ S9 AVALANCHE inverts contract type for anti-pattern</div>
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin:8px 0 6px;font-weight:700">PART III — FULL AUTOMATION</div>
+          <div>✅ completeSession: randomised cooldown 5–25s</div>
+          <div>✅ Auto-refresh: socket reconnect every 4 runs</div>
+          <div>✅ Golden market: HEALTHY + prob≥75 + not AVOID</div>
+          <div>✅ autoPilot: picks best golden market on restart</div>
+          <div>✅ Market score gate: score &gt;70 + not POOR health</div>
+          <div>✅ Stuck watchdog: stale tick &gt;12s → reconnect</div>
+          <div>✅ Stuck trade: &gt;45s pending → release lock</div>
+          <div>✅ Mode-switch cooldown: random 10–29s enforced</div>
+          <div>⚠️ API key shuffle (every 5 runs): not in this build</div>
+          <div style="color:hsl(var(--primary));letter-spacing:2px;font-size:8px;margin:8px 0 6px;font-weight:700">PART IV — ANTI-PREDICTION LOGIC</div>
+          <div>✅ Randomised cooldown timing (5–25s per session)</div>
+          <div>✅ Stake drifts from round numbers via 1.8× toFixed(2)</div>
+          <div>✅ S9 inverts parity — confuses broker pattern matching</div>
+          <div>✅ ALT-A/B recovery flips break martingale fingerprint</div>
+          <div>✅ Market hot-swap via golden scanner each restart</div>
+          <div>✅ quote.toFixed(2) digit extraction causes tick drift</div>
+          <div>✅ 20s analysis hold randomises tick-to-trade latency</div>
+          <div>✅ Socket reconnect on closed socket before retry</div>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid hsl(var(--border));color:hsl(var(--win));font-size:8px;letter-spacing:1px">
+            34 CONFIRMED ✅ &nbsp;·&nbsp; 1 NOT IN BUILD ⚠️
+          </div>
+        </div>
+      </div>`;
+    if (global.setHtmlIfChanged(el(`${rootId}-right`), rightHtml)) {
+      el(`${rootId}-clear`).onclick = () => engine.clearStats();
+    }
+  }
+
+  function updateLive(rootId, snap) {
+    const { state: s, config: c, strategyPhase, strategyWaitReason, liveDigit, liveQuote, cooldownTime } = snap;
+    const digit = el(`${rootId}-digit`);
+    if (digit) {
+      const newDigitText = liveDigit >= 0 ? String(liveDigit) : '—';
+      if (digit.textContent !== newDigitText) digit.textContent = newDigitText;
+      if (digit.className !== 'digit-pad text-primary') digit.className = 'digit-pad text-primary';
+    }
+    const badge = el(`${rootId}-badge`);
+    if (badge) {
+      const txt = s.isCooldown ? `CD ${cooldownTime}s` : s.isLocked ? '⚡ FIRING' : s.active ? 'SCOUT' : 'IDLE';
+      badge.textContent = txt;
+      badge.className = s.isCooldown ? 'text-accent' : s.isLocked ? 'text-success' : s.active ? 'text-primary' : 'text-muted';
+    }
+    // ── Tab header cooldown ring ──
+    const tabCdRing = document.getElementById(`${rootId}-tab-cd-ring`);
+    const tabCdNum = document.getElementById(`${rootId}-tab-cd-num`);
+    const tabCdArc = document.getElementById(`${rootId}-tab-cd-arc`);
+    if (tabCdRing) {
+      if (s.isCooldown && cooldownTime > 0) {
+        tabCdRing.style.display = 'flex';
+        if (tabCdNum) tabCdNum.textContent = cooldownTime;
+        if (tabCdArc) {
+          const total = 2 * Math.PI * 14;
+          // Assume max CD is 25s; show remaining arc
+          const maxCd = snap._cdMax || 25;
+          const offset = total * (1 - Math.min(cooldownTime / maxCd, 1));
+          tabCdArc.style.strokeDashoffset = offset.toFixed(1);
+        }
+      } else {
+        tabCdRing.style.display = 'none';
+      }
+    }
+    const sub = el(`${rootId}-subtitle`);
+    if (sub) sub.textContent = `${c.selectedMarket} · ${snap.currentStrategyName}`;
+    const streak = el(`${rootId}-streak`);
+    if (streak) streak.textContent = s.streak;
+    const runs = el(`${rootId}-runs`);
+    if (runs) runs.textContent = s.currentRuns;
+    const reason = el(`${rootId}-wait-reason`);
+    if (reason) reason.textContent = strategyWaitReason || (s.active ? 'Scanning for entry…' : 'Engine offline');
+    const fa = el(`${rootId}-flow-analyze`);
+    const fw = el(`${rootId}-flow-wait`);
+    const ff = el(`${rootId}-flow-fire`);
+    if (fa && fw && ff) {
+      fa.className = 'flow-step' + (strategyPhase !== 'firing' ? ' active' : '');
+      fw.className = 'flow-step' + (strategyWaitReason && s.active ? ' active' : '');
+      ff.className = 'flow-step' + (strategyPhase === 'firing' ? ' fire active' : '');
+    }
+    const bal = el(`${rootId}-balance`);
+    if (bal && s.connected) {
+      bal.style.display = 'block';
+      bal.innerHTML = `BAL <span class="text-success font-fira">${(s.balance || 0).toFixed(2)}</span> · P/L <span class="${s.stats.profit >= 0 ? 'text-success' : 'text-destructive'} font-fira">${s.stats.profit.toFixed(2)}</span>`;
+    }
+    const conn = el(`${rootId}-conn`);
+    if (conn) conn.style.background = s.connected ? 'hsl(var(--success))' : 'hsl(var(--destructive)/0.5)';
+    const qs = el(`${rootId}-quote-small`);
+    if (qs && liveQuote) qs.textContent = liveQuote.toFixed(4);
+    const toggle = el(`${rootId}-toggle`);
+    if (toggle) {
+      toggle.textContent = s.active ? 'TERMINATE SESSION' : 'ENGAGE OMEGA';
+      toggle.className = 'btn-omega' + (s.active ? ' stop' : '');
+      toggle.disabled = s.isCooldown || snap.isStrategyTransitioning;
+    }
+
+    // ── Live Entry Conditions Panel ───────────────────────────────────────────
+    const condPanel = document.getElementById(`${rootId}-conditions`);
+    const condList  = document.getElementById(`${rootId}-cond-list`);
+    const condFill  = document.getElementById(`${rootId}-cond-fill`);
+    const condPct   = document.getElementById(`${rootId}-cond-pct`);
+    const condPulse = document.getElementById(`${rootId}-cond-pulse`);
+    const condStatus= document.getElementById(`${rootId}-cond-status`);
+    if (condPanel && condList) {
+      const a = snap.analysis;
+      const isOver = c.overBarrier !== undefined && snap.fixedTradeMode === null;
+
+      // Build conditions list
+      const conditions = [];
+
+      conditions.push({
+        label: 'Engine Armed',
+        met: s.active && !s.isCooldown,
+        value: s.active ? (s.isCooldown ? 'CD' : 'ON') : 'OFF',
+      });
+      conditions.push({
+        label: 'Trading Connected',
+        met: !!s.connected,
+        value: s.connected ? 'YES' : 'NO',
+      });
+      const analysisReady = !!a && a.probability > 0;
+      conditions.push({
+        label: 'Analysis Ready',
+        met: analysisReady,
+        value: analysisReady ? `${a.probability}%` : '—',
+      });
+      const sigMet = a && a.probability >= c.minSignal;
+      conditions.push({
+        label: `Signal ≥ ${c.minSignal}%`,
+        met: !!sigMet,
+        value: a ? `${a.probability}%` : '—',
+      });
+      const streakMet = s.streak >= c.minStreak;
+      conditions.push({
+        label: `Streak ≥ ${c.minStreak}`,
+        met: streakMet,
+        value: `${s.streak}`,
+      });
+      const notAvoid = !a || a.recommendation !== 'AVOID';
+      conditions.push({
+        label: 'Signal not AVOID',
+        met: notAvoid,
+        value: a ? a.recommendation : '—',
+      });
+      const health = snap.marketHealth;
+      const healthOk = !health || health.longTerm !== 'POOR';
+      conditions.push({
+        label: 'Market Health',
+        met: healthOk,
+        value: health ? health.longTerm : 'SCAN',
+      });
+      const noLock = !s.isLocked || s.inRecovery;
+      conditions.push({
+        label: 'No active trade',
+        met: noLock,
+        value: s.isLocked ? (s.inRecovery ? 'REC' : 'WAIT') : 'CLEAR',
+      });
+
+      const metCount = conditions.filter(cd => cd.met).length;
+      const total = conditions.length;
+      const allMet = metCount === total;
+      const pct = total > 0 ? Math.round((metCount / total) * 100) : 0;
+      const isFiring = s.isLocked && !s.inRecovery;
+
+      condPanel.classList.toggle('all-met', allMet);
+      if (condPulse) {
+        condPulse.className = 'entry-cond-pulse' + (isFiring ? ' firing' : allMet ? ' active' : '');
+      }
+      if (condStatus) {
+        condStatus.textContent = isFiring ? '⚡ FIRING' : allMet ? '✓ READY' : 'WAITING';
+        condStatus.className = 'entry-cond-status' + (isFiring ? ' fire' : allMet ? ' met' : '');
+      }
+      const newHtml = conditions.map(cd => {
+        const icon = cd.met ? '✓' : '○';
+        return `<div class="entry-cond-row ${cd.met ? 'met' : 'pending'}">
+          <span class="entry-cond-icon" style="color:${cd.met ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">` + icon + `</span>
+          <span class="entry-cond-label">${cd.label}</span>
+          <span class="entry-cond-value">${cd.value}</span>
+        </div>`;
+      }).join('');
+      if (condList.__lastConds !== newHtml) { condList.innerHTML = newHtml; condList.__lastConds = newHtml; }
+      if (condFill) {
+        condFill.style.width = pct + '%';
+        condFill.className = 'entry-cond-fill' + (allMet ? ' full' : '');
+      }
+      if (condPct) condPct.textContent = `${metCount} / ${total} conditions met`;
+    }
+  }
+
+  global.TitanUI = {
+    render(engine, rootId, label) {
+      const root = buildShell(engine, rootId, label);
+      if (!root) return;
+      const snap = engine.getSnapshot();
+      const sh = shells[rootId];
+      renderLeft(engine, rootId, snap);
+      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy || sh.lastOverBarrier !== snap.config.overBarrier || sh.lastTradeMode !== snap.config.tradeMode) {
+        renderCenterConfig(engine, rootId, snap);
+        sh.lastStrategy = snap.config.currentStrategy;
+        sh.lastOverBarrier = snap.config.overBarrier;
+        sh.lastTradeMode = snap.config.tradeMode;
+      }
+      renderRight(engine, rootId, snap);
+      updateLive(rootId, snap);
+    },
+    renderLive(engine, rootId, label) {
+      const root = document.getElementById(rootId);
+      if (!root) return;
+      if (!shells[rootId]) return this.render(engine, rootId, label);
+      const snap = engine.getSnapshot();
+      updateLive(rootId, snap);
+      // Update left panel (signal strength, digit frequency, etc.) every ~4 seconds
+      const sh = shells[rootId];
+      const now = Date.now();
+      // Re-render center config if any key config values changed (barrier, strategy, tradeMode, streak, signal)
+      if (!sh.configBuilt || sh.lastStrategy !== snap.config.currentStrategy || sh.lastOverBarrier !== snap.config.overBarrier || sh.lastTradeMode !== snap.config.tradeMode || sh.lastMinStreak !== snap.config.minStreak || sh.lastMinSignal !== snap.config.minSignal) {
+        renderCenterConfig(engine, rootId, snap);
+        sh.lastStrategy = snap.config.currentStrategy;
+        sh.lastOverBarrier = snap.config.overBarrier;
+        sh.lastTradeMode = snap.config.tradeMode;
+        sh.lastMinStreak = snap.config.minStreak;
+        sh.lastMinSignal = snap.config.minSignal;
+      }
+      if (!sh._lastLeftRender || (now - sh._lastLeftRender) >= 4000) {
+        // Only rebuild if no dropdown is focused (avoid interrupting user interaction)
+        const focused = document.activeElement;
+        const leftPanel = document.getElementById(`${rootId}-left`);
+        const leftHasFocus = leftPanel && leftPanel.contains(focused);
+        if (!leftHasFocus) {
+          renderLeft(engine, rootId, snap);
+          sh._lastLeftRender = now;
+        }
+      }
+      renderRight(engine, rootId, snap);
+    },
+  };
+})(window);
+
+(function (global) {
   'use strict';
 
   function el(id, parent) { return (parent || document).querySelector(id.startsWith('#') ? id : '#' + id); }
@@ -9777,7 +10836,9 @@ window.NexusStrategies=exports;
 
 
 </script>
-<script>(function () {
+
+<script>
+(function () {
   'use strict';
 
   const BOT_IDS = ['differ', 'even', 'odd', 'nexus'];
@@ -9884,7 +10945,8 @@ window.NexusStrategies=exports;
   }
 
   function bindHubTabs() {
-    switchApp('dashboard');
+    document.querySelectorAll('.hub-tab').forEach((btn) => btn.addEventListener('click', () => switchApp(btn.dataset.app)));
+    switchApp(activeApp);
     const sidebar = document.getElementById('hub-sidebar');
     const collapseBtn = document.getElementById('hub-sidebar-collapse');
     if (sidebar && collapseBtn) {
@@ -10197,144 +11259,6 @@ window.NexusStrategies=exports;
   window._hubEngines = engines; // expose for master toggle label updater
   window.UnifiedHub = { switchApp };
 })();
-</script>
-<script>
-  (function() {
-    const THEMES = [
-      { v: 'luminous', i: '💎', label: 'Luminous' },
-      { v: 'void',     i: '⬛', label: 'Void'     },
-      { v: 'dark',     i: '🟣', label: 'Obsidian' },
-      { v: 'midnight', i: '🔵', label: 'Midnight'  },
-      { v: 'slate',    i: '🌌', label: 'Nebula'   },
-      { v: 'charcoal', i: '🩶', label: 'Charcoal' },
-      { v: 'light',    i: '⚪', label: 'Arctic'   },
-    ];
-    function renderThemePills(container, cb) {
-      if (!container) return;
-      container.innerHTML = THEMES.map(t =>
-        `<button class="theme-pill-btn" data-tv="${t.v}" title="${t.label}">${t.i}</button>`
-      ).join('');
-      container.querySelectorAll('.theme-pill-btn').forEach(b => b.onclick = () => cb(b.dataset.tv));
-    }
-    function refreshPills() {
-      const s = window.HubStore ? window.HubStore.getState() : {};
-      document.querySelectorAll('.theme-pill-btn').forEach(b =>
-        b.classList.toggle('active', b.dataset.tv === s.theme));
-    }
-    function applyTheme() {
-      const s = window.HubStore ? window.HubStore.getState() : {};
-      document.documentElement.className = s.theme || 'dark';
-    }
-    if (window.HubStore) {
-      window.HubStore.subscribe(() => { applyTheme(); refreshPills(); refreshTopbar(); });
-      applyTheme();
-    }
-    renderThemePills(document.getElementById('hub-theme-pills'), v => window.HubStore && window.HubStore.setTheme(v));
-    renderThemePills(document.getElementById('settings-theme-pills'), v => window.HubStore && window.HubStore.setTheme(v));
-    refreshPills();
-    const modal = document.getElementById('settings-modal');
-    const settingsBtn = document.getElementById('hub-settings-btn');
-    const closeBtn = document.getElementById('settings-close');
-    if (settingsBtn) settingsBtn.onclick = () => modal && modal.setAttribute('aria-hidden','false');
-    if (closeBtn) closeBtn.onclick = () => modal && modal.setAttribute('aria-hidden','true');
-    if (modal) modal.onclick = e => { if (e.target === modal) modal.setAttribute('aria-hidden','true'); };
-    const appIdInput = document.getElementById('settings-appid');
-    const appIdSaveBtn = document.getElementById('settings-appid-save');
-    if (appIdSaveBtn) appIdSaveBtn.onclick = () => {
-      const v = (appIdInput && appIdInput.value || '').trim();
-      if (window.HubStore) window.HubStore.setAppId(v);
-      appIdSaveBtn.textContent = 'Saved ✓'; setTimeout(() => appIdSaveBtn.textContent = 'Save', 2000);
-    };
-    if (window.HubStore && appIdInput) { const s=window.HubStore.getState(); if(s.appId) appIdInput.value=s.appId; }
-    const wsInput = document.getElementById('settings-wsappid');
-    const wsSaveBtn = document.getElementById('settings-wsappid-save');
-    if (wsSaveBtn) wsSaveBtn.onclick = () => {
-      const v = (wsInput && wsInput.value || '').trim();
-      if (window.HubStore) window.HubStore.setWsAppId(v);
-      wsSaveBtn.textContent = 'Saved ✓'; setTimeout(() => wsSaveBtn.textContent = 'Save', 2000);
-    };
-    const tokenInput = document.getElementById('settings-token');
-    const statusEl = document.getElementById('settings-status');
-    const saveBtn = document.getElementById('settings-save');
-    function refreshAuthStatus() {
-      const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (tokenInput && hub.apiToken) tokenInput.value = hub.apiToken;
-      if (statusEl) statusEl.textContent = hub.connectionStatus === 'connected'
-        ? `✓ Connected${hub.accountId ? ' — ' + hub.accountId : ''}`
-        : hub.connectionStatus === 'connecting' ? '⏳ Connecting…'
-        : hub.apiToken ? `✗ ${hub.connectionError || 'Not connected'}` : 'No token set';
-    }
-    if (saveBtn) saveBtn.onclick = () => {
-      const v = (tokenInput && tokenInput.value || '').trim();
-      if (v && window.HubStore) window.HubStore.setToken(v);
-    };
-    refreshAuthStatus();
-    if (window.HubStore) window.HubStore.subscribe(refreshAuthStatus);
-    const accTypeBtn = document.getElementById('settings-account-type');
-    if (accTypeBtn) accTypeBtn.onclick = () => {
-      const hub = window.HubStore.getState();
-      window.HubStore.setAccountType(hub.accountType === 'real' ? 'demo' : 'real');
-    };
-    ['settings-tg-token','settings-tg-chat'].forEach(id => {
-      const node = document.getElementById(id);
-      if (node && window.HubStore) node.onchange = () =>
-        window.HubStore.setTelegram(
-          document.getElementById('settings-tg-token').value.trim(),
-          document.getElementById('settings-tg-chat').value.trim()
-        );
-    });
-    const tgToggle = document.getElementById('settings-tg-toggle');
-    if (tgToggle) tgToggle.onclick = () =>
-      window.HubStore.setTelegramEnabled(!window.HubStore.getState().telegramEnabled);
-    const muteToggleBtn = document.getElementById('settings-mute-toggle');
-    const muteIcon = document.getElementById('mute-icon');
-    const muteLabel = document.getElementById('mute-label');
-    const _muteChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('benz_club_mute') : null;
-    function applyMuteState(muted) {
-      document.querySelectorAll('audio,video').forEach(el => el.muted = muted);
-      if (window.Sounds && window.Sounds.soundEngine) window.Sounds.soundEngine.toggle(!muted);
-      try { localStorage.setItem('benz_muted', muted ? '1' : '0'); } catch(_) {}
-      if (muteToggleBtn) muteToggleBtn.classList.toggle('on', muted);
-      if (muteIcon) muteIcon.textContent = muted ? '🔇' : '🔊';
-      if (muteLabel) muteLabel.textContent = muted ? 'Muted' : 'Sound On';
-      window._benzMuted = muted;
-    }
-    if (_muteChannel) _muteChannel.onmessage = e => { if (typeof e.data?.muted === 'boolean') applyMuteState(e.data.muted); };
-    (function initMute() {
-      let saved = false;
-      try { saved = localStorage.getItem('benz_muted') === '1'; } catch(_) {}
-      applyMuteState(saved);
-    })();
-    if (muteToggleBtn) muteToggleBtn.onclick = () => {
-      const nowMuted = !window._benzMuted;
-      applyMuteState(nowMuted);
-      if (_muteChannel) _muteChannel.postMessage({ muted: nowMuted });
-    };
-    function refreshTopbar() {
-      const hub = window.HubStore ? window.HubStore.getState() : {};
-      const idEl = document.getElementById('hub-account-id');
-      if (idEl) idEl.textContent = hub.accountId ? `${hub.accountType === 'real' ? 'REAL' : 'DEMO'} · ${hub.accountId}` : 'No account linked';
-      const balPill = document.getElementById('hub-balance-pill');
-      if (balPill) {
-        if (hub.isAuthenticated) { balPill.style.display = ''; balPill.textContent = `${hub.currency || 'USD'} ${hub.balanceUSD.toFixed(2)}`; }
-        else balPill.style.display = 'none';
-      }
-    }
-    refreshTopbar();
-    const sidebar = document.getElementById('hub-sidebar');
-    const collapseBtn = document.getElementById('hub-sidebar-collapse');
-    if (sidebar && collapseBtn) {
-      let collapsed = false;
-      try { collapsed = localStorage.getItem('hub_sidebar_collapsed') === '1'; } catch(e) {}
-      sidebar.classList.toggle('collapsed', collapsed);
-      collapseBtn.addEventListener('click', () => {
-        collapsed = !collapsed;
-        sidebar.classList.toggle('collapsed', collapsed);
-        try { localStorage.setItem('hub_sidebar_collapsed', collapsed ? '1' : '0'); } catch(e) {}
-      });
-    }
-    setInterval(() => { const c = document.getElementById('hub-clock'); if (c) c.textContent = new Date().toLocaleTimeString('en-US',{hour12:false}); }, 1000);
-  })();
 </script>
 </body>
 </html>
