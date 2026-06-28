@@ -13083,7 +13083,7 @@ window.NexusStrategies=exports;
   function bindMasterControl() {
     // Delegated so it works once DashboardUI builds the shell (and rebuilds it).
     document.addEventListener('click', (e) => {
-      const btn = e.target.closest('');
+      const btn = e.target.closest('#dash-master-toggle');
       if (!btn) return;
       const engagedCount = BOT_IDS.filter((id) => {
         const eng = engines[id];
