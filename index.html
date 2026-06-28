@@ -985,6 +985,98 @@ html.light .terminal-input, html.light .terminal-select {
   background-size: 100% 100% !important;
 }
 
+/* ══════════════════════════════════════════════════════
+   JOURNAL — GLOBAL UPGRADE STYLES (shared across all panels)
+   ══════════════════════════════════════════════════════ */
+@keyframes jnl-digit-pop-g { 0%{transform:scale(0.7);opacity:0} 60%{transform:scale(1.12)} 100%{transform:scale(1);opacity:1} }
+@keyframes jnl-slide-g { from{opacity:0;transform:translateY(-10px) scale(0.98)} to{opacity:1;transform:translateY(0) scale(1)} }
+@keyframes jnl-win-g { 0%{box-shadow:0 0 0 0 hsl(var(--win)/0)} 30%{box-shadow:0 0 0 8px hsl(var(--win)/0.35)} 100%{box-shadow:0 0 0 0 hsl(var(--win)/0)} }
+@keyframes jnl-loss-g { 0%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} 30%{box-shadow:0 0 0 8px hsl(var(--loss)/0.35)} 100%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} }
+
+.jnl-entry {
+  border-radius:16px; padding:0; margin-bottom:8px;
+  display:flex; flex-direction:column;
+  position:relative; overflow:hidden;
+  animation:jnl-slide-g .25s cubic-bezier(.16,1,.3,1);
+  transition:transform .2s, box-shadow .2s;
+  cursor:default;
+}
+.jnl-entry:hover { transform:translateX(4px) translateY(-1px) !important; }
+.jnl-entry.win {
+  background:linear-gradient(135deg,hsl(var(--win)/0.09),hsl(var(--win)/0.03));
+  border:1px solid hsl(var(--win)/0.3);
+  box-shadow:0 3px 16px hsl(var(--win)/0.12), inset 0 1px 0 hsl(255 100% 100%/0.03);
+  animation:jnl-win-g .6s ease, jnl-slide-g .25s cubic-bezier(.16,1,.3,1);
+}
+.jnl-entry.win:hover { box-shadow:0 6px 28px hsl(var(--win)/0.22), 0 0 0 1px hsl(var(--win)/0.2) !important; }
+.jnl-entry.loss {
+  background:linear-gradient(135deg,hsl(var(--loss)/0.09),hsl(var(--loss)/0.03));
+  border:1px solid hsl(var(--loss)/0.3);
+  box-shadow:0 3px 16px hsl(var(--loss)/0.1), inset 0 1px 0 hsl(255 100% 100%/0.03);
+  animation:jnl-loss-g .6s ease, jnl-slide-g .25s cubic-bezier(.16,1,.3,1);
+}
+.jnl-entry.loss:hover { box-shadow:0 6px 28px hsl(var(--loss)/0.2), 0 0 0 1px hsl(var(--loss)/0.2) !important; }
+.jnl-entry::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:4px;
+  border-radius:4px 0 0 4px;
+}
+.jnl-entry.win::before { background:linear-gradient(180deg,hsl(var(--win)),hsl(var(--win)/0.4)); box-shadow:0 0 12px hsl(var(--win)/0.7); }
+.jnl-entry.loss::before { background:linear-gradient(180deg,hsl(var(--loss)),hsl(var(--loss)/0.4)); box-shadow:0 0 12px hsl(var(--loss)/0.6); }
+.jnl-top-row { display:flex; align-items:center; gap:10px; padding:11px 14px 8px 18px; }
+.jnl-digit-row {
+  display:flex; align-items:center; gap:0;
+  padding:0 14px 12px 18px;
+  border-top:1px solid hsl(var(--border)/0.2); margin-top:2px;
+}
+.jnl-badge {
+  width:36px; height:36px; border-radius:10px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Outfit',sans-serif; font-size:14px; font-weight:900; letter-spacing:0.5px;
+}
+.jnl-badge.win { background:hsl(var(--win)/0.2); color:hsl(var(--win)); border:1.5px solid hsl(var(--win)/0.35); }
+.jnl-badge.loss { background:hsl(var(--loss)/0.2); color:hsl(var(--loss)); border:1.5px solid hsl(var(--loss)/0.35); }
+.jnl-ct-pill {
+  display:inline-flex; align-items:center; gap:3px;
+  padding:2px 8px; border-radius:999px;
+  font-size:8.5px; font-weight:900; font-family:'DM Mono',monospace; letter-spacing:1px;
+}
+.jnl-rec-tag {
+  display:inline-flex; align-items:center;
+  padding:2px 7px; border-radius:999px;
+  font-size:8px; font-weight:800; font-family:'DM Mono',monospace;
+  background:hsl(var(--accent)/0.1); color:hsl(var(--accent)); border:1px solid hsl(var(--accent)/0.3);
+}
+.jnl-meta-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; flex:1; min-width:0; }
+.jnl-time { font-size:9px; color:hsl(var(--muted-foreground)/0.7); font-family:'DM Mono',monospace; }
+.jnl-win-tag { font-size:8px; padding:2px 8px; border-radius:999px; font-weight:900; font-family:'Outfit',sans-serif;
+  background:hsl(var(--win)/0.12); color:hsl(var(--win)); border:1px solid hsl(var(--win)/0.3); }
+.jnl-loss-tag { font-size:8px; padding:2px 8px; border-radius:999px; font-weight:900; font-family:'Outfit',sans-serif;
+  background:hsl(var(--loss)/0.12); color:hsl(var(--loss)); border:1px solid hsl(var(--loss)/0.3); }
+.jnl-pnl { font-family:'Outfit',sans-serif; font-size:18px; font-weight:900; letter-spacing:-0.5px; flex-shrink:0; margin-left:auto; }
+.jnl-pnl.win { color:hsl(var(--win)); text-shadow:0 0 12px hsl(var(--win)/0.5); }
+.jnl-pnl.loss { color:hsl(var(--loss)); text-shadow:0 0 12px hsl(var(--loss)/0.4); }
+.jnl-digit-display { display:flex; align-items:center; gap:8px; flex:1; }
+.jnl-digit-label {
+  font-size:8px; font-family:'DM Mono',monospace; font-weight:700;
+  color:hsl(var(--muted-foreground)/0.5); letter-spacing:1px;
+  writing-mode:vertical-rl; text-orientation:mixed; transform:rotate(180deg); line-height:1;
+}
+.jnl-entry-digit {
+  font-family:'DM Mono',monospace; font-size:11px; font-weight:700;
+  color:hsl(var(--muted-foreground)/0.5); padding:0 2px;
+}
+.jnl-arrow { font-size:13px; color:hsl(var(--muted-foreground)/0.35); padding:0 2px; flex-shrink:0; }
+.jnl-exit-digit {
+  font-family:'Outfit',sans-serif; font-size:48px; font-weight:900;
+  line-height:1; letter-spacing:-2px;
+  animation:jnl-digit-pop-g .35s cubic-bezier(.16,1,.3,1);
+  flex-shrink:0; min-width:44px; text-align:center;
+}
+.jnl-exit-digit.win { color:hsl(var(--win)); text-shadow:0 0 20px hsl(var(--win)/0.6), 0 0 40px hsl(var(--win)/0.25); }
+.jnl-exit-digit.loss { color:hsl(var(--loss)); text-shadow:0 0 20px hsl(var(--loss)/0.5), 0 0 40px hsl(var(--loss)/0.2); }
+
+/* ══════════════════════════════════════════════════════ */
+
 /* ── LIVE TICK CELLS ── */
 .live-tick-cell {
   background: hsl(var(--bg) / .5) !important;
@@ -9682,17 +9774,53 @@ window.NexusStrategies=exports;
         const strategy = this.getStrategy(cfg.currentStrategy);
         if (strategy.id === 9) { contractType = 'DIGITUNDER'; barrierValue = cfg.overBarrier; }
         if (st.inRecovery) {
+          // ── Default recovery: OVER at recoveryBarrier (all OVER, never UNDER by default) ──
+          contractType = 'DIGITOVER';
           barrierValue = cfg.recoveryBarrier;
           if (cfg.smartRecovery) {
+            // ── 🧠 Smart Toggle: reads last 25 ticks; bets OVER or UNDER whichever side is starved ──
+            // If OVER has been dominant recently (over-rate high), switch to UNDER to confuse Deriv
+            // If UNDER has been dominant (over-rate low), stay OVER
             const recent = st.history.slice(-25);
-            const overRate = recent.filter((d) => d > 4).length / recent.length;
-            if (overRate >= 0.6) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
+            const overRate = recent.length ? recent.filter((d) => d > cfg.recoveryBarrier).length / recent.length : 0.5;
+            if (overRate >= 0.6) {
+              // OVER is dominant → flip to UNDER to catch the correction
+              contractType = 'DIGITUNDER';
+              barrierValue = 9 - cfg.recoveryBarrier;
+              this.addLog('engine', 'SMART-REC', `Smart: OVER ${(overRate*100).toFixed(0)}% dominant → betting UNDER ${barrierValue}`);
+            } else {
+              this.addLog('engine', 'SMART-REC', `Smart: OVER ${(overRate*100).toFixed(0)}% → staying OVER ${barrierValue}`);
+            }
           } else if (cfg.alternatingRecovery) {
+            // ── 🔄 Alt Mode A ─────────────────────────────────────────────────────────────
+            // Pattern: loss occurs on OVER barrier → recovery sequence:
+            //   step 1 = OVER recoveryBarrier  (standard start)
+            //   step 2 = OVER recoveryBarrier  (continue OVER)
+            //   step 3 = UNDER (9-rec) flipped (3rd step confuses Deriv pattern detection)
+            //   step 4 = OVER recoveryBarrier  (back to OVER)
+            //   step 5 = OVER recoveryBarrier
+            //   step 6 = UNDER (9-rec)  → repeats every 3rd step
+            //   Rule: flip to UNDER only when step % 3 === 0 (steps 3, 6, 9…)
             const step = st.martingaleStep;
-            if (step >= 2 && ((step - 2) % 3 === 0)) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
+            if (step > 0 && step % 3 === 0) {
+              contractType = 'DIGITUNDER';
+              barrierValue = 9 - cfg.recoveryBarrier;
+            }
+            this.addLog('engine', 'ALT-A', `AltA step ${step}: ${contractType} @ ${barrierValue}`);
           } else if (cfg.alternatingRecoveryB) {
+            // ── 🔁 Alt Mode B ─────────────────────────────────────────────────────────────
+            // Pattern: loss occurs on OVER barrier → recovery starts with UNDER to confuse Deriv:
+            //   step 1 = UNDER (9-rec)   (UNDER-first to break the OVER fingerprint)
+            //   step 2 = OVER recoveryBarrier
+            //   step 3 = OVER recoveryBarrier
+            //   step 4 = UNDER (9-rec)   (repeats: UNDER → OVER → OVER → UNDER → …)
+            //   Rule: UNDER on step 1 and on steps where (step - 1) % 3 === 0
             const step = st.martingaleStep;
-            if (step === 1 || (step > 1 && ((step - 1) % 3 === 0))) { contractType = 'DIGITUNDER'; barrierValue = 9 - cfg.recoveryBarrier; }
+            if (step === 1 || (step > 1 && (step - 1) % 3 === 0)) {
+              contractType = 'DIGITUNDER';
+              barrierValue = 9 - cfg.recoveryBarrier;
+            }
+            this.addLog('engine', 'ALT-B', `AltB step ${step}: ${contractType} @ ${barrierValue}`);
           }
           // STEP 4 OVER 0 SHIELD: at step 3 of a 4-cap chain, override everything with OVER 0
           // for ~90% survival rate rather than risking full session loss (documentary §3.4)
@@ -10495,15 +10623,36 @@ window.NexusStrategies=exports;
           <div class="glass-monitor" style="padding:8px"><div class="font-mono-data">${wr}%</div>WIN RATE</div>
         </div>
       </div>
-      <div style="margin-top:8px" class="journal-list">${s.journal.slice(0, 60).map((j) => `<div class="journal-entry ${j.type}">
-        <span class="journal-badge ${j.type}">${j.type === 'win' ? 'W' : 'L'}</span>
-        <span style="color:hsl(var(--muted-foreground));font-size:9px;font-family:'DM Mono',monospace">${j.time}</span>
-        <span class="journal-digits" style="display:flex;align-items:center;gap:4px">
-          <span style="font-size:9px;color:hsl(var(--muted-foreground))">B:</span><b style="font-size:18px;font-weight:900;color:hsl(var(--accent));text-shadow:0 0 8px hsl(var(--accent)/0.6)">${j.barrier}</b>
-          <span style="color:hsl(var(--muted-foreground));font-size:10px;margin:0 2px">${j.entryDigit ?? '—'}<span class="arrow">→</span></span><b style="font-size:22px;font-weight:900;color:${j.type==='win'?'hsl(var(--win))':'hsl(var(--loss))'};text-shadow:0 0 10px ${j.type==='win'?'hsl(var(--win)/0.7)':'hsl(var(--loss)/0.7)'}">${j.exitDigit}</b>
-        </span>
-        <span class="journal-net ${j.type === 'win' ? 'neon-text-win' : 'neon-text-loss'}">${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}</span>
-      </div>`).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
+      <div style="margin-top:8px" class="journal-list">${s.journal.slice(0, 60).map((j) => {
+        const isWin = j.type === 'win';
+        const wc = isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+        const exD = j.exitDigit ?? '?';
+        const enD = j.entryDigit ?? '—';
+        const pl = (j.profit >= 0 ? '+' : '') + j.profit.toFixed(2);
+        return `<div class="jnl-entry ${j.type}">
+          <div class="jnl-top-row">
+            <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
+            <div class="jnl-meta-row">
+              <span class="jnl-time">${j.time}</span>
+              <span class="${isWin ? 'jnl-win-tag' : 'jnl-loss-tag'}">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
+              <span class="jnl-ct-pill" style="background:hsl(var(--accent)/0.1);color:hsl(var(--accent));border:1.5px solid hsl(var(--accent)/0.3)">B:${j.barrier}</span>
+            </div>
+            <div class="jnl-pnl ${j.type}">${pl}</div>
+          </div>
+          <div class="jnl-digit-row">
+            <div class="jnl-digit-label">EXIT</div>
+            <div class="jnl-digit-display">
+              <span class="jnl-entry-digit">${enD}</span>
+              <span class="jnl-arrow">→</span>
+              <span class="jnl-exit-digit ${j.type}">${exD}</span>
+            </div>
+            <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0">
+              <span style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px">PAYOUT</span>
+              <span style="font-size:10px;font-family:'DM Mono',monospace;font-weight:700;color:${wc}">${pl}</span>
+            </div>
+          </div>
+        </div>`;
+      }).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
       <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:'Outfit',sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
     if (setHtmlIfChanged(el('differ-right'), rightHtml)) {
       el('differ-reset').onclick = () => global.benzEngine.dispatch({ type: 'RESET_JOURNAL' });
@@ -11035,7 +11184,7 @@ window.NexusStrategies=exports;
           <div class="cp-input-group">
             <span class="cp-input-label">Recovery Barrier</span>
             <select class="cp-input" id="${rootId}-rec-barrier-sel" style="font-size:11px">
-              ${[0,1,2,3,4,5,6,7,8,9].map(b=>`<option value="${b}" ${b===c.recoveryBarrier?'selected':''}>Under ${b} (${(9-b)*10}% win)</option>`).join('')}
+              ${[0,1,2,3,4,5,6,7,8,9].map(b=>`<option value="${b}" ${b===c.recoveryBarrier?'selected':''}>Over ${b} (${(9-b)*10}% win)</option>`).join('')}
             </select>
           </div>` : `
           <div class="cp-input-group" style="justify-content:center">
@@ -11060,10 +11209,10 @@ window.NexusStrategies=exports;
         <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
         <div style="display:flex;flex-direction:column;gap:5px">
           ${[
-            {id:'plain', icon:'💡', title:'Standard', desc:isOver?`UNDER ${c.recoveryBarrier} every step`:`Stays on ${(c.tradeMode||'odd').toUpperCase()}`, sel:!c.alternatingRecovery&&!c.alternatingRecoveryB&&!c.smartRecovery},
-            {id:'altA',  icon:'🔄', title:'Alt Mode A', desc:'Staggered flip every 3rd step', sel:c.alternatingRecovery&&!c.smartRecovery},
-            {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:'EVEN/UNDER-first block pattern', sel:c.alternatingRecoveryB&&!c.smartRecovery},
-            {id:'smart', icon:'🧠', title:'Smart', desc:'Tick-adaptive per step', sel:c.smartRecovery},
+            {id:'plain', icon:'💡', title:'Standard', desc:isOver?`OVER ${c.recoveryBarrier} every step — pure martingale`:`Stays on ${(c.tradeMode||'odd').toUpperCase()} — pure martingale`, sel:!c.alternatingRecovery&&!c.alternatingRecoveryB&&!c.smartRecovery},
+            {id:'altA',  icon:'🔄', title:'Alt Mode A', desc:isOver?'Loss→OVER rec, 3rd step flips UNDER to confuse Deriv':'Loss→EVEN, 3rd step flips UNDER, then back — anti-pattern', sel:c.alternatingRecovery&&!c.smartRecovery},
+            {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:isOver?'Loss→UNDER first, then OVER×2, UNDER, OVER×2 cycle':'Loss→UNDER first, OVER×2 block — opposite entry to Alt A', sel:c.alternatingRecoveryB&&!c.smartRecovery},
+            {id:'smart', icon:'🧠', title:'Smart Toggle', desc:isOver?'Reads last 25 ticks; bets OVER or UNDER based on which side is starved':'Reads last 20 ticks; bets ODD or EVEN based on which appears less', sel:c.smartRecovery},
           ].map(rm=>`
           <div class="cp-mart-card ${rm.sel?'selected':''}" data-rmode="${rm.id}" id="${rootId}-rmode-${rm.id}">
             <div style="display:flex;align-items:center;gap:8px">
@@ -11195,11 +11344,14 @@ window.NexusStrategies=exports;
     const rightHtml = `
     <style>
       @keyframes jnl-in    { from{opacity:0;transform:translateX(10px)} to{opacity:1;transform:translateX(0)} }
-      @keyframes jnl-win   { 0%{box-shadow:0 0 0 0 hsl(var(--win)/0)} 30%{box-shadow:0 0 0 6px hsl(var(--win)/0.3)} 100%{box-shadow:0 0 0 0 hsl(var(--win)/0)} }
-      @keyframes jnl-loss  { 0%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} 30%{box-shadow:0 0 0 6px hsl(var(--loss)/0.3)} 100%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} }
+      @keyframes jnl-win   { 0%{box-shadow:0 0 0 0 hsl(var(--win)/0)} 30%{box-shadow:0 0 0 8px hsl(var(--win)/0.35)} 100%{box-shadow:0 0 0 0 hsl(var(--win)/0)} }
+      @keyframes jnl-loss  { 0%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} 30%{box-shadow:0 0 0 8px hsl(var(--loss)/0.35)} 100%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} }
       @keyframes jnl-pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-      @keyframes jnl-slide { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes jnl-slide { from{opacity:0;transform:translateY(-10px) scale(0.98)} to{opacity:1;transform:translateY(0) scale(1)} }
       @keyframes jnl-shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+      @keyframes jnl-digit-pop { 0%{transform:scale(0.7);opacity:0} 60%{transform:scale(1.12)} 100%{transform:scale(1);opacity:1} }
+      @keyframes jnl-glow-pulse { 0%,100%{filter:drop-shadow(0 0 8px currentColor)} 50%{filter:drop-shadow(0 0 18px currentColor)} }
+
       .jnl-header-card {
         background:linear-gradient(135deg,hsl(var(--card)/0.95),hsl(var(--bg)/0.8));
         border:1px solid hsl(var(--border)/0.5); border-radius:16px;
@@ -11216,40 +11368,138 @@ window.NexusStrategies=exports;
       }
       .jnl-stat-val { font-family:'Outfit',sans-serif; font-size:24px; font-weight:900; line-height:1; }
       .jnl-stat-label { font-size:8px; font-family:'DM Mono',monospace; letter-spacing:1.5px; color:hsl(var(--muted-foreground)); margin-top:4px; }
+
+      /* ── UPGRADED JOURNAL ENTRY ── */
       .jnl-entry {
-        border-radius:14px; padding:13px 14px; margin-bottom:7px;
-        display:flex; align-items:center; gap:12px;
+        border-radius:16px; padding:0; margin-bottom:8px;
+        display:flex; flex-direction:column;
         position:relative; overflow:hidden;
-        animation:jnl-slide .2s ease;
+        animation:jnl-slide .25s cubic-bezier(.16,1,.3,1);
         transition:transform .2s, box-shadow .2s;
         cursor:default;
       }
-      .jnl-entry:hover { transform:translateX(3px); }
+      .jnl-entry:hover { transform:translateX(4px) translateY(-1px); }
       .jnl-entry.win {
-        background:linear-gradient(135deg,hsl(var(--win)/0.1),hsl(var(--win)/0.04));
-        border:1px solid hsl(var(--win)/0.25);
-        box-shadow:0 2px 12px hsl(var(--win)/0.1);
+        background:linear-gradient(135deg,hsl(var(--win)/0.09),hsl(var(--win)/0.03));
+        border:1px solid hsl(var(--win)/0.3);
+        box-shadow:0 3px 16px hsl(var(--win)/0.12), inset 0 1px 0 hsl(255 100% 100%/0.03);
+        animation:jnl-win .6s ease, jnl-slide .25s cubic-bezier(.16,1,.3,1);
       }
-      .jnl-entry.win:hover { box-shadow:0 4px 20px hsl(var(--win)/0.2); }
+      .jnl-entry.win:hover { box-shadow:0 6px 28px hsl(var(--win)/0.22), 0 0 0 1px hsl(var(--win)/0.2); }
       .jnl-entry.loss {
-        background:linear-gradient(135deg,hsl(var(--loss)/0.1),hsl(var(--loss)/0.04));
-        border:1px solid hsl(var(--loss)/0.25);
-        box-shadow:0 2px 12px hsl(var(--loss)/0.1);
+        background:linear-gradient(135deg,hsl(var(--loss)/0.09),hsl(var(--loss)/0.03));
+        border:1px solid hsl(var(--loss)/0.3);
+        box-shadow:0 3px 16px hsl(var(--loss)/0.1), inset 0 1px 0 hsl(255 100% 100%/0.03);
+        animation:jnl-loss .6s ease, jnl-slide .25s cubic-bezier(.16,1,.3,1);
       }
-      .jnl-entry.loss:hover { box-shadow:0 4px 20px hsl(var(--loss)/0.2); }
+      .jnl-entry.loss:hover { box-shadow:0 6px 28px hsl(var(--loss)/0.2), 0 0 0 1px hsl(var(--loss)/0.2); }
+
+      /* Left accent bar */
       .jnl-entry::before {
-        content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
-        border-radius:2px 0 0 2px;
+        content:''; position:absolute; left:0; top:0; bottom:0; width:4px;
+        border-radius:4px 0 0 4px;
       }
-      .jnl-entry.win::before { background:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.6); }
-      .jnl-entry.loss::before { background:hsl(var(--loss)); box-shadow:0 0 8px hsl(var(--loss)/0.6); }
+      .jnl-entry.win::before { background:linear-gradient(180deg,hsl(var(--win)),hsl(var(--win)/0.4)); box-shadow:0 0 12px hsl(var(--win)/0.7); }
+      .jnl-entry.loss::before { background:linear-gradient(180deg,hsl(var(--loss)),hsl(var(--loss)/0.4)); box-shadow:0 0 12px hsl(var(--loss)/0.6); }
+
+      /* Top row: badge + meta + P&L */
+      .jnl-top-row {
+        display:flex; align-items:center; gap:10px;
+        padding:11px 14px 8px 18px;
+      }
+      /* Bottom row: the big digit display */
+      .jnl-digit-row {
+        display:flex; align-items:center; gap:0;
+        padding:0 14px 12px 18px;
+        border-top:1px solid hsl(var(--border)/0.2);
+        margin-top:2px;
+      }
+
       .jnl-badge {
-        width:38px; height:38px; border-radius:12px; flex-shrink:0;
+        width:36px; height:36px; border-radius:10px; flex-shrink:0;
         display:flex; align-items:center; justify-content:center;
-        font-family:'Outfit',sans-serif; font-size:15px; font-weight:900;
+        font-family:'Outfit',sans-serif; font-size:14px; font-weight:900;
+        letter-spacing:0.5px;
       }
-      .jnl-badge.win { background:hsl(var(--win)/0.18); color:hsl(var(--win)); border:1px solid hsl(var(--win)/0.3); }
-      .jnl-badge.loss { background:hsl(var(--loss)/0.18); color:hsl(var(--loss)); border:1px solid hsl(var(--loss)/0.3); }
+      .jnl-badge.win { background:hsl(var(--win)/0.2); color:hsl(var(--win)); border:1.5px solid hsl(var(--win)/0.35); }
+      .jnl-badge.loss { background:hsl(var(--loss)/0.2); color:hsl(var(--loss)); border:1.5px solid hsl(var(--loss)/0.35); }
+
+      /* Contract type pill */
+      .jnl-ct-pill {
+        display:inline-flex; align-items:center; gap:3px;
+        padding:2px 8px; border-radius:999px;
+        font-size:8.5px; font-weight:900; font-family:'DM Mono',monospace;
+        letter-spacing:1px; text-transform:uppercase;
+      }
+
+      /* Recovery mode tag */
+      .jnl-rec-tag {
+        display:inline-flex; align-items:center; gap:3px;
+        padding:2px 7px; border-radius:999px;
+        font-size:8px; font-weight:800; font-family:'DM Mono',monospace;
+        background:hsl(var(--accent)/0.1); color:hsl(var(--accent));
+        border:1px solid hsl(var(--accent)/0.3);
+      }
+
+      /* ── BIG EXIT DIGIT ── */
+      .jnl-digit-display {
+        display:flex; align-items:center; gap:8px; flex:1;
+      }
+      .jnl-digit-label {
+        font-size:8px; font-family:'DM Mono',monospace; font-weight:700;
+        color:hsl(var(--muted-foreground)/0.6); letter-spacing:1px;
+        writing-mode:vertical-rl; text-orientation:mixed;
+        transform:rotate(180deg); line-height:1;
+      }
+      .jnl-entry-digit {
+        font-family:'DM Mono',monospace; font-size:11px; font-weight:700;
+        color:hsl(var(--muted-foreground)/0.6); padding:0 2px;
+      }
+      .jnl-arrow {
+        font-size:13px; color:hsl(var(--muted-foreground)/0.4); padding:0 2px; flex-shrink:0;
+      }
+      .jnl-exit-digit {
+        font-family:'Outfit',sans-serif; font-size:48px; font-weight:900;
+        line-height:1; letter-spacing:-2px;
+        animation:jnl-digit-pop .35s cubic-bezier(.16,1,.3,1);
+        flex-shrink:0; min-width:44px; text-align:center;
+      }
+      .jnl-exit-digit.win { color:hsl(var(--win)); text-shadow:0 0 20px hsl(var(--win)/0.6), 0 0 40px hsl(var(--win)/0.25); }
+      .jnl-exit-digit.loss { color:hsl(var(--loss)); text-shadow:0 0 20px hsl(var(--loss)/0.5), 0 0 40px hsl(var(--loss)/0.2); }
+
+      /* Barrier pill */
+      .jnl-barrier-pill {
+        display:flex; flex-direction:column; align-items:center; justify-content:center;
+        padding:6px 12px; border-radius:12px; flex-shrink:0;
+        background:hsl(var(--accent)/0.1); border:1px solid hsl(var(--accent)/0.3);
+        min-width:52px;
+      }
+      .jnl-barrier-letter { font-size:7px; font-family:'DM Mono',monospace; font-weight:700; color:hsl(var(--muted-foreground)/0.6); letter-spacing:1px; }
+      .jnl-barrier-num { font-family:'Outfit',sans-serif; font-size:22px; font-weight:900; color:hsl(var(--accent)); text-shadow:0 0 10px hsl(var(--accent)/0.6); line-height:1; }
+
+      /* P&L display */
+      .jnl-pnl {
+        font-family:'Outfit',sans-serif; font-size:18px; font-weight:900;
+        letter-spacing:-0.5px; flex-shrink:0; margin-left:auto;
+      }
+      .jnl-pnl.win { color:hsl(var(--win)); text-shadow:0 0 12px hsl(var(--win)/0.5); }
+      .jnl-pnl.loss { color:hsl(var(--loss)); text-shadow:0 0 12px hsl(var(--loss)/0.4); }
+
+      /* Time + tags row */
+      .jnl-meta-row {
+        display:flex; align-items:center; gap:6px; flex-wrap:wrap; flex:1; min-width:0;
+      }
+      .jnl-time {
+        font-size:9px; color:hsl(var(--muted-foreground)/0.7);
+        font-family:'DM Mono',monospace;
+      }
+      .jnl-win-tag, .jnl-loss-tag {
+        font-size:8px; padding:2px 8px; border-radius:999px;
+        font-weight:900; font-family:'Outfit',sans-serif; flex-shrink:0;
+      }
+      .jnl-win-tag { background:hsl(var(--win)/0.12); color:hsl(var(--win)); border:1px solid hsl(var(--win)/0.3); }
+      .jnl-loss-tag { background:hsl(var(--loss)/0.12); color:hsl(var(--loss)); border:1px solid hsl(var(--loss)/0.3); }
+
       .jnl-digit-pill {
         display:inline-flex; align-items:center; gap:5px;
         padding:3px 9px; border-radius:999px; font-size:10px;
@@ -11261,10 +11511,6 @@ window.NexusStrategies=exports;
       .jnl-dot.w { background:hsl(var(--win)); box-shadow:0 0 4px hsl(var(--win)/0.6); }
       .jnl-dot.l { background:hsl(var(--loss)); box-shadow:0 0 4px hsl(var(--loss)/0.4); }
       .jnl-dot.e { background:hsl(var(--border)/0.4); }
-
-      /* ═══════════════════════════════════════════════
-         CONTROL PANEL — Premium Glass UI
-         ═══════════════════════════════════════════════ */
       @keyframes cp-pulse   { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.7;transform:scale(1.08)} }
       @keyframes cp-in      { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
       @keyframes cp-glow    { 0%,100%{box-shadow:0 0 16px hsl(var(--primary)/0.12)} 50%{box-shadow:0 0 32px hsl(var(--primary)/0.28)} }
@@ -11538,53 +11784,42 @@ window.NexusStrategies=exports;
         if (isOddEven) {
           const modeLabel = ctRaw === 'DIGITODD' ? 'ODD' : 'EVEN';
           const modeColor = ctRaw === 'DIGITODD' ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
-          barrierChip = `<span style="
-            display:inline-flex;align-items:center;gap:3px;
-            font-size:13px;font-weight:900;font-family:'Outfit',sans-serif;
-            padding:3px 10px;border-radius:8px;
-            background:${modeColor}18;
-            color:${modeColor};
-            border:1.5px solid ${modeColor}55;
-            text-shadow:0 0 8px ${modeColor}80;
-            letter-spacing:1px;
-          ">${modeLabel}</span>`;
+          barrierChip = `<span class="jnl-ct-pill" style="background:${modeColor}18;color:${modeColor};border:1.5px solid ${modeColor}55">${modeLabel}</span>`;
+        } else if (j.contractType) {
+          const ctLabel = ctRaw.replace('DIGIT','');
+          const isOver = ctRaw === 'DIGITOVER';
+          const isUnder = ctRaw === 'DIGITUNDER';
+          const ctColor = isOver ? 'hsl(var(--win))' : isUnder ? 'hsl(var(--loss))' : 'hsl(var(--accent))';
+          barrierChip = `<span class="jnl-ct-pill" style="background:${ctColor}15;color:${ctColor};border:1.5px solid ${ctColor}44">${ctLabel}${j.barrier != null ? ' '+j.barrier : ''}</span>`;
         } else if (j.barrier != null) {
-          barrierChip = `<span style="
-            display:inline-flex;align-items:center;gap:3px;
-            font-size:15px;font-weight:900;font-family:'Outfit',sans-serif;
-            padding:3px 10px;border-radius:8px;
-            background:hsl(var(--accent)/0.15);
-            color:hsl(var(--accent));
-            border:1.5px solid hsl(var(--accent)/0.45);
-            text-shadow:0 0 10px hsl(var(--accent)/0.7);
-            letter-spacing:0px;
-          "><span style="font-size:9px;font-family:'DM Mono',monospace;font-weight:700;opacity:0.7">B:</span>${j.barrier}</span>`;
+          barrierChip = `<span class="jnl-ct-pill" style="background:hsl(var(--accent)/0.12);color:hsl(var(--accent));border:1.5px solid hsl(var(--accent)/0.3)">B:${j.barrier}</span>`;
         }
         return `<div class="jnl-entry ${j.type}">
-          <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
-              <span class="jnl-digit-pill" style="background:hsl(var(--bg));border:1px solid hsl(var(--border)/0.5)">
-                <span style="color:hsl(var(--muted-foreground));font-size:9px">Ent</span>
-                <b style="font-size:13px">${entD}</b>
-                <span style="color:hsl(var(--muted-foreground));font-size:11px">→</span>
-                <b style="font-size:24px;font-weight:900;color:${winColor};text-shadow:0 0 16px ${winColor},0 0 32px ${winColor}50;letter-spacing:-1px;line-height:1">${exiD}</b>
-              </span>
+          <!-- TOP ROW: badge + meta + P&L -->
+          <div class="jnl-top-row">
+            <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
+            <div class="jnl-meta-row">
+              <span class="jnl-time">${j.time || ''}</span>
+              <span class="${isWin ? 'jnl-win-tag' : 'jnl-loss-tag'}">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
+              ${recoveryMode ? `<span class="jnl-rec-tag">${recoveryMode}</span>` : ''}
               ${barrierChip}
             </div>
-            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-              <span style="font-size:9px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">${j.time || ''}</span>
-              <span style="font-size:8.5px;padding:2px 7px;border-radius:999px;font-weight:800;font-family:'Outfit',sans-serif;
-                background:${isWin?'hsl(var(--win)/0.12)':'hsl(var(--loss)/0.12)'};
-                color:${winColor};border:1px solid ${isWin?'hsl(var(--win)/0.3)':'hsl(var(--loss)/0.3)'}">
-                ${isWin?'▲ WIN':'▼ LOSS'}</span>
-              ${recoveryMode ? `<span style="font-size:8px;padding:1px 6px;border-radius:999px;background:hsl(var(--accent)/0.1);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.3);font-family:'DM Mono',monospace">${recoveryMode}</span>` : ''}
-              <span style="font-size:8px;color:hsl(var(--muted-foreground)/0.6);margin-left:auto">Net Payout</span>
-            </div>
+            <div class="jnl-pnl ${j.type}">${pl}</div>
           </div>
-          <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${winColor};
-            text-shadow:0 0 10px ${winColor}60;letter-spacing:-0.5px;flex-shrink:0">
-            ${pl}
+          <!-- BOTTOM ROW: entry digit → BIG exit digit + net payout label -->
+          <div class="jnl-digit-row">
+            <div class="jnl-digit-label">EXIT</div>
+            <div class="jnl-digit-display">
+              <span class="jnl-entry-digit" title="Entry digit">${entD}</span>
+              <span class="jnl-arrow">→</span>
+              <span class="jnl-exit-digit ${j.type}" title="Exit digit">${exiD !== '—' ? exiD : '?'}</span>
+            </div>
+            <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0">
+              <span style="font-size:7.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px">NET PAYOUT</span>
+              <span style="font-size:10px;font-family:'DM Mono',monospace;font-weight:700;color:${isWin?'hsl(var(--win))':'hsl(var(--loss)/0.7)'}">
+                ${j.stake != null ? '$'+parseFloat(j.stake).toFixed(2) : '—'}
+              </span>
+            </div>
           </div>
         </div>`;
       }).join('')}
