@@ -439,8 +439,8 @@
 .btn-primary:hover::before{opacity:1;animation:btn-shine 1.2s linear infinite;}
 .btn-primary:active{transform:scale(.97) !important;}
 /* Master toggle */
-#dash-master-toggle{transition:all .3s cubic-bezier(.34,1.56,.64,1) !important;letter-spacing:2px !important;}
-#dash-master-toggle:hover{transform:translateY(-3px) scale(1.04) !important;filter:brightness(1.15) !important;letter-spacing:3px !important;}
+
+
 /* Journal */
 .journal-entry{animation:card-enter .35s cubic-bezier(.34,1.56,.64,1) both !important;transition:all .2s cubic-bezier(.34,1.56,.64,1) !important;}
 .journal-entry:hover{transform:translateX(4px) !important;border-left:2px solid hsl(var(--win)/.5) !important;box-shadow:0 4px 20px hsl(var(--win)/.1) !important;}
@@ -2070,14 +2070,9 @@ html.light .log-entry { background: hsl(var(--muted) / .3); }
 .pnl-badge.pos { color: hsl(var(--win)); background: hsl(var(--win) / .1); }
 .pnl-badge.neg { color: hsl(var(--loss)); background: hsl(var(--loss) / .1); }
 
-/* ──────────────────────────────────────────────────────────────
-   MASTER CONTROL — dashboard all-engines toggle
-   ────────────────────────────────────────────────────────────── */
-#dash-master-toggle {
-  font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 10px;
-  letter-spacing: 2px; text-transform: uppercase;
-}
-#dash-master-toggle:hover { transform: translateY(-1px); box-shadow: var(--shadow-gold), var(--shadow-md); }
+
+
+
 
 /* ──────────────────────────────────────────────────────────────
    EXECUTION PANEL (exec-*)
@@ -2310,13 +2305,8 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 /* ── Bot cards grid ── */
 .rank-table { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 4px; }
 
-/* ── Master control panel upgrade ── */
-#dash-master-panel {
-  border-radius: var(--radius) !important;
-  background: linear-gradient(135deg, hsl(var(--primary) / .08), hsl(var(--primary-2) / .05)) !important;
-  border: 1px solid hsl(var(--primary) / .2) !important;
-  box-shadow: 0 0 0 1px hsl(var(--primary) / .06), var(--glow-gold) !important;
-}
+
+
 
 /* ── Exec + journal sizing ── */
 .exec-list { max-height: 260px; }
@@ -2788,10 +2778,7 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 .equity-svg { height: 180px !important; }
 
 /* Master panel upgrade */
-#dash-master-panel {
-  border-radius: 16px !important;
-  padding: 20px 24px !important;
-}
+
 
 /* ── Glass panels upgrade ── */
 .glass-panel {
@@ -3050,11 +3037,7 @@ html.luminous .glass-panel-glow, html.luminous .glass-card-glow {
   border-color: rgba(0,242,254,0.14) !important;
   box-shadow: inset 0 1px 0 rgba(0,242,254,0.08), 0 0 30px rgba(0,242,254,0.06), 0 12px 40px rgba(0,0,0,0.5) !important;
 }
-html.luminous #dash-master-panel {
-  background: linear-gradient(135deg, rgba(0,242,254,0.06) 0%, rgba(255,0,122,0.04) 100%) !important;
-  border-color: rgba(0,242,254,0.18) !important;
-  box-shadow: inset 0 1px 0 rgba(0,242,254,0.10), 0 0 40px rgba(0,242,254,0.08), 0 8px 32px rgba(0,0,0,0.5) !important;
-}
+html.luminous 
 
 /* ── LUMINOUS: Stat cards ── */
 html.luminous .stat-card { position: relative !important; overflow: hidden !important; }
@@ -3140,16 +3123,8 @@ html.luminous .dash-hero-title {
 }
 
 /* ── LUMINOUS: Buttons ── */
-html.luminous .btn-primary, html.luminous .btn-omega, html.luminous #dash-master-toggle {
-  background: linear-gradient(135deg, #00f2fe, #ff007a) !important;
-  border: none !important; color: #0B0B0F !important;
-  font-family: var(--font-digit) !important; font-weight: 700 !important; letter-spacing: 1.5px !important;
-  box-shadow: 0 0 24px rgba(0,242,254,0.25), 0 4px 16px rgba(255,0,122,0.15) !important;
-}
-html.luminous .btn-primary:hover, html.luminous .btn-omega:hover, html.luminous #dash-master-toggle:hover {
-  filter: brightness(1.12) !important; transform: translateY(-2px) !important;
-  box-shadow: 0 0 36px rgba(0,242,254,0.35), 0 6px 24px rgba(255,0,122,0.22) !important;
-}
+html.luminous .btn-primary, html.luminous .btn-omega, html.luminous 
+html.luminous .btn-primary:hover, html.luminous .btn-omega:hover, html.luminous 
 html.luminous .btn-engage { border-color: rgba(0,242,254,0.22) !important; color: #00f2fe !important; background: rgba(0,242,254,0.05) !important; }
 html.luminous .btn-engage:hover { background: rgba(0,242,254,0.10) !important; border-color: rgba(0,242,254,0.40) !important; box-shadow: 0 0 18px rgba(0,242,254,0.12) !important; }
 html.luminous .btn-engage.armed { border-color: rgba(0,242,254,0.50) !important; background: rgba(0,242,254,0.08) !important; }
@@ -3320,11 +3295,7 @@ html.void .glass-panel-glow, html.void .glass-card-glow {
   border-color: rgba(255,255,255,0.08) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 0 20px rgba(255,255,255,0.02), 0 12px 40px rgba(0,0,0,0.85) !important;
 }
-html.void #dash-master-panel {
-  background: rgba(8,8,10,0.92) !important;
-  border-color: rgba(255,255,255,0.09) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 0 28px rgba(255,255,255,0.02), 0 8px 32px rgba(0,0,0,0.9) !important;
-}
+html.void 
 
 /* ── VOID: Stat cards ── */
 html.void .stat-card { position: relative !important; overflow: hidden !important; }
@@ -3393,14 +3364,8 @@ html.void .dash-hero-title {
 }
 
 /* ── VOID: Buttons ── */
-html.void .btn-primary, html.void .btn-omega, html.void #dash-master-toggle {
-  background: rgba(255,255,255,0.90) !important;
-  border: 1px solid rgba(255,255,255,0.12) !important;
-  color: #000000 !important;
-  font-family: var(--font-digit) !important; font-weight: 700 !important; letter-spacing: 1.5px !important;
-  box-shadow: 0 0 20px rgba(255,255,255,0.10), 0 4px 16px rgba(0,0,0,0.5) !important;
-}
-html.void .btn-primary:hover, html.void .btn-omega:hover, html.void #dash-master-toggle:hover { filter: brightness(1.08) !important; transform: translateY(-2px) !important; box-shadow: 0 0 28px rgba(255,255,255,0.16), 0 6px 24px rgba(0,0,0,0.6) !important; }
+html.void .btn-primary, html.void .btn-omega, html.void 
+html.void .btn-primary:hover, html.void .btn-omega:hover, html.void 
 html.void .btn-engage { border-color: rgba(255,255,255,0.15) !important; color: rgba(220,220,230,0.85) !important; background: rgba(255,255,255,0.04) !important; }
 html.void .btn-engage:hover { background: rgba(255,255,255,0.07) !important; border-color: rgba(255,255,255,0.25) !important; }
 html.void .btn-engage.armed { border-color: rgba(255,255,255,0.30) !important; background: rgba(255,255,255,0.06) !important; }
@@ -3873,66 +3838,13 @@ html.light body::before { display: none; }
 .dash-ticker-item .t-down { color: hsl(var(--loss)); }
 .dash-ticker-item .t-sep  { color: hsl(var(--border-bright)); margin: 0 4px; }
 
-/* ── MASTER CONTROL PANEL — COMPLETE REDESIGN ── */
-#dash-master-panel {
-  background: linear-gradient(135deg,
-    hsl(var(--primary)/0.12),
-    hsl(var(--primary-2)/0.08),
-    hsl(var(--secondary)/0.05)) !important;
-  border: 1px solid hsl(var(--primary)/0.25) !important;
-  border-radius: 16px !important;
-  box-shadow:
-    0 0 0 1px hsl(var(--primary)/0.08) inset,
-    0 8px 32px hsl(var(--primary)/0.08),
-    0 0 60px hsl(var(--primary)/0.04) !important;
-  position: relative;
-  overflow: hidden;
-}
-#dash-master-panel::before {
-  content: '';
-  position: absolute;
-  top: -50%; left: -50%;
-  width: 200%; height: 200%;
-  background: radial-gradient(ellipse at 30% 30%, hsl(var(--primary)/0.08) 0%, transparent 60%);
-  pointer-events: none;
-}
-#dash-master-panel::after {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg,
-    transparent,
-    hsl(var(--primary)/0.5) 30%,
-    hsl(var(--secondary)/0.4) 70%,
-    transparent);
-}
-#dash-master-toggle {
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2))) !important;
-  border-radius: 12px !important;
-  padding: 11px 32px !important;
-  font-size: 10px !important;
-  letter-spacing: 3px !important;
-  box-shadow:
-    0 0 30px hsl(var(--primary)/0.4),
-    0 4px 16px hsl(var(--primary)/0.3),
-    inset 0 1px 0 hsl(0 0% 100% / 0.2) !important;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.2s var(--ease) !important;
-}
-#dash-master-toggle::before {
-  content: '';
-  position: absolute;
-  top: 0; left: -100%;
-  width: 50%; height: 100%;
-  background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.2), transparent);
-  /* shimmer removed */
-}
-#dash-master-toggle:hover {
-  transform: translateY(-2px) !important;
-  box-shadow: 0 0 50px hsl(var(--primary)/0.6), 0 8px 24px hsl(var(--primary)/0.4) !important;
-}
+
+
+
+
+
+
+
 
 /* ── STAT CARDS — PREMIUM REDESIGN ── */
 .stat-card {
@@ -4242,20 +4154,10 @@ html.light body::before { display: none; }
 }
 
 /* ── DASH MASTER TP/SL inputs — enhanced ── */
-#dash-master-tp {
-  border-radius: 10px !important;
-  transition: box-shadow 0.2s !important;
-}
-#dash-master-tp:focus {
-  box-shadow: 0 0 0 3px hsl(var(--win)/0.2), 0 0 16px hsl(var(--win)/0.15) !important;
-}
-#dash-master-sl {
-  border-radius: 10px !important;
-  transition: box-shadow 0.2s !important;
-}
-#dash-master-sl:focus {
-  box-shadow: 0 0 0 3px hsl(var(--loss)/0.2), 0 0 16px hsl(var(--loss)/0.15) !important;
-}
+
+
+
+
 
 /* ── SCROLLBARS — CUSTOM ── */
 *::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -4641,44 +4543,10 @@ body::before {
   margin-top: 5px !important;
 }
 
-/* ── MASTER CONTROL — DEEP GLASS ── */
-#dash-master-panel {
-  background: linear-gradient(135deg,
-    hsl(232 95% 64% / 0.09),
-    hsl(258 88% 60% / 0.06),
-    hsl(195 100% 54% / 0.04)) !important;
-  border: 1px solid hsl(232 95% 64% / 0.2) !important;
-  border-radius: 18px !important;
-  box-shadow:
-    0 0 0 1px hsl(232 95% 64% / 0.06) inset,
-    0 12px 48px hsl(0 0% 0% / 0.6),
-    0 0 80px hsl(232 95% 64% / 0.04) !important;
-  animation: neon-border-pulse 4s ease-in-out infinite !important;
-}
-#dash-master-toggle {
-  background: linear-gradient(135deg,
-    hsl(232 95% 60%),
-    hsl(258 88% 56%),
-    hsl(195 100% 50%)) !important;
-  background-size: 200% 200% !important;
-  animation: aurora-shift 3s ease-in-out infinite !important;
-  border-radius: 12px !important;
-  box-shadow:
-    0 0 40px hsl(232 95% 64% / 0.5),
-    0 4px 20px hsl(232 95% 64% / 0.3),
-    inset 0 1px 0 hsl(0 0% 100% / 0.25) !important;
-  padding: 12px 38px !important;
-  font-size: 10px !important;
-  letter-spacing: 3.5px !important;
-  font-weight: 900 !important;
-}
-#dash-master-toggle:hover {
-  transform: translateY(-3px) scale(1.02) !important;
-  box-shadow:
-    0 0 60px hsl(232 95% 64% / 0.7),
-    0 8px 30px hsl(232 95% 64% / 0.45),
-    inset 0 1px 0 hsl(0 0% 100% / 0.3) !important;
-}
+
+
+
+
 
 /* ── STAT CARDS — ABYSS CRYSTALS ── */
 .stat-card {
@@ -6131,41 +5999,14 @@ html body #panel-dashboard .journal-entry {
   margin-bottom: 5px !important;
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   MASTER CONTROL + ENGAGE ALL — fix overlap / clipping
-   Panel must not clip the button. Use align-items:stretch so
-   the button row flows naturally and the button is always visible.
-   ═══════════════════════════════════════════════════════════════════ */
-#dash-master-panel {
-  padding: 16px 22px !important;    /* matches stat-card horizontal 22px */
-  min-height: 0 !important;
-  overflow: visible !important;     /* stop clipping the ENGAGE ALL button */
-  align-items: center !important;
-  flex-wrap: nowrap !important;     /* prevent wrapping that hides the button */
-  gap: 14px !important;
-}
-/* On narrow screens allow wrap but keep minimum visible */
-@media (max-width: 860px) {
-  #dash-master-panel { flex-wrap: wrap !important; }
-}
-#dash-master-toggle {
-  padding: 12px 24px !important;
-  font-size: 9.5px !important;
-  letter-spacing: 2.5px !important;
-  border-radius: 11px !important;
-  min-width: 148px !important;
-  white-space: nowrap !important;
-  flex-shrink: 0 !important;
-  align-self: center !important;   /* vertically centre in the row */
-}
+
+
+/* On narrow screens allow wrap inside the inner control box */
+
+
 /* Stop Profit / Stop Loss inputs — tighter */
 #dash-master-tp,
-#dash-master-sl {
-  width: 82px !important;
-  padding: 7px 8px !important;
-  font-size: 12px !important;
-  border-radius: 9px !important;
-}
+
 
 /* Luminous / Void theme overrides */
 html.luminous .cp-stat-pill { background: rgba(20,20,28,0.6) !important; border-color: rgba(0,242,254,0.1) !important; }
@@ -12184,31 +12025,36 @@ window.NexusStrategies=exports;
         <!-- ═══ END HERO ROW ═══ -->
 
         <!-- ═══ MASTER CONTROL ═══ -->
-        <div class="glass-panel-glow" id="dash-master-panel" style="padding:18px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-height:80px">
-          <div style="flex:1;min-width:200px">
-            <div style="font-family:'Outfit',sans-serif;font-size:8px;font-weight:900;letter-spacing:4px;text-transform:uppercase;color:hsl(var(--primary));margin-bottom:6px;display:flex;align-items:center;gap:8px">
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg>
+        <div id="dash-master-panel" style="padding:18px 22px;border-radius:16px;background:hsl(var(--card)/0.9);border:1px solid hsl(var(--border)/0.5);display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+          <!-- Title + status -->
+          <div style="flex:1;min-width:140px">
+            <div style="font-family:'Outfit',sans-serif;font-size:8px;font-weight:900;letter-spacing:4px;text-transform:uppercase;color:hsl(var(--primary));margin-bottom:5px;display:flex;align-items:center;gap:7px">
+              <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg>
               MASTER CONTROL
             </div>
-            <div class="text-muted" style="font-size:11.5px;font-weight:600" id="dash-master-status">0 / 4 engines engaged</div>
+            <div class="text-muted" style="font-size:11px;font-weight:600" id="dash-master-status">0 / 4 engines engaged</div>
           </div>
-          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-            <div style="display:flex;flex-direction:column;gap:4px">
-              <label style="font-size:8px;letter-spacing:2.5px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--win));text-transform:uppercase;display:flex;align-items:center;gap:4px">
-                <svg viewBox="0 0 10 10" width="8" height="8" fill="hsl(var(--win))"><polygon points="5,1 9,9 1,9"/></svg>
-                Stop Profit
-              </label>
-              <input id="dash-master-tp" type="number" min="0" step="1" value="50" style="width:86px;padding:8px 10px;border:1px solid hsl(var(--win)/0.35);border-radius:10px;background:hsl(var(--win)/0.07);color:hsl(var(--win));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
-            </div>
-            <div style="display:flex;flex-direction:column;gap:4px">
-              <label style="font-size:8px;letter-spacing:2.5px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--loss));text-transform:uppercase;display:flex;align-items:center;gap:4px">
-                <svg viewBox="0 0 10 10" width="8" height="8" fill="hsl(var(--loss))"><polygon points="5,9 9,1 1,1"/></svg>
-                Stop Loss
-              </label>
-              <input id="dash-master-sl" type="number" min="0" step="1" value="20" style="width:86px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
-            </div>
+          <!-- TP input -->
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <label style="font-size:8px;letter-spacing:2px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--win));text-transform:uppercase;display:flex;align-items:center;gap:4px;white-space:nowrap">
+              <svg viewBox="0 0 10 10" width="7" height="7" fill="hsl(var(--win))"><polygon points="5,1 9,9 1,9"/></svg>Take Profit $
+            </label>
+            <input id="dash-master-tp" type="number" min="0" step="1" value="50" style="width:90px;padding:8px 10px;border:1px solid hsl(var(--win)/0.35);border-radius:10px;background:hsl(var(--win)/0.07);color:hsl(var(--win));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
           </div>
-          <button id="dash-master-toggle" style="margin:0;padding:14px 28px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;position:relative;overflow:hidden;align-self:flex-end;flex-shrink:0;min-width:160px;white-space:nowrap">
+          <!-- SL input -->
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <label style="font-size:8px;letter-spacing:2px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--loss));text-transform:uppercase;display:flex;align-items:center;gap:4px;white-space:nowrap">
+              <svg viewBox="0 0 10 10" width="7" height="7" fill="hsl(var(--loss))"><polygon points="5,9 9,1 1,1"/></svg>Stop Loss $
+            </label>
+            <input id="dash-master-sl" type="number" min="0" step="1" value="20" style="width:90px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
+          </div>
+          <!-- P&L gate status badge -->
+          <div id="dash-pnl-gate-status" style="font-family:'DM Mono',monospace;font-size:11px;font-weight:700;padding:7px 13px;border-radius:8px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border)/0.5);color:hsl(var(--muted-foreground));white-space:nowrap;align-self:flex-end">Gate: Armed</div>
+          <!-- hidden gate inputs kept for JS logic, invisible -->
+          <input id="dash-pnl-gate-sl" type="hidden" value="20">
+          <input id="dash-pnl-gate-tp" type="hidden" value="50">
+          <!-- Engage button -->
+          <button id="dash-master-toggle" style="margin:0;padding:13px 26px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;align-self:flex-end;flex-shrink:0;min-width:148px;white-space:nowrap">
             ⚡ ENGAGE ALL
           </button>
         </div>
@@ -12761,9 +12607,9 @@ window.NexusStrategies=exports;
         const mc = ctRaw === 'DIGITODD' ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
         barrierChip = `<span style="font-size:11px;font-weight:900;padding:2px 9px;border-radius:6px;background:${mc}18;color:${mc};border:1px solid ${mc}50;font-family:'Outfit',sans-serif">${ml}</span>`;
       } else if (isDiff && j.barrier != null) {
-        barrierChip = `<span style="font-size:11px;font-weight:900;padding:2px 9px;border-radius:6px;background:hsl(var(--primary)/0.12);color:hsl(var(--primary));border:1px solid hsl(var(--primary)/0.4);font-family:'Outfit',sans-serif">≠${j.barrier}</span>`;
-      } else if (j.barrier != null && j.barrier !== 0) {
-        barrierChip = `<span style="font-size:11px;font-weight:900;padding:2px 9px;border-radius:6px;background:hsl(var(--accent)/0.12);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.4);font-family:'Outfit',sans-serif">B:${j.barrier}</span>`;
+        barrierChip = `<span style="font-size:12px;font-weight:900;padding:3px 10px;border-radius:8px;background:hsl(var(--primary)/0.15);color:hsl(var(--primary));border:1px solid hsl(var(--primary)/0.5);font-family:'Outfit',sans-serif;box-shadow:0 0 8px hsl(var(--primary)/0.35),inset 0 1px 0 hsl(255 100% 100%/0.07);letter-spacing:0.5px">≠${j.barrier}</span>`;
+      } else if (j.barrier != null) {
+        barrierChip = `<span style="font-size:12px;font-weight:900;padding:3px 10px;border-radius:8px;background:hsl(var(--accent)/0.15);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.5);font-family:'Outfit',sans-serif;box-shadow:0 0 8px hsl(var(--accent)/0.35),inset 0 1px 0 hsl(255 100% 100%/0.07);letter-spacing:0.5px">B:${j.barrier}</span>`;
       }
       const recoveryChip = j.recoveryMode ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--accent)/0.08);color:hsl(var(--accent)/0.8);border:1px solid hsl(var(--accent)/0.25);font-family:'DM Mono',monospace">${j.recoveryMode}</span>` : '';
       return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}" style="padding:14px 16px;min-height:72px;gap:12px">
@@ -13120,6 +12966,106 @@ window.NexusStrategies=exports;
     return { tp, sl };
   }
 
+  // ── SESSION P&L GATE ─────────────────────────────────────────────────────
+  // Reads the gate inputs every render tick and kills all engines if the
+  // session P&L has crossed the daily loss limit or daily profit target.
+  let _gateTriggered = false; // latch — only fires once per page load
+  let _gateLastNotify = 0;
+
+  function getSessionPnl() {
+    let total = 0;
+    BOT_IDS.forEach((id) => {
+      const eng = engines[id];
+      if (!eng) return;
+      const s = eng.state;
+      if (id === 'differ') {
+        total += (s.totalPnl || s.sessionPnl || 0);
+      } else {
+        total += (s.sessionPnl || s.totalPnl || 0);
+      }
+    });
+    return total;
+  }
+
+  function terminateAllEngines(reason) {
+    BOT_IDS.forEach((id) => {
+      const eng = engines[id];
+      if (!eng) return;
+      if (id === 'differ') {
+        try { eng.abortTrades(); eng.disarmSystem(); } catch(_) {}
+      } else {
+        if (eng.state.active || eng.state.isLocked) {
+          try { eng.toggleEngine(); } catch(_) {}
+        }
+      }
+    });
+    // Flash the gate status badge
+    const badge = document.getElementById('dash-pnl-gate-status');
+    if (badge) {
+      badge.textContent = `⛔ ${reason}`;
+      badge.style.background = 'hsl(var(--loss)/0.18)';
+      badge.style.borderColor = 'hsl(var(--loss)/0.6)';
+      badge.style.color = 'hsl(var(--loss))';
+    }
+    // Update master toggle label
+    const btn = document.getElementById('dash-master-toggle');
+    if (btn) {
+      btn.textContent = '⛔ TERMINATE ALL';
+      btn.style.background = 'linear-gradient(135deg,hsl(var(--loss)),hsl(350 60% 38%))';
+    }
+    // Notify once
+    const now = Date.now();
+    if (now - _gateLastNotify > 10000) {
+      _gateLastNotify = now;
+      const toast = document.getElementById('global-error-toast');
+      if (toast) {
+        toast.textContent = `⛔ P&L GATE TRIGGERED — ${reason} · All engines stopped.`;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 8000);
+      }
+    }
+  }
+
+  function checkPnlGate() {
+    if (_gateTriggered) return;
+    const pnl = getSessionPnl();
+    const slVal = parseFloat((document.getElementById('dash-master-sl') || {}).value) || 10;
+    const tpVal = parseFloat((document.getElementById('dash-master-tp') || {}).value) || 50;
+    const badge = document.getElementById('dash-pnl-gate-status');
+
+    if (pnl <= -Math.abs(slVal)) {
+      _gateTriggered = true;
+      terminateAllEngines(`LOSS GATE -$${Math.abs(slVal).toFixed(2)}`);
+    } else if (pnl >= Math.abs(tpVal)) {
+      _gateTriggered = true;
+      terminateAllEngines(`PROFIT GATE +$${Math.abs(tpVal).toFixed(2)}`);
+    } else {
+      // Update badge with live P&L
+      if (badge) {
+        const pct = pnl < 0
+          ? Math.min(100, Math.round((Math.abs(pnl) / slVal) * 100))
+          : Math.min(100, Math.round((pnl / tpVal) * 100));
+        const col = pnl < 0 ? 'hsl(var(--loss))' : 'hsl(var(--win))';
+        const sign = pnl >= 0 ? '+' : '';
+        badge.textContent = `Gate: ${sign}$${pnl.toFixed(2)} (${pct}%)`;
+        badge.style.background = pnl < 0 ? 'hsl(var(--loss)/0.1)' : pnl > 0 ? 'hsl(var(--win)/0.1)' : 'hsl(var(--bg)/0.5)';
+        badge.style.borderColor = pnl !== 0 ? (pnl < 0 ? 'hsl(var(--loss)/0.4)' : 'hsl(var(--win)/0.4)') : 'hsl(var(--border)/0.5)';
+        badge.style.color = pnl !== 0 ? col : 'hsl(var(--muted-foreground))';
+      }
+    }
+  }
+
+  // Reset gate latch when all engines are stopped (allows re-arm after fixing)
+  function maybeResetGateLatch() {
+    if (!_gateTriggered) return;
+    const anyOn = BOT_IDS.some((id) => {
+      const eng = engines[id];
+      return eng && (id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
+    });
+    if (!anyOn) _gateTriggered = false;
+  }
+  // ── END P&L GATE ─────────────────────────────────────────────────────────
+
   function applyMasterTpSlToAllEngines() {
     const { tp, sl } = getMasterTpSl();
     BOT_IDS.forEach((id) => {
@@ -13137,7 +13083,7 @@ window.NexusStrategies=exports;
   function bindMasterControl() {
     // Delegated so it works once DashboardUI builds the shell (and rebuilds it).
     document.addEventListener('click', (e) => {
-      const btn = e.target.closest('#dash-master-toggle');
+      const btn = e.target.closest('');
       if (!btn) return;
       const engagedCount = BOT_IDS.filter((id) => {
         const eng = engines[id];
@@ -13221,7 +13167,7 @@ window.NexusStrategies=exports;
     try { ['even', 'odd', 'nexus'].forEach(ensureTitanEngine); } catch(e) { console.error('[Hub] ensureTitanEngine error:', e); }
     try { bindHubTabs(); } catch(e) { console.error('[Hub] bindHubTabs error:', e); }
     try { queueDashboardRender(); } catch(e) { console.error('[Hub] queueDashboardRender error:', e); }
-    setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); } catch(e){} }, 3000);
+    setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); checkPnlGate(); maybeResetGateLatch(); } catch(e){} }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
