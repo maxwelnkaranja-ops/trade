@@ -11371,134 +11371,150 @@ window.NexusStrategies=exports;
 
       /* ── UPGRADED JOURNAL ENTRY ── */
       .jnl-entry {
-        border-radius:16px; padding:0; margin-bottom:8px;
+        border-radius:12px; padding:0; margin-bottom:5px;
         display:flex; flex-direction:column;
         position:relative; overflow:hidden;
         animation:jnl-slide .25s cubic-bezier(.16,1,.3,1);
-        transition:transform .2s, box-shadow .2s;
+        transition:transform .18s, box-shadow .18s;
         cursor:default;
       }
-      .jnl-entry:hover { transform:translateX(4px) translateY(-1px); }
+      .jnl-entry:hover { transform:translateX(3px); }
       .jnl-entry.win {
-        background:linear-gradient(135deg,hsl(var(--win)/0.09),hsl(var(--win)/0.03));
-        border:1px solid hsl(var(--win)/0.3);
-        box-shadow:0 3px 16px hsl(var(--win)/0.12), inset 0 1px 0 hsl(255 100% 100%/0.03);
-        animation:jnl-win .6s ease, jnl-slide .25s cubic-bezier(.16,1,.3,1);
+        background:hsl(0 0% 5%);
+        border:1px solid hsl(var(--win)/0.18);
+        box-shadow:0 2px 10px hsl(0 0% 0%/0.5);
+        animation:jnl-win .5s ease, jnl-slide .25s cubic-bezier(.16,1,.3,1);
       }
-      .jnl-entry.win:hover { box-shadow:0 6px 28px hsl(var(--win)/0.22), 0 0 0 1px hsl(var(--win)/0.2); }
+      .jnl-entry.win:hover { border-color:hsl(var(--win)/0.3); box-shadow:0 4px 18px hsl(0 0% 0%/0.6); }
       .jnl-entry.loss {
-        background:linear-gradient(135deg,hsl(var(--loss)/0.09),hsl(var(--loss)/0.03));
-        border:1px solid hsl(var(--loss)/0.3);
-        box-shadow:0 3px 16px hsl(var(--loss)/0.1), inset 0 1px 0 hsl(255 100% 100%/0.03);
-        animation:jnl-loss .6s ease, jnl-slide .25s cubic-bezier(.16,1,.3,1);
+        background:hsl(0 0% 5%);
+        border:1px solid hsl(var(--loss)/0.15);
+        box-shadow:0 2px 10px hsl(0 0% 0%/0.5);
+        animation:jnl-loss .5s ease, jnl-slide .25s cubic-bezier(.16,1,.3,1);
       }
-      .jnl-entry.loss:hover { box-shadow:0 6px 28px hsl(var(--loss)/0.2), 0 0 0 1px hsl(var(--loss)/0.2); }
+      .jnl-entry.loss:hover { border-color:hsl(var(--loss)/0.25); }
 
       /* Left accent bar */
       .jnl-entry::before {
-        content:''; position:absolute; left:0; top:0; bottom:0; width:4px;
-        border-radius:4px 0 0 4px;
+        content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+        border-radius:3px 0 0 3px;
       }
-      .jnl-entry.win::before { background:linear-gradient(180deg,hsl(var(--win)),hsl(var(--win)/0.4)); box-shadow:0 0 12px hsl(var(--win)/0.7); }
-      .jnl-entry.loss::before { background:linear-gradient(180deg,hsl(var(--loss)),hsl(var(--loss)/0.4)); box-shadow:0 0 12px hsl(var(--loss)/0.6); }
+      .jnl-entry.win::before { background:hsl(var(--win)); box-shadow:0 0 10px hsl(var(--win)/0.8); }
+      .jnl-entry.loss::before { background:hsl(var(--loss)/0.6); }
 
       /* Top row: badge + meta + P&L */
       .jnl-top-row {
-        display:flex; align-items:center; gap:10px;
-        padding:11px 14px 8px 18px;
+        display:flex; align-items:center; gap:8px;
+        padding:8px 10px 6px 14px;
       }
       /* Bottom row: the big digit display */
       .jnl-digit-row {
         display:flex; align-items:center; gap:0;
-        padding:0 14px 12px 18px;
-        border-top:1px solid hsl(var(--border)/0.2);
-        margin-top:2px;
+        padding:0 10px 8px 14px;
+        margin-top:0;
       }
 
       .jnl-badge {
-        width:36px; height:36px; border-radius:10px; flex-shrink:0;
+        width:28px; height:28px; border-radius:8px; flex-shrink:0;
         display:flex; align-items:center; justify-content:center;
-        font-family:'Outfit',sans-serif; font-size:14px; font-weight:900;
+        font-family:'Outfit',sans-serif; font-size:13px; font-weight:900;
         letter-spacing:0.5px;
       }
-      .jnl-badge.win { background:hsl(var(--win)/0.2); color:hsl(var(--win)); border:1.5px solid hsl(var(--win)/0.35); }
-      .jnl-badge.loss { background:hsl(var(--loss)/0.2); color:hsl(var(--loss)); border:1.5px solid hsl(var(--loss)/0.35); }
+      .jnl-badge.win {
+        background:hsl(0 0% 0%);
+        color:hsl(var(--win));
+        border:1.5px solid hsl(var(--win)/0.4);
+        text-shadow:0 0 14px hsl(var(--win)/0.9), 0 0 28px hsl(var(--win)/0.5);
+        box-shadow:0 0 10px hsl(var(--win)/0.25);
+      }
+      .jnl-badge.loss {
+        background:hsl(0 0% 0%);
+        color:hsl(var(--loss)/0.6);
+        border:1.5px solid hsl(var(--loss)/0.25);
+      }
 
       /* Contract type pill */
       .jnl-ct-pill {
         display:inline-flex; align-items:center; gap:3px;
-        padding:2px 8px; border-radius:999px;
-        font-size:8.5px; font-weight:900; font-family:'DM Mono',monospace;
+        padding:2px 7px; border-radius:999px;
+        font-size:8px; font-weight:900; font-family:'DM Mono',monospace;
         letter-spacing:1px; text-transform:uppercase;
       }
 
       /* Recovery mode tag */
       .jnl-rec-tag {
         display:inline-flex; align-items:center; gap:3px;
-        padding:2px 7px; border-radius:999px;
-        font-size:8px; font-weight:800; font-family:'DM Mono',monospace;
-        background:hsl(var(--accent)/0.1); color:hsl(var(--accent));
-        border:1px solid hsl(var(--accent)/0.3);
+        padding:1px 6px; border-radius:999px;
+        font-size:7.5px; font-weight:800; font-family:'DM Mono',monospace;
+        background:hsl(var(--accent)/0.08); color:hsl(var(--accent)/0.7);
+        border:1px solid hsl(var(--accent)/0.2);
       }
 
       /* ── BIG EXIT DIGIT ── */
       .jnl-digit-display {
-        display:flex; align-items:center; gap:8px; flex:1;
+        display:flex; align-items:center; gap:6px; flex:1;
       }
       .jnl-digit-label {
-        font-size:8px; font-family:'DM Mono',monospace; font-weight:700;
-        color:hsl(var(--muted-foreground)/0.6); letter-spacing:1px;
+        font-size:7px; font-family:'DM Mono',monospace; font-weight:700;
+        color:hsl(var(--muted-foreground)/0.4); letter-spacing:1px;
         writing-mode:vertical-rl; text-orientation:mixed;
         transform:rotate(180deg); line-height:1;
       }
       .jnl-entry-digit {
-        font-family:'DM Mono',monospace; font-size:11px; font-weight:700;
-        color:hsl(var(--muted-foreground)/0.6); padding:0 2px;
+        font-family:'DM Mono',monospace; font-size:10px; font-weight:700;
+        color:hsl(var(--muted-foreground)/0.4); padding:0 1px;
       }
       .jnl-arrow {
-        font-size:13px; color:hsl(var(--muted-foreground)/0.4); padding:0 2px; flex-shrink:0;
+        font-size:11px; color:hsl(var(--muted-foreground)/0.3); padding:0 1px; flex-shrink:0;
       }
       .jnl-exit-digit {
-        font-family:'Outfit',sans-serif; font-size:48px; font-weight:900;
+        font-family:'Outfit',sans-serif; font-size:42px; font-weight:900;
         line-height:1; letter-spacing:-2px;
         animation:jnl-digit-pop .35s cubic-bezier(.16,1,.3,1);
-        flex-shrink:0; min-width:44px; text-align:center;
+        flex-shrink:0; min-width:38px; text-align:center;
       }
-      .jnl-exit-digit.win { color:hsl(var(--win)); text-shadow:0 0 20px hsl(var(--win)/0.6), 0 0 40px hsl(var(--win)/0.25); }
-      .jnl-exit-digit.loss { color:hsl(var(--loss)); text-shadow:0 0 20px hsl(var(--loss)/0.5), 0 0 40px hsl(var(--loss)/0.2); }
+      .jnl-exit-digit.win { color:hsl(var(--win)); text-shadow:0 0 18px hsl(var(--win)/0.7), 0 0 36px hsl(var(--win)/0.3); }
+      .jnl-exit-digit.loss { color:hsl(var(--loss)/0.55); text-shadow:none; }
 
       /* Barrier pill */
       .jnl-barrier-pill {
         display:flex; flex-direction:column; align-items:center; justify-content:center;
-        padding:6px 12px; border-radius:12px; flex-shrink:0;
-        background:hsl(var(--accent)/0.1); border:1px solid hsl(var(--accent)/0.3);
-        min-width:52px;
+        padding:4px 10px; border-radius:10px; flex-shrink:0;
+        background:hsl(var(--accent)/0.08); border:1px solid hsl(var(--accent)/0.2);
+        min-width:44px;
       }
-      .jnl-barrier-letter { font-size:7px; font-family:'DM Mono',monospace; font-weight:700; color:hsl(var(--muted-foreground)/0.6); letter-spacing:1px; }
-      .jnl-barrier-num { font-family:'Outfit',sans-serif; font-size:22px; font-weight:900; color:hsl(var(--accent)); text-shadow:0 0 10px hsl(var(--accent)/0.6); line-height:1; }
+      .jnl-barrier-letter { font-size:7px; font-family:'DM Mono',monospace; font-weight:700; color:hsl(var(--muted-foreground)/0.5); letter-spacing:1px; }
+      .jnl-barrier-num { font-family:'Outfit',sans-serif; font-size:18px; font-weight:900; color:hsl(var(--accent)/0.8); line-height:1; }
 
       /* P&L display */
       .jnl-pnl {
-        font-family:'Outfit',sans-serif; font-size:18px; font-weight:900;
-        letter-spacing:-0.5px; flex-shrink:0; margin-left:auto;
+        font-family:'Outfit',sans-serif; font-size:15px; font-weight:900;
+        letter-spacing:-0.3px; flex-shrink:0; margin-left:auto;
       }
-      .jnl-pnl.win { color:hsl(var(--win)); text-shadow:0 0 12px hsl(var(--win)/0.5); }
-      .jnl-pnl.loss { color:hsl(var(--loss)); text-shadow:0 0 12px hsl(var(--loss)/0.4); }
+      .jnl-pnl.win { color:hsl(var(--win)); text-shadow:0 0 10px hsl(var(--win)/0.5); }
+      .jnl-pnl.loss { color:hsl(var(--loss)/0.6); }
 
       /* Time + tags row */
       .jnl-meta-row {
-        display:flex; align-items:center; gap:6px; flex-wrap:wrap; flex:1; min-width:0;
+        display:flex; align-items:center; gap:5px; flex-wrap:wrap; flex:1; min-width:0;
       }
       .jnl-time {
-        font-size:9px; color:hsl(var(--muted-foreground)/0.7);
+        font-size:8.5px; color:hsl(var(--muted-foreground)/0.45);
         font-family:'DM Mono',monospace;
       }
-      .jnl-win-tag, .jnl-loss-tag {
-        font-size:8px; padding:2px 8px; border-radius:999px;
+      .jnl-win-tag {
+        font-size:7.5px; padding:1px 6px; border-radius:999px;
         font-weight:900; font-family:'Outfit',sans-serif; flex-shrink:0;
+        background:transparent; color:hsl(var(--win));
+        letter-spacing:0.5px;
+        text-shadow:0 0 10px hsl(var(--win)/0.8), 0 0 20px hsl(var(--win)/0.4);
       }
-      .jnl-win-tag { background:hsl(var(--win)/0.12); color:hsl(var(--win)); border:1px solid hsl(var(--win)/0.3); }
-      .jnl-loss-tag { background:hsl(var(--loss)/0.12); color:hsl(var(--loss)); border:1px solid hsl(var(--loss)/0.3); }
+      .jnl-loss-tag {
+        font-size:7.5px; padding:1px 6px; border-radius:999px;
+        font-weight:900; font-family:'Outfit',sans-serif; flex-shrink:0;
+        background:transparent; color:hsl(var(--loss)/0.5);
+        letter-spacing:0.5px;
+      }
 
       .jnl-digit-pill {
         display:inline-flex; align-items:center; gap:5px;
@@ -11808,15 +11824,14 @@ window.NexusStrategies=exports;
           </div>
           <!-- BOTTOM ROW: entry digit → BIG exit digit + net payout label -->
           <div class="jnl-digit-row">
-            <div class="jnl-digit-label">EXIT</div>
             <div class="jnl-digit-display">
               <span class="jnl-entry-digit" title="Entry digit">${entD}</span>
               <span class="jnl-arrow">→</span>
-              <span class="jnl-exit-digit ${j.type}" title="Exit digit">${exiD !== '—' ? exiD : '?'}</span>
+              <span class="jnl-exit-digit ${j.type}" title="Exit digit">${exiD !== '—' ? exiD : '—'}</span>
             </div>
-            <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0">
-              <span style="font-size:7.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px">NET PAYOUT</span>
-              <span style="font-size:10px;font-family:'DM Mono',monospace;font-weight:700;color:${isWin?'hsl(var(--win))':'hsl(var(--loss)/0.7)'}">
+            <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:1px;flex-shrink:0">
+              <span style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.35);letter-spacing:0.8px">PAYOUT</span>
+              <span style="font-size:11px;font-family:'DM Mono',monospace;font-weight:700;color:${isWin?'hsl(var(--win))':'hsl(var(--loss)/0.5)'}">
                 ${j.stake != null ? '$'+parseFloat(j.stake).toFixed(2) : '—'}
               </span>
             </div>
@@ -12346,6 +12361,14 @@ window.NexusStrategies=exports;
           <div class="glass-panel journal-panel" style="flex:2;min-width:0;display:flex;flex-direction:column;min-height:420px">
             <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 16px 0;flex-shrink:0">
               <div class="section-divider" style="margin-bottom:0;flex:1">TRADE JOURNAL</div>
+              <button id="dash-clear-all-stats" style="flex-shrink:0;margin-left:10px;padding:3px 10px;border-radius:6px;
+                border:1px solid hsl(var(--loss)/0.25);background:transparent;
+                color:hsl(var(--loss)/0.5);font-family:'DM Mono',monospace;font-size:8px;font-weight:700;
+                letter-spacing:1.5px;cursor:pointer;transition:all .15s"
+                onmouseover="this.style.background='hsl(var(--loss)/0.08)';this.style.color='hsl(var(--loss)/0.8)'"
+                onmouseout="this.style.background='transparent';this.style.color='hsl(var(--loss)/0.5)'">
+                CLEAR STATS
+              </button>
             </div>
             <div class="journal-tabs" id="dash-journal-tabs" style="padding:8px 16px 0;flex-shrink:0"></div>
             <div class="journal-list" id="dash-journal-list" style="flex:1;overflow-y:auto;padding:8px 16px 16px"></div>
@@ -12847,35 +12870,76 @@ window.NexusStrategies=exports;
         barrierChip = `<span style="font-size:12px;font-weight:900;padding:3px 10px;border-radius:8px;background:hsl(var(--accent)/0.15);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.5);font-family:'Outfit',sans-serif;box-shadow:0 0 8px hsl(var(--accent)/0.35),inset 0 1px 0 hsl(255 100% 100%/0.07);letter-spacing:0.5px">B:${j.barrier}</span>`;
       }
       const recoveryChip = j.recoveryMode ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--accent)/0.08);color:hsl(var(--accent)/0.8);border:1px solid hsl(var(--accent)/0.25);font-family:'DM Mono',monospace">${j.recoveryMode}</span>` : '';
-      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}" style="padding:14px 16px;min-height:72px;gap:12px">
-        <div class="journal-badge-wrap">
-          <span class="journal-badge ${j.type}" style="width:36px;height:36px;font-size:14px;font-weight:900;border-radius:10px">${isWin ? 'W' : 'L'}</span>
-        </div>
-        <div class="journal-entry-body" style="flex:1">
-          <div class="journal-entry-top" style="margin-bottom:5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="journal-bot-label" style="color:${botDot};font-size:11.5px;font-weight:700">
-              <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${botDot};box-shadow:0 0 6px ${botDot};margin-right:5px;vertical-align:middle"></span>
-              ${botLabel}
+      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}"
+        data-nav-jnl="${j.botId || ''}"
+        style="padding:8px 12px;min-height:0;gap:10px;cursor:${j.botId && !j.isHistory ? 'pointer' : 'default'};
+               background:hsl(0 0% 4%);border:1px solid hsl(${isWin?'var(--win)/0.16':'var(--loss)/0.12'});
+               border-radius:10px;margin-bottom:5px;display:flex;align-items:center;
+               transition:border-color .15s,transform .15s;"
+        onmouseover="if(this.dataset.navJnl&&!${j.isHistory||false})this.style.transform='translateX(3px)'"
+        onmouseout="this.style.transform=''">
+        <div style="width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;
+                    font-family:'Outfit',sans-serif;font-size:12px;font-weight:900;flex-shrink:0;
+                    background:hsl(0 0% 0%);
+                    ${isWin
+                      ? 'color:hsl(var(--win));border:1.5px solid hsl(var(--win)/0.35);text-shadow:0 0 12px hsl(var(--win)/0.9),0 0 24px hsl(var(--win)/0.5);box-shadow:0 0 8px hsl(var(--win)/0.2);'
+                      : 'color:hsl(var(--loss)/0.5);border:1.5px solid hsl(var(--loss)/0.2);'}">${isWin ? 'W' : 'L'}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:3px">
+            <span style="color:${botDot};font-size:10px;font-weight:700;font-family:'DM Mono',monospace;white-space:nowrap">
+              <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${botDot};margin-right:4px;vertical-align:middle"></span>${botLabel}
             </span>
-            ${hasDigits ? `<span class="journal-digits-pill" style="font-size:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:5px">
-              <span style="opacity:0.6">Ent</span>
-              <b>${entryD}</b>
-              <span style="opacity:0.5">→</span>
-              <b style="font-size:20px;font-weight:900;color:${winColor};text-shadow:0 0 10px ${winColor}70;line-height:1;letter-spacing:-0.5px">${exitD}</b>
-            </span>` : ''}
             ${barrierChip}
-            <span class="journal-time-stamp" style="font-size:10px;margin-left:auto">${j.time || ''}</span>
+            <span style="font-size:9px;color:hsl(var(--muted-foreground)/0.4);font-family:'DM Mono',monospace;margin-left:auto;white-space:nowrap">${j.time || ''}</span>
           </div>
-          <div class="journal-entry-bottom" style="gap:7px;display:flex;align-items:center;flex-wrap:wrap">
-            <span class="journal-type-label ${j.type}" style="font-size:10.5px;font-weight:800">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
+          <div style="display:flex;align-items:center;gap:5px">
+            <span style="font-size:8px;font-weight:900;font-family:'Outfit',sans-serif;letter-spacing:0.5px;
+                         ${isWin
+                           ? 'color:hsl(var(--win));text-shadow:0 0 8px hsl(var(--win)/0.8),0 0 16px hsl(var(--win)/0.4);'
+                           : 'color:hsl(var(--loss)/0.5);'}">
+              ${isWin ? '▲ WIN' : '▼ LOSS'}</span>
             ${recoveryChip}
-            <span style="font-size:9.5px;color:hsl(var(--muted-foreground)/0.6);font-family:'DM Mono',monospace;margin-left:auto">Net Payout</span>
           </div>
         </div>
-        <div class="journal-pl ${isWin ? 'win' : 'loss'}" style="font-size:18px;font-weight:900;text-align:right;letter-spacing:-0.02em">${plStr}</div>
+        ${hasDigits ? `<div style="display:flex;align-items:center;gap:3px;flex-shrink:0;margin:0 4px">
+          <span style="font-size:9px;color:hsl(var(--muted-foreground)/0.35);font-family:'DM Mono',monospace">${entryD}</span>
+          <span style="font-size:10px;color:hsl(var(--muted-foreground)/0.25)">→</span>
+          <span style="font-family:'Outfit',sans-serif;font-size:32px;font-weight:900;line-height:1;letter-spacing:-1px;
+                       ${isWin
+                         ? 'color:hsl(var(--win));text-shadow:0 0 14px hsl(var(--win)/0.7),0 0 28px hsl(var(--win)/0.3);'
+                         : 'color:hsl(var(--loss)/0.45);'}">${exitD}</span>
+        </div>` : ''}
+        <div style="flex-shrink:0;text-align:right">
+          <div style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:900;letter-spacing:-0.5px;
+                      ${isWin ? 'color:hsl(var(--win));text-shadow:0 0 8px hsl(var(--win)/0.5);' : 'color:hsl(var(--loss)/0.6);'}">${plStr}</div>
+        </div>
       </div>`;
     }).join('') : '<div class="exec-empty">No trades yet — connect your account in Settings</div>';
     global.setHtmlIfChanged(el('dash-journal-list', root), journalHtml);
+    // Wire up CLEAR STATS button
+    const clearAllBtn = el('dash-clear-all-stats', root);
+    if (clearAllBtn && !clearAllBtn._bound) {
+      clearAllBtn._bound = true;
+      clearAllBtn.addEventListener('click', () => {
+        if (!confirm('Clear all trade stats and journal for all bots?')) return;
+        botIds.forEach((id) => {
+          const eng = engines[id];
+          if (!eng) return;
+          if (id === 'differ') { eng.dispatch && eng.dispatch({ type: 'CLEAR_STATS' }); }
+          else { eng.clearStats && eng.clearStats(); }
+        });
+        try { localStorage.removeItem('benz_journal_cache'); } catch(_) {}
+        render(root, engines);
+      });
+    }
+
+    // Wire up clickable journal entries → navigate to bot tab
+    el('dash-journal-list', root).querySelectorAll('[data-nav-jnl]').forEach((row) => {
+      const botId = row.dataset.navJnl;
+      if (botId && window.UnifiedHub) {
+        row.addEventListener('click', () => window.UnifiedHub.switchApp(botId));
+      }
+    });
   }
 
   global.DashboardUI = { render };
