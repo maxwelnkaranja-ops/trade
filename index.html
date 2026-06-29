@@ -10038,8 +10038,15 @@ window.NexusStrategies=exports;
                 // ── DIGIT EXTRACTION (Differ) ───────────────────────────────
                 // exit_tick_display_value is a full price like "1234.56" — last char is the digit.
                 // entry digit: prefer API field, fall back to currentTick recorded at trigger.
-                function _lc(v) { const s = v?.toString().trim(); return (s && s.length) ? s.slice(-1) : null; }
-                const _dExitRaw  = _lc(c.exit_tick_display_value) ?? _lc(c.exit_tick);
+                // Multiple fallback fields tried in order of reliability.
+                function _lc(v) { const s = v?.toString().trim(); return (s && s.length && /\d/.test(s.slice(-1))) ? s.slice(-1) : null; }
+                const _dExitRaw = _lc(c.exit_tick_display_value)
+                  ?? _lc(c.exit_tick)
+                  ?? _lc(c.sell_spot_display_value)
+                  ?? _lc(c.sell_spot)
+                  ?? (c.audit_details?.contract_end?.[c.audit_details.contract_end.length - 1]?.tick
+                      ? _lc(String(c.audit_details.contract_end[c.audit_details.contract_end.length - 1].tick))
+                      : null);
                 const _dEntryRaw = _lc(c.entry_tick_display_value) ?? _lc(c.entry_tick);
                 const exitDigitParsed  = (_dExitRaw  !== null && _dExitRaw  !== '') ? parseInt(_dExitRaw)  : null;
                 const entryDigitFinal  = (_dEntryRaw !== null && _dEntryRaw !== '')
@@ -10665,8 +10672,15 @@ window.NexusStrategies=exports;
       // The last character IS the traded digit for all Digit contract types.
       // entry_tick_display_value is frequently absent in the is_sold update;
       // we fall back to state.lastTradedDigit which was captured at fire time.
-      function _lastChar(v) { const s = v?.toString().trim(); return (s && s.length) ? s.slice(-1) : null; }
-      const _exitRaw  = _lastChar(contract.exit_tick_display_value) ?? _lastChar(contract.exit_tick);
+      // Multiple fallback fields tried in order of reliability.
+      function _lastChar(v) { const s = v?.toString().trim(); return (s && s.length && /\d/.test(s.slice(-1))) ? s.slice(-1) : null; }
+      const _exitRaw = _lastChar(contract.exit_tick_display_value)
+        ?? _lastChar(contract.exit_tick)
+        ?? _lastChar(contract.sell_spot_display_value)
+        ?? _lastChar(contract.sell_spot)
+        ?? (contract.audit_details?.contract_end?.[contract.audit_details.contract_end.length - 1]?.tick
+            ? _lastChar(String(contract.audit_details.contract_end[contract.audit_details.contract_end.length - 1].tick))
+            : null);
       const _entryRaw = _lastChar(contract.entry_tick_display_value) ?? _lastChar(contract.entry_tick);
       const exitDigit = (_exitRaw !== null && _exitRaw !== '') ? _exitRaw : '?';
       // Prefer API entry digit; fall back to the digit the engine recorded at fire time
@@ -13643,10 +13657,9 @@ window.NexusStrategies=exports;
       const isWin = j.type === 'win';
       const botLabel = j.isHistory ? 'DERIV' : (BOT_META[j.botId] ? BOT_META[j.botId].label : (j.botId || '—'));
       const botDot = j.isHistory ? 'hsl(var(--secondary))' : (BOT_META[j.botId] ? BOT_META[j.botId].dot : 'hsl(var(--muted-foreground))');
-      const hasDigits = j.entryDigit != null || j.exitDigit != null;
       const plStr = (j.profit >= 0 ? '+' : '') + '$' + j.profit.toFixed(2);
-      const exitD = j.exitDigit != null ? j.exitDigit : '—';
-      const entryD = j.entryDigit != null ? j.entryDigit : '—';
+      const exitD = (j.exitDigit != null && j.exitDigit !== '?') ? j.exitDigit : '—';
+      const entryD = (j.entryDigit != null && j.entryDigit !== '?') ? j.entryDigit : '—';
       const winColor = isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))';
       // Build barrier/mode chip
       const ctRaw = (j.contractType || '').toUpperCase();
@@ -13694,15 +13707,17 @@ window.NexusStrategies=exports;
             ${recoveryChip}
           </div>
         </div>
-        ${hasDigits ? `<div style="display:flex;align-items:center;gap:3px;flex-shrink:0;margin:0 4px">
+        <div style="display:flex;align-items:center;gap:3px;flex-shrink:0;margin:0 4px">
           <span style="font-size:9px;color:hsl(var(--muted-foreground)/0.35);font-family:'DM Mono',monospace">${entryD}</span>
           <span style="font-size:10px;color:hsl(var(--muted-foreground)/0.25)">→</span>
           <span style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;line-height:1;letter-spacing:-1px;
                        padding:3px 7px;border-radius:7px;background:hsl(0 0% 0%/0.85);
-                       ${isWin
-                         ? 'color:hsl(var(--win));text-shadow:0 0 14px hsl(var(--win)/0.9),0 0 28px hsl(var(--win)/0.5);border:1px solid hsl(var(--win)/0.25);box-shadow:0 0 10px hsl(var(--win)/0.2);'
-                         : 'color:hsl(var(--loss)/0.5);border:1px solid hsl(var(--loss)/0.12);'}">${exitD}</span>
-        </div>` : ''}
+                       ${exitD !== '—'
+                         ? (isWin
+                           ? 'color:hsl(var(--win));text-shadow:0 0 14px hsl(var(--win)/0.9),0 0 28px hsl(var(--win)/0.5);border:1px solid hsl(var(--win)/0.25);box-shadow:0 0 10px hsl(var(--win)/0.2);'
+                           : 'color:hsl(var(--loss)/0.5);border:1px solid hsl(var(--loss)/0.12);')
+                         : 'color:hsl(var(--muted-foreground)/0.3);border:1px solid hsl(var(--border)/0.2);font-size:14px;'}">${exitD}</span>
+        </div>
         <div style="flex-shrink:0;text-align:right">
           <div style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:900;letter-spacing:-0.5px;
                       ${isWin ? 'color:hsl(var(--win));text-shadow:0 0 8px hsl(var(--win)/0.5);' : 'color:hsl(var(--loss)/0.6);'}">${plStr}</div>
