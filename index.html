@@ -6380,16 +6380,13 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 }
 
 /* ─────────────────────────────────────────────────────────────────────
-   JOURNAL ENTRIES — compact, surgical, readable
-   Target: ~52px tall per entry max, tight inner padding
+   JOURNAL ENTRIES — compact for BOT TABS only, dashboard unchanged
+   Target: ~52px tall per entry max in bot tabs, tight inner padding
    ───────────────────────────────────────────────────────────────────── */
 
-/* Reset any bloated padding from earlier layers */
+/* signal-in animation applies globally but no sizing changes to dashboard */
 .jnl-entry,
 .journal-entry {
-  padding: 0 !important;
-  margin-bottom: 3px !important;
-  border-radius: 9px !important;
   animation: signal-in 0.22s cubic-bezier(0.16,1,0.3,1) both !important;
   position: relative !important;
   overflow: hidden !important;
@@ -6397,15 +6394,38 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 .jnl-entry.win  { animation: signal-in 0.22s cubic-bezier(0.16,1,0.3,1) both, signal-flash-win  0.55s ease both !important; }
 .jnl-entry.loss { animation: signal-in 0.22s cubic-bezier(0.16,1,0.3,1) both, signal-flash-loss 0.55s ease both !important; }
 
-/* Compact top row */
-.jnl-top-row {
+/* ── BOT TABS ONLY: compact journal entries ──
+   Scoped to Differ, Even, Odd, Nexus panels — NOT dashboard
+   ── */
+#differ-right .jnl-entry,
+#differ-right .journal-entry,
+#even-root  .jnl-entry, #even-root  .journal-entry,
+#odd-root   .jnl-entry, #odd-root   .journal-entry,
+#nexus-root .jnl-entry, #nexus-root .journal-entry,
+.benz-col   .jnl-entry, .benz-col   .journal-entry {
+  padding: 0 !important;
+  margin-bottom: 3px !important;
+  border-radius: 9px !important;
+}
+
+/* Compact top row — bot tabs only */
+#differ-right .jnl-top-row,
+#even-root  .jnl-top-row,
+#odd-root   .jnl-top-row,
+#nexus-root .jnl-top-row,
+.benz-col   .jnl-top-row {
   display: flex !important;
   align-items: center !important;
   gap: 7px !important;
   padding: 7px 10px 5px 12px !important;
 }
-/* Compact digit row */
-.jnl-digit-row {
+
+/* Compact digit row — bot tabs only */
+#differ-right .jnl-digit-row,
+#even-root  .jnl-digit-row,
+#odd-root   .jnl-digit-row,
+#nexus-root .jnl-digit-row,
+.benz-col   .jnl-digit-row {
   display: flex !important;
   align-items: center !important;
   gap: 0 !important;
@@ -6413,31 +6433,36 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
   border-top: 1px solid hsl(var(--border)/0.18) !important;
 }
 
-/* Badge — smaller, tighter */
-.jnl-badge {
+/* Compact badge — bot tabs only */
+#differ-right .jnl-badge,
+#even-root  .jnl-badge,
+#odd-root   .jnl-badge,
+#nexus-root .jnl-badge,
+.benz-col   .jnl-badge {
   width: 26px !important;
   height: 26px !important;
   border-radius: 7px !important;
   font-size: 11px !important;
-  font-weight: 900 !important;
-  flex-shrink: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1) !important;
 }
-.jnl-entry:hover .jnl-badge { transform: scale(1.15) !important; }
 
-/* P&L — compact font */
-.jnl-pnl {
+/* Compact P&L — bot tabs only */
+#differ-right .jnl-pnl,
+#even-root  .jnl-pnl,
+#odd-root   .jnl-pnl,
+#nexus-root .jnl-pnl,
+.benz-col   .jnl-pnl {
   font-size: 14px !important;
   font-weight: 900 !important;
   letter-spacing: -0.3px !important;
   animation: pnl-count 0.3s 0.1s both !important;
 }
 
-/* Exit digit — punchy but not huge */
-.jnl-exit-digit {
+/* Exit digit — punchy but not huge — bot tabs only */
+#differ-right .jnl-exit-digit,
+#even-root  .jnl-exit-digit,
+#odd-root   .jnl-exit-digit,
+#nexus-root .jnl-exit-digit,
+.benz-col   .jnl-exit-digit {
   font-size: 32px !important;
   font-weight: 900 !important;
   line-height: 1 !important;
@@ -6448,73 +6473,72 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
   animation: digit-stamp 0.35s cubic-bezier(0.16,1,0.3,1) both !important;
 }
 
-/* Meta tags — tighter */
-.jnl-time {
+/* Meta tags — tighter — bot tabs only */
+#differ-right .jnl-time,
+#even-root  .jnl-time,
+#odd-root   .jnl-time,
+#nexus-root .jnl-time,
+.benz-col   .jnl-time {
   font-size: 8px !important;
   color: hsl(var(--muted-foreground)/0.55) !important;
 }
-.jnl-win-tag, .jnl-loss-tag {
+#differ-right .jnl-win-tag, #differ-right .jnl-loss-tag,
+#even-root  .jnl-win-tag,  #even-root  .jnl-loss-tag,
+#odd-root   .jnl-win-tag,  #odd-root   .jnl-loss-tag,
+#nexus-root .jnl-win-tag,  #nexus-root .jnl-loss-tag,
+.benz-col   .jnl-win-tag,  .benz-col   .jnl-loss-tag {
   font-size: 7.5px !important;
   padding: 1px 5px !important;
-  border-radius: 999px !important;
-  font-weight: 900 !important;
 }
-.jnl-ct-pill {
+#differ-right .jnl-ct-pill,
+#even-root  .jnl-ct-pill,
+#odd-root   .jnl-ct-pill,
+#nexus-root .jnl-ct-pill,
+.benz-col   .jnl-ct-pill {
   font-size: 7.5px !important;
   padding: 1px 6px !important;
-  border-radius: 999px !important;
 }
-.jnl-entry-digit {
+#differ-right .jnl-entry-digit,
+#even-root  .jnl-entry-digit,
+#odd-root   .jnl-entry-digit,
+#nexus-root .jnl-entry-digit,
+.benz-col   .jnl-entry-digit {
   font-size: 9px !important;
   color: hsl(var(--muted-foreground)/0.3) !important;
 }
-.jnl-arrow {
+#differ-right .jnl-arrow,
+#even-root  .jnl-arrow,
+#odd-root   .jnl-arrow,
+#nexus-root .jnl-arrow,
+.benz-col   .jnl-arrow {
   font-size: 10px !important;
-  color: hsl(var(--muted-foreground)/0.2) !important;
   padding: 0 3px !important;
-  flex-shrink: 0 !important;
 }
 
-/* Left accent bar */
-.jnl-entry::before {
+/* Left bar — bot tabs only */
+#differ-right .jnl-entry::before,
+#even-root  .jnl-entry::before,
+#odd-root   .jnl-entry::before,
+#nexus-root .jnl-entry::before,
+.benz-col   .jnl-entry::before {
   top: 6px !important;
   bottom: 6px !important;
   width: 2px !important;
 }
 
-/* List gap */
-.journal-list {
+/* List gap tighter — bot tabs only */
+#differ-right .journal-list,
+#even-root  .journal-list,
+#odd-root   .journal-list,
+#nexus-root .journal-list,
+.benz-col   .journal-list {
   gap: 3px !important;
 }
 
-/* ── Override all the bloated paddings from earlier layers ── */
-/* Differ journal right col */
-#differ-right .jnl-entry,
-#differ-right .journal-entry { padding: 0 !important; }
+/* Badge hover — global */
+.jnl-entry:hover .jnl-badge { transform: scale(1.15) !important; }
 
-/* Even / Odd / Nexus */
-#even-root .jnl-entry, #even-root .journal-entry,
-#odd-root  .jnl-entry, #odd-root  .journal-entry,
-#nexus-root .jnl-entry, #nexus-root .journal-entry {
-  padding: 0 !important;
-}
 
-/* Benz col generic */
-.benz-col .jnl-entry,
-.benz-col .journal-entry {
-  padding: 0 !important;
-  margin-bottom: 3px !important;
-  font-size: 11px !important;
-}
-
-/* Dashboard-specific journal entries */
-html body #panel-dashboard .journal-entry {
-  padding: 0 !important;
-  min-height: 0 !important;
-  border-radius: 9px !important;
-  border-left-width: 2px !important;
-  margin-bottom: 3px !important;
-}
 
 /* ─────────────────────────────────────────────────────────────────────
    SIDEBAR — animated sweep, refined active indicator
@@ -10015,8 +10039,8 @@ window.NexusStrategies=exports;
                 // exit_tick_display_value is a full price like "1234.56" — last char is the digit.
                 // entry digit: prefer API field, fall back to currentTick recorded at trigger.
                 function _lc(v) { const s = v?.toString().trim(); return (s && s.length) ? s.slice(-1) : null; }
-                const _dExitRaw  = _lc(c.exit_tick_display_value) || _lc(c.exit_tick);
-                const _dEntryRaw = _lc(c.entry_tick_display_value) || _lc(c.entry_tick);
+                const _dExitRaw  = _lc(c.exit_tick_display_value) ?? _lc(c.exit_tick);
+                const _dEntryRaw = _lc(c.entry_tick_display_value) ?? _lc(c.entry_tick);
                 const exitDigitParsed  = (_dExitRaw  !== null && _dExitRaw  !== '') ? parseInt(_dExitRaw)  : null;
                 const entryDigitFinal  = (_dEntryRaw !== null && _dEntryRaw !== '')
                   ? parseInt(_dEntryRaw)
@@ -10642,8 +10666,8 @@ window.NexusStrategies=exports;
       // entry_tick_display_value is frequently absent in the is_sold update;
       // we fall back to state.lastTradedDigit which was captured at fire time.
       function _lastChar(v) { const s = v?.toString().trim(); return (s && s.length) ? s.slice(-1) : null; }
-      const _exitRaw  = _lastChar(contract.exit_tick_display_value) || _lastChar(contract.exit_tick);
-      const _entryRaw = _lastChar(contract.entry_tick_display_value) || _lastChar(contract.entry_tick);
+      const _exitRaw  = _lastChar(contract.exit_tick_display_value) ?? _lastChar(contract.exit_tick);
+      const _entryRaw = _lastChar(contract.entry_tick_display_value) ?? _lastChar(contract.entry_tick);
       const exitDigit = (_exitRaw !== null && _exitRaw !== '') ? _exitRaw : '?';
       // Prefer API entry digit; fall back to the digit the engine recorded at fire time
       const entryDigitResolved = (_entryRaw !== null && _entryRaw !== '')
