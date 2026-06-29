@@ -6110,6 +6110,186 @@ html.void .cp-flow-step.active { color: #e0e0ef !important; background: rgba(255
 html.void .cp-barrier-btn.selected { background: rgba(255,255,255,0.08) !important; border-color: rgba(255,255,255,0.25) !important; color: #fff !important; }
 html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !important; border-color: rgba(255,255,255,0.22) !important; color: #fff !important; }
 
+/* ══════════════════════════════════════════════════════════════
+   BENZ CLUB — DARK ELITE JOURNAL UPGRADE
+   Ultra-dark entries · neon win/loss glow · crisp digit display
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── BASE JOURNAL ENTRY — pitch-black surface ── */
+.jnl-entry,
+.journal-entry {
+  background: hsl(0 0% 2%) !important;
+  border: 1px solid hsl(0 0% 8%) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 12px hsl(0 0% 0% / 0.7), inset 0 1px 0 hsl(255 100% 100% / 0.02) !important;
+  transition: transform .16s var(--ease), border-color .16s var(--ease), box-shadow .16s var(--ease) !important;
+}
+.jnl-entry:hover,
+.journal-entry:hover {
+  transform: translateX(3px) !important;
+  border-color: hsl(0 0% 14%) !important;
+  box-shadow: 0 4px 20px hsl(0 0% 0% / 0.8), inset 0 1px 0 hsl(255 100% 100% / 0.03) !important;
+}
+
+/* ── WIN ENTRY — emerald glow ring ── */
+.jnl-entry.win,
+.journal-entry.win {
+  background: hsl(0 0% 2%) !important;
+  border-color: hsl(var(--win) / 0.22) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--win) / 0.08),
+    0 2px 16px hsl(0 0% 0% / 0.7),
+    inset 0 1px 0 hsl(var(--win) / 0.06) !important;
+}
+.jnl-entry.win:hover,
+.journal-entry.win:hover {
+  border-color: hsl(var(--win) / 0.38) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--win) / 0.14),
+    0 6px 28px hsl(0 0% 0% / 0.75),
+    0 0 20px hsl(var(--win) / 0.08),
+    inset 0 1px 0 hsl(var(--win) / 0.08) !important;
+}
+
+/* ── LOSS ENTRY — red trace, minimal glow ── */
+.jnl-entry.loss,
+.journal-entry.loss {
+  background: hsl(0 0% 2%) !important;
+  border-color: hsl(var(--loss) / 0.16) !important;
+  box-shadow: 0 2px 12px hsl(0 0% 0% / 0.7) !important;
+}
+.jnl-entry.loss:hover,
+.journal-entry.loss:hover {
+  border-color: hsl(var(--loss) / 0.28) !important;
+  box-shadow: 0 4px 18px hsl(0 0% 0% / 0.8) !important;
+}
+
+/* ── LEFT ACCENT BAR ── */
+.jnl-entry::before,
+.journal-entry::before {
+  content: '' !important;
+  position: absolute !important;
+  left: 0 !important; top: 8px !important; bottom: 8px !important;
+  width: 2.5px !important;
+  border-radius: 3px !important;
+}
+.jnl-entry.win::before,
+.journal-entry.win::before {
+  background: hsl(var(--win)) !important;
+  box-shadow: 0 0 10px hsl(var(--win) / 0.9), 0 0 20px hsl(var(--win) / 0.4) !important;
+}
+.jnl-entry.loss::before,
+.journal-entry.loss::before {
+  background: hsl(var(--loss) / 0.5) !important;
+  box-shadow: none !important;
+}
+
+/* ── WIN BADGE — glowing W ── */
+.jnl-badge.win,
+.journal-badge.win {
+  background: hsl(0 0% 0%) !important;
+  color: hsl(var(--win)) !important;
+  border: 1.5px solid hsl(var(--win) / 0.4) !important;
+  text-shadow: 0 0 14px hsl(var(--win) / 0.9), 0 0 28px hsl(var(--win) / 0.5) !important;
+  box-shadow: 0 0 10px hsl(var(--win) / 0.25) !important;
+}
+.jnl-badge.loss,
+.journal-badge.loss {
+  background: hsl(0 0% 0%) !important;
+  color: hsl(var(--loss) / 0.55) !important;
+  border: 1.5px solid hsl(var(--loss) / 0.2) !important;
+  text-shadow: none !important;
+}
+
+/* ── EXIT DIGIT — big neon number ── */
+.jnl-exit-digit.win {
+  color: hsl(var(--win)) !important;
+  background: hsl(0 0% 0% / 0.9) !important;
+  border: 1px solid hsl(var(--win) / 0.3) !important;
+  text-shadow:
+    0 0 14px hsl(var(--win) / 0.95),
+    0 0 30px hsl(var(--win) / 0.55),
+    0 0 55px hsl(var(--win) / 0.2) !important;
+  box-shadow: 0 0 14px hsl(var(--win) / 0.22), inset 0 1px 0 hsl(var(--win) / 0.1) !important;
+}
+.jnl-exit-digit.loss {
+  color: hsl(var(--loss) / 0.55) !important;
+  background: hsl(0 0% 0% / 0.9) !important;
+  border: 1px solid hsl(var(--loss) / 0.14) !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+}
+
+/* ── P&L AMOUNTS ── */
+.jnl-pnl.win,
+.journal-amount.win {
+  color: hsl(var(--win)) !important;
+  text-shadow: 0 0 10px hsl(var(--win) / 0.55), 0 0 22px hsl(var(--win) / 0.22) !important;
+}
+.jnl-pnl.loss,
+.journal-amount.loss {
+  color: hsl(var(--loss) / 0.55) !important;
+  text-shadow: none !important;
+}
+
+/* ── WIN/LOSS TAGS ── */
+.jnl-win-tag { color: hsl(var(--win)) !important; text-shadow: 0 0 10px hsl(var(--win) / 0.8), 0 0 20px hsl(var(--win) / 0.4) !important; }
+.jnl-loss-tag { color: hsl(var(--loss) / 0.5) !important; text-shadow: none !important; }
+
+/* ── RECOVERY MODE TAG ── */
+.jnl-rec-tag {
+  background: hsl(var(--accent) / 0.07) !important;
+  color: hsl(var(--accent) / 0.65) !important;
+  border-color: hsl(var(--accent) / 0.18) !important;
+}
+
+/* ── CONTRACT TYPE PILL ── */
+.jnl-ct-pill {
+  font-size: 8px !important;
+  letter-spacing: 0.8px !important;
+}
+
+/* ── BARRIER PILL ── */
+.jnl-barrier-pill {
+  background: hsl(var(--accent) / 0.06) !important;
+  border-color: hsl(var(--accent) / 0.16) !important;
+}
+.jnl-barrier-num { color: hsl(var(--accent) / 0.75) !important; }
+
+/* ── ENTRY DIGIT (small, dimmed) ── */
+.jnl-entry-digit {
+  color: hsl(var(--muted-foreground) / 0.35) !important;
+  font-size: 10px !important;
+}
+.jnl-arrow { color: hsl(var(--muted-foreground) / 0.25) !important; }
+
+/* ── HEADER CARD ── */
+.jnl-header-card {
+  background: linear-gradient(135deg, hsl(var(--card) / 0.9), hsl(0 0% 2% / 0.85)) !important;
+  border-color: hsl(var(--border) / 0.45) !important;
+}
+.jnl-stat-box {
+  background: hsl(0 0% 3%) !important;
+  border: 1px solid hsl(var(--border) / 0.4) !important;
+}
+
+/* ── CLEAR BUTTON ── */
+#even-root-clear, #odd-root-clear, #nexus-root-clear, [id$="-clear"] {
+  background: hsl(var(--loss) / 0.04) !important;
+  border-color: hsl(var(--loss) / 0.22) !important;
+  color: hsl(var(--loss) / 0.7) !important;
+}
+
+/* ── DOT ROW (win streak dots) ── */
+.jnl-dot.w { background: hsl(var(--win)) !important; box-shadow: 0 0 5px hsl(var(--win) / 0.7) !important; }
+.jnl-dot.l { background: hsl(var(--loss) / 0.7) !important; box-shadow: 0 0 4px hsl(var(--loss) / 0.3) !important; }
+.jnl-dot.e { background: hsl(var(--border)) !important; }
+
+/* ── JOURNAL LIST SCROLLBAR ── */
+.journal-list::-webkit-scrollbar { width: 3px !important; }
+.journal-list::-webkit-scrollbar-track { background: transparent !important; }
+.journal-list::-webkit-scrollbar-thumb { background: hsl(var(--primary) / 0.25) !important; border-radius: 3px !important; }
+
 </style>
 <script>
 /* ============================================================
@@ -9369,8 +9549,8 @@ window.NexusStrategies=exports;
                 _self.ownContractIds.delete(c.contract_id);
                 const isWin = c.status === 'won';
                 const profit = parseFloat(c.profit) || 0;
-                const exit = c.exit_tick_display_value?.toString().slice(-1);
-                const entryRaw = c.entry_tick_display_value?.toString().slice(-1);
+                const exit = c.exit_tick_display_value?.toString().slice(-1) || c.exit_tick?.toString().slice(-1);
+                const entryRaw = c.entry_tick_display_value?.toString().slice(-1) ?? c.entry_tick?.toString().slice(-1);
                 const entryDigit = entryRaw !== undefined && entryRaw !== '' ? parseInt(entryRaw) : null;
                 // Parse exit digit correctly: '0' is valid, only use null when missing
                 const exitDigitParsed = (exit !== undefined && exit !== '' && exit !== '?') ? parseInt(exit) : null;
@@ -9382,6 +9562,7 @@ window.NexusStrategies=exports;
                     barrier: _self.state.coldDigit ?? (c.barrier !== undefined && c.barrier !== null && c.barrier !== '' ? parseInt(c.barrier) : 0),
                     exitDigit: exitDigitParsed, profit, entryDigit,
                     market: c.underlying || _self.state.primaryMarket, stake: parseFloat(c.buy_price) || _self.state.stake,
+                    payout: isWin ? (parseFloat(c.buy_price) || _self.state.stake) + Math.abs(profit) : (parseFloat(c.buy_price) || _self.state.stake),
                   },
                 });
                 const tradeMsg = `${isWin ? '✓ WIN' : '✗ LOSS'} | B:${c.barrier} E:${exit} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}`;
@@ -9987,8 +10168,8 @@ window.NexusStrategies=exports;
       // rest of the session, which is a real-money safety issue.
       const profit = isNaN(profitRaw) ? 0 : profitRaw;
       if (isNaN(profitRaw)) this.addLog('error', 'DATA', 'Contract result had an unreadable profit value — treated as 0 for stats.');
-      const exitDigit = contract.exit_tick_display_value?.slice(-1) || '?';
-      const entryDigit = contract.entry_tick_display_value?.slice(-1) ?? null;
+      const exitDigit = contract.exit_tick_display_value?.slice(-1) || contract.exit_tick?.toString().slice(-1) || '?';
+      const entryRawTitan = contract.entry_tick_display_value?.slice(-1) ?? contract.entry_tick?.toString().slice(-1) ?? null;
       this.pendingTrade = null;
       if (win) this.sound.playWin(); else this.sound.playLoss();
       this.addLog(win ? 'win' : 'loss', 'BOLT', `Exit: ${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
@@ -10005,8 +10186,9 @@ window.NexusStrategies=exports;
         market: contract.underlying || this.config.selectedMarket,
         barrier: this._lastTradedBarrier != null ? this._lastTradedBarrier : (contract.barrier !== undefined && contract.barrier !== null && contract.barrier !== '' ? parseInt(contract.barrier) : (this.config.overBarrier ?? 0)),
         contractType: this._lastTradedContractType || '',
-        exitDigit: exitDigit !== '?' && exitDigit !== undefined && exitDigit !== '' ? parseInt(exitDigit) : null, entryDigit: entryDigit !== null && entryDigit !== undefined && entryDigit !== '' ? parseInt(entryDigit) : null,
+        exitDigit: exitDigit !== '?' && exitDigit !== undefined && exitDigit !== '' ? parseInt(exitDigit) : null, entryDigit: entryRawTitan !== null && entryRawTitan !== undefined && entryRawTitan !== '' ? parseInt(entryRawTitan) : null,
         profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
+        payout: win ? (parseFloat(contract.buy_price) || this.state.currentStake) + Math.abs(profit) : parseFloat(contract.buy_price) || this.state.currentStake,
         martingaleStep: this.state.martingaleStep,
         inRecovery: this.state.inRecovery,
         recoveryMode: this.state.inRecovery ? (
@@ -11159,6 +11341,17 @@ window.NexusStrategies=exports;
           <input class="cp-input" type="number" id="${rootId}-streak-in" value="${c.minStreak}">
         </div>
       </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px">
+        <div id="${rootId}-save-status" style="font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px;flex:1">Unsaved changes will be lost on reload</div>
+        <button id="${rootId}-save-btn" style="
+          padding:7px 16px; border-radius:10px; border:1.5px solid hsl(var(--primary)/0.5);
+          background:linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08));
+          color:hsl(var(--primary)); font-family:'Outfit',sans-serif; font-size:10px;
+          font-weight:900; letter-spacing:2px; cursor:pointer; white-space:nowrap;
+          transition:all .18s cubic-bezier(.34,1.56,.64,1);
+          box-shadow:0 0 12px hsl(var(--primary)/0.12);
+        ">💾 SAVE</button>
+      </div>
     </div>
     <!-- ── MARTINGALE ENGINE ─────────────────────────────────────── -->
     <div class="cp-card">
@@ -11258,10 +11451,57 @@ window.NexusStrategies=exports;
     </button>`;
 
     el(`${rootId}-market`).onchange = (e) => engine.changeMarket(e.target.value);
-    el(`${rootId}-stake`).onchange = (e) => engine.setConfig({ stake: Math.max(0.35, parseFloat(e.target.value) || 0.35) });
-    el(`${rootId}-runs-in`).onchange = (e) => engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) });
-    el(`${rootId}-signal`).onchange = (e) => engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 70)) });
-    el(`${rootId}-streak-in`).onchange = (e) => engine.setConfig({ minStreak: Math.max(1, parseInt(e.target.value) || 2) });
+
+    // ── DEFERRED NUMERIC INPUT BINDINGS ──────────────────────────────
+    // Numeric fields no longer push to engine.setConfig() on every keystroke.
+    // They only mark the panel "dirty" (showing an unsaved-changes hint) so
+    // the user can tweak multiple fields before committing with Save.
+    function markDirty() {
+      const statusEl = el(`${rootId}-save-status`);
+      const saveBtn  = el(`${rootId}-save-btn`);
+      if (statusEl) { statusEl.textContent = '● unsaved changes'; statusEl.style.color = 'hsl(var(--loss)/0.7)'; }
+      if (saveBtn)  { saveBtn.style.borderColor = 'hsl(var(--loss)/0.55)'; saveBtn.style.background = 'linear-gradient(135deg,hsl(var(--loss)/0.12),hsl(var(--loss)/0.05))'; saveBtn.style.color = 'hsl(var(--loss))'; }
+    }
+    function markSaved() {
+      const statusEl = el(`${rootId}-save-status`);
+      const saveBtn  = el(`${rootId}-save-btn`);
+      if (statusEl) { statusEl.textContent = '✓ settings saved'; statusEl.style.color = 'hsl(var(--win))'; }
+      if (saveBtn)  { saveBtn.style.borderColor = 'hsl(var(--primary)/0.5)'; saveBtn.style.background = 'linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08))'; saveBtn.style.color = 'hsl(var(--primary))'; }
+      setTimeout(() => {
+        const s2 = el(`${rootId}-save-status`);
+        if (s2) { s2.textContent = 'Unsaved changes will be lost on reload'; s2.style.color = 'hsl(var(--muted-foreground)/0.5)'; }
+      }, 2500);
+    }
+
+    // Mark dirty on any numeric input change (no immediate setConfig)
+    [`${rootId}-stake`,`${rootId}-runs-in`,`${rootId}-signal`,`${rootId}-streak-in`,`${rootId}-mult`,`${rootId}-tp`,`${rootId}-sl`].forEach(id => {
+      const inp = el(id);
+      if (inp) { inp.oninput = markDirty; inp.onchange = markDirty; }
+    });
+
+    // ── SAVE BUTTON ── commits all numeric fields at once to engine + localStorage
+    const saveBtn = el(`${rootId}-save-btn`);
+    if (saveBtn) saveBtn.onclick = () => {
+      const stakeVal   = parseFloat(el(`${rootId}-stake`)?.value);
+      const runsVal    = parseInt(el(`${rootId}-runs-in`)?.value);
+      const signalVal  = parseInt(el(`${rootId}-signal`)?.value);
+      const streakVal  = parseInt(el(`${rootId}-streak-in`)?.value);
+      const multEl     = el(`${rootId}-mult`);
+      const multVal    = multEl ? parseFloat(multEl.value) : null;
+      const tpEl       = el(`${rootId}-tp`);
+      const slEl       = el(`${rootId}-sl`);
+      const patch = {};
+      if (!isNaN(stakeVal)  && stakeVal  > 0)    patch.stake               = Math.max(0.35, stakeVal);
+      if (!isNaN(runsVal)   && runsVal   > 0)    patch.targetRuns          = Math.max(1, runsVal);
+      if (!isNaN(signalVal))                      patch.minSignal           = Math.min(100, Math.max(0, signalVal));
+      if (!isNaN(streakVal) && streakVal > 0)    patch.minStreak           = Math.max(1, streakVal);
+      if (multVal !== null && !isNaN(multVal) && multVal >= 1.01) patch.martingaleMultiplier = multVal;
+      if (tpEl) { const v = parseFloat(tpEl.value); if (!isNaN(v)) patch.takeProfit = Math.max(0, v); }
+      if (slEl) { const v = parseFloat(slEl.value); if (!isNaN(v)) patch.stopLoss   = Math.max(0, v); }
+      if (Object.keys(patch).length) engine.setConfig(patch);
+      markSaved();
+    };
+
     el(`${rootId}-mart`).onclick = (e) => { e.stopPropagation(); const en = !c.martingaleEnabled; engine.setConfig({ martingaleEnabled: en }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     const martHeader = el(`${rootId}-mart-header`);
     if (martHeader) {
@@ -11275,12 +11515,8 @@ window.NexusStrategies=exports;
     const autoHdr = el(`${rootId}-auto-header`);
     if (autoHdr) autoHdr.onclick = () => { const p = el(`${rootId}-auto-panel`); if (p) { p.style.display = p.style.display === 'none' ? '' : 'none'; } };
     el(`${rootId}-auto`).onclick = (e) => { e.stopPropagation(); engine.setConfig({ autoPilot: !c.autoPilot }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
-    el(`${rootId}-mult`) && (el(`${rootId}-mult`).onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 1.01) engine.setConfig({ martingaleMultiplier: v }); else e.target.value = engine.config.martingaleMultiplier; });
-    el(`${rootId}-mult`) && (el(`${rootId}-mult`).oninput = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 1.01) engine.setConfig({ martingaleMultiplier: v }); });
-    el(`${rootId}-tp`) && (el(`${rootId}-tp`).onchange = (e) => engine.setConfig({ takeProfit: Math.max(0, parseFloat(e.target.value) || 0) }));
-    el(`${rootId}-sl`) && (el(`${rootId}-sl`).onchange = (e) => engine.setConfig({ stopLoss: Math.max(0, parseFloat(e.target.value) || 0) }));
     el(`${rootId}-autorefresh`) && (el(`${rootId}-autorefresh`).onclick = () => { engine.setConfig({ autoRefresh: !c.autoRefresh }); renderCenterConfig(engine, rootId, engine.getSnapshot()); });
-    // Stop step dropdown
+    // Stop step dropdown — instant (structural setting)
     const stopSel = el(`${rootId}-stop-select`);
     if (stopSel) stopSel.onchange = (e) => {
       const v = parseInt(e.target.value);
@@ -11288,10 +11524,10 @@ window.NexusStrategies=exports;
       const desc = el(`${rootId}-stopstep-desc`);
       if (desc) desc.textContent = v===1?'1 loss → stop, await fresh signal':v===2?'2 losses → stop + cooldown':v===3?'3 losses → 30s forced pause':v===4?'4 losses → switches to recovery barrier':v===999?'♾ Always recovering — doubles stake every loss until a win':'5 losses before session aborts';
     };
-    // Recovery barrier dropdown (over mode)
+    // Recovery barrier dropdown (over mode) — instant
     const recBarrierSel = el(`${rootId}-rec-barrier-sel`);
     if (recBarrierSel) recBarrierSel.onchange = (e) => { engine.setConfig({ recoveryBarrier: parseInt(e.target.value) }); };
-    // Recovery mode cards
+    // Recovery mode cards — instant (binary switches, not numeric)
     ['plain','altA','altB','smart'].forEach(mode => {
       const card = el(`${rootId}-rmode-${mode}`);
       if (!card) return;
@@ -11844,7 +12080,7 @@ window.NexusStrategies=exports;
             <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:1px;flex-shrink:0">
               <span style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.35);letter-spacing:0.8px">PAYOUT</span>
               <span style="font-size:11px;font-family:'DM Mono',monospace;font-weight:700;color:${isWin?'hsl(var(--win))':'hsl(var(--loss)/0.5)'}">
-                ${j.stake != null ? '$'+parseFloat(j.stake).toFixed(2) : '—'}
+                ${j.payout != null ? '$'+parseFloat(j.payout).toFixed(2) : (j.stake != null ? '$'+parseFloat(j.stake).toFixed(2) : '—')}
               </span>
             </div>
           </div>
