@@ -248,11 +248,11 @@
 #differ-right .journal-entry,
 #odd-root .journal-entry.differ-jentry,
 .benz-col .journal-entry {
-  padding: 6px 10px !important;
-  min-height: 44px !important;
-  font-size: 13px !important;
-  border-radius: 12px !important;
-  margin-bottom: 6px !important;
+  padding: 3px 8px !important;
+  min-height: 0 !important;
+  font-size: 12px !important;
+  border-radius: 10px !important;
+  margin-bottom: 4px !important;
 }
 .benz-col .journal-list { gap: 8px !important; }
 .benz-col .journal-net, .benz-col .journal-amount { font-size: 15px !important; font-weight: 800 !important; }
@@ -260,10 +260,10 @@
 
 /* Titan right panel journal entries bigger */
 #even-root .journal-entry, #odd-root .journal-entry, #nexus-root .journal-entry {
-  padding: 6px 10px !important;
-  min-height: 44px !important;
-  font-size: 12.5px !important;
-  gap: 8px !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  font-size: 12px !important;
+  gap: 0 !important;
 }
 #even-root .journal-entry span, #odd-root .journal-entry span, #nexus-root .journal-entry span {
   font-size: 12px !important;
@@ -2031,7 +2031,7 @@ html.light .log-entry { background: hsl(var(--muted) / .3); }
   transition: all .2s;
 }
 .journal-tab.active { color: hsl(var(--primary)); border-color: hsl(var(--primary) / .4); background: hsl(var(--primary) / .09); }
-.journal-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
+.journal-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 
 .journal-entry {
   display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-radius: var(--radius-sm);
@@ -6120,8 +6120,9 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 .journal-entry {
   background: hsl(0 0% 2%) !important;
   border: 1px solid hsl(0 0% 8%) !important;
-  border-radius: 12px !important;
-  box-shadow: 0 2px 12px hsl(0 0% 0% / 0.7), inset 0 1px 0 hsl(255 100% 100% / 0.02) !important;
+  border-radius: 10px !important;
+  margin-bottom: 4px !important;
+  box-shadow: 0 1px 8px hsl(0 0% 0% / 0.6), inset 0 1px 0 hsl(255 100% 100% / 0.02) !important;
   transition: transform .16s var(--ease), border-color .16s var(--ease), box-shadow .16s var(--ease) !important;
 }
 .jnl-entry:hover,
@@ -9549,18 +9550,24 @@ window.NexusStrategies=exports;
                 _self.ownContractIds.delete(c.contract_id);
                 const isWin = c.status === 'won';
                 const profit = parseFloat(c.profit) || 0;
-                const exit = c.exit_tick_display_value?.toString().slice(-1) || c.exit_tick?.toString().slice(-1);
-                const entryRaw = c.entry_tick_display_value?.toString().slice(-1) ?? c.entry_tick?.toString().slice(-1);
-                const entryDigit = entryRaw !== undefined && entryRaw !== '' ? parseInt(entryRaw) : null;
-                // Parse exit digit correctly: '0' is valid, only use null when missing
-                const exitDigitParsed = (exit !== undefined && exit !== '' && exit !== '?') ? parseInt(exit) : null;
+                // ── DIGIT EXTRACTION (Differ) ───────────────────────────────
+                // exit_tick_display_value is a full price like "1234.56" — last char is the digit.
+                // entry digit: prefer API field, fall back to currentTick recorded at trigger.
+                function _lc(v) { const s = v?.toString().trim(); return (s && s.length) ? s.slice(-1) : null; }
+                const _dExitRaw  = _lc(c.exit_tick_display_value) || _lc(c.exit_tick);
+                const _dEntryRaw = _lc(c.entry_tick_display_value) || _lc(c.entry_tick);
+                const exitDigitParsed  = (_dExitRaw  !== null && _dExitRaw  !== '') ? parseInt(_dExitRaw)  : null;
+                const entryDigitFinal  = (_dEntryRaw !== null && _dEntryRaw !== '')
+                  ? parseInt(_dEntryRaw)
+                  : (_self.state.currentTick != null ? _self.state.currentTick : null);
+                // ──────────────────────────────────────────────────────────────
                 _self.dispatch({
                   type: 'ADD_JOURNAL',
                   entry: {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
                     time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'differ',
                     barrier: _self.state.coldDigit ?? (c.barrier !== undefined && c.barrier !== null && c.barrier !== '' ? parseInt(c.barrier) : 0),
-                    exitDigit: exitDigitParsed, profit, entryDigit,
+                    exitDigit: exitDigitParsed, profit, entryDigit: entryDigitFinal,
                     market: c.underlying || _self.state.primaryMarket, stake: parseFloat(c.buy_price) || _self.state.stake,
                     payout: isWin ? (parseFloat(c.buy_price) || _self.state.stake) + Math.abs(profit) : (parseFloat(c.buy_price) || _self.state.stake),
                   },
@@ -10168,11 +10175,24 @@ window.NexusStrategies=exports;
       // rest of the session, which is a real-money safety issue.
       const profit = isNaN(profitRaw) ? 0 : profitRaw;
       if (isNaN(profitRaw)) this.addLog('error', 'DATA', 'Contract result had an unreadable profit value — treated as 0 for stats.');
-      const exitDigit = contract.exit_tick_display_value?.slice(-1) || contract.exit_tick?.toString().slice(-1) || '?';
-      const entryRawTitan = contract.entry_tick_display_value?.slice(-1) ?? contract.entry_tick?.toString().slice(-1) ?? null;
+      // ── DIGIT EXTRACTION ────────────────────────────────────────────
+      // Deriv sends exit_tick_display_value as a full price string e.g. "1234.56"
+      // The last character IS the traded digit for all Digit contract types.
+      // entry_tick_display_value is frequently absent in the is_sold update;
+      // we fall back to state.lastTradedDigit which was captured at fire time.
+      function _lastChar(v) { const s = v?.toString().trim(); return (s && s.length) ? s.slice(-1) : null; }
+      const _exitRaw  = _lastChar(contract.exit_tick_display_value) || _lastChar(contract.exit_tick);
+      const _entryRaw = _lastChar(contract.entry_tick_display_value) || _lastChar(contract.entry_tick);
+      const exitDigit = (_exitRaw !== null && _exitRaw !== '') ? _exitRaw : '?';
+      // Prefer API entry digit; fall back to the digit the engine recorded at fire time
+      const entryDigitResolved = (_entryRaw !== null && _entryRaw !== '')
+        ? parseInt(_entryRaw)
+        : (this.state.lastTradedDigit != null ? this.state.lastTradedDigit : null);
+      const exitDigitResolved = (exitDigit !== '?' && exitDigit !== '') ? parseInt(exitDigit) : null;
+      // ────────────────────────────────────────────────────────────────
       this.pendingTrade = null;
       if (win) this.sound.playWin(); else this.sound.playLoss();
-      this.addLog(win ? 'win' : 'loss', 'BOLT', `Exit: ${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
+      this.addLog(win ? 'win' : 'loss', 'BOLT', `Entry:${entryDigitResolved ?? '?'} Exit:${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
       // Deduplicate: skip if this contract_id was already journaled
       const contractKey = contract.contract_id ? contract.contract_id.toString() : null;
       if (contractKey) {
@@ -10186,7 +10206,7 @@ window.NexusStrategies=exports;
         market: contract.underlying || this.config.selectedMarket,
         barrier: this._lastTradedBarrier != null ? this._lastTradedBarrier : (contract.barrier !== undefined && contract.barrier !== null && contract.barrier !== '' ? parseInt(contract.barrier) : (this.config.overBarrier ?? 0)),
         contractType: this._lastTradedContractType || '',
-        exitDigit: exitDigit !== '?' && exitDigit !== undefined && exitDigit !== '' ? parseInt(exitDigit) : null, entryDigit: entryRawTitan !== null && entryRawTitan !== undefined && entryRawTitan !== '' ? parseInt(entryRawTitan) : null,
+        exitDigit: exitDigitResolved, entryDigit: entryDigitResolved,
         profit, stake: parseFloat(contract.buy_price) || this.state.currentStake,
         payout: win ? (parseFloat(contract.buy_price) || this.state.currentStake) + Math.abs(profit) : parseFloat(contract.buy_price) || this.state.currentStake,
         martingaleStep: this.state.martingaleStep,
@@ -10738,6 +10758,17 @@ window.NexusStrategies=exports;
           <input type="number" class="terminal-input" id="differ-trigger" value="${s.silenceTrigger}" min="5" max="30">
           <span class="input-hint">Number of ticks the target digit must be silent before firing</span>
         </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:8px">
+          <div id="differ-save-status" style="font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px;flex:1">Unsaved changes lost on reload</div>
+          <button id="differ-save-btn" style="
+            padding:7px 16px; border-radius:10px; border:1.5px solid hsl(var(--primary)/0.5);
+            background:linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08));
+            color:hsl(var(--primary)); font-family:'Outfit',sans-serif; font-size:10px;
+            font-weight:900; letter-spacing:2px; cursor:pointer; white-space:nowrap;
+            transition:all .18s cubic-bezier(.34,1.56,.64,1);
+            box-shadow:0 0 12px hsl(var(--primary)/0.12);
+          ">💾 SAVE</button>
+        </div>
       </div>
       <div class="glass-panel" style="padding:12px;margin-top:8px">
         <div class="settings-toggle-row">
@@ -10770,15 +10801,44 @@ window.NexusStrategies=exports;
 
     const eng = global.benzEngine;
     el('differ-market').onchange = (e) => { eng.dispatch({ type: 'SET_MARKET', market: e.target.value }); setTimeout(() => eng.connectAnalysis(), 100); };
-    el('differ-stake').onchange = (e) => eng.dispatch({ type: 'SET_STAKE', value: Math.max(0.35, parseFloat(e.target.value) || 1) });
-    el('differ-batch').onchange = (e) => eng.dispatch({ type: 'SET_BATCH', value: Math.max(1, parseInt(e.target.value) || 1) });
-    el('differ-speed').oninput = (e) => { eng.dispatch({ type: 'SET_SPEED', value: parseInt(e.target.value) }); const sl = el('differ-speed-label'); if (sl) { const v = parseInt(e.target.value); sl.textContent = (v <= 100 ? 'SUPERSONIC' : v <= 300 ? 'FAST' : v <= 600 ? 'NORMAL' : 'SLOW') + ` (${v}ms)`; } };
-    el('differ-trigger').onchange = (e) => eng.dispatch({ type: 'SET_TRIGGER', value: Math.max(1, parseInt(e.target.value) || 12) });
+    // Speed slider and abort-on-loss stay instant (non-numeric or real-time feel needed)
+    el('differ-speed').oninput = (e) => { const sl = el('differ-speed-label'); if (sl) { const v = parseInt(e.target.value); sl.textContent = (v <= 100 ? 'SUPERSONIC' : v <= 300 ? 'FAST' : v <= 600 ? 'NORMAL' : 'SLOW') + ` (${v}ms)`; } };
     el('differ-abortonloss').onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' });
     el('differ-auto').onclick = () => { eng.dispatch({ type: 'TOGGLE_AUTO' }); renderCenterConfig(eng.state); };
-    el('differ-tp') && (el('differ-tp').onchange = (e) => eng.dispatch({ type: 'SET_TP', value: Math.max(0, parseFloat(e.target.value) || 0) }));
-    el('differ-sl') && (el('differ-sl').onchange = (e) => eng.dispatch({ type: 'SET_SL', value: Math.max(0, parseFloat(e.target.value) || 0) }));
-    el('differ-autobatch') && (el('differ-autobatch').onchange = (e) => eng.dispatch({ type: 'SET_AUTO_BATCH', value: Math.max(1, parseInt(e.target.value) || 1) }));
+    // ── DIFFER SAVE BUTTON ── deferred numeric field commit ──────────
+    function differMarkDirty() {
+      const st = el('differ-save-status'); const sb = el('differ-save-btn');
+      if (st) { st.textContent = '● unsaved changes'; st.style.color = 'hsl(var(--loss)/0.7)'; }
+      if (sb) { sb.style.borderColor = 'hsl(var(--loss)/0.55)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--loss)/0.12),hsl(var(--loss)/0.05))'; sb.style.color = 'hsl(var(--loss))'; }
+    }
+    function differMarkSaved() {
+      const st = el('differ-save-status'); const sb = el('differ-save-btn');
+      if (st) { st.textContent = '✓ settings saved'; st.style.color = 'hsl(var(--win))'; }
+      if (sb) { sb.style.borderColor = 'hsl(var(--primary)/0.5)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08))'; sb.style.color = 'hsl(var(--primary))'; }
+      setTimeout(() => { const s2 = el('differ-save-status'); if (s2) { s2.textContent = 'Unsaved changes lost on reload'; s2.style.color = 'hsl(var(--muted-foreground)/0.5)'; } }, 2500);
+    }
+    ['differ-stake','differ-batch','differ-trigger','differ-autobatch','differ-speed'].forEach(id => {
+      const inp = el(id); if (inp) { inp.oninput = differMarkDirty; inp.onchange = differMarkDirty; }
+    });
+    const differSaveBtn = el('differ-save-btn');
+    if (differSaveBtn) differSaveBtn.onclick = () => {
+      const stakeEl   = el('differ-stake');
+      const batchEl   = el('differ-batch');
+      const trigEl    = el('differ-trigger');
+      const abatchEl  = el('differ-autobatch');
+      const speedEl   = el('differ-speed');
+      const tpEl      = el('differ-tp');
+      const slEl      = el('differ-sl');
+      if (stakeEl)  { const v = parseFloat(stakeEl.value);   if (!isNaN(v) && v >= 0.35) eng.dispatch({ type: 'SET_STAKE',      value: Math.max(0.35, v) }); }
+      if (batchEl)  { const v = parseInt(batchEl.value);     if (!isNaN(v) && v >= 1)    eng.dispatch({ type: 'SET_BATCH',      value: Math.max(1, v) }); }
+      if (trigEl)   { const v = parseInt(trigEl.value);      if (!isNaN(v) && v >= 1)    eng.dispatch({ type: 'SET_TRIGGER',    value: Math.max(1, v) }); }
+      if (abatchEl) { const v = parseInt(abatchEl.value);    if (!isNaN(v) && v >= 1)    eng.dispatch({ type: 'SET_AUTO_BATCH', value: Math.max(1, v) }); }
+      if (speedEl)  { const v = parseInt(speedEl.value);                                  eng.dispatch({ type: 'SET_SPEED',      value: v }); }
+      if (tpEl)     { const v = parseFloat(tpEl.value);      if (!isNaN(v))              eng.dispatch({ type: 'SET_TP',         value: Math.max(0, v) }); }
+      if (slEl)     { const v = parseFloat(slEl.value);      if (!isNaN(v))              eng.dispatch({ type: 'SET_SL',         value: Math.max(0, v) }); }
+      differMarkSaved();
+    };
+    el('differ-autobatch') && (el('differ-autobatch').oninput = differMarkDirty);
     el('differ-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
     el('differ-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
   }
@@ -11640,20 +11700,20 @@ window.NexusStrategies=exports;
 
       /* Top row: badge + meta + P&L */
       .jnl-top-row {
-        display:flex; align-items:center; gap:8px;
-        padding:5px 8px 3px 12px;
+        display:flex; align-items:center; gap:6px;
+        padding:4px 7px 2px 10px;
       }
       /* Bottom row: the big digit display */
       .jnl-digit-row {
         display:flex; align-items:center; gap:0;
-        padding:0 8px 5px 12px;
+        padding:0 7px 4px 10px;
         margin-top:0;
       }
 
       .jnl-badge {
-        width:28px; height:28px; border-radius:8px; flex-shrink:0;
+        width:22px; height:22px; border-radius:7px; flex-shrink:0;
         display:flex; align-items:center; justify-content:center;
-        font-family:'Outfit',sans-serif; font-size:13px; font-weight:900;
+        font-family:'Outfit',sans-serif; font-size:11px; font-weight:900;
         letter-spacing:0.5px;
       }
       .jnl-badge.win {
@@ -11704,11 +11764,11 @@ window.NexusStrategies=exports;
         font-size:11px; color:hsl(var(--muted-foreground)/0.3); padding:0 1px; flex-shrink:0;
       }
       .jnl-exit-digit {
-        font-family:'Outfit',sans-serif; font-size:28px; font-weight:900;
-        line-height:1; letter-spacing:-1px;
+        font-family:'Outfit',sans-serif; font-size:22px; font-weight:900;
+        line-height:1; letter-spacing:-0.5px;
         animation:jnl-digit-pop .35s cubic-bezier(.16,1,.3,1);
-        flex-shrink:0; min-width:34px; text-align:center;
-        padding:4px 8px; border-radius:8px;
+        flex-shrink:0; min-width:28px; text-align:center;
+        padding:3px 7px; border-radius:7px;
         background:hsl(0 0% 0% / 0.85);
       }
       .jnl-exit-digit.win {
@@ -11736,7 +11796,7 @@ window.NexusStrategies=exports;
 
       /* P&L display */
       .jnl-pnl {
-        font-family:'Outfit',sans-serif; font-size:15px; font-weight:900;
+        font-family:'Outfit',sans-serif; font-size:13px; font-weight:900;
         letter-spacing:-0.3px; flex-shrink:0; margin-left:auto;
       }
       .jnl-pnl.win { color:hsl(var(--win)); text-shadow:0 0 10px hsl(var(--win)/0.5); }
