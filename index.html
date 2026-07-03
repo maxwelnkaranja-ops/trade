@@ -13502,8 +13502,6 @@ window.NexusStrategies=exports;
     el('dash-wonlost', root).innerHTML = `<span class="text-success">+$${wonUSD.toFixed(0)}</span> <span class="text-muted" style="font-size:1rem">/</span> <span class="text-destructive">-$${lostUSD.toFixed(0)}</span>`;
 
     // ── Balance Hero Card ──
-    const displayCurrency = hub.displayCurrency || 'USD';
-    const conversionRate = 129.5;
     const displayBalance = displayCurrency === 'KSH' ? hub.balanceUSD * conversionRate : hub.balanceUSD;
     const balanceText = `${displayCurrency} ${displayBalance.toFixed(2)}`;
     const baseCurrencyText = hub.currency && hub.currency !== displayCurrency ? `Base: ${hub.currency}` : `Base: ${hub.currency || 'USD'}`;
