@@ -6806,6 +6806,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
     accountId: '',
     balanceUSD: 0,
     currency: 'USD',
+    displayCurrency: load('hub_display_currency', 'USD'),
     isAuthenticated: false,
     connectionStatus: 'disconnected', // disconnected | connecting | connected
     connectionError: '',
@@ -6860,6 +6861,13 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
   function setTelegramEnabled(on) {
     state.telegramEnabled = on;
     save('hub_tg_enabled', on.toString());
+    emit();
+  }
+
+  function setDisplayCurrency(currency) {
+    currency = currency === 'KSH' ? 'KSH' : 'USD';
+    state.displayCurrency = currency;
+    save('hub_display_currency', currency);
     emit();
   }
 
@@ -10076,7 +10084,7 @@ window.NexusStrategies=exports;
                     payout: isWin ? (parseFloat(c.buy_price) || _self.state.stake) + Math.abs(profit) : (parseFloat(c.buy_price) || _self.state.stake),
                   },
                 });
-                const tradeMsg = `${isWin ? '✓ WIN' : '✗ LOSS'} | B:${c.barrier} E:${exit} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}`;
+                const tradeMsg = `${isWin ? '✓ WIN' : '✗ LOSS'} | B:${c.barrier} E:${exitDigitParsed ?? exitDigit} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}`;
                 _self.dispatch({ type: 'NOTIFY', message: tradeMsg, ntype: isWin ? 'win' : 'loss' });
                 const cs = _self.state;
                 const tgMsg = `${isWin ? '✅' : '❌'} ${tradeMsg}\n💰 Balance: ${(isNaN(balAfter) ? cs.balanceUSD : balAfter).toFixed(2)} | Net P/L: ${cs.totalProfit.toFixed(2)}`;
@@ -10802,13 +10810,7 @@ window.NexusStrategies=exports;
         if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); showCongratulationsPopup(cfg.takeProfit); this.completeSession(); return; }
         if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); this.completeSession(); return; }
       }
-      // REWAIT mode (documentary §3.2 Mode A): escalate stake but release lock, await fresh signal
-      if (st.isLocked && cfg.martingaleEnabled && cfg.martingaleStopStep === 1 && st.inRecovery) {
-        this.executionGuard = false;
-        this.state = { ...this.state, isLocked: false, inRecovery: false, martingaleStep: 0, currentStake: cfg.stake };
-        this.addLog('loss', 'CRITICAL', `STEP 1 LIMIT HIT — stopping recovery and awaiting fresh signal`);
-        return;
-      }
+      // REWAIT mode removed: stop-at-1 behavior is no longer supported.
       // MARTINGALE DISABLED: after any loss, release lock so bot picks up next signal naturally
       if (st.isLocked && !cfg.martingaleEnabled && !st.inRecovery) {
         this.executionGuard = false;
@@ -12027,11 +12029,11 @@ window.NexusStrategies=exports;
         <div class="cp-input-group" style="margin-bottom:10px">
           <span class="cp-input-label">Stop / Recovery Rule</span>
           <select class="cp-input" id="${rootId}-stop-select" style="margin-top:4px;font-size:11px">
-            ${[{v:1,label:'🔁 Rewait — await fresh signal'},{v:2,label:'⏸ Stop at Step 2'},{v:3,label:'⏱ 30s pause at Step 3'},{v:4,label:'🔄 Deep Recovery Step 4'},{v:5,label:'💪 Max Recovery Step 5'},{v:999,label:'♾ Always Recover'}]
+            ${[{v:2,label:'⏸ Stop at Step 2'},{v:3,label:'⏱ 30s pause at Step 3'},{v:4,label:'🔄 Deep Recovery Step 4'},{v:5,label:'💪 Max Recovery Step 5'},{v:999,label:'♾ Always Recover'}]
               .map(o=>`<option value="${o.v}" ${c.martingaleStopStep===o.v?'selected':''}>${o.label}</option>`).join('')}
           </select>
           <div id="${rootId}-stopstep-desc" style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:4px;padding:6px 8px;background:hsl(var(--bg)/0.5);border-radius:7px;font-family:'DM Mono',monospace">${
-            c.martingaleStopStep===1?'1 loss → stop, await fresh signal':c.martingaleStopStep===2?'2 losses → stop + cooldown':c.martingaleStopStep===3?'3 losses → 30s forced pause':c.martingaleStopStep===4?'4 losses → deep recovery + final stop':c.martingaleStopStep===999?'♾ Always recovering — doubles until a win':'5 losses before session aborts'
+            c.martingaleStopStep===2?'2 losses → stop + cooldown':c.martingaleStopStep===3?'3 losses → 30s forced pause':c.martingaleStopStep===4?'4 losses → deep recovery + final stop':c.martingaleStopStep===999?'♾ Always recovering — doubles until a win':'5 losses before session aborts'
           }</div>
         </div>
 
@@ -13136,8 +13138,12 @@ window.NexusStrategies=exports;
               USD 0<span class="bal-cents">.00</span>
               <span class="bal-badge" id="dash-balance-badge">OFFLINE</span>
             </div>
-            <div class="dash-balance-row2">
+            <div class="dash-balance-row2" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <span class="dash-balance-currency" id="dash-account-sub">Not connected — add a token in Settings</span>
+              <div id="dash-currency-switch" style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:999px;border:1px solid hsl(var(--border)/0.4);background:hsl(var(--bg)/0.75)">
+                <button data-currency="USD" class="dash-currency-btn" style="padding:4px 10px;border:none;border-radius:999px;background:transparent;color:inherit;cursor:pointer">USD</button>
+                <button data-currency="KSH" class="dash-currency-btn" style="padding:4px 10px;border:none;border-radius:999px;background:transparent;color:inherit;cursor:pointer">KSH</button>
+              </div>
             </div>
             <!-- Animated sine wave -->
             <div class="hero-graph-wrap">
@@ -13221,14 +13227,14 @@ window.NexusStrategies=exports;
             <label style="font-size:8px;letter-spacing:2px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--win));text-transform:uppercase;display:flex;align-items:center;gap:4px;white-space:nowrap">
               <svg viewBox="0 0 10 10" width="7" height="7" fill="hsl(var(--win))"><polygon points="5,1 9,9 1,9"/></svg>Take Profit $
             </label>
-            <input id="dash-master-tp" type="number" min="0" step="1" value="50" style="width:90px;padding:8px 10px;border:1px solid hsl(var(--win)/0.35);border-radius:10px;background:hsl(var(--win)/0.07);color:hsl(var(--win));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
+            <input id="dash-master-tp" type="number" min="0" step="1" value="${loadMasterGateValues().tp}" style="width:90px;padding:8px 10px;border:1px solid hsl(var(--win)/0.35);border-radius:10px;background:hsl(var(--win)/0.07);color:hsl(var(--win));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
           </div>
           <!-- SL input -->
           <div style="display:flex;flex-direction:column;gap:4px">
             <label style="font-size:8px;letter-spacing:2px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--loss));text-transform:uppercase;display:flex;align-items:center;gap:4px;white-space:nowrap">
               <svg viewBox="0 0 10 10" width="7" height="7" fill="hsl(var(--loss))"><polygon points="5,9 9,1 1,1"/></svg>Stop Loss $
             </label>
-            <input id="dash-master-sl" type="number" min="0" step="1" value="20" style="width:90px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
+            <input id="dash-master-sl" type="number" min="0" step="1" value="${loadMasterGateValues().sl}" style="width:90px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
           </div>
           <!-- P&L gate status badge -->
           <div id="dash-pnl-gate-status" style="font-family:'DM Mono',monospace;font-size:11px;font-weight:700;padding:7px 13px;border-radius:8px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border)/0.5);color:hsl(var(--muted-foreground));white-space:nowrap;align-self:flex-end">Gate: Armed</div>
@@ -13481,7 +13487,11 @@ window.NexusStrategies=exports;
       });
     });
 
-    el('dash-netpl', root).textContent = `${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}`;
+    const displayCurrency = hub.displayCurrency || 'USD';
+    const conversionRate = 129.5;
+    const displayProfit = displayCurrency === 'KSH' ? totalProfit * conversionRate : totalProfit;
+    const displayProfitLabel = displayCurrency === 'KSH' ? `KSH ${displayProfit.toFixed(2)}` : `${displayCurrency} ${displayProfit.toFixed(2)}`;
+    el('dash-netpl', root).textContent = `${displayProfit >= 0 ? '+' : ''}${displayProfitLabel}`;
     el('dash-netpl', root).className = 'stat-card-value ' + (totalProfit >= 0 ? 'text-success' : 'text-destructive');
     el('dash-netpl-sub', root).textContent = `${totalWin + totalLoss} closed`;
 
@@ -13492,12 +13502,21 @@ window.NexusStrategies=exports;
     el('dash-wonlost', root).innerHTML = `<span class="text-success">+$${wonUSD.toFixed(0)}</span> <span class="text-muted" style="font-size:1rem">/</span> <span class="text-destructive">-$${lostUSD.toFixed(0)}</span>`;
 
     // ── Balance Hero Card ──
-    const balStr = hub.balanceUSD.toFixed(2).split('.');
+    const displayCurrency = hub.displayCurrency || 'USD';
+    const conversionRate = 129.5;
+    const displayBalance = displayCurrency === 'KSH' ? hub.balanceUSD * conversionRate : hub.balanceUSD;
+    const balanceText = `${displayCurrency} ${displayBalance.toFixed(2)}`;
+    const baseCurrencyText = hub.currency && hub.currency !== displayCurrency ? `Base: ${hub.currency}` : `Base: ${hub.currency || 'USD'}`;
     const balHeroEl = el('dash-balance', root);
     if (balHeroEl) {
-      balHeroEl.innerHTML = `${hub.currency || 'USD'} ${balStr[0]}<span class="bal-cents">.${balStr[1]}</span><span class="bal-badge" id="dash-balance-badge">${hub.isAuthenticated ? 'LIVE' : 'OFFLINE'}</span>`;
+      balHeroEl.innerHTML = `${balanceText}<span class="bal-cents"></span><span class="bal-badge" id="dash-balance-badge">${hub.isAuthenticated ? 'LIVE' : 'OFFLINE'}</span>`;
     }
-    el('dash-account-sub', root).textContent = hub.accountId ? `Account ${hub.accountId} · ${hub.isAuthenticated ? 'Live' : 'Offline'}` : 'Not connected — add a token in Settings';
+    el('dash-account-sub', root).textContent = hub.accountId ? `Account ${hub.accountId} · ${hub.isAuthenticated ? 'Live' : 'Offline'} · ${baseCurrencyText}` : 'Not connected — add a token in Settings';
+    const currencyButtons = root.querySelectorAll('#dash-currency-switch .dash-currency-btn');
+    currencyButtons.forEach((btn) => {
+      btn.style.background = btn.dataset.currency === displayCurrency ? 'hsl(var(--primary)/0.18)' : 'transparent';
+      btn.style.color = btn.dataset.currency === displayCurrency ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))';
+    });
 
     // ── Yield Ring ──
     const ringPctEl = el('dash-ring-pct', root);
@@ -14208,6 +14227,22 @@ window.NexusStrategies=exports;
     const sl = parseFloat((document.getElementById('dash-master-sl') || {}).value) || 20;
     return { tp, sl };
   }
+  function loadMasterGateValues() {
+    try {
+      const tp = parseFloat(localStorage.getItem('dash_master_tp'));
+      const sl = parseFloat(localStorage.getItem('dash_master_sl'));
+      return {
+        tp: !isNaN(tp) ? tp : 50,
+        sl: !isNaN(sl) ? sl : 20,
+      };
+    } catch (e) {
+      return { tp: 50, sl: 20 };
+    }
+  }
+  function saveMasterGateValues(tp, sl) {
+    try { localStorage.setItem('dash_master_tp', tp.toString()); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('dash_master_sl', sl.toString()); } catch (e) { /* ignore */ }
+  }
 
   // ── SESSION P&L GATE ─────────────────────────────────────────────────────
   // Reads the gate inputs every render tick and kills all engines if the
@@ -14231,15 +14266,34 @@ window.NexusStrategies=exports;
   }
 
   function terminateAllEngines(reason) {
+    function forceStopTitan(eng) {
+      try {
+        if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
+        if (eng.modeSwitchTimer) { clearInterval(eng.modeSwitchTimer); eng.modeSwitchTimer = null; }
+        if (eng.stuckMonitor) { clearInterval(eng.stuckMonitor); eng.stuckMonitor = null; }
+        if (eng.pingInterval) { clearInterval(eng.pingInterval); eng.pingInterval = null; }
+        eng.executionGuard = false;
+        eng.pendingTrade = null;
+        eng.state = { ...eng.state, active: false, isLocked: false, isCooldown: false, currentStake: eng.config.stake, martingaleStep: 0, inRecovery: false };
+        eng.addLog('engine', 'TERMINATE', 'Force terminated by master control');
+        eng.emit && eng.emit();
+      } catch (_) {}
+    }
     BOT_IDS.forEach((id) => {
       const eng = engines[id];
       if (!eng) return;
       if (id === 'differ') {
-        try { eng.abortTrades(); eng.disarmSystem(); } catch(_) {}
+        try {
+          if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
+          if (eng.pingInterval) { clearInterval(eng.pingInterval); eng.pingInterval = null; }
+          if (eng.stuckMonitor) { clearInterval(eng.stuckMonitor); eng.stuckMonitor = null; }
+          eng.executionGuard = false; eng.pendingTrade = null;
+          eng.abortTrades(); eng.disarmSystem();
+          eng.addLog && eng.addLog('engine', 'TERMINATE', 'Force terminated by master control');
+          eng.emit && eng.emit();
+        } catch(_) {}
       } else {
-        if (eng.state.active || eng.state.isLocked) {
-          try { eng.toggleEngine(); } catch(_) {}
-        }
+        forceStopTitan(eng);
       }
     });
     // Flash the gate status badge
@@ -14311,6 +14365,7 @@ window.NexusStrategies=exports;
 
   function applyMasterTpSlToAllEngines() {
     const { tp, sl } = getMasterTpSl();
+    saveMasterGateValues(tp, sl);
     BOT_IDS.forEach((id) => {
       const eng = engines[id];
       if (!eng) return;
@@ -14350,9 +14405,38 @@ window.NexusStrategies=exports;
           }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
         } else {
+          // Consider an engine "on" only if actively running or locked (in the middle of a chain).
+          // Cooldown is treated as stopped so that master ENGAGE will clear cooldowns and restart fresh.
           const isOn = eng.state.active || eng.state.isLocked;
-          if (turnOn && !isOn) eng.toggleEngine();
-          if (!turnOn && isOn) eng.toggleEngine();
+          if (turnOn) {
+            // If engine is in cooldown, clear it and reset martingale state before starting
+            if (eng.state.isCooldown) {
+              try {
+                if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
+                eng.state = { ...eng.state, isCooldown: false, isLocked: false, active: false, currentStake: eng.config.stake, martingaleStep: 0, inRecovery: false };
+                eng.executionGuard = false;
+                eng.pendingTrade = null;
+                eng.addLog('engine', 'TERMINATE', 'Cooldown cleared by master control — preparing to ENGAGE');
+                eng.emit && eng.emit();
+              } catch (_) {}
+            }
+            if (!isOn) eng.toggleEngine();
+          } else {
+            if (isOn) {
+              if (eng.state.isCooldown) {
+                try {
+                  if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
+                  eng.state = { ...eng.state, isCooldown: false, isLocked: false, active: false, currentStake: eng.config.stake, martingaleStep: 0, inRecovery: false };
+                  eng.executionGuard = false;
+                  eng.pendingTrade = null;
+                  eng.addLog('engine', 'TERMINATE', 'Force terminated by master control during cooldown');
+                  eng.emit && eng.emit();
+                } catch (_) {}
+              } else {
+                eng.toggleEngine();
+              }
+            }
+          }
         }
       });
       // Update button label immediately after click
@@ -14380,6 +14464,20 @@ window.NexusStrategies=exports;
       if (e.target.id === 'dash-master-tp' || e.target.id === 'dash-master-sl') {
         applyMasterTpSlToAllEngines();
       }
+    });
+    document.addEventListener('input', (e) => {
+      if (e.target.id === 'dash-master-tp' || e.target.id === 'dash-master-sl') {
+        saveMasterGateValues(parseFloat(document.getElementById('dash-master-tp')?.value) || 50, parseFloat(document.getElementById('dash-master-sl')?.value) || 20);
+      }
+    });
+    document.addEventListener('click', (e) => {
+      const currencyBtn = e.target.closest('.dash-currency-btn');
+      if (!currencyBtn) return;
+      const selected = currencyBtn.dataset.currency;
+      if (window.HubStore && window.HubStore.setDisplayCurrency) {
+        window.HubStore.setDisplayCurrency(selected);
+      }
+      queueDashboardRender();
     });
   }
 
