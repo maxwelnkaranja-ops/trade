@@ -13121,6 +13121,19 @@ window.NexusStrategies=exports;
     return stage;
   }
 
+  function loadMasterGateValues() {
+    try {
+      const tp = parseFloat(localStorage.getItem('dash_master_tp'));
+      const sl = parseFloat(localStorage.getItem('dash_master_sl'));
+      return {
+        tp: !isNaN(tp) ? tp : 50,
+        sl: !isNaN(sl) ? sl : 20,
+      };
+    } catch (e) {
+      return { tp: 50, sl: 20 };
+    }
+  }
+
   function buildShell(root) {
     root.innerHTML = `
       <div class="dash-scroll">
@@ -14224,18 +14237,6 @@ window.NexusStrategies=exports;
     const tp = parseFloat((document.getElementById('dash-master-tp') || {}).value) || 50;
     const sl = parseFloat((document.getElementById('dash-master-sl') || {}).value) || 20;
     return { tp, sl };
-  }
-  function loadMasterGateValues() {
-    try {
-      const tp = parseFloat(localStorage.getItem('dash_master_tp'));
-      const sl = parseFloat(localStorage.getItem('dash_master_sl'));
-      return {
-        tp: !isNaN(tp) ? tp : 50,
-        sl: !isNaN(sl) ? sl : 20,
-      };
-    } catch (e) {
-      return { tp: 50, sl: 20 };
-    }
   }
   function saveMasterGateValues(tp, sl) {
     try { localStorage.setItem('dash_master_tp', tp.toString()); } catch (e) { /* ignore */ }
