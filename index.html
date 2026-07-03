@@ -10597,10 +10597,47 @@ window.NexusStrategies=exports;
       this.emit();
     }
 
-    _showCooldownOverlay(duration) {
+    // ── FORCED PAUSE (Stop Step 3) ──────────────────────────────────────────
+    // Unlike completeSession(), this does NOT reset martingaleStep/currentStake/
+    // inRecovery and does NOT switch markets — it just breathes for `seconds`
+    // then fires the next escalated recovery trade automatically. This is what
+    // makes "30s pause at Step 3" actually recover instead of quietly aborting.
+    _forcedPauseAndResume(seconds) {
+      this.executionGuard = false; this.pendingTrade = null;
+      this.state = { ...this.state, isLocked: false, isForcedPause: true };
+      this.cooldownTime = seconds;
+      this._cdMax = seconds;
+      if (this.cooldownTimer) clearInterval(this.cooldownTimer);
+      this._showCooldownOverlay(
+        seconds,
+        'FORCED PAUSE',
+        `⏱ Breathing room — recovery resumes @ $${this.state.currentStake.toFixed(2)}`,
+        { skipMarketScan: true }
+      );
+      this.cooldownTimer = setInterval(() => {
+        this.cooldownTime--;
+        this._updateCooldownOverlay(this.cooldownTime);
+        if (this.cooldownTime <= 0) {
+          clearInterval(this.cooldownTimer); this.cooldownTimer = null;
+          this._hideCooldownOverlay();
+          this.state = { ...this.state, isForcedPause: false, isLocked: true };
+          if (this.state.active) {
+            this.addLog('engine', 'RESUME', `▶ Resuming recovery — Step ${this.state.martingaleStep} @ $${this.state.currentStake.toFixed(2)}`);
+            this.executionGuard = false;
+            this.executeBoltPurchase();
+          }
+        }
+        this.emit();
+      }, 1000);
+      this.emit();
+    }
+    // ── END FORCED PAUSE ─────────────────────────────────────────────────────
+
+    _showCooldownOverlay(duration, title, subtitle, opts) {
       const rootId = this.id + '-root';
       const root = document.getElementById(rootId);
       if (!root) return;
+      const o = opts || {};
       let overlay = root.querySelector('.titan-cd-overlay');
       if (!overlay) {
         overlay = document.createElement('div');
@@ -10618,8 +10655,8 @@ window.NexusStrategies=exports;
             </svg>
             <div class="titan-cd-num">${duration}</div>
           </div>
-          <div class="titan-cd-title">COOLING DOWN</div>
-          <div class="titan-cd-sub">🔍 Scanning for best volatility market…</div>
+          <div class="titan-cd-title">${title || 'COOLING DOWN'}</div>
+          <div class="titan-cd-sub">${subtitle || '🔍 Scanning for best volatility market…'}</div>
           <div class="titan-cd-market font-mono" id="${rootId}-cd-market"></div>
         </div>`;
       overlay.style.display = 'flex';
@@ -10630,8 +10667,9 @@ window.NexusStrategies=exports;
         arc.style.strokeDashoffset = '0';
         setTimeout(() => { arc.style.strokeDashoffset = total.toFixed(1); arc.style.transition = `stroke-dashoffset ${duration}s linear`; }, 50);
       }
-      // Scan for best market and show it
-      if (this.scanner) {
+      // Scan for best market and show it — skip during a forced pause, since we
+      // deliberately stay on the same market/step rather than switching.
+      if (this.scanner && !o.skipMarketScan) {
         setTimeout(() => {
           const best = this.scanner.getGoldenMarkets ? (this.scanner.getGoldenMarkets()[0] || this.scanner.getBestMarket()) : this.scanner.getBestMarket();
           const mEl = document.getElementById(rootId + '-cd-market');
@@ -10732,7 +10770,11 @@ window.NexusStrategies=exports;
           const { stake } = this.T.calculateNextStake(this.state.currentStake, cfg.martingaleMultiplier, nextStep, cfg.martingaleStopStep);
           ns.currentStake = stake;
           if (nextStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
-            this.addLog('loss', 'CRITICAL', `STEP ${cfg.martingaleStopStep} LIMIT HIT — entering cooldown after this trade.`);
+            if (cfg.martingaleStopStep === 3) {
+              this.addLog('loss', 'CRITICAL', `STEP 3 CHECKPOINT HIT — 30s forced pause after this trade, then recovery continues.`);
+            } else {
+              this.addLog('loss', 'CRITICAL', `STEP ${cfg.martingaleStopStep} LIMIT HIT — entering cooldown after this trade.`);
+            }
           }
         }
       }
@@ -10761,8 +10803,18 @@ window.NexusStrategies=exports;
         this.addLog('engine', 'REWAIT', `Martingale OFF: Loss accepted → awaiting next entry signal`);
         return;
       }
-      // MAX RECOVERY STEP REACHED → cooldown (market switch needed)
-      if (st.isLocked && cfg.martingaleEnabled && st.martingaleStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
+      // STOP STEP 3 = "30s forced pause" mode: breathe, then KEEP recovering —
+      // this must never fall through to the hard-abort below, or step 3 just
+      // gives up like step 2/5 instead of actually recovering.
+      if (st.isLocked && cfg.martingaleEnabled && cfg.martingaleStopStep === 3 && st.martingaleStep >= 3 && st.inRecovery) {
+        this.addLog('loss', 'PAUSE', `STEP 3 CHECKPOINT — 30s forced pause, then resuming recovery @ $${st.currentStake.toFixed(2)}`);
+        this._forcedPauseAndResume(30);
+        return;
+      }
+      // MAX RECOVERY STEP REACHED → cooldown (market switch needed). Applies to
+      // Stop-at-2, Max-Recovery-5, and Deep-Recovery-4 once their cap is hit —
+      // 999 (Always Recover) and 3 (handled above) are excluded.
+      if (st.isLocked && cfg.martingaleEnabled && st.martingaleStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999 && cfg.martingaleStopStep !== 3) {
         this.addLog('loss', 'CRITICAL', `MAX RECOVERY STEP ${cfg.martingaleStopStep} REACHED — accepting loss, entering cooldown for market switch`);
         this.completeSession(); return;
       }
@@ -10791,7 +10843,17 @@ window.NexusStrategies=exports;
       if (health && health.longTerm === 'POOR') { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
       this.sound.playEngineStart();
       this.addLog('win', 'ENGINE', `STREAK HIT — FIRING CHAIN (${health?.longTerm || 'SCANNING'})`);
-      this.state = { ...this.state, isLocked: true, currentRuns: 0, martingaleStep: 0, inRecovery: false, currentStake: this.config.stake };
+      // FIX: only reset martingale/recovery state when we are NOT already
+      // mid-recovery. Previously this always reset martingaleStep/inRecovery/
+      // currentStake to base, which silently threw away the escalated stake
+      // set right after a loss (REWAIT mode releases the lock and waits for
+      // a fresh signal — that fresh signal re-enters here). That made
+      // "recovery mode" appear to never trigger even when enabled.
+      if (this.state.inRecovery) {
+        this.state = { ...this.state, isLocked: true, currentRuns: 0 };
+      } else {
+        this.state = { ...this.state, isLocked: true, currentRuns: 0, martingaleStep: 0, inRecovery: false, currentStake: this.config.stake };
+      }
       this.executeBoltPurchase();
     }
 
