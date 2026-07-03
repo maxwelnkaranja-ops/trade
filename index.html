@@ -7053,7 +7053,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
     getAuthenticatedWsUrl: () => Promise.reject(new Error('Use WS authorize flow')),
     getState: () => state,
     subscribe(cb) { listeners.add(cb); return () => listeners.delete(cb); },
-    setToken, setTheme, setTelegram, setTelegramEnabled, setAccountType, setAppId, setWsAppId, notifyTelegram, connectAccount,
+    setToken, setTheme, setTelegram, setTelegramEnabled, setDisplayCurrency, setAccountType, setAppId, setWsAppId, notifyTelegram, connectAccount,
     getDerivHistory: () => state.derivHistory,
     setBotEnabled, isBotEnabled,
   };
@@ -10568,7 +10568,7 @@ window.NexusStrategies=exports;
       // Reset martingale state so the NEXT session always starts from the base stake,
       // regardless of what step the current session ended on (stop-loss, max step, TP, etc.)
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false,
-        currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+        currentRuns: 0, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
       const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
       this._cdMax = cd; // store for tab ring arc
@@ -10606,7 +10606,15 @@ window.NexusStrategies=exports;
           if (this.config.autoPilot) {
             setTimeout(() => {
               if (!this.state.isCooldown) {
-                this.state.active = true;
+                this.state = {
+                  ...this.state,
+                  active: true,
+                  isLocked: false,
+                  currentRuns: 0,
+                  currentStake: this.config.stake,
+                  martingaleStep: 0,
+                  inRecovery: false,
+                };
                 this.addLog('engine', 'ENGINE', 'Auto-restart engaged — waiting for triggers');
                 this.emit();
               }
