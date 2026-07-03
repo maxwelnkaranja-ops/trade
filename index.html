@@ -10443,12 +10443,11 @@ window.NexusStrategies=exports;
             this.addLog('engine', 'SMART-REC', `Smart: ODD ${(oddPct*100).toFixed(0)}% → betting ${contractType.replace('DIGIT','')}`);
           } else if (cfg.alternatingRecovery) {
             // ── 🔄 Alt Mode A ───────────────────────────────────────────────────
-            // UI pattern (ODD base): ODD → EVEN → ODD×2 → EVEN → …
-            //                        step:  1      2       3       4
-            //   i.e. step 1 = flip to EVEN; step 2 = back to ODD; step 3 = ODD; step 4 = EVEN …
-            //   Pattern rule: EVEN on steps where (step % 3 === 1), else same parity.
+            // UI pattern (base parity): same → opposite → same → same → opposite → …
+            //   step 1 = base parity, step 2 = flipped, step 3 = base, step 4 = base.
+            //   Pattern rule: flip only on steps where (step % 3 === 2).
             const step = st.martingaleStep; // already incremented in handleContractResult
-            const flipToOpposite = (step % 3 === 1);
+            const flipToOpposite = (step % 3 === 2);
             contractType = flipToOpposite
               ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
               : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
@@ -10495,15 +10494,14 @@ window.NexusStrategies=exports;
           } else if (cfg.alternatingRecovery) {
             // ── 🔄 Alt Mode A ─────────────────────────────────────────────────────────────
             // Pattern: loss occurs on OVER barrier → recovery sequence:
-            //   step 1 = OVER recoveryBarrier  (standard start)
-            //   step 2 = OVER recoveryBarrier  (continue OVER)
-            //   step 3 = UNDER (9-rec) flipped (3rd step confuses Deriv pattern detection)
-            //   step 4 = OVER recoveryBarrier  (back to OVER)
-            //   step 5 = OVER recoveryBarrier
-            //   step 6 = UNDER (9-rec)  → repeats every 3rd step
-            //   Rule: flip to UNDER only when step % 3 === 0 (steps 3, 6, 9…)
+            //   step 1 = OVER recoveryBarrier
+            //   step 2 = UNDER (9-rec)
+            //   step 3 = OVER recoveryBarrier
+            //   step 4 = OVER recoveryBarrier
+            //   repeat with UNDER on step 5, 8, ...
+            //   Rule: flip to UNDER only when step % 3 === 2.
             const step = st.martingaleStep;
-            if (step > 0 && step % 3 === 0) {
+            if (step > 0 && step % 3 === 2) {
               contractType = 'DIGITUNDER';
               barrierValue = 9 - cfg.recoveryBarrier;
             }
@@ -10814,7 +10812,7 @@ window.NexusStrategies=exports;
 
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
-      if (cfg.autoPilot && st.active) {
+      if (st.active) {
         if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); showCongratulationsPopup(cfg.takeProfit); this.completeSession(); return; }
         if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); this.completeSession(); return; }
       }
@@ -10861,21 +10859,19 @@ window.NexusStrategies=exports;
 
     startChainExecution() {
       if (this.executionGuard) return;
+      if (!this.state.active || this.state.isCooldown) return;
       this.executionGuard = true;
       const health = this.socket.getHealth(this.config.selectedMarket);
       if (health && health.longTerm === 'POOR') { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
       this.sound.playEngineStart();
       this.addLog('win', 'ENGINE', `STREAK HIT — FIRING CHAIN (${health?.longTerm || 'SCANNING'})`);
-      // FIX: only reset martingale/recovery state when we are NOT already
-      // mid-recovery. Previously this always reset martingaleStep/inRecovery/
-      // currentStake to base, which silently threw away the escalated stake
-      // set right after a loss (REWAIT mode releases the lock and waits for
-      // a fresh signal — that fresh signal re-enters here). That made
-      // "recovery mode" appear to never trigger even when enabled.
+      // Only reset base chain state when we are NOT already mid-recovery.
+      // currentRuns is preserved throughout the active session so target-runs
+      // count is not erased by every new signal.
       if (this.state.inRecovery) {
-        this.state = { ...this.state, isLocked: true, currentRuns: 0 };
+        this.state = { ...this.state, isLocked: true };
       } else {
-        this.state = { ...this.state, isLocked: true, currentRuns: 0, martingaleStep: 0, inRecovery: false, currentStake: this.config.stake };
+        this.state = { ...this.state, isLocked: true, martingaleStep: 0, inRecovery: false, currentStake: this.config.stake };
       }
       this.executeBoltPurchase();
     }
@@ -11036,14 +11032,33 @@ window.NexusStrategies=exports;
         this.addLog('error', 'ENGINE', `${this.botLabel} is disabled — enable it from the Dashboard first`);
         return;
       }
-      if (newActive) { this.sound.playEngineStart(); this.executionGuard = false; this.pendingTrade = null; }
-      else {
-        this.sound.playEngineStop(); this.executionGuard = false; this.pendingTrade = null; this.strategyPhase = 'idle';
-        // Reset martingale so next session starts clean from base stake
-        this.state = { ...this.state, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+      this.executionGuard = false;
+      this.pendingTrade = null;
+      if (newActive) {
+        this.sound.playEngineStart();
+        this.state = {
+          ...this.state,
+          active: true,
+          isLocked: false,
+          currentRuns: 0,
+          currentStake: this.config.stake,
+          martingaleStep: 0,
+          inRecovery: false,
+        };
+      } else {
+        this.sound.playEngineStop();
+        this.strategyPhase = 'idle';
+        this.state = {
+          ...this.state,
+          active: false,
+          isLocked: false,
+          currentRuns: 0,
+          currentStake: this.config.stake,
+          martingaleStep: 0,
+          inRecovery: false,
+        };
       }
       this.addLog('engine', 'ENGINE', newActive ? 'OMEGA Strategy Engaged' : 'Session Terminated');
-      this.state = { ...this.state, active: newActive, isLocked: newActive ? this.state.isLocked : false };
       this.emit();
     }
 
