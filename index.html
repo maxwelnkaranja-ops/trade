@@ -7537,9 +7537,20 @@ window.EvenTrading = exports;
           setTimeout(() => resolve(), 500);
           return;
         }
+        let settled = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          this.isConnecting = false;
+          resolve();
+        };
+        const timeoutId = setTimeout(() => {
+          settle();
+        }, 12000);
         this.isConnecting = true;
         this.socket = new WebSocket(getWsUrl());
         this.socket.onopen = () => {
+          clearTimeout(timeoutId);
           this.isConnecting = false;
           this.reconnectAttempts = 0;
           if (this.pingInterval) clearInterval(this.pingInterval);
@@ -7551,7 +7562,7 @@ window.EvenTrading = exports;
           this.subscriptions.forEach((_, symbol) => {
             if (this.socket) this.socket.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
           });
-          resolve();
+          settle();
         };
         this.socket.onmessage = (msg) => {
           try {
@@ -7589,6 +7600,7 @@ window.EvenTrading = exports;
               clearTimeout(el._hideTimer);
               el._hideTimer = setTimeout(() => el.classList.remove('show'), 10000);
             }
+            settle();
           }
         };
       });
@@ -12817,7 +12829,7 @@ window.NexusStrategies=exports;
       if (digit.textContent !== newDigitText) digit.textContent = newDigitText;
       digit.style.boxShadow = snap.pendingTrade
         ? '0 0 24px hsl(var(--accent)/0.65),0 0 48px hsl(var(--accent)/0.18)'
-        : 'none';
+        : '';
       if (digit.className !== 'digit-pad text-primary') digit.className = 'digit-pad text-primary';
     }
     const badge = el(`${rootId}-badge`);
@@ -13886,7 +13898,9 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  let activeApp = localStorage.getItem('hub_active_app') || 'dashboard';
+  const VALID_APPS = ['dashboard', 'differ', 'even', 'odd', 'nexus'];
+  let activeApp = localStorage.getItem('hub_active_app');
+  if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
   const engines = { differ: null, even: null, odd: null, nexus: null };
@@ -13899,6 +13913,7 @@ window.NexusStrategies=exports;
   }
 
   function renderDashboard() {
+    if (!dashboardEl) dashboardEl = document.getElementById('dashboard-root');
     if (!dashboardEl || !window.DashboardUI) return;
     window.DashboardUI.render(dashboardEl, engines);
   }
@@ -13914,6 +13929,7 @@ window.NexusStrategies=exports;
     };
     engines.differ = eng;
     window.benzEngine = eng; // back-compat for code/snippets that reach for this directly
+    if (eng.emit) eng.emit();
     return eng;
   }
 
@@ -13948,6 +13964,7 @@ window.NexusStrategies=exports;
       if (activeApp === 'dashboard') queueDashboardRender();
     };
     engines[id] = eng;
+    if (eng.emit) eng.emit();
     return eng;
   }
 
@@ -13966,6 +13983,7 @@ window.NexusStrategies=exports;
   }
 
   function switchApp(id) {
+    if (!VALID_APPS.includes(id)) id = 'dashboard';
     activeApp = id;
     try { localStorage.setItem('hub_active_app', id); } catch (e) { /* storage unavailable — tab still switches for this session */ }
     const activeBtn = document.querySelector(`.hub-tab[data-app="${id}"]`);
@@ -13973,8 +13991,12 @@ window.NexusStrategies=exports;
     document.querySelectorAll('.app-panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + id));
     const crumb = document.getElementById('hub-breadcrumb-current');
     if (crumb && activeBtn) crumb.textContent = activeBtn.dataset.label || activeBtn.textContent.trim();
-    if (id === 'dashboard') queueDashboardRender();
-    else initBotTab(id);
+    if (id === 'dashboard') {
+      queueDashboardRender();
+      renderDashboard();
+    } else {
+      initBotTab(id);
+    }
   }
 
   function bindHubTabs() {
@@ -14387,7 +14409,7 @@ window.NexusStrategies=exports;
     try { ensureDifferEngine(); } catch(e) { console.error('[Hub] ensureDifferEngine error:', e); }
     try { ['even', 'odd', 'nexus'].forEach(ensureTitanEngine); } catch(e) { console.error('[Hub] ensureTitanEngine error:', e); }
     try { bindHubTabs(); } catch(e) { console.error('[Hub] bindHubTabs error:', e); }
-    try { queueDashboardRender(); } catch(e) { console.error('[Hub] queueDashboardRender error:', e); }
+    try { queueDashboardRender(); renderDashboard(); } catch(e) { console.error('[Hub] queueDashboardRender error:', e); }
     setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); checkPnlGate(); maybeResetGateLatch(); } catch(e){} }, 3000);
   }
 
