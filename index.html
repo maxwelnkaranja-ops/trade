@@ -102,7 +102,7 @@
     </aside>
 
     <div class="hub-main">
-      <header class="hub-header" style="display:none">
+      <header class="hub-header" style="display:flex;align-items:center;gap:12px">
         <div class="hub-breadcrumb font-mono">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/></svg>
           <span>Overview</span>
@@ -110,6 +110,7 @@
           <span class="crumb-current" id="hub-breadcrumb-current">Dashboard</span>
         </div>
         <div class="hub-header-right">
+          <button type="button" id="hub-global-save-btn" title="Save settings on every tab" style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:10px;border:1.5px solid hsl(var(--primary)/0.5);background:linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08));color:hsl(var(--primary));font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;letter-spacing:1.5px;cursor:pointer;white-space:nowrap">💾 <span>SAVE SETTINGS</span></button>
           <div class="hub-clock font-mono" id="hub-clock">--:--:--</div>
           <div class="hub-live-badge" id="hub-live-badge"><span class="dot"></span><span id="hub-live-text">Offline</span></div>
         </div>
@@ -9849,7 +9850,7 @@ window.NexusStrategies=exports;
           if (s.experiment?.isRunning) s.experiment.trades = [...s.experiment.trades, entry];
           break;
         }
-        case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; break;
+        case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; this._tpSlLatched = false; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'SET_LUCKY': s.luckyNumber = action.value; break;
         case 'SET_RECOMMENDED_MARKET': s.recommendedMarket = action.market; s.analysisConfidence = action.confidence; break;
@@ -9969,15 +9970,11 @@ window.NexusStrategies=exports;
             const { cold, third } = getColdestDigits(freqP);
             this.dispatch({ type: 'SET_COLD', cold, third });
             this.dispatch({ type: 'SET_LUCKY', value: determineLuckyNumber(cs.coldStreakHistory) });
-            if (cs.totalProfit >= cs.takeProfit) {
-              const m = `🏆 TAKE PROFIT reached: ${cs.totalProfit.toFixed(2)}`;
-              this.dispatch({ type: 'NOTIFY', message: m, ntype: 'win' });
-              window.HubStore.notifyTelegram(m);
-            } else if (cs.totalProfit < 0 && Math.abs(cs.totalProfit) >= cs.stopLoss) {
-              const m = `🛑 STOP LOSS reached: ${cs.totalProfit.toFixed(2)}`;
-              this.dispatch({ type: 'NOTIFY', message: m, ntype: 'loss' });
-              window.HubStore.notifyTelegram(m);
-            } else {
+            // TP/SL is now enforced the instant a trade result lands (see
+            // ownContractIds handler above) rather than waiting for cooldown
+            // to end, so by the time we get here the engine has already been
+            // force-disarmed if the target was hit. Only re-arm if it wasn't.
+            if (!this._tpSlLatched) {
               this.dispatch({ type: 'ARM' });
               this.dispatch({ type: 'NOTIFY', message: `🔄 Re-armed — Differ ≠${cold} | CD: ${duration}s`, ntype: 'info' });
             }
@@ -10147,6 +10144,30 @@ window.NexusStrategies=exports;
                     _self.dispatch({ type: 'NOTIFY', message: '⛔ ABORT triggered — loss detected', ntype: 'loss' });
                   }
                 }
+                // ── HARD TP/SL ENFORCEMENT ──────────────────────────────────
+                // Fires the instant net P/L crosses the target the user set,
+                // independent of Auto Mode (previously this only got checked
+                // at cooldown-end, and only when Auto Mode was on). Pops a
+                // modal like the other engines and forces the bot to stop —
+                // it will not silently keep firing past the limit.
+                const _netPl = _self.state.totalProfit;
+                const _tpTarget = _self.state.takeProfit;
+                const _slTarget = _self.state.stopLoss;
+                if (!_self._tpSlLatched) {
+                  if (_tpTarget > 0 && _netPl >= _tpTarget) {
+                    _self._tpSlLatched = true;
+                    showResultPopup('tp', _tpTarget, _netPl);
+                    _self.dispatch({ type: 'NOTIFY', message: `🏆 TAKE PROFIT reached: ${_netPl.toFixed(2)} — engine stopped`, ntype: 'win' });
+                    window.HubStore.notifyTelegram(`🏆 Differ TAKE PROFIT reached: ${_netPl.toFixed(2)} — engine stopped`);
+                    _self.abortTrades(); _self.disarmSystem();
+                  } else if (_slTarget > 0 && _netPl <= -_slTarget) {
+                    _self._tpSlLatched = true;
+                    showResultPopup('sl', _slTarget, _netPl);
+                    _self.dispatch({ type: 'NOTIFY', message: `🛑 STOP LOSS reached: ${_netPl.toFixed(2)} — engine stopped`, ntype: 'loss' });
+                    window.HubStore.notifyTelegram(`🛑 Differ STOP LOSS reached: ${_netPl.toFixed(2)} — engine stopped`);
+                    _self.abortTrades(); _self.disarmSystem();
+                  }
+                }
               }
             }
             if (d.msg_type === 'buy') {
@@ -10225,6 +10246,7 @@ window.NexusStrategies=exports;
       if (!window.HubStore.isBotEnabled('differ')) { this.dispatch({ type: 'NOTIFY', message: 'Differ bot is disabled — enable it from the Dashboard first', ntype: 'loss' }); return; }
       if (!s.isAuthenticated) { this.dispatch({ type: 'NOTIFY', message: 'Add your API token in Settings first', ntype: 'loss' }); return; }
       if (s.coldDigit === null) { this.dispatch({ type: 'NOTIFY', message: 'Waiting for analysis — cold digit not yet determined', ntype: 'info' }); return; }
+      this._tpSlLatched = false; // fresh manual arm — allow the TP/SL gate to fire again
       this.dispatch({ type: 'ARM' });
       this.dispatch({ type: 'NOTIFY', message: `⚡ BOLT ARMED — Differ ≠${s.coldDigit} | Trigger at ${s.silenceTrigger}`, ntype: 'info' });
     }
@@ -10251,19 +10273,29 @@ window.NexusStrategies=exports;
   function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
   const ANALYSIS_HOLD = 20;
 
-  function showCongratulationsPopup(target) {
+  // Generalized TP/SL popup — kind: 'tp' (win/green) or 'sl' (loss/red).
+  // Kept the old name as a thin wrapper so existing call sites keep working.
+  function showResultPopup(kind, target, netValue) {
     const existing = document.getElementById('benz-congrats-popup');
     if (existing) existing.remove();
+    const isTp = kind !== 'sl';
+    const color = isTp ? '#48ffa7' : '#ff5c6a';
+    const rgb = isTp ? '72,255,167' : '255,92,106';
+    const icon = isTp ? '🏆' : '🛑';
+    const title = isTp ? 'Take Profit Hit!' : 'Stop Loss Hit!';
+    const bodyLabel = isTp ? 'Target' : 'Limit';
+    const netTxt = (netValue !== undefined && netValue !== null) ? ` · Net P/L: <b style="color:${color}">$${Number(netValue).toFixed(2)}</b>` : '';
     const div = document.createElement('div');
     div.id = 'benz-congrats-popup';
-    div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(72,255,167,0.12),rgba(0,200,120,0.08));border:1px solid rgba(72,255,167,0.5);border-radius:20px;padding:32px 40px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 60px rgba(72,255,167,0.2),0 20px 60px rgba(0,0,0,0.5);backdrop-filter:blur(24px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;cursor:pointer;min-width:260px';
-    div.innerHTML = `<div style="font-size:2.8rem;margin-bottom:10px">🏆</div><div style="font-size:18px;font-weight:900;letter-spacing:3px;color:#48ffa7;text-transform:uppercase;margin-bottom:8px">Take Profit Hit!</div><div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:14px">Target of <b style="color:#48ffa7">$${Number(target).toFixed(2)}</b> reached 🎉</div><div style="font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.4);text-transform:uppercase">Session Complete · Tap to dismiss</div>`;
+    div.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(${rgb},0.12),rgba(${rgb},0.08));border:1px solid rgba(${rgb},0.5);border-radius:20px;padding:32px 40px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 60px rgba(${rgb},0.2),0 20px 60px rgba(0,0,0,0.5);backdrop-filter:blur(24px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;cursor:pointer;min-width:260px`;
+    div.innerHTML = `<div style="font-size:2.8rem;margin-bottom:10px">${icon}</div><div style="font-size:18px;font-weight:900;letter-spacing:3px;color:${color};text-transform:uppercase;margin-bottom:8px">${title}</div><div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:14px">${bodyLabel} of <b style="color:${color}">$${Number(target).toFixed(2)}</b> reached${isTp ? ' 🎉' : ''}${netTxt}</div><div style="font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.4);text-transform:uppercase">Session Stopped · Tap to dismiss</div>`;
     document.body.appendChild(div);
     requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translate(-50%,-50%) scale(1)'; });
     const dismiss = () => { div.style.opacity = '0'; div.style.transform = 'translate(-50%,-50%) scale(0.85)'; setTimeout(() => { try { div.remove(); } catch(_) {} }, 350); };
     setTimeout(dismiss, 6000);
     div.onclick = dismiss;
   }
+  function showCongratulationsPopup(target) { showResultPopup('tp', target); }
 
   class TitanEngine {
     constructor(opts) {
@@ -10640,7 +10672,10 @@ window.NexusStrategies=exports;
         this._updateCooldownOverlay(this.cooldownTime);
         if (this.cooldownTime <= 0) {
           clearInterval(this.cooldownTimer); this.cooldownTimer = null;
-          this.state = { ...this.state, isCooldown: false };
+          // HARD FORCE: stake/martingale step always snap back to the base
+          // stake the instant cooldown ends, no matter what step/TP/SL/abort
+          // path got us here, and regardless of whether Auto Pilot is on.
+          this.state = { ...this.state, isCooldown: false, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
           this._hideCooldownOverlay();
           // Market switch: find best market
           if (this.scanner) {
@@ -10863,8 +10898,8 @@ window.NexusStrategies=exports;
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
       if (st.active) {
-        if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); showCongratulationsPopup(cfg.takeProfit); this.completeSession(); return; }
-        if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); this.completeSession(); return; }
+        if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); showResultPopup('tp', cfg.takeProfit, st.stats.profit); this.completeSession(); return; }
+        if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); showResultPopup('sl', cfg.stopLoss, st.stats.profit); this.completeSession(); return; }
       }
       // REWAIT mode removed: stop-at-1 behavior is no longer supported.
       // MARTINGALE DISABLED: after any loss, release lock so bot picks up next signal naturally
@@ -11476,11 +11511,11 @@ window.NexusStrategies=exports;
       if (sb) { sb.style.borderColor = 'hsl(var(--primary)/0.5)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08))'; sb.style.color = 'hsl(var(--primary))'; }
       setTimeout(() => { const s2 = el('differ-save-status'); if (s2) { s2.textContent = 'Unsaved changes lost on reload'; s2.style.color = 'hsl(var(--muted-foreground)/0.5)'; } }, 2500);
     }
-    ['differ-stake','differ-batch','differ-trigger','differ-autobatch','differ-speed','differ-tp','differ-sl'].forEach(id => {
-      const inp = el(id); if (inp) { inp.oninput = differMarkDirty; inp.onchange = differMarkDirty; }
-    });
-    const differSaveBtn = el('differ-save-btn');
-    if (differSaveBtn) differSaveBtn.onclick = () => {
+    // Commits every field currently shown in the panel to the engine (which
+    // persists to localStorage on each SET_* dispatch). Used by the per-tab
+    // Save button AND by the global navbar "Save Settings" button, so a value
+    // typed but not yet blurred/committed is never silently lost on refresh.
+    function differCommitAllFields() {
       const stakeEl   = el('differ-stake');
       const batchEl   = el('differ-batch');
       const trigEl    = el('differ-trigger');
@@ -11495,9 +11530,23 @@ window.NexusStrategies=exports;
       if (speedEl)  { const v = parseInt(speedEl.value);                                  eng.dispatch({ type: 'SET_SPEED',      value: v }); }
       if (tpEl)     { const v = parseFloat(tpEl.value);      if (!isNaN(v))              eng.dispatch({ type: 'SET_TP',         value: Math.max(0, v) }); }
       if (slEl)     { const v = parseFloat(slEl.value);      if (!isNaN(v))              eng.dispatch({ type: 'SET_SL',         value: Math.max(0, v) }); }
-      differMarkSaved();
-    };
-    el('differ-autobatch') && (el('differ-autobatch').oninput = differMarkDirty);
+    }
+    // Expose so the global navbar Save button (shared across all tabs) can
+    // force-commit whatever is currently sitting in these inputs.
+    global.BenzUI = global.BenzUI || {};
+    global.BenzUI.commitPendingSettings = () => { differCommitAllFields(); differMarkSaved(); };
+    ['differ-stake','differ-batch','differ-trigger','differ-autobatch','differ-speed','differ-tp','differ-sl'].forEach(id => {
+      const inp = el(id);
+      if (inp) {
+        inp.oninput = differMarkDirty;
+        // Autosave the instant the field is committed (blur / Enter / stepper
+        // click) — matches how the Even/Odd/Over-Under tabs already behave,
+        // so values are never lost just because the Save button wasn't clicked.
+        inp.onchange = () => { differCommitAllFields(); differMarkSaved(); };
+      }
+    });
+    const differSaveBtn = el('differ-save-btn');
+    if (differSaveBtn) differSaveBtn.onclick = () => { differCommitAllFields(); differMarkSaved(); };
     el('differ-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
     el('differ-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
   }
@@ -14567,6 +14616,47 @@ window.NexusStrategies=exports;
     return id === 'differ' ? ensureDifferEngine() : ensureTitanEngine(id);
   }
 
+  // ── GLOBAL "SAVE SETTINGS" BUTTON ───────────────────────────────────────
+  // Lives in the shared header so it's visible no matter which tab you're
+  // on. Force-commits whatever is sitting in every tab's input fields (the
+  // Differ tab requires an explicit commit; Even/Odd/Over-Under already
+  // autosave on every change, but we re-persist them too as a safety net)
+  // so "finish editing everywhere, press Save once" actually works.
+  function saveAllSettings() {
+    let savedAny = false;
+    try {
+      if (window.BenzUI && typeof window.BenzUI.commitPendingSettings === 'function') {
+        window.BenzUI.commitPendingSettings();
+        savedAny = true;
+      }
+    } catch (e) { console.error('[Hub] Differ save error:', e); }
+    ['even', 'odd', 'nexus'].forEach((id) => {
+      const eng = engines[id];
+      if (eng && typeof eng.saveConfig === 'function') {
+        try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
+      }
+    });
+    const toast = document.getElementById('global-error-toast');
+    if (toast) {
+      toast.textContent = savedAny ? '✅ Settings saved on every tab' : '⚠ Nothing to save yet';
+      toast.style.background = savedAny ? 'hsl(var(--win)/0.15)' : '';
+      toast.style.borderColor = savedAny ? 'hsl(var(--win)/0.5)' : '';
+      toast.style.color = savedAny ? 'hsl(var(--win))' : '';
+      toast.classList.add('show');
+      setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 2500);
+    }
+  }
+
+  function bindGlobalSaveButton() {
+    const btn = document.getElementById('hub-global-save-btn');
+    if (!btn) return;
+    btn.onclick = () => {
+      saveAllSettings();
+      btn.style.transform = 'scale(0.94)';
+      setTimeout(() => { btn.style.transform = ''; }, 150);
+    };
+  }
+
   function refreshTabDots() {
     BOT_IDS.forEach((id) => {
       const dot = document.querySelector(`.hub-tab[data-app="${id}"] .dot`);
@@ -14582,6 +14672,7 @@ window.NexusStrategies=exports;
     try { refreshTopbar(); } catch(e) { console.error('[Hub] refreshTopbar error:', e); }
     dashboardEl = document.getElementById('dashboard-root');
     try { bindMasterControl(); } catch(e) { console.error('[Hub] bindMasterControl error:', e); }
+    try { bindGlobalSaveButton(); } catch(e) { console.error('[Hub] bindGlobalSaveButton error:', e); }
     // Start all four engines' public analysis sockets immediately, regardless
     // of which tab is active — ticks/digits should be live the moment the
     // page loads, not only after a tab is opened. Trading sockets inside
