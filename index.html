@@ -12250,12 +12250,16 @@ window.NexusStrategies=exports;
 
         <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
         <div style="display:flex;flex-direction:column;gap:5px">
-          ${[
-            {id:'plain', icon:'💡', title:'Standard', desc:isOver?`OVER ${c.recoveryBarrier} every step — pure martingale`:`Stays on ${(c.tradeMode||'odd').toUpperCase()} — pure martingale`, sel:!c.alternatingRecovery&&!c.alternatingRecoveryB&&!c.smartRecovery},
-            {id:'altA',  icon:'🔄', title:'Alt Mode A', desc:isOver?'Loss→OVER rec, 3rd step flips UNDER to confuse Deriv':'Loss→EVEN, 3rd step flips UNDER, then back — anti-pattern', sel:c.alternatingRecovery&&!c.smartRecovery},
-            {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:isOver?'Loss→UNDER first, then OVER×2, UNDER, OVER×2 cycle':'Loss→UNDER first, OVER×2 block — opposite entry to Alt A', sel:c.alternatingRecoveryB&&!c.smartRecovery},
-            {id:'smart', icon:'🧠', title:'Smart Toggle', desc:isOver?'Reads last 25 ticks; bets OVER or UNDER based on which side is starved':'Reads last 20 ticks; bets ODD or EVEN based on which appears less', sel:c.smartRecovery},
-          ].map(rm=>`
+          ${(() => {
+            const base = isOver ? 'OVER' : (c.tradeMode === 'odd' ? 'ODD' : 'EVEN');
+            const opp  = isOver ? 'UNDER' : (c.tradeMode === 'odd' ? 'EVEN' : 'ODD');
+            return [
+              {id:'plain', icon:'💡', title:'Standard', desc:isOver?`OVER ${c.recoveryBarrier} every step — pure martingale`:`Stays on ${base} every step — pure martingale`, sel:!c.alternatingRecovery&&!c.alternatingRecoveryB&&!c.smartRecovery},
+              {id:'altA',  icon:'🔄', title:'Alt Mode A', desc:`Stays ${base}, flips to ${opp} every 3rd step (2, 5, 8…) — anti-pattern`, sel:c.alternatingRecovery&&!c.smartRecovery},
+              {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:`Opens on ${opp} immediately, back to ${base} for 2 steps, repeats every 3rd step (1, 4, 7…) — mirrors Alt A`, sel:c.alternatingRecoveryB&&!c.smartRecovery},
+              {id:'smart', icon:'🧠', title:'Smart Toggle', desc:isOver?'Reads last 25 ticks; bets OVER or UNDER based on which side is starved':'Reads last 20 ticks; bets ODD or EVEN based on which appears less', sel:c.smartRecovery},
+            ];
+          })().map(rm=>`
           <div class="cp-mart-card ${rm.sel?'selected':''}" data-rmode="${rm.id}" id="${rootId}-rmode-${rm.id}">
             <div style="display:flex;align-items:center;gap:8px">
               <span style="font-size:14px">${rm.icon}</span>
