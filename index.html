@@ -1366,6 +1366,72 @@ body {
 *::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .35); }
 
 /* ──────────────────────────────────────────────────────────────
+   MODERN POLISH — keyboard accessibility, mobile touch, skeletons
+   (additive layer; existing component styles above/below still win)
+   ────────────────────────────────────────────────────────────── */
+
+/* Mouse/touch clicks stay clean (no ring), keyboard nav gets a clear,
+   on-brand ring — the outline:none scattered through this file was never
+   paired with a focus-visible fallback, which is an accessibility gap. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid hsl(var(--primary) / .8) !important;
+  outline-offset: 2px !important;
+  border-radius: 6px;
+  transition: outline-color .15s ease;
+}
+button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible {
+  box-shadow: 0 0 0 4px hsl(var(--primary) / .18) !important;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline-offset: 0 !important;
+}
+
+/* Mobile: respect notches/home-indicator, kill the gray tap-flash on
+   touch, and let taps register instantly instead of waiting on the
+   default 300ms double-tap detection delay. */
+html { -webkit-tap-highlight-color: transparent; }
+button, a, [role="button"], .btn-primary, .btn-danger, .btn-omega, .btn-engage {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.hub-header {
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
+  padding-top: max(8px, env(safe-area-inset-top));
+}
+@supports (padding: max(0px)) {
+  body { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* Baseline press-down feedback for any interactive element that doesn't
+   already define its own :active transform elsewhere in the file — a
+   quiet fallback, not a replacement for the richer per-component ones. */
+button, .btn-primary, .btn-danger, .btn-omega, .btn-engage, [role="button"] {
+  transition: transform .12s cubic-bezier(.34,1.56,.64,1), filter .12s ease, box-shadow .18s ease;
+}
+button:active, [role="button"]:active { transform: scale(.96); }
+
+/* Reusable shimmer-skeleton utility for any loading placeholder — reuses
+   the shimmer keyframe already defined above rather than adding a new one.
+   Usage: <div class="skeleton" style="width:120px;height:14px"></div> */
+.skeleton {
+  display: inline-block;
+  border-radius: 6px;
+  background: linear-gradient(90deg,
+    hsl(var(--card-2, var(--card))) 25%,
+    hsl(var(--border-bright, var(--border))) 50%,
+    hsl(var(--card-2, var(--card))) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.skeleton-text { height: 0.85em; width: 100%; margin: 2px 0; }
+.skeleton-circle { border-radius: 50%; }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; opacity: .5; }
+}
+
+/* ──────────────────────────────────────────────────────────────
    SHELL — sidebar + main column, dead black with subtle depth
    ────────────────────────────────────────────────────────────── */
 .hub-shell {
@@ -10536,17 +10602,15 @@ window.NexusStrategies=exports;
             this.addLog('engine', 'ALT-A', `AltA step ${step}: ${contractType.replace('DIGIT','')}`);
           } else if (cfg.alternatingRecoveryB) {
             // ── 🔁 Alt Mode B ───────────────────────────────────────────────────
-            // UI pattern (ODD base): EVEN → ODD×2 → EVEN → ODD×2 → …
-            //                        step:  1        2  3    4        5  6
-            //   Pattern rule: EVEN on steps where (step % 3 === 1), else ODD.
-            //   Same numeric rule as Alt A but starting direction is opposite (EVEN first).
+            // Mirror image of Alt A: flips to the opposite parity FIRST (step 1),
+            // then base, base, flip again — flip at steps 1, 4, 7…
+            //   EVEN bot: ODD → EVEN → EVEN → ODD → EVEN → EVEN → ODD …
+            //   ODD  bot: EVEN → ODD → ODD → EVEN → ODD → ODD → EVEN … (mirrored)
             const step = st.martingaleStep;
             const flipToOpposite = (step % 3 === 1);
             contractType = flipToOpposite
               ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
               : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
-            // Alt B always starts EVEN on step 1 regardless of base mode, for both ODD & EVEN bots
-            if (step === 1) contractType = 'DIGITEVEN';
             this.addLog('engine', 'ALT-B', `AltB step ${step}: ${contractType.replace('DIGIT','')}`);
           }
         }
@@ -10709,11 +10773,11 @@ window.NexusStrategies=exports;
       this.emit();
     }
 
-    // ── FORCED PAUSE (Stop Step 3) ──────────────────────────────────────────
-    // Unlike completeSession(), this does NOT reset martingaleStep/currentStake/
-    // inRecovery and does NOT switch markets — it just breathes for `seconds`
-    // then fires the next escalated recovery trade automatically. This is what
-    // makes "30s pause at Step 3" actually recover instead of quietly aborting.
+    // ── FORCED PAUSE (Stop Step 3) — DEPRECATED, no longer called ──────────
+    // Previously resumed the escalated recovery stake after a 30s breather.
+    // Per explicit instruction, Step 3 now hard-resets via completeSession()
+    // instead (see checkStopLoss/loss handler above), so this never fires.
+    // Left in place only in case older saved configs still reference it.
     _forcedPauseAndResume(seconds) {
       this.executionGuard = false; this.pendingTrade = null;
       this.state = { ...this.state, isLocked: false, isForcedPause: true };
@@ -10883,7 +10947,7 @@ window.NexusStrategies=exports;
           ns.currentStake = stake;
           if (nextStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
             if (cfg.martingaleStopStep === 3) {
-              this.addLog('loss', 'CRITICAL', `STEP 3 CHECKPOINT HIT — 30s forced pause after this trade, then recovery continues.`);
+              this.addLog('loss', 'CRITICAL', `STEP 3 LIMIT HIT — accepting loss, resetting to base stake after this trade.`);
             } else {
               this.addLog('loss', 'CRITICAL', `STEP ${cfg.martingaleStopStep} LIMIT HIT — entering cooldown after this trade.`);
             }
@@ -10909,12 +10973,17 @@ window.NexusStrategies=exports;
         this.addLog('engine', 'REWAIT', `Martingale OFF: Loss accepted → awaiting next entry signal`);
         return;
       }
-      // STOP STEP 3 = "30s forced pause" mode: breathe, then KEEP recovering —
-      // this must never fall through to the hard-abort below, or step 3 just
-      // gives up like step 2/5 instead of actually recovering.
+      // STOP STEP reached (this is the DEFAULT for almost every strategy
+      // preset — martingaleStopStep: 3). Previously this paused ~30s and
+      // then RESUMED the escalated recovery stake, silently carrying the
+      // losing session's martingale step into what looked like a fresh
+      // cooldown. Per explicit instruction: after cooldown the stake must
+      // come back to base, full stop — no continuing the previous
+      // session's recovery chain. Route to the same hard-reset path as
+      // every other stop condition.
       if (st.isLocked && cfg.martingaleEnabled && cfg.martingaleStopStep === 3 && st.martingaleStep >= 3 && st.inRecovery) {
-        this.addLog('loss', 'PAUSE', `STEP 3 CHECKPOINT — 30s forced pause, then resuming recovery @ $${st.currentStake.toFixed(2)}`);
-        this._forcedPauseAndResume(30);
+        this.addLog('loss', 'CRITICAL', `STOP STEP 3 REACHED — accepting loss, resetting to base stake, entering cooldown for market switch`);
+        this.completeSession();
         return;
       }
       // MAX RECOVERY STEP REACHED → cooldown (market switch needed). Applies to
@@ -11619,7 +11688,17 @@ window.NexusStrategies=exports;
     bar.style.cssText = 'text-align:center;padding:10px;font-family:monospace;font-size:13px;border-top:1px solid hsl(var(--border)/0.5)';
 
     const tick = el('differ-live-tick');
-    if (tick) tick.textContent = s.currentTick ?? '—';
+    if (tick) {
+      tick.textContent = s.currentTick ?? '—';
+      // Glow the digit box while a batch is actively firing — same visual
+      // language as the Even/Odd/Over-Under bots' pendingTrade glow, so you
+      // can see at a glance when a trade is actually being executed.
+      tick.style.transition = 'box-shadow .18s ease, text-shadow .18s ease';
+      tick.style.boxShadow = s.isRunning
+        ? '0 0 18px hsl(var(--win)/0.55), 0 0 36px hsl(var(--win)/0.16)'
+        : '';
+      tick.style.textShadow = s.isRunning ? '0 0 14px hsl(var(--win)/0.6)' : '';
+    }
     const cold = el('differ-live-cold');
     if (cold) cold.textContent = s.coldDigit ?? '—';
 
@@ -12161,11 +12240,11 @@ window.NexusStrategies=exports;
         <div class="cp-input-group" style="margin-bottom:10px">
           <span class="cp-input-label">Stop / Recovery Rule</span>
           <select class="cp-input" id="${rootId}-stop-select" style="margin-top:4px;font-size:11px">
-            ${[{v:2,label:'⏸ Stop at Step 2'},{v:3,label:'⏱ 30s pause at Step 3'},{v:4,label:'🔄 Deep Recovery Step 4'},{v:5,label:'💪 Max Recovery Step 5'},{v:999,label:'♾ Always Recover'}]
+            ${[{v:1,label:'⏹ Stop at Step 1 (no recovery)'},{v:2,label:'⏸ Stop at Step 2'},{v:3,label:'⏹ Stop at Step 3 (reset)'},{v:4,label:'🔄 Deep Recovery Step 4'},{v:5,label:'💪 Max Recovery Step 5'},{v:999,label:'♾ Always Recover'}]
               .map(o=>`<option value="${o.v}" ${c.martingaleStopStep===o.v?'selected':''}>${o.label}</option>`).join('')}
           </select>
           <div id="${rootId}-stopstep-desc" style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:4px;padding:6px 8px;background:hsl(var(--bg)/0.5);border-radius:7px;font-family:'DM Mono',monospace">${
-            c.martingaleStopStep===2?'2 losses → stop + cooldown':c.martingaleStopStep===3?'3 losses → 30s forced pause':c.martingaleStopStep===4?'4 losses → deep recovery + final stop':c.martingaleStopStep===999?'♾ Always recovering — doubles until a win':'5 losses before session aborts'
+            c.martingaleStopStep===1?'1 loss → stop, no recovery, await fresh signal':c.martingaleStopStep===2?'2 losses → stop + cooldown':c.martingaleStopStep===3?'3 losses → stop + reset to base stake':c.martingaleStopStep===4?'4 losses → deep recovery + final stop':c.martingaleStopStep===999?'♾ Always recovering — doubles until a win':'5 losses before session aborts'
           }</div>
         </div>
 
@@ -12309,7 +12388,7 @@ window.NexusStrategies=exports;
       const v = parseInt(e.target.value);
       engine.setConfig({ martingaleStopStep: v });
       const desc = el(`${rootId}-stopstep-desc`);
-      if (desc) desc.textContent = v===1?'1 loss → stop, await fresh signal':v===2?'2 losses → stop + cooldown':v===3?'3 losses → 30s forced pause':v===4?'4 losses → deep recovery + final stop':v===999?'♾ Always recovering — doubles stake every loss until a win':'5 losses before session aborts';
+      if (desc) desc.textContent = v===1?'1 loss → stop, await fresh signal':v===2?'2 losses → stop + cooldown':v===3?'3 losses → stop + reset to base stake':v===4?'4 losses → deep recovery + final stop':v===999?'♾ Always recovering — doubles stake every loss until a win':'5 losses before session aborts';
     };
     // Recovery barrier dropdown (over mode) — instant
     const recBarrierSel = el(`${rootId}-rec-barrier-sel`);
@@ -14382,15 +14461,20 @@ window.NexusStrategies=exports;
   let _gateLastNotify = 0;
 
   function getSessionPnl() {
+    // BUG FIX: this used to read s.sessionPnl / s.totalPnl, which don't
+    // exist on either engine's state object — Titan bots track P&L at
+    // s.stats.profit and Differ tracks it at s.totalProfit. Reading the
+    // wrong field meant this always summed to 0, so the master TP/SL gate
+    // below could never actually fire no matter what you set it to.
     let total = 0;
     BOT_IDS.forEach((id) => {
       const eng = engines[id];
       if (!eng) return;
       const s = eng.state;
       if (id === 'differ') {
-        total += (s.totalPnl || s.sessionPnl || 0);
+        total += (s.totalProfit || 0);
       } else {
-        total += (s.sessionPnl || s.totalPnl || 0);
+        total += (s.stats && typeof s.stats.profit === 'number' ? s.stats.profit : 0);
       }
     });
     return total;
