@@ -9718,19 +9718,35 @@ window.NexusStrategies=exports;
     }
 
     loadInitialState() {
+      const saved = this.loadSavedConfig();
+      const parseNum = (value, fallback) => {
+        const n = parseFloat(value);
+        return Number.isFinite(n) ? n : fallback;
+      };
+      const parseIntVal = (value, fallback) => {
+        const n = parseInt(value, 10);
+        return Number.isFinite(n) ? n : fallback;
+      };
+      const parseBool = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
+      const primaryMarket = typeof saved.primaryMarket === 'string' && saved.primaryMarket ? saved.primaryMarket : '1HZ100V';
       return {
         isAuthenticated: false, balanceUSD: 0,
-        primaryMarket: '1HZ100V', globalMarket: getGlobalMarket('1HZ100V'),
+        primaryMarket, globalMarket: getGlobalMarket(primaryMarket),
         historyP: [], historyG: [],
         freqP: Array.from({ length: 10 }, (_, i) => ({ digit: i, count: 0, percentage: 0, lastSeen: -1, coldStreak: 0 })),
         freqG: Array.from({ length: 10 }, (_, i) => ({ digit: i, count: 0, percentage: 0, lastSeen: -1, coldStreak: 0 })),
         coldDigit: null, thirdColdDigit: null, currentTick: null, silenceCount: 0,
-        luckyNumber: 12, recommendedMarket: '1HZ100V', analysisConfidence: 0,
-        coldStreakHistory: [], stake: 1, batchSize: 4, speed: 50, silenceTrigger: 12,
+        luckyNumber: 12, recommendedMarket: primaryMarket, analysisConfidence: 0,
+        coldStreakHistory: [],
+        stake: Math.max(0.35, parseNum(saved.stake, 1)),
+        batchSize: Math.max(1, parseIntVal(saved.batchSize, 4)),
+        speed: Math.min(1000, Math.max(50, parseIntVal(saved.speed, 50))),
+        silenceTrigger: Math.min(30, Math.max(1, parseIntVal(saved.silenceTrigger, 12))),
         isArmed: false, isRunning: false, isCooldown: false, cooldownRemaining: 0,
-        autoMode: true, takeProfit: 15, stopLoss: 10, autoBatchSize: 4,
+        autoMode: parseBool(saved.autoMode, true), takeProfit: Math.max(0, parseNum(saved.takeProfit, 15)),
+        stopLoss: Math.max(0, parseNum(saved.stopLoss, 10)), autoBatchSize: Math.max(1, parseIntVal(saved.autoBatchSize, 4)),
         journal: [], totalWins: 0, totalLoss: 0, totalProfit: 0,
-        notifications: [], firedCount: 0, abortOnLoss: true,
+        notifications: [], firedCount: 0, abortOnLoss: parseBool(saved.abortOnLoss, true),
         connectionStatus: 'disconnected', experiment: null,
         experimentHistory: this.loadExperimentHistory(),
         plHistory: [],
@@ -9751,6 +9767,38 @@ window.NexusStrategies=exports;
       }
     }
 
+    loadSavedConfig() {
+      try {
+        const raw = localStorage.getItem('benz_differ_config');
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    saveConfig() {
+      try {
+        const s = this.state;
+        const payload = {
+          primaryMarket: s.primaryMarket,
+          stake: s.stake,
+          batchSize: s.batchSize,
+          speed: s.speed,
+          silenceTrigger: s.silenceTrigger,
+          autoMode: s.autoMode,
+          takeProfit: s.takeProfit,
+          stopLoss: s.stopLoss,
+          autoBatchSize: s.autoBatchSize,
+          abortOnLoss: s.abortOnLoss,
+        };
+        localStorage.setItem('benz_differ_config', JSON.stringify(payload));
+      } catch (e) {
+        /* storage unavailable — state still updates in-memory */
+      }
+    }
+
     emit() { if (this.onUpdate) this.onUpdate(this.state); }
 
     dispatch(action) {
@@ -9762,6 +9810,7 @@ window.NexusStrategies=exports;
         case 'SET_MARKET':
           s.primaryMarket = action.market; s.globalMarket = getGlobalMarket(action.market);
           s.historyP = []; s.historyG = []; s.silenceCount = 0; s.coldDigit = null;
+          this.saveConfig();
           break;
         case 'TICK_P': {
           const newHist = [...s.historyP, action.digit].slice(-150);
@@ -9773,10 +9822,10 @@ window.NexusStrategies=exports;
         }
         case 'TICK_G': s.historyG = [...s.historyG, action.digit].slice(-150); break;
         case 'SET_COLD': s.coldDigit = action.cold; s.thirdColdDigit = action.third; break;
-        case 'SET_STAKE': s.stake = action.value; break;
-        case 'SET_BATCH': s.batchSize = action.value; break;
-        case 'SET_SPEED': s.speed = action.value; break;
-        case 'SET_TRIGGER': s.silenceTrigger = action.value; break;
+        case 'SET_STAKE': s.stake = action.value; this.saveConfig(); break;
+        case 'SET_BATCH': s.batchSize = action.value; this.saveConfig(); break;
+        case 'SET_SPEED': s.speed = action.value; this.saveConfig(); break;
+        case 'SET_TRIGGER': s.silenceTrigger = action.value; this.saveConfig(); break;
         case 'ARM': s.isArmed = true; break;
         case 'DISARM': s.isArmed = false; s.isRunning = false; break;
         case 'FIRING': s.isRunning = true; s.isArmed = false; s.firedCount = 0; break;
@@ -9784,10 +9833,11 @@ window.NexusStrategies=exports;
         case 'COOLDOWN_START': s.isCooldown = true; s.cooldownRemaining = action.duration; break;
         case 'COOLDOWN_TICK': s.cooldownRemaining = action.remaining; break;
         case 'COOLDOWN_END': s.isCooldown = false; s.cooldownRemaining = 0; s.silenceCount = 0; break;
-        case 'TOGGLE_AUTO': s.autoMode = !s.autoMode; break;
-        case 'SET_TP': s.takeProfit = action.value; break;
-        case 'SET_SL': s.stopLoss = action.value; break;
-        case 'SET_AUTO_BATCH': s.autoBatchSize = action.value; break;
+        case 'TOGGLE_AUTO': s.autoMode = !s.autoMode; this.saveConfig(); break;
+        case 'SET_TP': s.takeProfit = action.value; this.saveConfig(); break;
+        case 'SET_SL': s.stopLoss = action.value; this.saveConfig(); break;
+        case 'SET_AUTO_BATCH': s.autoBatchSize = action.value; this.saveConfig(); break;
+        case 'TOGGLE_ABORT_ON_LOSS': s.abortOnLoss = !s.abortOnLoss; this.saveConfig(); break;
         case 'ADD_JOURNAL': {
           const entry = action.entry;
           const isWin = entry.type === 'win';
@@ -11343,6 +11393,16 @@ window.NexusStrategies=exports;
             <input type="number" class="terminal-input" id="differ-batch" value="${s.batchSize}">
           </div>
         </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div class="labeled-input">
+            <span class="input-label">Take Profit ($)</span>
+            <input type="number" step="0.01" class="terminal-input" id="differ-tp" value="${s.takeProfit}">
+          </div>
+          <div class="labeled-input">
+            <span class="input-label">Stop Loss ($)</span>
+            <input type="number" step="0.01" class="terminal-input" id="differ-sl" value="${s.stopLoss}">
+          </div>
+        </div>
         <div class="glass-monitor" style="padding:8px;text-align:center;margin:0 0 10px;font-size:11px">BATCH PAYOUT (ALL WIN) <span class="neon-text-win font-mono-data">${batchPayout.toFixed(2)}</span></div>
         <div class="burst-speed-row" style="margin-bottom:10px">
           <div class="burst-speed-header">
@@ -11416,7 +11476,7 @@ window.NexusStrategies=exports;
       if (sb) { sb.style.borderColor = 'hsl(var(--primary)/0.5)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08))'; sb.style.color = 'hsl(var(--primary))'; }
       setTimeout(() => { const s2 = el('differ-save-status'); if (s2) { s2.textContent = 'Unsaved changes lost on reload'; s2.style.color = 'hsl(var(--muted-foreground)/0.5)'; } }, 2500);
     }
-    ['differ-stake','differ-batch','differ-trigger','differ-autobatch','differ-speed'].forEach(id => {
+    ['differ-stake','differ-batch','differ-trigger','differ-autobatch','differ-speed','differ-tp','differ-sl'].forEach(id => {
       const inp = el(id); if (inp) { inp.oninput = differMarkDirty; inp.onchange = differMarkDirty; }
     });
     const differSaveBtn = el('differ-save-btn');
