@@ -9795,6 +9795,19 @@ window.NexusStrategies=exports;
       this.state = this.loadInitialState();
       this._bindMethods();
       this.connectAnalysis();
+      // Multi-market scanner for rotation after cooldown — reuses the same
+      // MarketScanner class (and shared underlying socket) the Even/Odd/
+      // Over/Under bots already use, just for market scoring, completely
+      // separate from this engine's own single-market tick stream below.
+      this.scanner = null;
+      try {
+        const ScannerModule = window.NexusScanner || window.EvenScanner;
+        if (ScannerModule && ScannerModule.MarketScanner) {
+          this.scanner = new ScannerModule.MarketScanner((st) => { this.scannerState = st; });
+          this.scanner.setTickPeriod(this.state.tickPeriod || 50);
+          this.scanner.start();
+        }
+      } catch (e) { console.error('[Differ] scanner init failed:', e); }
       if (window.HubStore.getState().apiToken) setTimeout(() => this.authenticate(), 500);
       window.addEventListener('hub:token-changed', () => this.authenticate());
       window.addEventListener('hub:account-type-changed', () => this.authenticate());
@@ -10083,20 +10096,37 @@ window.NexusStrategies=exports;
           clearInterval(this.cooldownTimer); this.cooldownTimer = null;
           this._hideDifferCooldownOverlay();
           this.dispatch({ type: 'COOLDOWN_END' });
+          // Multi-market rotation: weighted pick among the top 2-3 scoring
+          // markets instead of always the single #1 — same idea as the
+          // Even/Odd/Over/Under bots, so this bot's footprint isn't
+          // concentrated on one symbol either.
+          if (this.scanner) {
+            const golden = this.scanner.getGoldenMarkets ? this.scanner.getGoldenMarkets() : [];
+            const pool = golden.length ? golden.slice(0, 3) : (this.scanner.getBestMarket ? [this.scanner.getBestMarket()].filter(Boolean) : []);
+            let best = null;
+            if (pool.length) {
+              const weights = [0.6, 0.25, 0.15];
+              const totalW = weights.slice(0, pool.length).reduce((a, b) => a + b, 0);
+              let r = Math.random() * totalW;
+              for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) { best = pool[i]; break; } }
+              if (!best) best = pool[0];
+            }
+            if (best && best.symbol && best.symbol !== this.state.primaryMarket) {
+              const rank = pool.indexOf(best) + 1;
+              this.dispatch({ type: 'NOTIFY', message: `🔀 Switching to ${best.symbol} (score: ${best.score || '?'}${rank > 1 ? `, picked #${rank}` : ''})`, ntype: 'info' });
+              this.dispatch({ type: 'SET_MARKET', market: best.symbol });
+            }
+          }
           const cs = this.state;
           if (cs.autoMode) {
             const freqP = computeFrequency(cs.historyP, this.tickIndex);
             const { cold, third } = getColdestDigits(freqP);
             this.dispatch({ type: 'SET_COLD', cold, third });
             this.dispatch({ type: 'SET_LUCKY', value: determineLuckyNumber(cs.coldStreakHistory) });
-            // TP/SL is now enforced the instant a trade result lands (see
-            // ownContractIds handler above) rather than waiting for cooldown
-            // to end, so by the time we get here the engine has already been
-            // force-disarmed if the target was hit. Only re-arm if it wasn't.
-            if (!this._tpSlLatched) {
-              this.dispatch({ type: 'ARM' });
-              this.dispatch({ type: 'NOTIFY', message: `🔄 Re-armed — Differ ≠${cold} | CD: ${duration}s`, ntype: 'info' });
-            }
+            // Re-arm for the next session (TP/SL is enforced globally from
+            // the Dashboard's master P&L gate now, not per-bot here).
+            this.dispatch({ type: 'ARM' });
+            this.dispatch({ type: 'NOTIFY', message: `🔄 Re-armed — Differ ≠${cold} | CD: ${duration}s`, ntype: 'info' });
           }
         } else {
           this.dispatch({ type: 'COOLDOWN_TICK', remaining });
@@ -10230,9 +10260,17 @@ window.NexusStrategies=exports;
                   ?? _lc(c.exit_tick)
                   ?? _lc(c.sell_spot_display_value)
                   ?? _lc(c.sell_spot)
+                  ?? _lc(c.current_spot_display_value)
+                  ?? _lc(c.current_spot)
                   ?? (c.audit_details?.contract_end?.[c.audit_details.contract_end.length - 1]?.tick
                       ? _lc(String(c.audit_details.contract_end[c.audit_details.contract_end.length - 1].tick))
-                      : null);
+                      : null)
+                  // Last-resort fallback: same idea as the Titan bots — this
+                  // engine already tracks its own live tick feed independently
+                  // (state.currentTick), and for a 1-tick DIGITDIFF contract the
+                  // most recently observed digit at settlement time is the exit
+                  // tick, so use it rather than showing a permanent dash.
+                  ?? (_self.state.currentTick != null ? String(_self.state.currentTick) : null);
                 const _dEntryRaw = _lc(c.entry_tick_display_value) ?? _lc(c.entry_tick);
                 const exitDigitParsed  = (_dExitRaw  !== null && _dExitRaw  !== '') ? parseInt(_dExitRaw)  : null;
                 const entryDigitFinal  = (_dEntryRaw !== null && _dEntryRaw !== '')
@@ -10467,6 +10505,7 @@ window.NexusStrategies=exports;
         // (a light-to-moderate confirmation window, not razor-thin or so
         // strict it rarely fires). Both off by default.
         barrierShuffle: false, barrierMin: 2, barrierMax: 6,
+        recBarrierShuffle: false, recBarrierMin: 2, recBarrierMax: 6,
         streakShuffle: false, streakMin: 2, streakMax: 4,
       };
       const overDefaults = { ...evenDefaults, autoPilot: false, autoRefresh: false, tradeMode: undefined };
@@ -10848,6 +10887,10 @@ window.NexusStrategies=exports;
         const lo = Math.min(cfg.barrierMin, cfg.barrierMax), hi = Math.max(cfg.barrierMin, cfg.barrierMax);
         patch.overBarrier = lo + Math.floor(Math.random() * (hi - lo + 1));
       }
+      if (this.isOU && cfg.recBarrierShuffle) {
+        const lo = Math.min(cfg.recBarrierMin, cfg.recBarrierMax), hi = Math.max(cfg.recBarrierMin, cfg.recBarrierMax);
+        patch.recoveryBarrier = lo + Math.floor(Math.random() * (hi - lo + 1));
+      }
       if (cfg.streakShuffle) {
         const lo = Math.min(cfg.streakMin, cfg.streakMax), hi = Math.max(cfg.streakMin, cfg.streakMax);
         patch.minStreak = lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -10902,11 +10945,24 @@ window.NexusStrategies=exports;
           this.state = { ...this.state, isCooldown: false, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
           this._hideCooldownOverlay();
           this._rerollShuffles();
-          // Market switch: find best market
+          // Market switch: weighted pick among the top 2-3 scoring markets
+          // instead of always the single #1 — spreads trading footprint
+          // across markets rather than concentrating on one, while still
+          // leaning toward the best-scoring option most of the time.
           if (this.scanner) {
-            const best = this.scanner.getGoldenMarkets ? (this.scanner.getGoldenMarkets()[0] || this.scanner.getBestMarket()) : this.scanner.getBestMarket();
+            const golden = this.scanner.getGoldenMarkets ? this.scanner.getGoldenMarkets() : [];
+            const pool = golden.length ? golden.slice(0, 3) : (this.scanner.getBestMarket() ? [this.scanner.getBestMarket()] : []);
+            let best = null;
+            if (pool.length) {
+              const weights = [0.6, 0.25, 0.15];
+              const totalW = weights.slice(0, pool.length).reduce((a, b) => a + b, 0);
+              let r = Math.random() * totalW;
+              for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) { best = pool[i]; break; } }
+              if (!best) best = pool[0];
+            }
             if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
-              this.addLog('engine', 'MARKET', `🔀 Switching to best market: ${best.symbol} (score: ${best.score || '?'})`);
+              const rank = pool.indexOf(best) + 1;
+              this.addLog('engine', 'MARKET', `🔀 Switching to ${best.symbol} (score: ${best.score || '?'}${rank > 1 ? `, picked #${rank}` : ''})`);
               this.setConfig({ selectedMarket: best.symbol });
               this.changeMarket(best.symbol);
             }
@@ -11053,9 +11109,18 @@ window.NexusStrategies=exports;
         ?? _lastChar(contract.exit_tick)
         ?? _lastChar(contract.sell_spot_display_value)
         ?? _lastChar(contract.sell_spot)
+        ?? _lastChar(contract.current_spot_display_value)
+        ?? _lastChar(contract.current_spot)
         ?? (contract.audit_details?.contract_end?.[contract.audit_details.contract_end.length - 1]?.tick
             ? _lastChar(String(contract.audit_details.contract_end[contract.audit_details.contract_end.length - 1].tick))
-            : null);
+            : null)
+        // Last-resort fallback: Deriv occasionally omits every exit-tick field
+        // on the is_sold update for tick-duration Digit contracts. Since this
+        // engine keeps its own independent live tick feed for analysis
+        // (state.currentDigit, updated on every tick), the most recently
+        // observed digit at the moment this contract settles is, for a
+        // 1-tick contract, the exit tick — far better than showing nothing.
+        ?? (this.state.currentDigit >= 0 ? String(this.state.currentDigit) : null);
       const _entryRaw = _lastChar(contract.entry_tick_display_value) ?? _lastChar(contract.entry_tick);
       const exitDigit = (_exitRaw !== null && _exitRaw !== '') ? _exitRaw : '?';
       // Prefer API entry digit; fall back to the digit the engine recorded at fire time
@@ -11362,6 +11427,7 @@ window.NexusStrategies=exports;
           martingaleStep: 0,
           inRecovery: false,
         };
+        this._rerollShuffles();
       } else {
         this.sound.playEngineStop();
         this.strategyPhase = 'idle';
@@ -11790,11 +11856,25 @@ window.NexusStrategies=exports;
       }
     });
     const stakeVaryBtn = el('differ-stake-vary');
-    if (stakeVaryBtn) stakeVaryBtn.onclick = () => eng.dispatch({ type: 'TOGGLE_STAKE_VARY' });
+    if (stakeVaryBtn) stakeVaryBtn.onclick = () => {
+      eng.dispatch({ type: 'TOGGLE_STAKE_VARY' });
+      // The Differ panel is built once and never fully re-rendered, so the
+      // toggle's visual state (and the fields it enables/disables) has to be
+      // updated by hand here rather than relying on a re-render to show it.
+      const isOn = eng.state.stakeVary;
+      stakeVaryBtn.classList.toggle('on', isOn);
+      const stakeEl = el('differ-stake');
+      const minEl = el('differ-stake-min'), maxEl = el('differ-stake-max');
+      if (stakeEl) { stakeEl.disabled = isOn; stakeEl.style.opacity = isOn ? '.45' : ''; }
+      [minEl, maxEl].forEach(inp => { if (inp) { inp.disabled = !isOn; const row = inp.closest('div')?.parentElement; if (row) row.style.opacity = isOn ? '' : '.45'; } });
+    };
     const differSaveBtn = el('differ-save-btn');
     if (differSaveBtn) differSaveBtn.onclick = () => { differCommitAllFields(); differMarkSaved(); };
     const triggerShuffleBtn = el('differ-trigger-shuffle');
-    if (triggerShuffleBtn) triggerShuffleBtn.onclick = () => eng.dispatch({ type: 'TOGGLE_TRIGGER_SHUFFLE' });
+    if (triggerShuffleBtn) triggerShuffleBtn.onclick = () => {
+      eng.dispatch({ type: 'TOGGLE_TRIGGER_SHUFFLE' });
+      triggerShuffleBtn.classList.toggle('on', eng.state.triggerShuffle);
+    };
     el('differ-engage').onclick = () => s.isArmed ? eng.disarmSystem() : eng.armSystem();
     el('differ-abort').onclick = () => { eng.abortTrades(); eng.disarmSystem(); };
   }
@@ -11811,6 +11891,10 @@ window.NexusStrategies=exports;
     }
     const total = s.totalWins + s.totalLoss;
     const wr = total ? ((s.totalWins / total) * 100).toFixed(1) : '0.0';
+    const digitFreqSample = s.journal.slice(0, 50).filter((j) => j.exitDigit != null && j.exitDigit >= 0 && j.exitDigit <= 9);
+    const digitFreqCounts = Array.from({length:10}, (_, d) => digitFreqSample.filter((j) => j.exitDigit === d).length);
+    const digitFreqMax = Math.max(1, ...digitFreqCounts);
+    const digitFreqTotal = digitFreqSample.length;
     const rightHtml = `
       <div style="text-align:center;padding:12px" class="glass-panel-glow">
         <div style="font-size:10px;letter-spacing:3px">NET PROFIT</div>
@@ -11820,6 +11904,24 @@ window.NexusStrategies=exports;
           <div class="glass-monitor" style="padding:8px"><div class="neon-text-loss font-mono-data">${s.totalLoss}</div>LOSSES</div>
           <div class="glass-monitor" style="padding:8px"><div class="font-mono-data">${wr}%</div>WIN RATE</div>
         </div>
+        ${digitFreqTotal ? `
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid hsl(var(--border)/0.3);text-align:left">
+          <div style="font-size:8px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px;margin-bottom:6px">EXIT DIGIT FREQUENCY · LAST ${digitFreqTotal}</div>
+          <div style="display:flex;align-items:flex-end;gap:3px;height:34px">
+            ${digitFreqCounts.map((cnt, d) => {
+              const pct = Math.max(4, (cnt / digitFreqMax) * 100);
+              const isMax = cnt === digitFreqMax && cnt > 0;
+              const isCold = d === s.coldDigit;
+              const barColor = isCold ? 'hsl(var(--accent))' : isMax ? 'hsl(var(--win))' : cnt === 0 ? 'hsl(var(--border))' : 'hsl(var(--secondary))';
+              return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;height:100%;justify-content:flex-end" title="Digit ${d}: ${cnt} time${cnt===1?'':'s'}${isCold?' (currently cold)':''}">
+                <div style="width:100%;height:${pct}%;min-height:2px;background:${barColor};border-radius:2px 2px 0 0;opacity:${cnt===0?0.25:0.9};transition:height .5s cubic-bezier(0.34,1.56,0.64,1)${isMax||isCold?';box-shadow:0 0 6px currentColor':''}"></div>
+              </div>`;
+            }).join('')}
+          </div>
+          <div style="display:flex;gap:3px;margin-top:3px">
+            ${digitFreqCounts.map((cnt, d) => `<div style="flex:1;text-align:center;font-size:8px;font-family:'DM Mono',monospace;color:${d===s.coldDigit?'hsl(var(--accent))':cnt===digitFreqMax&&cnt>0?'hsl(var(--win))':'hsl(var(--muted-foreground))'}">${d}</div>`).join('')}
+          </div>
+        </div>` : ''}
       </div>
       <div style="margin-top:8px" class="journal-list">${s.journal.slice(0, 60).map((j) => {
         const isWin = j.type === 'win';
@@ -12496,6 +12598,29 @@ window.NexusStrategies=exports;
             ${[0,1,2,3,4,5,6,7,8,9].map(b=>`<option value="${b}" ${b===c.barrierMax?'selected':''}>Over ${b}</option>`).join('')}
           </select>
         </div>
+      </div>
+      <div class="cp-toggle-row" style="padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border));margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="titan-toggle ${c.recBarrierShuffle?'on':''}" id="${rootId}-rec-barrier-shuffle" onclick="event.stopPropagation()"></button>
+          <div>
+            <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">🔁 Recovery-Barrier Shuffle</div>
+            <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Varies the recovery barrier (used mid-loss-chain) independently from the entry barrier above — instead of always ${c.recoveryBarrier}</div>
+          </div>
+        </div>
+      </div>
+      <div class="cp-input-row" style="margin-bottom:10px;${c.recBarrierShuffle?'':'opacity:.45'}">
+        <div class="cp-input-group">
+          <span class="cp-input-label">Min Rec. Barrier</span>
+          <select class="cp-input" id="${rootId}-rec-barrier-min-sel" ${c.recBarrierShuffle?'':'disabled'}>
+            ${[0,1,2,3,4,5,6,7,8,9].map(b=>`<option value="${b}" ${b===c.recBarrierMin?'selected':''}>Over ${b}</option>`).join('')}
+          </select>
+        </div>
+        <div class="cp-input-group">
+          <span class="cp-input-label">Max Rec. Barrier</span>
+          <select class="cp-input" id="${rootId}-rec-barrier-max-sel" ${c.recBarrierShuffle?'':'disabled'}>
+            ${[0,1,2,3,4,5,6,7,8,9].map(b=>`<option value="${b}" ${b===c.recBarrierMax?'selected':''}>Over ${b}</option>`).join('')}
+          </select>
+        </div>
       </div>` : ''}
       <div class="cp-toggle-row" style="padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border));margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:10px">
@@ -12667,6 +12792,15 @@ window.NexusStrategies=exports;
       engine.setConfig({ barrierShuffle: !engine.config.barrierShuffle });
       renderCenterConfig(engine, rootId, engine.getSnapshot());
     };
+    const recBarrierShuffleBtn = el(`${rootId}-rec-barrier-shuffle`);
+    if (recBarrierShuffleBtn) recBarrierShuffleBtn.onclick = () => {
+      engine.setConfig({ recBarrierShuffle: !engine.config.recBarrierShuffle });
+      renderCenterConfig(engine, rootId, engine.getSnapshot());
+    };
+    const recBarrierMinSel = el(`${rootId}-rec-barrier-min-sel`);
+    if (recBarrierMinSel) recBarrierMinSel.onchange = (e) => engine.setConfig({ recBarrierMin: parseInt(e.target.value) });
+    const recBarrierMaxSel = el(`${rootId}-rec-barrier-max-sel`);
+    if (recBarrierMaxSel) recBarrierMaxSel.onchange = (e) => engine.setConfig({ recBarrierMax: parseInt(e.target.value) });
     const barrierMinSel = el(`${rootId}-barrier-min-sel`);
     if (barrierMinSel) barrierMinSel.onchange = (e) => engine.setConfig({ barrierMin: parseInt(e.target.value) });
     const barrierMaxSel = el(`${rootId}-barrier-max-sel`);
@@ -12716,6 +12850,13 @@ window.NexusStrategies=exports;
     const recentWins  = journal.slice(0,10).filter(j=>j.type==='win').length;
     const recentTotal = Math.min(10,journal.length);
     const recentStreak = (() => { let n=0; for(const j of journal){ if(j.type==='win')n++; else break; } return n; })();
+    // Digit-frequency histogram: which digits have actually landed on exit
+    // over the last 50 trades — reusing exitDigit, which is already tracked
+    // on every journal entry for the recovery-mode display.
+    const digitFreqSample = journal.slice(0, 50).filter(j => j.exitDigit != null && j.exitDigit >= 0 && j.exitDigit <= 9);
+    const digitFreqCounts = Array.from({length:10}, (_, d) => digitFreqSample.filter(j => j.exitDigit === d).length);
+    const digitFreqMax = Math.max(1, ...digitFreqCounts);
+    const digitFreqTotal = digitFreqSample.length;
 
     const rightHtml = `
     <style>
@@ -13161,6 +13302,27 @@ window.NexusStrategies=exports;
           ${journal.slice(0,10).map(j=>`<div class="jnl-dot ${j.type==='win'?'w':'l'}" title="${j.type==='win'?'+'+j.profit.toFixed(2):j.profit.toFixed(2)}"></div>`).join('')}
           ${Array.from({length:Math.max(0,10-Math.min(10,journal.length))},()=>`<div class="jnl-dot e"></div>`).join('')}
           <span style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));margin-left:6px">${recentWins}/${recentTotal} wins</span>
+        </div>
+      </div>` : ''}
+
+      <!-- Digit-frequency histogram: which digits actually landed on exit -->
+      ${digitFreqTotal ? `
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid hsl(var(--border)/0.3)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+          <span style="font-size:8px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">EXIT DIGIT FREQUENCY · LAST ${digitFreqTotal}</span>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:3px;height:38px">
+          ${digitFreqCounts.map((cnt, d) => {
+            const pct = Math.max(4, (cnt / digitFreqMax) * 100);
+            const isMax = cnt === digitFreqMax && cnt > 0;
+            const barColor = isMax ? 'hsl(var(--win))' : cnt === 0 ? 'hsl(var(--border))' : 'hsl(var(--accent))';
+            return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;height:100%;justify-content:flex-end" title="Digit ${d}: ${cnt} time${cnt===1?'':'s'}">
+              <div style="width:100%;height:${pct}%;min-height:2px;background:${barColor};border-radius:2px 2px 0 0;opacity:${cnt===0?0.25:0.9};transition:height .5s cubic-bezier(0.34,1.56,0.64,1)${isMax?';box-shadow:0 0 6px hsl(var(--win)/0.6)':''}"></div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div style="display:flex;gap:3px;margin-top:3px">
+          ${digitFreqCounts.map((cnt, d) => `<div style="flex:1;text-align:center;font-size:8px;font-family:'DM Mono',monospace;color:${cnt===digitFreqMax&&cnt>0?'hsl(var(--win))':'hsl(var(--muted-foreground))'}">${d}</div>`).join('')}
         </div>
       </div>` : ''}
     </div>
