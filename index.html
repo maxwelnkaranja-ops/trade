@@ -7482,8 +7482,8 @@ function calculateMarketScore(analysis) {
  * MULTI-TIMEFRAME ANALYSIS
  */
 function analyzeMultiTimeframe(history) {
-  const shortAnalysis = analyzeDigits(history, 25);
-  const longAnalysis = analyzeDigits(history, 50);
+  const shortAnalysis = analyzeDigits(history, 25, false);
+  const longAnalysis = analyzeDigits(history, 50, false);
   
   const shortOk = shortAnalysis.probability >= 50 && shortAnalysis.recommendation !== 'AVOID';
   const longOk = longAnalysis.probability >= 50 && longAnalysis.recommendation !== 'AVOID';
@@ -7848,7 +7848,7 @@ window.EvenTrading = exports;
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
         if (market.history.length >= 10) {
-          market.analysis = analyzeDigits(market.history, this.tickPeriod);
+          market.analysis = analyzeDigits(market.history, this.tickPeriod, false);
           market.score = this.calculateScore(market);
           market.isGolden = market.health && market.health.longTerm === 'HEALTHY' &&
             market.analysis.probability >= 75 && market.analysis.recommendation !== 'AVOID';
@@ -8710,8 +8710,8 @@ function calculateMarketScore(analysis) {
  * Relaxed thresholds - doesn't need perfect alignment
  */
 function analyzeMultiTimeframe(history) {
-  const shortAnalysis = analyzeDigits(history, 25);
-  const longAnalysis = analyzeDigits(history, 50);
+  const shortAnalysis = analyzeDigits(history, 25, false);
+  const longAnalysis = analyzeDigits(history, 50, false);
   
   // Check if both timeframes GENERALLY agree (relaxed thresholds)
   // Both need to be above 50% probability (not harsh)
@@ -9045,7 +9045,7 @@ window.NexusTrading = exports;
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
         if (market.history.length >= 10) {
-          market.analysis = analyzeDigits(market.history, this.tickPeriod);
+          market.analysis = analyzeDigits(market.history, this.tickPeriod, false);
           market.score = this.calculateScore(market);
           market.isGolden = market.health && market.health.longTerm === 'HEALTHY' &&
             market.analysis.probability >= 75 && market.analysis.recommendation !== 'AVOID';
@@ -12176,7 +12176,7 @@ window.NexusStrategies=exports;
               <text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" fill="${v?'hsl(var(--win))':'rgba(255,255,255,0.28)'}" font-size="7" font-family="'Outfit',sans-serif" font-weight="700">${label}</text>`;
     }).join('');
 
-    el(`${rootId}-left`).innerHTML = `
+    setHtmlIfChanged(el(`${rootId}-left`), `
     
 
     <!-- ── HEADER ─────────────────────────────────────────── -->
