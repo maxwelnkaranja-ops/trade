@@ -315,7 +315,7 @@
   background:linear-gradient(135deg,hsl(var(--card)/0.9),hsl(var(--bg)/0.7));
   border:1px solid hsl(var(--border)/0.5); border-radius:16px;
   padding:14px; margin-bottom:10px;
-  backdrop-filter:blur(12px); animation:dahub-in .3s ease;
+  backdrop-filter:blur(12px);
   position:relative; overflow:hidden;
 }
 .dahub-card::before {
@@ -338,7 +338,10 @@
   border: 1px solid hsl(var(--border)/0.5);
   border-radius: 16px; padding: 14px 14px 12px;
   margin-bottom: 10px; backdrop-filter: blur(12px);
-  animation: ahub-glow-in .3s ease;
+  /* NOTE: deliberately no mount/entrance animation here — this card gets
+     rebuilt on every live price tick (several times a second on 1s
+     markets), and an "animate in" keyframe replaying that often is what
+     produced the visible screen flicker. */
   position: relative; overflow: hidden;
 }
 .ahub-card::before {
@@ -373,7 +376,10 @@
   border-radius:14px; border:1px solid hsl(var(--border)/0.4);
   background: linear-gradient(135deg, hsl(var(--bg)/0.75), hsl(var(--card)/0.5));
   backdrop-filter: blur(8px);
-  animation: ahub-mkt-in .4s cubic-bezier(.22,1,.36,1) both;
+  /* NOTE: no mount/entrance animation — this list is rebuilt on every
+     scanner tick, and an "animate in" keyframe replaying that often is a
+     flicker generator, not a polish detail. Only hover/selected states
+     transition, since those only fire on real interaction. */
   transition: transform .18s cubic-bezier(.34,1.56,.64,1), border-color .18s ease, box-shadow .18s ease, background .2s ease;
 }
 .ahub-mkt-card:last-child { margin-bottom:0; }
@@ -394,11 +400,6 @@
   box-shadow: 0 0 0 1px hsl(var(--primary)/0.3), 0 6px 22px hsl(var(--primary)/0.18);
   background: linear-gradient(135deg, hsl(var(--primary)/0.13), hsl(var(--card)/0.6));
 }
-.ahub-mkt-card:nth-of-type(1) { animation-delay: .02s; }
-.ahub-mkt-card:nth-of-type(2) { animation-delay: .08s; }
-.ahub-mkt-card:nth-of-type(3) { animation-delay: .14s; }
-.ahub-mkt-card:nth-of-type(4) { animation-delay: .20s; }
-.ahub-mkt-card:nth-of-type(5) { animation-delay: .26s; }
 .ahub-mkt-rank {
   width:24px; height:24px; border-radius:50%; flex-shrink:0;
   display:flex; align-items:center; justify-content:center;
@@ -1150,7 +1151,6 @@ html.light .terminal-input, html.light .terminal-select {
 .jnl-exit-digit {
   font-family:'Outfit',sans-serif; font-size:48px; font-weight:900;
   line-height:1; letter-spacing:-2px;
-  animation:jnl-digit-pop-g .35s cubic-bezier(.16,1,.3,1);
   flex-shrink:0; min-width:44px; text-align:center;
 }
 .jnl-exit-digit.win { color:hsl(var(--win)); text-shadow:0 0 20px hsl(var(--win)/0.6), 0 0 40px hsl(var(--win)/0.25); }
@@ -4094,12 +4094,10 @@ html.light body::before { display: none; }
   position: relative;
   overflow: hidden;
   transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
-  animation: dash-card-in 0.5s cubic-bezier(0.16,1,0.3,1) both;
+  /* NOTE: no mount animation — the dashboard redraws every few seconds
+     while it's the active tab, and an entrance keyframe replaying that
+     often is what caused these cards to visibly flicker. */
 }
-.stat-card:nth-child(1) { animation-delay: 0.05s; }
-.stat-card:nth-child(2) { animation-delay: 0.10s; }
-.stat-card:nth-child(3) { animation-delay: 0.15s; }
-.stat-card:nth-child(4) { animation-delay: 0.20s; }
 .stat-card::before {
   content: '';
   position: absolute;
@@ -4836,7 +4834,6 @@ body::before {
   font-size: 2rem !important;
   font-weight: 900 !important;
   letter-spacing: -0.04em !important;
-  animation: stat-value-in 0.5s cubic-bezier(0.16,1,0.3,1) both !important;
 }
 .stat-card-label {
   color: hsl(240 4% 38%) !important;
@@ -6531,15 +6528,15 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
    Target: ~52px tall per entry max in bot tabs, tight inner padding
    ───────────────────────────────────────────────────────────────────── */
 
-/* signal-in animation applies globally but no sizing changes to dashboard */
+/* NOTE: no mount/flash animation here — the journal list is rebuilt on
+   every engine tick, so an "animate/flash in" keyframe on .jnl-entry would
+   replay for every historical entry each time, which is the flicker bug
+   this comment used to cause. Entries just appear/update statically now. */
 .jnl-entry,
 .journal-entry {
-  animation: signal-in 0.22s cubic-bezier(0.16,1,0.3,1) both !important;
   position: relative !important;
   overflow: hidden !important;
 }
-.jnl-entry.win  { animation: signal-in 0.22s cubic-bezier(0.16,1,0.3,1) both, signal-flash-win  0.55s ease both !important; }
-.jnl-entry.loss { animation: signal-in 0.22s cubic-bezier(0.16,1,0.3,1) both, signal-flash-loss 0.55s ease both !important; }
 
 /* ── BOT TABS ONLY: compact journal entries ──
    Scoped to Differ, Even, Odd, Nexus (Over), Under panels — NOT dashboard
@@ -10281,7 +10278,6 @@ window.NexusStrategies=exports;
         case 'SET_MARKET':
           s.primaryMarket = action.market; s.globalMarket = getGlobalMarket(action.market);
           s.historyP = []; s.historyG = []; s.silenceCount = 0; s.coldDigit = null;
-          this.saveConfig();
           break;
         case 'TICK_P': {
           const newHist = [...s.historyP, action.digit].slice(-150);
@@ -10300,17 +10296,17 @@ window.NexusStrategies=exports;
         }
         case 'TICK_G': s.historyG = [...s.historyG, action.digit].slice(-150); break;
         case 'SET_COLD': s.coldDigit = action.cold; s.thirdColdDigit = action.third; break;
-        case 'SET_STAKE': s.stake = action.value; this.saveConfig(); break;
-        case 'SET_STAKE_MIN': s.stakeMin = action.value; this.saveConfig(); break;
-        case 'SET_STAKE_MAX': s.stakeMax = action.value; this.saveConfig(); break;
-        case 'TOGGLE_STAKE_VARY': s.stakeVary = !s.stakeVary; this.saveConfig(); break;
+        case 'SET_STAKE': s.stake = action.value; break;
+        case 'SET_STAKE_MIN': s.stakeMin = action.value; break;
+        case 'SET_STAKE_MAX': s.stakeMax = action.value; break;
+        case 'TOGGLE_STAKE_VARY': s.stakeVary = !s.stakeVary; break;
         // Batch Size is now a single unified field (autoBatchSize kept in sync
         // for anything that still reads it, since manual and auto-trigger
         // bursts fire the same contract count now — no more duplicate field).
-        case 'SET_BATCH': s.batchSize = action.value; s.autoBatchSize = action.value; this.saveConfig(); break;
-        case 'SET_SPEED': s.speed = action.value; this.saveConfig(); break;
-        case 'SET_TRIGGER': s.silenceTrigger = action.value; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : action.value; this.saveConfig(); break;
-        case 'TOGGLE_TRIGGER_SHUFFLE': s.triggerShuffle = !s.triggerShuffle; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : s.silenceTrigger; this.saveConfig(); break;
+        case 'SET_BATCH': s.batchSize = action.value; s.autoBatchSize = action.value; break;
+        case 'SET_SPEED': s.speed = action.value; break;
+        case 'SET_TRIGGER': s.silenceTrigger = action.value; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : action.value; break;
+        case 'TOGGLE_TRIGGER_SHUFFLE': s.triggerShuffle = !s.triggerShuffle; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : s.silenceTrigger; break;
         case 'ARM': s.isArmed = true; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : s.silenceTrigger; break;
         case 'DISARM': s.isArmed = false; s.isRunning = false; break;
         case 'FIRING': s.isRunning = true; s.isArmed = false; s.firedCount = 0; break;
@@ -10318,11 +10314,11 @@ window.NexusStrategies=exports;
         case 'COOLDOWN_START': s.isCooldown = true; s.cooldownRemaining = action.duration; break;
         case 'COOLDOWN_TICK': s.cooldownRemaining = action.remaining; break;
         case 'COOLDOWN_END': s.isCooldown = false; s.cooldownRemaining = 0; s.silenceCount = 0; break;
-        case 'TOGGLE_AUTO': s.autoMode = !s.autoMode; this.saveConfig(); break;
-        case 'SET_TP': s.takeProfit = action.value; this.saveConfig(); break;
-        case 'SET_SL': s.stopLoss = action.value; this.saveConfig(); break;
-        case 'SET_AUTO_BATCH': s.autoBatchSize = action.value; this.saveConfig(); break;
-        case 'TOGGLE_ABORT_ON_LOSS': s.abortOnLoss = !s.abortOnLoss; this.saveConfig(); break;
+        case 'TOGGLE_AUTO': s.autoMode = !s.autoMode; break;
+        case 'SET_TP': s.takeProfit = action.value; break;
+        case 'SET_SL': s.stopLoss = action.value; break;
+        case 'SET_AUTO_BATCH': s.autoBatchSize = action.value; break;
+        case 'TOGGLE_ABORT_ON_LOSS': s.abortOnLoss = !s.abortOnLoss; break;
         case 'ADD_JOURNAL': {
           const entry = action.entry;
           const isWin = entry.type === 'win';
@@ -10923,12 +10919,20 @@ window.NexusStrategies=exports;
 
     setConfig(partial) {
       this.config = { ...this.config, ...partial };
-      this.saveConfig();
-      // NOTE: sound is now governed exclusively by the dashboard's global
-      // mute switch (window._benzMuted / Settings → System Sound). Per-bot
-      // config no longer touches the shared engine's enabled flag, since
-      // this.sound is a singleton shared by all four tabs — letting any one
-      // bot toggle it here would silently override the other three.
+      // NOTE: no longer auto-persists to localStorage here. Every toggle,
+      // dropdown, or field used to write to disk the instant it changed,
+      // which is what caused both the constant "autosaving" and the visual
+      // flicker (each write triggered emit() -> full panel re-render).
+      // Config changes still apply immediately in-memory so the bot behaves
+      // live, but persistence now only happens when the operator explicitly
+      // presses a Save button (per-tab or the navbar's global one) — see
+      // saveConfig() call sites in bindMasterControl/saveAllSettings and the
+      // per-tab "-save-btn" handlers.
+      // sound is governed exclusively by the dashboard's global mute switch
+      // (window._benzMuted / Settings → System Sound). Per-bot config no
+      // longer touches the shared engine's enabled flag, since this.sound
+      // is a singleton shared by all four tabs — letting any one bot toggle
+      // it here would silently override the other three.
       this.emit();
     }
 
@@ -12250,15 +12254,16 @@ window.NexusStrategies=exports;
     // Expose so the global navbar Save button (shared across all tabs) can
     // force-commit whatever is currently sitting in these inputs.
     global.BenzUI = global.BenzUI || {};
-    global.BenzUI.commitPendingSettings = () => { differCommitAllFields(); differMarkSaved(); };
+    global.BenzUI.commitPendingSettings = () => { differCommitAllFields(); eng.saveConfig(); differMarkSaved(); };
     ['differ-stake','differ-batch','differ-trigger','differ-speed','differ-stake-min','differ-stake-max'].forEach(id => {
       const inp = el(id);
       if (inp) {
         inp.oninput = differMarkDirty;
-        // Autosave the instant the field is committed (blur / Enter / stepper
-        // click) — matches how the Even/Odd/Over-Under tabs already behave,
-        // so values are never lost just because the Save button wasn't clicked.
-        inp.onchange = () => { differCommitAllFields(); differMarkSaved(); };
+        // Applies the value to the live engine immediately (so the bot
+        // behaves with the new setting right away) but no longer writes to
+        // localStorage here — only an explicit Save (the button below, or
+        // the navbar's global "SAVE SETTINGS") persists it to disk.
+        inp.onchange = () => { differCommitAllFields(); differMarkDirty(); };
       }
     });
     const stakeVaryBtn = el('differ-stake-vary');
@@ -12275,7 +12280,7 @@ window.NexusStrategies=exports;
       [minEl, maxEl].forEach(inp => { if (inp) { inp.disabled = !isOn; const row = inp.closest('div')?.parentElement; if (row) row.style.opacity = isOn ? '' : '.45'; } });
     };
     const differSaveBtn = el('differ-save-btn');
-    if (differSaveBtn) differSaveBtn.onclick = () => { differCommitAllFields(); differMarkSaved(); };
+    if (differSaveBtn) differSaveBtn.onclick = () => { differCommitAllFields(); eng.saveConfig(); differMarkSaved(); };
     const triggerShuffleBtn = el('differ-trigger-shuffle');
     if (triggerShuffleBtn) triggerShuffleBtn.onclick = () => {
       eng.dispatch({ type: 'TOGGLE_TRIGGER_SHUFFLE' });
@@ -13149,6 +13154,7 @@ window.NexusStrategies=exports;
       if (tpEl) { const v = parseFloat(tpEl.value); if (!isNaN(v)) patch.takeProfit = Math.max(0, v); }
       if (slEl) { const v = parseFloat(slEl.value); if (!isNaN(v)) patch.stopLoss   = Math.max(0, v); }
       if (Object.keys(patch).length) engine.setConfig(patch);
+      engine.saveConfig();
       markSaved();
     };
 
@@ -13298,11 +13304,13 @@ window.NexusStrategies=exports;
       .jnl-stat-label { font-size:8px; font-family:'DM Mono',monospace; letter-spacing:1.5px; color:hsl(var(--muted-foreground)); margin-top:4px; }
 
       /* ── UPGRADED JOURNAL ENTRY ── */
+      /* NOTE: no mount/flash animation — this list rebuilds on every
+         engine tick, so an "animate/flash in" keyframe here would replay
+         for every historical entry each time (the flicker bug). */
       .jnl-entry {
         border-radius:12px; padding:0; margin-bottom:5px;
         display:flex; flex-direction:column;
         position:relative; overflow:hidden;
-        animation:jnl-slide .25s cubic-bezier(.16,1,.3,1);
         transition:transform .18s, box-shadow .18s;
         cursor:default;
       }
@@ -13311,14 +13319,12 @@ window.NexusStrategies=exports;
         background:hsl(0 0% 5%);
         border:1px solid hsl(var(--win)/0.18);
         box-shadow:0 2px 10px hsl(0 0% 0%/0.5);
-        animation:jnl-win .5s ease, jnl-slide .25s cubic-bezier(.16,1,.3,1);
       }
       .jnl-entry.win:hover { border-color:hsl(var(--win)/0.3); box-shadow:0 4px 18px hsl(0 0% 0%/0.6); }
       .jnl-entry.loss {
         background:hsl(0 0% 5%);
         border:1px solid hsl(var(--loss)/0.15);
         box-shadow:0 2px 10px hsl(0 0% 0%/0.5);
-        animation:jnl-loss .5s ease, jnl-slide .25s cubic-bezier(.16,1,.3,1);
       }
       .jnl-entry.loss:hover { border-color:hsl(var(--loss)/0.25); }
 
@@ -13398,7 +13404,6 @@ window.NexusStrategies=exports;
       .jnl-exit-digit {
         font-family:'Outfit',sans-serif; font-size:22px; font-weight:900;
         line-height:1; letter-spacing:-0.5px;
-        animation:jnl-digit-pop .35s cubic-bezier(.16,1,.3,1);
         flex-shrink:0; min-width:28px; text-align:center;
         padding:3px 7px; border-radius:7px;
         background:hsl(0 0% 0% / 0.85);
@@ -13487,7 +13492,6 @@ window.NexusStrategies=exports;
         padding: 14px;
         margin-bottom: 10px;
         position: relative; overflow: hidden;
-        animation: cp-in .3s ease;
         backdrop-filter: blur(10px);
         box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
         transition: border-color .2s, box-shadow .2s;
@@ -15127,7 +15131,7 @@ window.NexusStrategies=exports;
       #${rootId} .cp-card {
         background: linear-gradient(150deg,hsl(var(--card)/0.92),hsl(var(--bg-soft)/0.7));
         border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 14px; margin-bottom: 10px;
-        position: relative; overflow: hidden; animation: cp-in .3s ease; backdrop-filter: blur(10px);
+        position: relative; overflow: hidden; backdrop-filter: blur(10px);
         box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
         transition: border-color .2s, box-shadow .2s;
       }
@@ -15193,7 +15197,7 @@ window.NexusStrategies=exports;
       #${rootId} .rf-chart-wrap { position:relative; }
       #${rootId} .rf-chart-svg { display:block; overflow:visible; }
       #${rootId} .rf-chart-line { stroke-dasharray: 420; stroke-dashoffset: 0; animation: rf-dash-draw 1.1s cubic-bezier(.22,1,.36,1); }
-      #${rootId} .rf-chart-area { opacity:0; animation: cp-in .6s ease .3s forwards; }
+      #${rootId} .rf-chart-area { opacity:1; }
       #${rootId} .rf-chart-dot { animation: rf-dot-pulse 1.6s ease-in-out infinite; }
       #${rootId} .rf-chart-dot-ring { animation: rf-ring-pulse 1.6s ease-out infinite; }
       #${rootId} .rf-chart-meta { display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-family:'DM Mono',monospace; font-size:8px; color:hsl(var(--muted-foreground)); letter-spacing:.5px; }
@@ -15244,7 +15248,7 @@ window.NexusStrategies=exports;
 
       /* ── Cooldown progress bar ─────────────────────────────────────── */
       @keyframes rf-stripe-move { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
-      #${rootId} .rf-cd-bar-wrap { margin:10px 0 4px; animation: cp-in .3s ease; }
+      #${rootId} .rf-cd-bar-wrap { margin:10px 0 4px; }
       #${rootId} .rf-cd-bar-label { display:flex; justify-content:space-between; font-family:'DM Mono',monospace; font-size:9.5px; color:hsl(var(--accent)); margin-bottom:5px; letter-spacing:.5px; }
       #${rootId} .rf-cd-bar-track { height:6px; border-radius:4px; background:hsl(var(--bg)/0.7); border:1px solid hsl(var(--border)/0.4); overflow:hidden; }
       #${rootId} .rf-cd-bar-fill {
@@ -15550,19 +15554,54 @@ window.NexusStrategies=exports;
           <div class="cp-input-group"><span class="cp-input-label">Take Profit</span><input class="cp-input" type="number" step="0.01" id="${rootId}-tp" value="${c.takeProfit}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Stop Loss</span><input class="cp-input" type="number" step="0.01" id="${rootId}-sl" value="${c.stopLoss}"></div>
         </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px">
+          <div id="${rootId}-save-status" style="font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px;flex:1">Unsaved changes will be lost on reload</div>
+          <button id="${rootId}-save-btn" style="
+            padding:7px 16px; border-radius:10px; border:1.5px solid hsl(var(--primary)/0.5);
+            background:linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08));
+            color:hsl(var(--primary)); font-family:'Outfit',sans-serif; font-size:10px;
+            font-weight:900; letter-spacing:2px; cursor:pointer; white-space:nowrap;
+            transition:all .18s cubic-bezier(.34,1.56,.64,1);
+            box-shadow:0 0 12px hsl(var(--primary)/0.12);
+          ">💾 SAVE</button>
+        </div>
       </div>`;
     if (shHtml(host, html)) {
+      // ── Runtime toggles / selects apply immediately in-memory (the bot
+      // needs to react live) but no longer write to localStorage on every
+      // change — only an explicit Save (below, or the navbar's global
+      // "SAVE SETTINGS" button) persists anything to disk.
+      function markDirty() {
+        const st = el(`${rootId}-save-status`, host); const sb = el(`${rootId}-save-btn`, host);
+        if (st) { st.textContent = '● unsaved changes'; st.style.color = 'hsl(var(--loss)/0.7)'; }
+        if (sb) { sb.style.borderColor = 'hsl(var(--loss)/0.55)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--loss)/0.12),hsl(var(--loss)/0.05))'; sb.style.color = 'hsl(var(--loss))'; }
+      }
+      function markSaved() {
+        const st = el(`${rootId}-save-status`, host); const sb = el(`${rootId}-save-btn`, host);
+        if (st) { st.textContent = '✓ settings saved'; st.style.color = 'hsl(var(--win))'; }
+        if (sb) { sb.style.borderColor = 'hsl(var(--primary)/0.5)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08))'; sb.style.color = 'hsl(var(--primary))'; }
+        setTimeout(() => { const s2 = el(`${rootId}-save-status`, host); if (s2) { s2.textContent = 'Unsaved changes will be lost on reload'; s2.style.color = 'hsl(var(--muted-foreground)/0.5)'; } }, 2500);
+      }
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 });
-      el(`${rootId}-duration`, host).onchange = (e) => engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) });
-      el(`${rootId}-runs-in`, host).onchange = (e) => engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) });
-      el(`${rootId}-signal`, host).onchange = (e) => engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) });
-      el(`${rootId}-direction`, host).onchange = (e) => engine.setConfig({ direction: e.target.value });
-      el(`${rootId}-mg-toggle`, host).onclick = () => engine.setConfig({ martingaleEnabled: !c.martingaleEnabled });
-      el(`${rootId}-mult`, host).onchange = (e) => engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 });
-      el(`${rootId}-stop-step`, host).onchange = (e) => engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 });
-      el(`${rootId}-tp`, host).onchange = (e) => engine.setConfig({ takeProfit: parseFloat(e.target.value) || 0 });
-      el(`${rootId}-sl`, host).onchange = (e) => engine.setConfig({ stopLoss: parseFloat(e.target.value) || 0 });
+      el(`${rootId}-stake`, host).oninput = markDirty;
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); markDirty(); };
+      el(`${rootId}-duration`, host).oninput = markDirty;
+      el(`${rootId}-duration`, host).onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); markDirty(); };
+      el(`${rootId}-runs-in`, host).oninput = markDirty;
+      el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); markDirty(); };
+      el(`${rootId}-signal`, host).oninput = markDirty;
+      el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); markDirty(); };
+      el(`${rootId}-direction`, host).onchange = (e) => { engine.setConfig({ direction: e.target.value }); markDirty(); };
+      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); markDirty(); };
+      el(`${rootId}-mult`, host).oninput = markDirty;
+      el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); markDirty(); };
+      el(`${rootId}-stop-step`, host).oninput = markDirty;
+      el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); markDirty(); };
+      el(`${rootId}-tp`, host).oninput = markDirty;
+      el(`${rootId}-tp`, host).onchange = (e) => { engine.setConfig({ takeProfit: parseFloat(e.target.value) || 0 }); markDirty(); };
+      el(`${rootId}-sl`, host).oninput = markDirty;
+      el(`${rootId}-sl`, host).onchange = (e) => { engine.setConfig({ stopLoss: parseFloat(e.target.value) || 0 }); markDirty(); };
+      el(`${rootId}-save-btn`, host).onclick = () => { engine.saveConfig(); markSaved(); };
     }
   }
 
@@ -16319,7 +16358,7 @@ window.NexusStrategies=exports;
         savedAny = true;
       }
     } catch (e) { console.error('[Hub] Differ save error:', e); }
-    ['even', 'odd', 'nexus', 'under'].forEach((id) => {
+    ['even', 'odd', 'nexus', 'under', 'risefall'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
         try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
