@@ -18,6 +18,23 @@
       });
     }
   </script>
+  <script>
+    // ── Dashboard Master Gate reader ─────────────────────────────────────
+    // Single source of truth for the Dashboard's master Take Profit / Stop
+    // Loss inputs (persisted to localStorage as dash_master_tp / _sl).
+    // Exposed globally so any engine — in particular Higher/Lower, which no
+    // longer keeps its own TP/SL — can read the live dashboard value
+    // without depending on the Hub controller's internal scope.
+    window.getMasterGateValues = function () {
+      try {
+        const tp = parseFloat(localStorage.getItem('dash_master_tp'));
+        const sl = parseFloat(localStorage.getItem('dash_master_sl'));
+        return { tp: !isNaN(tp) ? tp : 50, sl: !isNaN(sl) ? sl : 20 };
+      } catch (e) {
+        return { tp: 50, sl: 20 };
+      }
+    };
+  </script>
   <div id="global-error-toast" class="global-error-toast" role="alert" aria-live="assertive"></div>
   <script>
     // Surface uncaught errors instead of failing silently — vital on a
@@ -201,6 +218,11 @@
                 <div class="label-sub">For trading with real money</div>
               </div>
             </div>
+          </div>
+          <div class="settings-section">
+            <label class="settings-label font-display">Risk Layouts</label>
+            <p class="settings-hint">Two saved snapshots of every bot's settings (stake, martingale, target runs, min signal) plus the Dashboard's master Take Profit / Stop Loss. Save your current setup into either slot, then switch between them any time — e.g. a careful "grow slowly" setup you keep for a small account, and a second slot you tune differently as your account grows. Rename either one, adjust its numbers whenever you like, and hit "Save Current" again to update that slot.</p>
+            <div id="settings-layouts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px"></div>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">Appearance</label>
@@ -6923,6 +6945,51 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 }
 
 /* ─────────────────────────────────────────────────────────────────────
+   PREMIUM CHROME / SHINE UPGRADE
+   Brushed-steel edge + slow light sweep applied to every analysis card,
+   config card, stat tile and pill across ALL bots (Differ, Even, Odd,
+   Over, Under, Higher/Lower) and the Dashboard — one shared visual
+   language instead of touching every panel's markup individually.
+   ───────────────────────────────────────────────────────────────────── */
+.ahub-card, .cp-card, .dash-stat-card, .stat-card, .jnl-header-card,
+.glass-pill, .jnl-stat-box, .rf-ind-card, .dash-balance-hero, .hub-sidebar {
+  position: relative !important;
+  border-color: hsl(0 0% 72% / 0.28) !important;
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.10), inset 0 0 0 1px hsl(0 0% 100% / 0.03), 0 10px 26px -14px rgba(0,0,0,.6) !important;
+  overflow: hidden !important;
+}
+.ahub-card::after, .cp-card::after, .dash-stat-card::after, .stat-card::after,
+.jnl-header-card::after, .glass-pill::after, .jnl-stat-box::after,
+.rf-ind-card::after, .dash-balance-hero::after {
+  content: '' !important;
+  position: absolute !important; inset: 0 !important;
+  background: linear-gradient(115deg, transparent 32%, hsl(0 0% 100% / .09) 45%, hsl(0 0% 100% / .16) 50%, hsl(0 0% 100% / .09) 55%, transparent 68%) !important;
+  background-size: 240% 240% !important;
+  background-position: -130% -130% !important;
+  animation: chrome-sweep 8s ease-in-out infinite !important;
+  pointer-events: none !important;
+  mix-blend-mode: overlay !important;
+  z-index: 1 !important;
+}
+.cp-engage-btn, .hub-tab.active {
+  position: relative !important;
+  overflow: hidden !important;
+}
+.cp-engage-btn::after {
+  content: '' !important;
+  position: absolute !important; inset: 0 !important;
+  background: linear-gradient(115deg, transparent 30%, hsl(0 0% 100% / .22) 48%, hsl(0 0% 100% / .30) 52%, transparent 70%) !important;
+  background-size: 260% 260% !important;
+  background-position: -140% -140% !important;
+  animation: chrome-sweep 5.5s ease-in-out infinite !important;
+  pointer-events: none !important;
+}
+@keyframes chrome-sweep {
+  0%, 35% { background-position: -130% -130%; }
+  65%, 100% { background-position: 130% 130%; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
    REDUCED MOTION — everything collapses gracefully
    ───────────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
@@ -10317,6 +10384,10 @@ window.NexusStrategies=exports;
         case 'TOGGLE_AUTO': s.autoMode = !s.autoMode; break;
         case 'SET_TP': s.takeProfit = action.value; break;
         case 'SET_SL': s.stopLoss = action.value; break;
+        // Bulk-apply a saved settings snapshot (used by the Settings →
+        // Risk Layouts feature) — merges every field in the patch directly
+        // into state in one go, same shape saveConfig() persists.
+        case 'HYDRATE_CONFIG': Object.assign(s, action.patch || {}); break;
         case 'SET_AUTO_BATCH': s.autoBatchSize = action.value; break;
         case 'TOGGLE_ABORT_ON_LOSS': s.abortOnLoss = !s.abortOnLoss; break;
         case 'ADD_JOURNAL': {
@@ -11600,8 +11671,15 @@ window.NexusStrategies=exports;
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
       if (st.active) {
-        if (st.stats.profit >= cfg.takeProfit) { this.addLog('win', 'AUTO', 'TAKE PROFIT REACHED'); showResultPopup('tp', cfg.takeProfit, st.stats.profit); this.completeSession(true); return; }
-        if (st.stats.profit <= -cfg.stopLoss) { this.addLog('loss', 'AUTO', 'STOP LOSS REACHED'); showResultPopup('sl', cfg.stopLoss, st.stats.profit); this.completeSession(false); return; }
+        // Higher/Lower has no session-level TP/SL of its own anymore — it
+        // always defers to whatever is set in the Dashboard's master gate,
+        // read live so changes made mid-session apply immediately.
+        const isRiseFall = this.mode === 'risefall';
+        const gate = isRiseFall && window.getMasterGateValues ? window.getMasterGateValues() : null;
+        const tp = gate ? gate.tp : cfg.takeProfit;
+        const sl = gate ? gate.sl : cfg.stopLoss;
+        if (st.stats.profit >= tp) { this.addLog('win', 'AUTO', isRiseFall ? 'DASHBOARD TAKE PROFIT REACHED' : 'TAKE PROFIT REACHED'); showResultPopup('tp', tp, st.stats.profit); this.completeSession(true); return; }
+        if (st.stats.profit <= -sl) { this.addLog('loss', 'AUTO', isRiseFall ? 'DASHBOARD STOP LOSS REACHED' : 'STOP LOSS REACHED'); showResultPopup('sl', sl, st.stats.profit); this.completeSession(false); return; }
       }
       // REWAIT mode removed: stop-at-1 behavior is no longer supported.
       // MARTINGALE DISABLED: after any loss, release lock so bot picks up next signal naturally
@@ -15038,6 +15116,56 @@ window.NexusStrategies=exports;
     if (!past) return null;
     return (now - past) / past;
   }
+  // MACD line (EMA12 - EMA26) plus a smoothed signal line, so we get both
+  // the raw momentum value and a crossover/histogram to score against.
+  function computeMACD(arr) {
+    if (arr.length < 26) return null;
+    const macdSeries = [];
+    for (let end = 26; end <= arr.length; end++) {
+      const slice = arr.slice(0, end);
+      const e12 = computeEMA(slice, 12), e26 = computeEMA(slice, 26);
+      if (e12 != null && e26 != null) macdSeries.push(e12 - e26);
+    }
+    if (!macdSeries.length) return null;
+    const macd = macdSeries[macdSeries.length - 1];
+    const signal = macdSeries.length >= 9 ? computeEMA(macdSeries, 9) : macd;
+    return { macd, signal, histogram: macd - (signal != null ? signal : macd) };
+  }
+  // ATR-style volatility: mean absolute tick-to-tick move over N ticks.
+  function computeVolatility(arr, period) {
+    if (arr.length < period + 1) return null;
+    const slice = arr.slice(-(period + 1));
+    let sum = 0;
+    for (let i = 1; i < slice.length; i++) sum += Math.abs(slice[i] - slice[i - 1]);
+    return sum / period;
+  }
+
+  // ── Rolling signal-accuracy tracker ──────────────────────────────────
+  // Every time analyze() produces a directional call, we remember it; a
+  // few ticks later we check whether price actually moved that way and
+  // keep a rolling hit-rate so the UI can show "this signal has been
+  // right X% of the time recently" instead of just a one-off confidence
+  // number with nothing to back it up.
+  const HORIZON = 8;      // ticks ahead to judge a past signal
+  const HISTORY_MAX = 60; // how many judged signals to keep
+  const _pending = [];    // [{ price, direction, atTick }]
+  const _history = [];    // [{ correct: bool }]
+  let _tickCount = 0;
+
+  function trackAccuracy(direction, price) {
+    _tickCount++;
+    if (direction) _pending.push({ price, direction, atTick: _tickCount });
+    while (_pending.length && _tickCount - _pending[0].atTick >= HORIZON) {
+      const p = _pending.shift();
+      const moved = price - p.price;
+      const correct = p.direction === 'CALL' ? moved > 0 : moved < 0;
+      _history.push({ correct });
+      if (_history.length > HISTORY_MAX) _history.shift();
+    }
+    if (!_history.length) return null;
+    const hits = _history.filter(h => h.correct).length;
+    return Math.round((hits / _history.length) * 100);
+  }
 
   function analyze(prices, symbol) {
     const MIN_TICKS = 25;
@@ -15045,7 +15173,8 @@ window.NexusStrategies=exports;
       return {
         ready: false, direction: null, confidence: 0, strength: 0, callScore: 0, putScore: 0,
         reasons: [`Warming up — collecting price history (${prices ? prices.length : 0}/${MIN_TICKS} ticks)…`],
-        rsi: null, bbPos: null, roc: null, ema5: null, ema20: null, price: prices && prices.length ? prices[prices.length - 1] : null,
+        rsi: null, bbPos: null, roc: null, ema5: null, ema20: null, macd: null, volatility: null, accuracy: null,
+        price: prices && prices.length ? prices[prices.length - 1] : null,
       };
     }
     const is1s = typeof symbol === 'string' && symbol.startsWith('1HZ');
@@ -15059,6 +15188,8 @@ window.NexusStrategies=exports;
     const roc = computeROC(prices, 5);
     const ema5 = computeEMA(prices, 5);
     const ema20 = computeEMA(prices, 20);
+    const macdData = computeMACD(prices);
+    const volatility = computeVolatility(prices, 14);
 
     let callScore = 0, putScore = 0;
     const reasons = [];
@@ -15095,16 +15226,28 @@ window.NexusStrategies=exports;
         if (bull && bbPos >= 0.5 && bbPos <= 0.85) { callScore += 2; reasons.push('Price in bullish pullback zone'); }
         else if (bear && bbPos <= 0.5 && bbPos >= 0.15) { putScore += 2; reasons.push('Price in bearish pullback zone'); }
       }
+      if (macdData && macdData.histogram != null) {
+        if (bull && macdData.histogram > 0) { callScore += 1; reasons.push('MACD histogram positive — trend confirmed'); }
+        else if (bear && macdData.histogram < 0) { putScore += 1; reasons.push('MACD histogram negative — trend confirmed'); }
+      }
     }
 
     const total = callScore + putScore;
     const direction = callScore === putScore ? null : (callScore > putScore ? 'CALL' : 'PUT');
     const confidence = total > 0 ? Math.round((Math.max(callScore, putScore) / Math.max(total, 1)) * 100) : 0;
-    // Scaled to ~0-100 against the max plausible score (9) so it lines up
-    // with the rest of the app's 0-100 "minSignal" style thresholds.
-    const strength = Math.round((Math.max(callScore, putScore) / 9) * 100);
+    // Scaled to ~0-100 against the max plausible score (10, after adding
+    // MACD confirmation) so it lines up with the rest of the app's 0-100
+    // "minSignal" style thresholds.
+    const strength = Math.round((Math.max(callScore, putScore) / 10) * 100);
+    const accuracy = trackAccuracy(direction, price);
 
-    return { ready: true, direction, confidence, strength, callScore, putScore, reasons, rsi, bbPos, roc, ema5, ema20, price, is1s };
+    return {
+      ready: true, direction, confidence, strength, callScore, putScore, reasons,
+      rsi, bbPos, roc, ema5, ema20, price, is1s,
+      macd: macdData ? macdData.macd : null,
+      macdHistogram: macdData ? macdData.histogram : null,
+      volatility, accuracy,
+    };
   }
 
   window.RiseFallAnalyzer = { analyze };
@@ -15427,7 +15570,11 @@ window.NexusStrategies=exports;
         <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--primary))">${fmtNum(a.ema5,3)}</div><div class="rf-ind-label">EMA5</div></div>
         <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--primary)/0.7)">${fmtNum(a.ema20,3)}</div><div class="rf-ind-label">EMA20</div></div>
         <div class="rf-ind-card"><div class="rf-ind-val" style="font-size:10px;color:hsl(var(--accent))">${a.is1s?'REVERT':'TREND'}</div><div class="rf-ind-label">MODE</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${(a.macdHistogram||0)>=0?'#00e676':'#ff5252'}">${fmtNum(a.macd,4)}</div><div class="rf-ind-label">MACD</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--accent))">${fmtNum(a.volatility,4)}</div><div class="rf-ind-label">VOLATILITY</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.accuracy==null?'hsl(var(--muted-foreground))':a.accuracy>=60?'#00e676':a.accuracy>=45?'#ffd740':'#ff5252'}">${a.accuracy!=null?a.accuracy+'%':'—'}</div><div class="rf-ind-label">ACCURACY</div></div>
       </div>
+      ${a.accuracy!=null ? `<div style="margin-top:2px;font-size:8.5px;color:hsl(var(--muted-foreground));text-align:center">Rolling hit-rate of this analyzer's own recent HIGHER/LOWER calls, checked 8 ticks later</div>` : ''}
     </div>
 
     <!-- TOP MARKETS -->
@@ -15549,11 +15696,28 @@ window.NexusStrategies=exports;
       </div>
 
       <div class="cp-card">
-        <div class="cp-section-label">Session Limits</div>
-        <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Take Profit</span><input class="cp-input" type="number" step="0.01" id="${rootId}-tp" value="${c.takeProfit}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Stop Loss</span><input class="cp-input" type="number" step="0.01" id="${rootId}-sl" value="${c.stopLoss}"></div>
+        <div class="cp-section-label" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Session Limits</span>
+          <span style="font-size:8px;font-family:'DM Mono',monospace;letter-spacing:1px;color:hsl(var(--primary));background:hsl(var(--primary)/0.1);border:1px solid hsl(var(--primary)/0.3);padding:2px 7px;border-radius:20px">DASHBOARD-CONTROLLED</span>
         </div>
+        <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
+          Higher/Lower no longer has its own Take Profit / Stop Loss — it always follows the master gate set on the Dashboard, live, even mid-session.
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group">
+            <span class="cp-input-label">Take Profit (master)</span>
+            <div id="${rootId}-tp-readout" style="padding:9px 10px;border-radius:10px;border:1px solid hsl(var(--win)/0.35);background:hsl(var(--win)/0.07);color:hsl(var(--win));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;text-align:center">+$${(window.getMasterGateValues ? window.getMasterGateValues().tp : 50).toFixed(2)}</div>
+          </div>
+          <div class="cp-input-group">
+            <span class="cp-input-label">Stop Loss (master)</span>
+            <div id="${rootId}-sl-readout" style="padding:9px 10px;border-radius:10px;border:1px solid hsl(var(--loss)/0.35);background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;text-align:center">-$${(window.getMasterGateValues ? window.getMasterGateValues().sl : 20).toFixed(2)}</div>
+          </div>
+        </div>
+        <button id="${rootId}-goto-dash" style="
+          width:100%; margin-top:8px; padding:8px; border-radius:10px; border:1px dashed hsl(var(--border)/0.6);
+          background:transparent; color:hsl(var(--muted-foreground)); font-family:'Outfit',sans-serif; font-size:9.5px;
+          font-weight:800; letter-spacing:1.5px; cursor:pointer; transition:all .18s;
+        ">⚙ EDIT IN DASHBOARD →</button>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px">
           <div id="${rootId}-save-status" style="font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px;flex:1">Unsaved changes will be lost on reload</div>
           <button id="${rootId}-save-btn" style="
@@ -15597,11 +15761,20 @@ window.NexusStrategies=exports;
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); markDirty(); };
       el(`${rootId}-stop-step`, host).oninput = markDirty;
       el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); markDirty(); };
-      el(`${rootId}-tp`, host).oninput = markDirty;
-      el(`${rootId}-tp`, host).onchange = (e) => { engine.setConfig({ takeProfit: parseFloat(e.target.value) || 0 }); markDirty(); };
-      el(`${rootId}-sl`, host).oninput = markDirty;
-      el(`${rootId}-sl`, host).onchange = (e) => { engine.setConfig({ stopLoss: parseFloat(e.target.value) || 0 }); markDirty(); };
+      const gotoDashBtn = el(`${rootId}-goto-dash`, host);
+      if (gotoDashBtn) gotoDashBtn.onclick = () => { if (window.UnifiedHub) window.UnifiedHub.switchApp('dashboard'); };
       el(`${rootId}-save-btn`, host).onclick = () => { engine.saveConfig(); markSaved(); };
+      // Keep the master-gate readouts live even while this panel sits open
+      // (e.g. the user tweaks TP/SL on the Dashboard tab in the background).
+      clearInterval(host._rfGateInterval);
+      host._rfGateInterval = setInterval(() => {
+        if (!document.body.contains(host)) { clearInterval(host._rfGateInterval); return; }
+        const tpEl = el(`${rootId}-tp-readout`, host), slEl = el(`${rootId}-sl-readout`, host);
+        if (!tpEl || !slEl || !window.getMasterGateValues) return;
+        const g = window.getMasterGateValues();
+        tpEl.textContent = `+$${g.tp.toFixed(2)}`;
+        slEl.textContent = `-$${g.sl.toFixed(2)}`;
+      }, 2000);
     }
   }
 
@@ -16231,10 +16404,171 @@ window.NexusStrategies=exports;
       if (id === 'differ') {
         eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp });
         eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl });
-      } else {
+      } else if (id !== 'risefall') {
+        // Higher/Lower is excluded on purpose: it reads the master gate
+        // live (window.getMasterGateValues) rather than a locally-set
+        // takeProfit/stopLoss, so there is nothing to push into it here.
         eng.setConfig && eng.setConfig({ takeProfit: tp, stopLoss: sl });
       }
     });
+  }
+
+  // ── RISK LAYOUTS ──────────────────────────────────────────────────────
+  // Two full snapshots of every bot's settings + the master TP/SL gate,
+  // saved under Settings so the person can flip between e.g. a careful
+  // "small account, grow slowly" setup and a second slot they tune
+  // differently later, without re-typing every field by hand each time.
+  const LAYOUT_CONFIG_KEYS = { differ: 'benz_differ_config', even: 'even_config', odd: 'odd_config', nexus: 'nexus_config', under: 'under_config', risefall: 'risefall_config' };
+
+  function captureCurrentLayout(name) {
+    const data = { name, savedAt: new Date().toISOString() };
+    Object.entries(LAYOUT_CONFIG_KEYS).forEach(([id, key]) => {
+      try { data[id] = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { data[id] = {}; }
+    });
+    const gate = getMasterTpSl();
+    data.masterTp = gate.tp; data.masterSl = gate.sl;
+    return data;
+  }
+
+  function loadLayoutSlot(slot) {
+    try {
+      const raw = localStorage.getItem(`hub_layout_${slot}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function saveLayoutSlot(slot, name) {
+    const existing = loadLayoutSlot(slot);
+    const finalName = name || (existing && existing.name) || `Layout ${slot}`;
+    const data = captureCurrentLayout(finalName);
+    localStorage.setItem(`hub_layout_${slot}`, JSON.stringify(data));
+    localStorage.setItem('hub_active_layout', String(slot));
+    return data;
+  }
+
+  function pushMasterGate(tp, sl) {
+    saveMasterGateValues(tp, sl);
+    const tpInput = document.getElementById('dash-master-tp');
+    const slInput = document.getElementById('dash-master-sl');
+    if (tpInput) tpInput.value = tp;
+    if (slInput) slInput.value = sl;
+    BOT_IDS.forEach((id) => {
+      const eng = engines[id];
+      if (!eng || id === 'risefall') return; // risefall always reads the gate live — nothing to push
+      if (id === 'differ') { eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp }); eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl }); }
+      else { eng.setConfig && eng.setConfig({ takeProfit: tp, stopLoss: sl }); }
+    });
+  }
+
+  function applyLayoutSlot(slot) {
+    const data = loadLayoutSlot(slot);
+    if (!data) return false;
+    Object.entries(LAYOUT_CONFIG_KEYS).forEach(([id, key]) => {
+      if (!data[id]) return;
+      localStorage.setItem(key, JSON.stringify(data[id]));
+      const eng = engines[id];
+      if (!eng) return;
+      if (id === 'differ') eng.dispatch && eng.dispatch({ type: 'HYDRATE_CONFIG', patch: data[id] });
+      else eng.setConfig && eng.setConfig(data[id]);
+    });
+    if (data.masterTp != null && data.masterSl != null) pushMasterGate(data.masterTp, data.masterSl);
+    localStorage.setItem('hub_active_layout', String(slot));
+    queueDashboardRender();
+    renderLayoutCards();
+    const toast = document.getElementById('global-error-toast');
+    if (toast) {
+      toast.textContent = `✅ Applied "${data.name}" to every bot`;
+      toast.style.background = 'hsl(var(--win)/0.15)'; toast.style.borderColor = 'hsl(var(--win)/0.5)'; toast.style.color = 'hsl(var(--win))';
+      toast.classList.add('show');
+      setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 2500);
+    }
+    return true;
+  }
+
+  function timeAgo(iso) {
+    if (!iso) return '';
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.round(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.round(hrs / 24)}d ago`;
+  }
+
+  function renderLayoutCards() {
+    const grid = document.getElementById('settings-layouts-grid');
+    if (!grid) return;
+    const active = localStorage.getItem('hub_active_layout');
+    grid.innerHTML = [1, 2].map((slot) => {
+      const data = loadLayoutSlot(slot);
+      const isActive = active === String(slot);
+      const stakeGlimpse = data ? ['even', 'odd', 'nexus', 'under', 'risefall'].map(id => data[id] && data[id].stake).find(v => v != null) : null;
+      return `
+      <div class="cp-card" style="margin-bottom:0;border-color:${isActive ? 'hsl(var(--primary)/0.5)' : ''}">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <input class="input-field font-mono" id="layout-name-${slot}" value="${(data && data.name) || `Layout ${slot}`}" style="font-size:11.5px;font-weight:800;padding:6px 8px;flex:1;min-width:0">
+          ${isActive ? `<span style="font-size:7.5px;font-weight:900;letter-spacing:1px;color:hsl(var(--primary));background:hsl(var(--primary)/0.12);border:1px solid hsl(var(--primary)/0.35);padding:3px 6px;border-radius:20px;white-space:nowrap">ACTIVE</span>` : ''}
+        </div>
+        <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));line-height:1.7">
+          ${data ? `Saved ${timeAgo(data.savedAt)}<br>TP <b style="color:hsl(var(--win))">+$${(data.masterTp||0).toFixed(2)}</b> · SL <b style="color:hsl(var(--loss))">-$${(data.masterSl||0).toFixed(2)}</b>${stakeGlimpse != null ? ` · Stake ~$${stakeGlimpse}` : ''}` : 'Not saved yet — click "Save Current" to capture your settings into this slot.'}
+        </div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <button type="button" class="btn-primary font-display" data-layout-apply="${slot}" ${!data ? 'disabled' : ''} style="flex:1;font-size:10px;padding:8px${!data ? ';opacity:.4;cursor:not-allowed' : ''}">▶ Apply</button>
+          <button type="button" class="font-display" data-layout-save="${slot}" style="flex:1;font-size:10px;padding:8px;border-radius:8px;border:1.5px solid hsl(var(--border)/0.6);background:hsl(var(--bg)/0.6);color:hsl(var(--foreground));cursor:pointer;font-weight:800;letter-spacing:0.5px">💾 Save Current</button>
+        </div>
+      </div>`;
+    }).join('');
+    grid.querySelectorAll('[data-layout-apply]').forEach((b) => {
+      b.onclick = () => applyLayoutSlot(parseInt(b.dataset.layoutApply));
+    });
+    grid.querySelectorAll('[data-layout-save]').forEach((b) => {
+      b.onclick = () => {
+        const slot = parseInt(b.dataset.layoutSave);
+        const nameInput = document.getElementById(`layout-name-${slot}`);
+        saveLayoutSlot(slot, nameInput ? nameInput.value.trim() : null);
+        renderLayoutCards();
+        const toast = document.getElementById('global-error-toast');
+        if (toast) {
+          toast.textContent = `✅ Current settings saved to Layout ${slot}`;
+          toast.style.background = 'hsl(var(--win)/0.15)'; toast.style.borderColor = 'hsl(var(--win)/0.5)'; toast.style.color = 'hsl(var(--win))';
+          toast.classList.add('show');
+          setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 2500);
+        }
+      };
+    });
+  }
+
+  // First-ever run: seed Layout 1 from whatever the person's current
+  // settings already are (their existing, presumably-conservative setup),
+  // then clone it into Layout 2 as a starting point they can tune
+  // differently later. Only runs once — never overwrites a slot that
+  // already has something saved in it.
+  function seedDefaultLayoutsOnce() {
+    try {
+      if (localStorage.getItem('hub_layouts_seeded')) return;
+      if (!loadLayoutSlot(1)) saveLayoutSlot(1, 'Layout 1');
+      if (!loadLayoutSlot(2)) {
+        const l1 = loadLayoutSlot(1);
+        if (l1) {
+          const clone = { ...l1, name: 'Layout 2', savedAt: new Date().toISOString() };
+          localStorage.setItem('hub_layout_2', JSON.stringify(clone));
+        }
+      }
+      if (!localStorage.getItem('hub_active_layout')) localStorage.setItem('hub_active_layout', '1');
+      localStorage.setItem('hub_layouts_seeded', '1');
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  function bindRiskLayouts() {
+    seedDefaultLayoutsOnce();
+    renderLayoutCards();
+    // Settings modal is re-opened repeatedly without a full re-render
+    // elsewhere, so refresh the cards (saved-time, active flag) every time
+    // it's opened rather than only once at page load.
+    const settingsBtn = document.getElementById('hub-settings-btn');
+    if (settingsBtn) settingsBtn.addEventListener('click', renderLayoutCards);
+    document.querySelectorAll('[data-open-settings]').forEach((b) => b.addEventListener('click', renderLayoutCards));
   }
 
   function bindMasterControl() {
@@ -16400,6 +16734,7 @@ window.NexusStrategies=exports;
     try { refreshTopbar(); } catch(e) { console.error('[Hub] refreshTopbar error:', e); }
     dashboardEl = document.getElementById('dashboard-root');
     try { bindMasterControl(); } catch(e) { console.error('[Hub] bindMasterControl error:', e); }
+    try { bindRiskLayouts(); } catch(e) { console.error('[Hub] bindRiskLayouts error:', e); }
     try { bindGlobalSaveButton(); } catch(e) { console.error('[Hub] bindGlobalSaveButton error:', e); }
     // Start all four engines' public analysis sockets immediately, regardless
     // of which tab is active — ticks/digits should be live the moment the
