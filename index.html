@@ -220,11 +220,6 @@
             </div>
           </div>
           <div class="settings-section">
-            <label class="settings-label font-display">Risk Layouts</label>
-            <p class="settings-hint">Two saved snapshots of every bot's settings (stake, martingale, target runs, min signal) plus the Dashboard's master Take Profit / Stop Loss. Save your current setup into either slot, then switch between them any time — e.g. a careful "grow slowly" setup you keep for a small account, and a second slot you tune differently as your account grows. Rename either one, adjust its numbers whenever you like, and hit "Save Current" again to update that slot.</p>
-            <div id="settings-layouts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px"></div>
-          </div>
-          <div class="settings-section">
             <label class="settings-label font-display">Appearance</label>
             <p class="settings-hint">Choose your visual theme. <strong>Theme 1 (Luminous)</strong> features cyan/magenta glassmorphism. <strong>Theme 2 (Void)</strong> uses ultra-black surfaces with zero ambient color. Settings are saved automatically.</p>
             <div class="theme-pill-row" id="settings-theme-pills" style="flex-wrap:wrap;gap:6px;margin-top:4px"></div>
@@ -10384,10 +10379,6 @@ window.NexusStrategies=exports;
         case 'TOGGLE_AUTO': s.autoMode = !s.autoMode; break;
         case 'SET_TP': s.takeProfit = action.value; break;
         case 'SET_SL': s.stopLoss = action.value; break;
-        // Bulk-apply a saved settings snapshot (used by the Settings →
-        // Risk Layouts feature) — merges every field in the patch directly
-        // into state in one go, same shape saveConfig() persists.
-        case 'HYDRATE_CONFIG': Object.assign(s, action.patch || {}); break;
         case 'SET_AUTO_BATCH': s.autoBatchSize = action.value; break;
         case 'TOGGLE_ABORT_ON_LOSS': s.abortOnLoss = !s.abortOnLoss; break;
         case 'ADD_JOURNAL': {
@@ -10995,10 +10986,10 @@ window.NexusStrategies=exports;
       // which is what caused both the constant "autosaving" and the visual
       // flicker (each write triggered emit() -> full panel re-render).
       // Config changes still apply immediately in-memory so the bot behaves
-      // live, but persistence now only happens when the operator explicitly
-      // presses a Save button (per-tab or the navbar's global one) — see
-      // saveConfig() call sites in bindMasterControl/saveAllSettings and the
-      // per-tab "-save-btn" handlers.
+      // live, but persistence now only happens when the operator presses
+      // the navbar's global "SAVE SETTINGS" button — see saveConfig() call
+      // sites in bindMasterControl/saveAllSettings. No bot has its own
+      // Save button anymore; the navbar button is the only save mechanism.
       // sound is governed exclusively by the dashboard's global mute switch
       // (window._benzMuted / Settings → System Sound). Per-bot config no
       // longer touches the shared engine's enabled flag, since this.sound
@@ -12258,16 +12249,8 @@ window.NexusStrategies=exports;
             </div>
           </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:8px">
-          <div id="differ-save-status" style="font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px;flex:1">Unsaved changes lost on reload</div>
-          <button id="differ-save-btn" style="
-            padding:7px 16px; border-radius:10px; border:1.5px solid hsl(var(--primary)/0.5);
-            background:linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08));
-            color:hsl(var(--primary)); font-family:'Outfit',sans-serif; font-size:10px;
-            font-weight:900; letter-spacing:2px; cursor:pointer; white-space:nowrap;
-            transition:all .18s cubic-bezier(.34,1.56,.64,1);
-            box-shadow:0 0 12px hsl(var(--primary)/0.12);
-          ">💾 SAVE</button>
+        <div style="margin-top:10px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
+          Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
         </div>
       </div>
       <div class="glass-panel" style="padding:12px;margin-top:8px">
@@ -12299,22 +12282,12 @@ window.NexusStrategies=exports;
     el('differ-speed').oninput = (e) => { const sl = el('differ-speed-label'); if (sl) { const v = parseInt(e.target.value); sl.textContent = (v <= 100 ? 'SUPERSONIC' : v <= 300 ? 'FAST' : v <= 600 ? 'NORMAL' : 'SLOW') + ` (${v}ms)`; } };
     el('differ-abortonloss').onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' });
     el('differ-auto').onclick = () => { eng.dispatch({ type: 'TOGGLE_AUTO' }); renderCenterConfig(eng.state); };
-    // ── DIFFER SAVE BUTTON ── deferred numeric field commit ──────────
-    function differMarkDirty() {
-      const st = el('differ-save-status'); const sb = el('differ-save-btn');
-      if (st) { st.textContent = '● unsaved changes'; st.style.color = 'hsl(var(--loss)/0.7)'; }
-      if (sb) { sb.style.borderColor = 'hsl(var(--loss)/0.55)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--loss)/0.12),hsl(var(--loss)/0.05))'; sb.style.color = 'hsl(var(--loss))'; }
-    }
-    function differMarkSaved() {
-      const st = el('differ-save-status'); const sb = el('differ-save-btn');
-      if (st) { st.textContent = '✓ settings saved'; st.style.color = 'hsl(var(--win))'; }
-      if (sb) { sb.style.borderColor = 'hsl(var(--primary)/0.5)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08))'; sb.style.color = 'hsl(var(--primary))'; }
-      setTimeout(() => { const s2 = el('differ-save-status'); if (s2) { s2.textContent = 'Unsaved changes lost on reload'; s2.style.color = 'hsl(var(--muted-foreground)/0.5)'; } }, 2500);
-    }
     // Commits every field currently shown in the panel to the engine (which
-    // persists to localStorage on each SET_* dispatch). Used by the per-tab
-    // Save button AND by the global navbar "Save Settings" button, so a value
-    // typed but not yet blurred/committed is never silently lost on refresh.
+    // persists to localStorage on each SET_* dispatch). Used ONLY by the
+    // global navbar "SAVE SETTINGS" button now — Differ no longer has its
+    // own per-tab Save button, so a value typed but not yet blurred still
+    // applies live in-memory via onchange below, but is only written to
+    // disk when the navbar button is pressed.
     function differCommitAllFields() {
       const stakeEl    = el('differ-stake');
       const batchEl    = el('differ-batch');
@@ -12332,16 +12305,15 @@ window.NexusStrategies=exports;
     // Expose so the global navbar Save button (shared across all tabs) can
     // force-commit whatever is currently sitting in these inputs.
     global.BenzUI = global.BenzUI || {};
-    global.BenzUI.commitPendingSettings = () => { differCommitAllFields(); eng.saveConfig(); differMarkSaved(); };
+    global.BenzUI.commitPendingSettings = () => { differCommitAllFields(); eng.saveConfig(); };
     ['differ-stake','differ-batch','differ-trigger','differ-speed','differ-stake-min','differ-stake-max'].forEach(id => {
       const inp = el(id);
       if (inp) {
-        inp.oninput = differMarkDirty;
         // Applies the value to the live engine immediately (so the bot
         // behaves with the new setting right away) but no longer writes to
-        // localStorage here — only an explicit Save (the button below, or
-        // the navbar's global "SAVE SETTINGS") persists it to disk.
-        inp.onchange = () => { differCommitAllFields(); differMarkDirty(); };
+        // localStorage here — only the navbar's global "SAVE SETTINGS"
+        // button persists it to disk.
+        inp.onchange = () => { differCommitAllFields(); };
       }
     });
     const stakeVaryBtn = el('differ-stake-vary');
@@ -12357,8 +12329,6 @@ window.NexusStrategies=exports;
       if (stakeEl) { stakeEl.disabled = isOn; stakeEl.style.opacity = isOn ? '.45' : ''; }
       [minEl, maxEl].forEach(inp => { if (inp) { inp.disabled = !isOn; const row = inp.closest('div')?.parentElement; if (row) row.style.opacity = isOn ? '' : '.45'; } });
     };
-    const differSaveBtn = el('differ-save-btn');
-    if (differSaveBtn) differSaveBtn.onclick = () => { differCommitAllFields(); eng.saveConfig(); differMarkSaved(); };
     const triggerShuffleBtn = el('differ-trigger-shuffle');
     if (triggerShuffleBtn) triggerShuffleBtn.onclick = () => {
       eng.dispatch({ type: 'TOGGLE_TRIGGER_SHUFFLE' });
@@ -12969,16 +12939,8 @@ window.NexusStrategies=exports;
           <input class="cp-input" type="number" id="${rootId}-streak-in" value="${c.minStreak}">
         </div>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px">
-        <div id="${rootId}-save-status" style="font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px;flex:1">Unsaved changes will be lost on reload</div>
-        <button id="${rootId}-save-btn" style="
-          padding:7px 16px; border-radius:10px; border:1.5px solid hsl(var(--primary)/0.5);
-          background:linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08));
-          color:hsl(var(--primary)); font-family:'Outfit',sans-serif; font-size:10px;
-          font-weight:900; letter-spacing:2px; cursor:pointer; white-space:nowrap;
-          transition:all .18s cubic-bezier(.34,1.56,.64,1);
-          box-shadow:0 0 12px hsl(var(--primary)/0.12);
-        ">💾 SAVE</button>
+      <div style="margin-top:8px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
+        Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
       </div>
     </div>
     <!-- ── MARTINGALE ENGINE ─────────────────────────────────────── -->
@@ -13169,33 +13131,14 @@ window.NexusStrategies=exports;
     el(`${rootId}-market`).onchange = (e) => engine.changeMarket(e.target.value);
 
     // ── DEFERRED NUMERIC INPUT BINDINGS ──────────────────────────────
-    // Numeric fields no longer push to engine.setConfig() on every keystroke.
-    // They only mark the panel "dirty" (showing an unsaved-changes hint) so
-    // the user can tweak multiple fields before committing with Save.
-    function markDirty() {
-      const statusEl = el(`${rootId}-save-status`);
-      const saveBtn  = el(`${rootId}-save-btn`);
-      if (statusEl) { statusEl.textContent = '● unsaved changes'; statusEl.style.color = 'hsl(var(--loss)/0.7)'; }
-      if (saveBtn)  { saveBtn.style.borderColor = 'hsl(var(--loss)/0.55)'; saveBtn.style.background = 'linear-gradient(135deg,hsl(var(--loss)/0.12),hsl(var(--loss)/0.05))'; saveBtn.style.color = 'hsl(var(--loss))'; }
-    }
-    function markSaved() {
-      const statusEl = el(`${rootId}-save-status`);
-      const saveBtn  = el(`${rootId}-save-btn`);
-      if (statusEl) { statusEl.textContent = '✓ settings saved'; statusEl.style.color = 'hsl(var(--win))'; }
-      if (saveBtn)  { saveBtn.style.borderColor = 'hsl(var(--primary)/0.5)'; saveBtn.style.background = 'linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08))'; saveBtn.style.color = 'hsl(var(--primary))'; }
-      setTimeout(() => {
-        const s2 = el(`${rootId}-save-status`);
-        if (s2) { s2.textContent = 'Unsaved changes will be lost on reload'; s2.style.color = 'hsl(var(--muted-foreground)/0.5)'; }
-      }, 2500);
-    }
-
-    // Mark dirty on any numeric input change (no immediate setConfig)
+    // Fields apply live to the engine in-memory as soon as they're
+    // changed/blurred. Persisting to localStorage now happens only via
+    // the navbar's global "SAVE SETTINGS" button (see saveAllSettings),
+    // not from a per-tab button — this tab has none anymore.
     [`${rootId}-stake`,`${rootId}-runs-in`,`${rootId}-signal`,`${rootId}-streak-in`,`${rootId}-mult`].forEach(id => {
       const inp = el(id);
       if (inp) {
-        inp.oninput = markDirty;
         inp.onchange = () => {
-          markDirty();
           const patch = {};
           const stakeVal = parseFloat(el(`${rootId}-stake`)?.value);
           const runsVal = parseInt(el(`${rootId}-runs-in`)?.value);
@@ -13211,30 +13154,6 @@ window.NexusStrategies=exports;
         };
       }
     });
-
-    // ── SAVE BUTTON ── commits all numeric fields at once to engine + localStorage
-    const saveBtn = el(`${rootId}-save-btn`);
-    if (saveBtn) saveBtn.onclick = () => {
-      const stakeVal   = parseFloat(el(`${rootId}-stake`)?.value);
-      const runsVal    = parseInt(el(`${rootId}-runs-in`)?.value);
-      const signalVal  = parseInt(el(`${rootId}-signal`)?.value);
-      const streakVal  = parseInt(el(`${rootId}-streak-in`)?.value);
-      const multEl     = el(`${rootId}-mult`);
-      const multVal    = multEl ? parseFloat(multEl.value) : null;
-      const tpEl       = el(`${rootId}-tp`);
-      const slEl       = el(`${rootId}-sl`);
-      const patch = {};
-      if (!isNaN(stakeVal)  && stakeVal  > 0)    patch.stake               = Math.max(0.35, stakeVal);
-      if (!isNaN(runsVal)   && runsVal   > 0)    patch.targetRuns          = Math.max(1, runsVal);
-      if (!isNaN(signalVal))                      patch.minSignal           = Math.min(100, Math.max(0, signalVal));
-      if (!isNaN(streakVal) && streakVal > 0)    patch.minStreak           = Math.max(1, streakVal);
-      if (multVal !== null && !isNaN(multVal) && multVal >= 1.01) patch.martingaleMultiplier = multVal;
-      if (tpEl) { const v = parseFloat(tpEl.value); if (!isNaN(v)) patch.takeProfit = Math.max(0, v); }
-      if (slEl) { const v = parseFloat(slEl.value); if (!isNaN(v)) patch.stopLoss   = Math.max(0, v); }
-      if (Object.keys(patch).length) engine.setConfig(patch);
-      engine.saveConfig();
-      markSaved();
-    };
 
     el(`${rootId}-mart`).onclick = (e) => { e.stopPropagation(); const en = !c.martingaleEnabled; engine.setConfig({ martingaleEnabled: en }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     const martHeader = el(`${rootId}-mart-header`);
@@ -15718,16 +15637,8 @@ window.NexusStrategies=exports;
           background:transparent; color:hsl(var(--muted-foreground)); font-family:'Outfit',sans-serif; font-size:9.5px;
           font-weight:800; letter-spacing:1.5px; cursor:pointer; transition:all .18s;
         ">⚙ EDIT IN DASHBOARD →</button>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px">
-          <div id="${rootId}-save-status" style="font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5);letter-spacing:0.8px;flex:1">Unsaved changes will be lost on reload</div>
-          <button id="${rootId}-save-btn" style="
-            padding:7px 16px; border-radius:10px; border:1.5px solid hsl(var(--primary)/0.5);
-            background:linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08));
-            color:hsl(var(--primary)); font-family:'Outfit',sans-serif; font-size:10px;
-            font-weight:900; letter-spacing:2px; cursor:pointer; white-space:nowrap;
-            transition:all .18s cubic-bezier(.34,1.56,.64,1);
-            box-shadow:0 0 12px hsl(var(--primary)/0.12);
-          ">💾 SAVE</button>
+        <div style="margin-top:10px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
+          Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
         </div>
       </div>`;
     if (shHtml(host, html)) {
@@ -15735,35 +15646,17 @@ window.NexusStrategies=exports;
       // needs to react live) but no longer write to localStorage on every
       // change — only an explicit Save (below, or the navbar's global
       // "SAVE SETTINGS" button) persists anything to disk.
-      function markDirty() {
-        const st = el(`${rootId}-save-status`, host); const sb = el(`${rootId}-save-btn`, host);
-        if (st) { st.textContent = '● unsaved changes'; st.style.color = 'hsl(var(--loss)/0.7)'; }
-        if (sb) { sb.style.borderColor = 'hsl(var(--loss)/0.55)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--loss)/0.12),hsl(var(--loss)/0.05))'; sb.style.color = 'hsl(var(--loss))'; }
-      }
-      function markSaved() {
-        const st = el(`${rootId}-save-status`, host); const sb = el(`${rootId}-save-btn`, host);
-        if (st) { st.textContent = '✓ settings saved'; st.style.color = 'hsl(var(--win))'; }
-        if (sb) { sb.style.borderColor = 'hsl(var(--primary)/0.5)'; sb.style.background = 'linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--primary)/0.08))'; sb.style.color = 'hsl(var(--primary))'; }
-        setTimeout(() => { const s2 = el(`${rootId}-save-status`, host); if (s2) { s2.textContent = 'Unsaved changes will be lost on reload'; s2.style.color = 'hsl(var(--muted-foreground)/0.5)'; } }, 2500);
-      }
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).oninput = markDirty;
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); markDirty(); };
-      el(`${rootId}-duration`, host).oninput = markDirty;
-      el(`${rootId}-duration`, host).onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); markDirty(); };
-      el(`${rootId}-runs-in`, host).oninput = markDirty;
-      el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); markDirty(); };
-      el(`${rootId}-signal`, host).oninput = markDirty;
-      el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); markDirty(); };
-      el(`${rootId}-direction`, host).onchange = (e) => { engine.setConfig({ direction: e.target.value }); markDirty(); };
-      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); markDirty(); };
-      el(`${rootId}-mult`, host).oninput = markDirty;
-      el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); markDirty(); };
-      el(`${rootId}-stop-step`, host).oninput = markDirty;
-      el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); markDirty(); };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
+      el(`${rootId}-duration`, host).onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); };
+      el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
+      el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
+      el(`${rootId}-direction`, host).onchange = (e) => { engine.setConfig({ direction: e.target.value }); };
+      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); };
+      el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
+      el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
       const gotoDashBtn = el(`${rootId}-goto-dash`, host);
       if (gotoDashBtn) gotoDashBtn.onclick = () => { if (window.UnifiedHub) window.UnifiedHub.switchApp('dashboard'); };
-      el(`${rootId}-save-btn`, host).onclick = () => { engine.saveConfig(); markSaved(); };
       // Keep the master-gate readouts live even while this panel sits open
       // (e.g. the user tweaks TP/SL on the Dashboard tab in the background).
       clearInterval(host._rfGateInterval);
@@ -16413,164 +16306,6 @@ window.NexusStrategies=exports;
     });
   }
 
-  // ── RISK LAYOUTS ──────────────────────────────────────────────────────
-  // Two full snapshots of every bot's settings + the master TP/SL gate,
-  // saved under Settings so the person can flip between e.g. a careful
-  // "small account, grow slowly" setup and a second slot they tune
-  // differently later, without re-typing every field by hand each time.
-  const LAYOUT_CONFIG_KEYS = { differ: 'benz_differ_config', even: 'even_config', odd: 'odd_config', nexus: 'nexus_config', under: 'under_config', risefall: 'risefall_config' };
-
-  function captureCurrentLayout(name) {
-    const data = { name, savedAt: new Date().toISOString() };
-    Object.entries(LAYOUT_CONFIG_KEYS).forEach(([id, key]) => {
-      try { data[id] = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { data[id] = {}; }
-    });
-    const gate = getMasterTpSl();
-    data.masterTp = gate.tp; data.masterSl = gate.sl;
-    return data;
-  }
-
-  function loadLayoutSlot(slot) {
-    try {
-      const raw = localStorage.getItem(`hub_layout_${slot}`);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
-  }
-
-  function saveLayoutSlot(slot, name) {
-    const existing = loadLayoutSlot(slot);
-    const finalName = name || (existing && existing.name) || `Layout ${slot}`;
-    const data = captureCurrentLayout(finalName);
-    localStorage.setItem(`hub_layout_${slot}`, JSON.stringify(data));
-    localStorage.setItem('hub_active_layout', String(slot));
-    return data;
-  }
-
-  function pushMasterGate(tp, sl) {
-    saveMasterGateValues(tp, sl);
-    const tpInput = document.getElementById('dash-master-tp');
-    const slInput = document.getElementById('dash-master-sl');
-    if (tpInput) tpInput.value = tp;
-    if (slInput) slInput.value = sl;
-    BOT_IDS.forEach((id) => {
-      const eng = engines[id];
-      if (!eng || id === 'risefall') return; // risefall always reads the gate live — nothing to push
-      if (id === 'differ') { eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp }); eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl }); }
-      else { eng.setConfig && eng.setConfig({ takeProfit: tp, stopLoss: sl }); }
-    });
-  }
-
-  function applyLayoutSlot(slot) {
-    const data = loadLayoutSlot(slot);
-    if (!data) return false;
-    Object.entries(LAYOUT_CONFIG_KEYS).forEach(([id, key]) => {
-      if (!data[id]) return;
-      localStorage.setItem(key, JSON.stringify(data[id]));
-      const eng = engines[id];
-      if (!eng) return;
-      if (id === 'differ') eng.dispatch && eng.dispatch({ type: 'HYDRATE_CONFIG', patch: data[id] });
-      else eng.setConfig && eng.setConfig(data[id]);
-    });
-    if (data.masterTp != null && data.masterSl != null) pushMasterGate(data.masterTp, data.masterSl);
-    localStorage.setItem('hub_active_layout', String(slot));
-    queueDashboardRender();
-    renderLayoutCards();
-    const toast = document.getElementById('global-error-toast');
-    if (toast) {
-      toast.textContent = `✅ Applied "${data.name}" to every bot`;
-      toast.style.background = 'hsl(var(--win)/0.15)'; toast.style.borderColor = 'hsl(var(--win)/0.5)'; toast.style.color = 'hsl(var(--win))';
-      toast.classList.add('show');
-      setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 2500);
-    }
-    return true;
-  }
-
-  function timeAgo(iso) {
-    if (!iso) return '';
-    const diff = Date.now() - new Date(iso).getTime();
-    const mins = Math.round(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.round(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.round(hrs / 24)}d ago`;
-  }
-
-  function renderLayoutCards() {
-    const grid = document.getElementById('settings-layouts-grid');
-    if (!grid) return;
-    const active = localStorage.getItem('hub_active_layout');
-    grid.innerHTML = [1, 2].map((slot) => {
-      const data = loadLayoutSlot(slot);
-      const isActive = active === String(slot);
-      const stakeGlimpse = data ? ['even', 'odd', 'nexus', 'under', 'risefall'].map(id => data[id] && data[id].stake).find(v => v != null) : null;
-      return `
-      <div class="cp-card" style="margin-bottom:0;border-color:${isActive ? 'hsl(var(--primary)/0.5)' : ''}">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
-          <input class="input-field font-mono" id="layout-name-${slot}" value="${(data && data.name) || `Layout ${slot}`}" style="font-size:11.5px;font-weight:800;padding:6px 8px;flex:1;min-width:0">
-          ${isActive ? `<span style="font-size:7.5px;font-weight:900;letter-spacing:1px;color:hsl(var(--primary));background:hsl(var(--primary)/0.12);border:1px solid hsl(var(--primary)/0.35);padding:3px 6px;border-radius:20px;white-space:nowrap">ACTIVE</span>` : ''}
-        </div>
-        <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));line-height:1.7">
-          ${data ? `Saved ${timeAgo(data.savedAt)}<br>TP <b style="color:hsl(var(--win))">+$${(data.masterTp||0).toFixed(2)}</b> · SL <b style="color:hsl(var(--loss))">-$${(data.masterSl||0).toFixed(2)}</b>${stakeGlimpse != null ? ` · Stake ~$${stakeGlimpse}` : ''}` : 'Not saved yet — click "Save Current" to capture your settings into this slot.'}
-        </div>
-        <div style="display:flex;gap:6px;margin-top:10px">
-          <button type="button" class="btn-primary font-display" data-layout-apply="${slot}" ${!data ? 'disabled' : ''} style="flex:1;font-size:10px;padding:8px${!data ? ';opacity:.4;cursor:not-allowed' : ''}">▶ Apply</button>
-          <button type="button" class="font-display" data-layout-save="${slot}" style="flex:1;font-size:10px;padding:8px;border-radius:8px;border:1.5px solid hsl(var(--border)/0.6);background:hsl(var(--bg)/0.6);color:hsl(var(--foreground));cursor:pointer;font-weight:800;letter-spacing:0.5px">💾 Save Current</button>
-        </div>
-      </div>`;
-    }).join('');
-    grid.querySelectorAll('[data-layout-apply]').forEach((b) => {
-      b.onclick = () => applyLayoutSlot(parseInt(b.dataset.layoutApply));
-    });
-    grid.querySelectorAll('[data-layout-save]').forEach((b) => {
-      b.onclick = () => {
-        const slot = parseInt(b.dataset.layoutSave);
-        const nameInput = document.getElementById(`layout-name-${slot}`);
-        saveLayoutSlot(slot, nameInput ? nameInput.value.trim() : null);
-        renderLayoutCards();
-        const toast = document.getElementById('global-error-toast');
-        if (toast) {
-          toast.textContent = `✅ Current settings saved to Layout ${slot}`;
-          toast.style.background = 'hsl(var(--win)/0.15)'; toast.style.borderColor = 'hsl(var(--win)/0.5)'; toast.style.color = 'hsl(var(--win))';
-          toast.classList.add('show');
-          setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 2500);
-        }
-      };
-    });
-  }
-
-  // First-ever run: seed Layout 1 from whatever the person's current
-  // settings already are (their existing, presumably-conservative setup),
-  // then clone it into Layout 2 as a starting point they can tune
-  // differently later. Only runs once — never overwrites a slot that
-  // already has something saved in it.
-  function seedDefaultLayoutsOnce() {
-    try {
-      if (localStorage.getItem('hub_layouts_seeded')) return;
-      if (!loadLayoutSlot(1)) saveLayoutSlot(1, 'Layout 1');
-      if (!loadLayoutSlot(2)) {
-        const l1 = loadLayoutSlot(1);
-        if (l1) {
-          const clone = { ...l1, name: 'Layout 2', savedAt: new Date().toISOString() };
-          localStorage.setItem('hub_layout_2', JSON.stringify(clone));
-        }
-      }
-      if (!localStorage.getItem('hub_active_layout')) localStorage.setItem('hub_active_layout', '1');
-      localStorage.setItem('hub_layouts_seeded', '1');
-    } catch (e) { /* storage unavailable */ }
-  }
-
-  function bindRiskLayouts() {
-    seedDefaultLayoutsOnce();
-    renderLayoutCards();
-    // Settings modal is re-opened repeatedly without a full re-render
-    // elsewhere, so refresh the cards (saved-time, active flag) every time
-    // it's opened rather than only once at page load.
-    const settingsBtn = document.getElementById('hub-settings-btn');
-    if (settingsBtn) settingsBtn.addEventListener('click', renderLayoutCards);
-    document.querySelectorAll('[data-open-settings]').forEach((b) => b.addEventListener('click', renderLayoutCards));
-  }
-
   function bindMasterControl() {
     // Delegated so it works once DashboardUI builds the shell (and rebuilds it).
     document.addEventListener('click', (e) => {
@@ -16680,10 +16415,11 @@ window.NexusStrategies=exports;
 
   // ── GLOBAL "SAVE SETTINGS" BUTTON ───────────────────────────────────────
   // Lives in the shared header so it's visible no matter which tab you're
-  // on. Force-commits whatever is sitting in every tab's input fields (the
-  // Differ tab requires an explicit commit; Even/Odd/Over-Under already
-  // autosave on every change, but we re-persist them too as a safety net)
-  // so "finish editing everywhere, press Save once" actually works.
+  // on, and is now the ONLY way settings get written to disk — no bot has
+  // its own Save button anymore, and nothing auto-saves on every change.
+  // Fields still apply live in-memory as you edit them (so the bot behaves
+  // correctly right away), but persisting to localStorage happens only
+  // when this button is pressed, across every tab at once.
   function saveAllSettings() {
     let savedAny = false;
     try {
@@ -16734,7 +16470,6 @@ window.NexusStrategies=exports;
     try { refreshTopbar(); } catch(e) { console.error('[Hub] refreshTopbar error:', e); }
     dashboardEl = document.getElementById('dashboard-root');
     try { bindMasterControl(); } catch(e) { console.error('[Hub] bindMasterControl error:', e); }
-    try { bindRiskLayouts(); } catch(e) { console.error('[Hub] bindRiskLayouts error:', e); }
     try { bindGlobalSaveButton(); } catch(e) { console.error('[Hub] bindGlobalSaveButton error:', e); }
     // Start all four engines' public analysis sockets immediately, regardless
     // of which tab is active — ticks/digits should be live the moment the
