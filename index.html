@@ -9004,6 +9004,114 @@ function analyzeDigits(history, tickPeriod = 50, barrier = 3, isUnder = false) {
   };
 }
 
+
+/**
+ * OVER 3 — GREEN/RED BAR MARKET ANALYSIS
+ * Replaces streak-based gating for the Over Bot when barrier === 3, per the
+ * "Over 3" ruleset:
+ *   MARKET CONDITION (good market to trade):
+ *     - Digits 0,1,2,3 are each below 10% frequency over the tick window
+ *     - Neither the green bar (most-appearing digit) nor the red bar
+ *       (least-appearing digit) sits on 0,1,2 or 3
+ *     - The green bar sits on an ODD digit: 5, 7 or 9
+ *     - The red bar sits on an ODD digit: 5, 7 or 9
+ *   ENTRY POINT:
+ *     - Only fire when the current/last digit is 1 or 3
+ *     - AND that digit's frequency is flat (neither rising nor falling)
+ * Returns an object shaped like analyzeDigits()'s output (so shared UI that
+ * reads probability/recommendation/conditions/frequencies keeps working)
+ * plus an `over3` sub-object carrying the real rule-by-rule breakdown for
+ * the dedicated Over 3 conditions panel.
+ */
+function analyzeOver3Condition(history, tickPeriod = 50) {
+  const data = history.slice(-tickPeriod);
+  const ZONE = [0, 1, 2, 3];
+
+  const empty = {
+    probability: 0,
+    digitCounts: Array(10).fill(0),
+    digitPercentages: Array(10).fill(0),
+    frequencies: Array.from({ length: 10 }, (_, i) => ({ digit: i, count: 0, percentage: 0 })),
+    hotDigits: [], coldDigits: [],
+    trendScore: 50, momentumScore: 50, volatilityIndex: 50, overDigitWeight: 50,
+    conditions: { stablePattern: false, dominantOdd: false, momentumUp: false, lowVolatility: false, rareDigits: false },
+    recommendation: 'HOLD', bestBarrier: 3,
+    over3: {
+      ready: false, marketGood: false, canEnter: false, reason: 'Collecting ticks…',
+      greenDigit: -1, redDigit: -1, zoneUnder10: false, greenOutsideZone: false,
+      redOutsideZone: false, greenIsOdd: false, redIsOdd: false, lastDigit: -1, zoneTrend: {},
+    },
+  };
+  if (data.length < 10) return empty;
+
+  const counts = Array(10).fill(0);
+  data.forEach((d) => counts[d]++);
+  const percentages = counts.map((c) => (c / data.length) * 100);
+  const frequencies = counts.map((c, i) => ({ digit: i, count: c, percentage: percentages[i] }));
+
+  // Green bar = most-appearing digit, red bar = least-appearing digit
+  let greenDigit = 0, redDigit = 0;
+  for (let i = 1; i < 10; i++) {
+    if (percentages[i] > percentages[greenDigit]) greenDigit = i;
+    if (percentages[i] < percentages[redDigit]) redDigit = i;
+  }
+  const isOddTarget = (d) => d === 5 || d === 7 || d === 9;
+
+  const zoneUnder10 = ZONE.every((d) => percentages[d] < 10);
+  const greenOutsideZone = !ZONE.includes(greenDigit);
+  const redOutsideZone = !ZONE.includes(redDigit);
+  const greenIsOdd = isOddTarget(greenDigit);
+  const redIsOdd = isOddTarget(redDigit);
+  const marketGood = zoneUnder10 && greenOutsideZone && redOutsideZone && greenIsOdd && redIsOdd;
+
+  // Trend per zone digit — compare first half vs second half of the window
+  // to see if that digit is increasing, decreasing, or flat/constant.
+  const half = Math.floor(data.length / 2);
+  const firstHalf = data.slice(0, half);
+  const secondHalf = data.slice(half);
+  const pctIn = (arr, d) => (arr.length ? (arr.filter((x) => x === d).length / arr.length) * 100 : 0);
+  const zoneTrend = {};
+  ZONE.forEach((d) => {
+    const p1 = pctIn(firstHalf, d), p2 = pctIn(secondHalf, d);
+    zoneTrend[d] = { first: p1, second: p2, direction: p2 > p1 + 1 ? 'increasing' : p2 < p1 - 1 ? 'decreasing' : 'flat' };
+  });
+
+  const lastDigit = data[data.length - 1];
+  const entryDigitOk = lastDigit === 1 || lastDigit === 3;
+  const entryTrendOk = entryDigitOk && zoneTrend[lastDigit].direction === 'flat';
+  const canEnter = marketGood && entryDigitOk && entryTrendOk;
+
+  let reason;
+  if (!marketGood) reason = 'Market conditions not met';
+  else if (!entryDigitOk) reason = `Waiting for digit 1 or 3 (last: ${lastDigit})`;
+  else if (!entryTrendOk) reason = `Digit ${lastDigit} is ${zoneTrend[lastDigit].direction} — waiting for flat`;
+  else reason = `ENTRY — digit ${lastDigit} stable`;
+
+  const overDigitWeight = percentages.filter((_, i) => i > 3).reduce((a, b) => a + b, 0);
+
+  return {
+    probability: marketGood ? (canEnter ? 100 : 70) : 30,
+    digitCounts: counts,
+    digitPercentages: percentages,
+    frequencies,
+    hotDigits: percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct > 15).map((d) => d.digit),
+    coldDigits: percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct < 8).map((d) => d.digit),
+    trendScore: 50, momentumScore: 50, volatilityIndex: 50,
+    overDigitWeight: Math.round(overDigitWeight),
+    conditions: {
+      stablePattern: zoneUnder10, dominantOdd: greenIsOdd, momentumUp: redIsOdd,
+      lowVolatility: greenOutsideZone, rareDigits: redOutsideZone,
+    },
+    recommendation: canEnter ? 'STRONG_BUY' : marketGood ? 'HOLD' : 'AVOID',
+    bestBarrier: 3,
+    over3: {
+      ready: true, marketGood, canEnter, reason,
+      greenDigit, redDigit, zoneUnder10, greenOutsideZone, redOutsideZone,
+      greenIsOdd, redIsOdd, lastDigit, zoneTrend,
+    },
+  };
+}
+
 function calculateVolatility(data) {
   if (data.length < 2) return 0;
   
@@ -9197,6 +9305,7 @@ function createLogEntry(
 
 exports.MARKETS = MARKETS;
 exports.analyzeDigits = analyzeDigits;
+exports.analyzeOver3Condition = analyzeOver3Condition;
 exports.calculateVolatility = calculateVolatility;
 exports.getEmptyAnalysis = getEmptyAnalysis;
 exports.findBestMarket = findBestMarket;
@@ -9380,7 +9489,7 @@ window.NexusTrading = exports;
 (function () {
   'use strict';
   function createMarketScanner(Trading, Socket, ns) {
-    const { analyzeDigits, MARKETS } = Trading;
+    const { analyzeDigits, analyzeOver3Condition, MARKETS } = Trading;
     const { globalSocket } = Socket;
 
     class MarketScanner {
@@ -9392,6 +9501,11 @@ window.NexusTrading = exports;
         // wrong scoring entirely.
         this.barrier = barrier;
         this.isUnder = isUnder;
+        // Over 3 scores/ranks markets on the green/red-bar market-condition
+        // rules instead of the generic probability model — this is what
+        // feeds "Top Markets" and the golden-market pool that autopilot
+        // switches into once the current market goes cold.
+        this.isOver3Scan = barrier === 3 && !isUnder && !!analyzeOver3Condition;
         this.marketData = new Map();
         this.unsubscribes = [];
         this.tickPeriod = 50;
@@ -9404,6 +9518,15 @@ window.NexusTrading = exports;
       }
 
       setTickPeriod(period) { this.tickPeriod = period; }
+
+      // Lets the engine keep this scanner in sync when the operator changes
+      // the barrier live (e.g. clicking "3") instead of only picking up the
+      // new barrier on the next reconnect.
+      setBarrier(barrier, isUnder = false) {
+        this.barrier = barrier;
+        this.isUnder = !!isUnder;
+        this.isOver3Scan = this.barrier === 3 && !this.isUnder && !!analyzeOver3Condition;
+      }
 
       async start() {
         await globalSocket.connect();
@@ -9425,10 +9548,15 @@ window.NexusTrading = exports;
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
         if (market.history.length >= 10) {
-          market.analysis = analyzeDigits(market.history, this.tickPeriod, this.barrier, this.isUnder);
+          market.analysis = this.isOver3Scan
+            ? analyzeOver3Condition(market.history, this.tickPeriod)
+            : analyzeDigits(market.history, this.tickPeriod, this.barrier, this.isUnder);
           market.score = this.calculateScore(market);
-          market.isGolden = market.health && market.health.longTerm === 'HEALTHY' &&
-            market.analysis.probability >= 75 && market.analysis.recommendation !== 'AVOID';
+          market.isGolden = this.isOver3Scan
+            ? !!(market.analysis.over3 && market.analysis.over3.marketGood &&
+                 (!market.health || market.health.longTerm !== 'POOR'))
+            : (market.health && market.health.longTerm === 'HEALTHY' &&
+               market.analysis.probability >= 75 && market.analysis.recommendation !== 'AVOID');
         }
         this.marketData.set(symbol, market);
         this.notifyUpdate();
@@ -9437,6 +9565,20 @@ window.NexusTrading = exports;
       calculateScore(market) {
         const { analysis, health } = market;
         if (!analysis) return 0;
+        if (analysis.over3) {
+          const o3 = analysis.over3;
+          if (!o3.ready) return 0;
+          const conds = [o3.zoneUnder10, o3.greenOutsideZone, o3.redOutsideZone, o3.greenIsOdd, o3.redIsOdd];
+          let score = (conds.filter(Boolean).length / conds.length) * 65; // up to 65 for conditions met
+          if (o3.marketGood) score += 20;   // full market-good bonus
+          if (o3.canEnter) score += 10;     // ready to fire right now
+          if (health) {
+            if (health.longTerm === 'HEALTHY') score += 3;
+            else if (health.longTerm === 'MODERATE') score += 1;
+            if (health.volatility === 'LOW') score += 2;
+          }
+          return Math.min(100, Math.round(score));
+        }
         let score = analysis.probability;
         if (health) {
           if (health.longTerm === 'HEALTHY') score += 25;
@@ -11188,6 +11330,13 @@ window.NexusStrategies=exports;
 
     setConfig(partial) {
       this.config = { ...this.config, ...partial };
+      // Keep the market scanner's barrier (and therefore its Over-3-aware
+      // scoring) in sync the instant the operator clicks a new barrier —
+      // otherwise "Top Markets" would keep scanning for the OLD barrier
+      // until the next reconnect.
+      if (this.isOU && partial.overBarrier !== undefined && this.scanner && this.scanner.setBarrier) {
+        this.scanner.setBarrier(this.config.overBarrier, this.isUnderMode);
+      }
       // NOTE: no longer auto-persists to localStorage here. Every toggle,
       // dropdown, or field used to write to disk the instant it changed,
       // which is what caused both the constant "autosaving" and the visual
@@ -11250,8 +11399,13 @@ window.NexusStrategies=exports;
         const fullHistory = this.socket.getHistory(market);
         const tickPeriod = this.config.tickPeriod;
         const history = fullHistory.slice(-tickPeriod);
+        // Over 3 runs on the green/red-bar market-condition analysis instead
+        // of streak counting — no streak to compute or gate on here at all.
+        const isOver3 = this.mode === 'over' && this.config.overBarrier === 3;
         let streak = 0;
-        if (this.mode === 'evenodd') {
+        if (isOver3) {
+          // streak intentionally left at 0 — Over 3 no longer uses it
+        } else if (this.mode === 'evenodd') {
           const isOddMode = this.config.tradeMode === 'odd';
           for (let i = fullHistory.length - 1; i >= 0; i--) {
             if (isOddMode ? this.T.isEven(fullHistory[i]) : this.T.isOdd(fullHistory[i])) streak++;
@@ -11278,6 +11432,8 @@ window.NexusStrategies=exports;
           if (this.priceHistory.length > 120) this.priceHistory.shift();
           result = window.RiseFallAnalyzer.analyze(this.priceHistory, market);
           this.analysis = result;
+        } else if (isOver3) {
+          result = this.T.analyzeOver3Condition(history, tickPeriod);
         } else {
           result = this.T.analyzeDigits(history, tickPeriod, ...this._analyzerArgs());
         }
@@ -11305,18 +11461,32 @@ window.NexusStrategies=exports;
         }
         const health = this.socket.getHealth(market);
         if (health && health.longTerm === 'POOR') { this.emit(); return; }
-        const strategy = this.getStrategy(this.config.currentStrategy);
-        if (strategy.id !== 1 && strategy.checkEntry) {
-          const entry = strategy.checkEntry(history, result);
-          if (entry.canEnter) {
-            this.strategyPhase = 'firing'; this.strategyWaitReason = entry.reason;
-            this.addLog('win', 'SNIPER', `${strategy.shortName}: ${entry.reason}`);
+        if (isOver3) {
+          // No streak logic, no strategy list — fire strictly off the Over 3
+          // market-condition + entry-point rules computed above.
+          const o3 = result.over3 || {};
+          if (o3.canEnter) {
+            this.strategyPhase = 'firing'; this.strategyWaitReason = o3.reason;
+            this.addLog('win', 'ENTRY', o3.reason);
             this.startChainExecution();
             setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
-          } else { this.strategyPhase = 'waiting'; this.strategyWaitReason = entry.reason; }
+          } else {
+            this.strategyPhase = 'waiting'; this.strategyWaitReason = o3.reason || 'Analyzing…';
+          }
         } else {
-          const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal, true, ...this._analyzerArgs());
-          if (canEnter) this.startChainExecution();
+          const strategy = this.getStrategy(this.config.currentStrategy);
+          if (strategy.id !== 1 && strategy.checkEntry) {
+            const entry = strategy.checkEntry(history, result);
+            if (entry.canEnter) {
+              this.strategyPhase = 'firing'; this.strategyWaitReason = entry.reason;
+              this.addLog('win', 'SNIPER', `${strategy.shortName}: ${entry.reason}`);
+              this.startChainExecution();
+              setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
+            } else { this.strategyPhase = 'waiting'; this.strategyWaitReason = entry.reason; }
+          } else {
+            const { canEnter } = this.T.checkEntryConditions(history, result, this.config.minStreak, this.config.minSignal, true, ...this._analyzerArgs());
+            if (canEnter) this.startChainExecution();
+          }
         }
         this.emit();
       });
@@ -12737,6 +12907,8 @@ window.NexusStrategies=exports;
 
   function renderLeft(engine, rootId, snap) {
     const { config: c, analysis: a, scannerState, marketHealth } = snap;
+    const isOver3 = engine.mode === 'over' && c.overBarrier === 3;
+    const o3 = (a && a.over3) || {};
     const prob = a ? a.probability : 0;
     const rec = a ? a.recommendation : '—';
     const mtf = a && a.mtfAligned !== false ? 'MTF ALIGNED' : 'MTF DIVERGENT';
@@ -12776,8 +12948,16 @@ window.NexusStrategies=exports;
     const freqData = (a && a.frequencies) ? a.frequencies : Array.from({length:10},(_,i)=>({digit:i,count:0,percentage:0}));
     const maxCount = Math.max(...freqData.map(f=>f.count), 1);
 
-    // Radar polygon for condition chips
-    const radarConds = [
+    // Radar polygon for condition chips — Over 3 shows the real rule-by-rule
+    // breakdown (green/red bar + zone + odd-digit checks); every other mode
+    // keeps the generic probability-model chips.
+    const radarConds = isOver3 ? [
+      [`Digits 0-3 all <10%`,        o3.zoneUnder10     || false],
+      [`Green(${o3.greenDigit ?? '—'}) ∉ 0-3`, o3.greenOutsideZone || false],
+      [`Red(${o3.redDigit ?? '—'}) ∉ 0-3`,     o3.redOutsideZone   || false],
+      [`Green odd (5/7/9)`,          o3.greenIsOdd      || false],
+      [`Red odd (5/7/9)`,            o3.redIsOdd        || false],
+    ] : [
       ['Stable',      a?.conditions?.stablePattern   || false],
       ['Dominant',    a?.conditions?.dominantOdd      || false],
       ['Momentum',    a?.conditions?.momentumUp       || false],
@@ -12867,8 +13047,13 @@ window.NexusStrategies=exports;
               <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">MODE</div>
             </div>
             <div style="background:hsl(var(--bg)/0.8);border-radius:8px;padding:7px;text-align:center;border:1px solid hsl(var(--border)/0.4)">
+              ${isOver3 ? `
+              <div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;color:hsl(var(--secondary))"><span style="color:hsl(var(--win))">${o3.greenDigit ?? '—'}</span>/<span style="color:hsl(var(--loss))">${o3.redDigit ?? '—'}</span></div>
+              <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">GRN/RED</div>
+              ` : `
               <div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;color:hsl(var(--secondary))">${c.minSignal}%</div>
               <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">MIN SIG</div>
+              `}
             </div>
           </div>
         </div>
@@ -12877,7 +13062,7 @@ window.NexusStrategies=exports;
 
     <!-- ── CONDITION RADAR ────────────────────────────────── -->
     <div class="ahub-card" style="margin-bottom:10px">
-      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Condition Radar</div>
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>${isOver3 ? 'Over 3 · Market Conditions' : 'Condition Radar'}</div>
       <div style="display:flex;align-items:center;gap:12px">
         <svg width="160" height="160" viewBox="0 0 160 160" style="flex-shrink:0">
           <defs>
@@ -12907,6 +13092,12 @@ window.NexusStrategies=exports;
           <div style="margin-top:4px;padding-top:8px;border-top:1px solid hsl(var(--border)/0.3);font-family:'DM Mono',monospace;font-size:10px;color:hsl(var(--muted-foreground))">
             Met: <span style="color:hsl(var(--win));font-weight:800">${radarConds.filter(([,v])=>v).length}</span> / ${radarConds.length}
           </div>
+          ${isOver3 ? `
+          <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${o3.canEnter ? 'hsl(var(--win)/0.12)' : 'hsl(var(--bg)/0.6)'};border:1px solid ${o3.canEnter ? 'hsl(var(--win)/0.4)' : 'hsl(var(--border)/0.4)'};text-align:center">
+            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">ENTRY POINT · digit 1 or 3, flat trend</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:800;margin-top:3px;color:${o3.canEnter ? 'hsl(var(--win))' : 'hsl(var(--foreground)/0.75)'}">${o3.reason || 'Analyzing…'}</div>
+          </div>
+          ` : ''}
         </div>
       </div>
     </div>
@@ -13036,6 +13227,8 @@ window.NexusStrategies=exports;
     const isOver = engine.mode === 'over';
     const isUnder = engine.mode === 'under';
     const isOU = isOver || isUnder;
+    const isOver3 = isOver && c.overBarrier === 3;
+    const o3 = (snap.analysis && snap.analysis.over3) || {};
     const markets = engine.T.MARKETS.map((m) => `<option value="${m.symbol}" ${m.symbol === c.selectedMarket ? 'selected' : ''}>${m.name}</option>`).join('');
     const winChance = isOver ? (9 - c.overBarrier) * 10 : isUnder ? c.overBarrier * 10 : 50;
 
@@ -13068,9 +13261,15 @@ window.NexusStrategies=exports;
     <!-- ── LIVE STATS ROW ──────────────────────────────────────────── -->
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <div class="cp-stat-pill">
+        ${isOver3 ? `
+        <div class="cp-stat-pill-val" style="color:${o3.marketGood ? 'hsl(var(--win))' : 'hsl(var(--loss))'};font-size:12px;letter-spacing:1px;margin-top:4px" id="${rootId}-streak">${o3.marketGood ? 'GOOD' : 'WAIT'}</div>
+        <div class="cp-stat-pill-label">MARKET</div>
+        <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${o3.marketGood ? 100 : 20}%;background:${o3.marketGood ? 'hsl(var(--win))' : 'hsl(var(--loss))'};box-shadow:0 0 6px ${o3.marketGood ? 'hsl(var(--win)/0.5)' : 'hsl(var(--loss)/0.5)'}"></div></div>
+        ` : `
         <div class="cp-stat-pill-val" style="color:hsl(var(--accent))" id="${rootId}-streak">${cpStreak}</div>
         <div class="cp-stat-pill-label">STREAK / ${c.minStreak}</div>
         <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${streakPct}%;background:hsl(var(--accent));box-shadow:0 0 6px hsl(var(--accent)/0.5)"></div></div>
+        `}
       </div>
       <div class="cp-stat-pill">
         <div class="cp-stat-pill-val" style="color:hsl(var(--secondary))" id="${rootId}-runs">${cpRuns}</div>
@@ -13137,6 +13336,7 @@ window.NexusStrategies=exports;
           <span class="cp-input-label">Target Runs</span>
           <input class="cp-input" type="number" id="${rootId}-runs-in" value="${c.targetRuns}">
         </div>
+        ${isOver3 ? '' : `
         <div class="cp-input-group">
           <span class="cp-input-label">Min Signal %</span>
           <input class="cp-input" type="number" id="${rootId}-signal" value="${c.minSignal}">
@@ -13145,7 +13345,13 @@ window.NexusStrategies=exports;
           <span class="cp-input-label">Min Streak</span>
           <input class="cp-input" type="number" id="${rootId}-streak-in" value="${c.minStreak}">
         </div>
+        `}
       </div>
+      ${isOver3 ? `
+      <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
+        Market conditions &amp; entry point live in the <b style="color:hsl(var(--primary))">Analysis Hub → Over 3 · Market Conditions</b> panel on the left
+      </div>
+      ` : ''}
       <div style="margin-top:8px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
         Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
       </div>
@@ -13285,6 +13491,11 @@ window.NexusStrategies=exports;
           </select>
         </div>
       </div>` : ''}
+      ${isOver3 ? `
+      <div style="padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.4);border:1px dashed hsl(var(--border));font-size:9px;color:hsl(var(--muted-foreground));text-align:center">
+        Streak logic is disabled for Over 3 — entries are gated by the green/red-bar market conditions and the digit 1/3 entry point instead.
+      </div>
+      ` : `
       <div class="cp-toggle-row" style="padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border));margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:10px">
           <button class="titan-toggle ${c.streakShuffle?'on':''}" id="${rootId}-streak-shuffle" onclick="event.stopPropagation()"></button>
@@ -13304,6 +13515,7 @@ window.NexusStrategies=exports;
           <input class="cp-input" type="number" min="1" max="10" id="${rootId}-streak-max" value="${c.streakMax}" ${c.streakShuffle?'':'disabled'}>
         </div>
       </div>
+      `}
     </div>
 
     <!-- ── AUTOMATION ─────────────────────────────────────────────── -->
