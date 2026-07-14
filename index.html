@@ -8242,7 +8242,7 @@ window.EvenTrading = exports;
         const maxScore = sorted[0] ? sorted[0].score : 1;
         const normalised = sorted.map((m, i) => ({
           ...m,
-          score: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
+          displayScore: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
         }));
         this.onUpdate({
           markets,
@@ -9242,29 +9242,44 @@ function checkEntryConditions(
     return { canEnter: false, streak, reason: `Streak ${streak}/${minStreak}` };
   }
 
-  if (analysis.probability < minProbability) {
-    return { canEnter: false, streak, reason: `Prob ${analysis.probability}%/${minProbability}%` };
+  // Precompute checks so we can implement an Over-only fallback when
+  // the only failing condition is the probability threshold.
+  const recOk = analysis.recommendation !== 'AVOID';
+  let mtfOk = true;
+  let mtf = null;
+  if (requireMultiTimeframe && history.length >= 50) {
+    mtf = analyzeMultiTimeframe(history, barrier, isUnder);
+    mtfOk = !!mtf.aligned;
   }
+  const probOk = analysis.probability >= minProbability;
 
-  if (analysis.recommendation === 'AVOID') {
+  if (!recOk) {
     return { canEnter: false, streak, reason: 'Analysis: AVOID' };
   }
 
-  // Multi-timeframe check (relaxed - only needs general alignment)
-  if (requireMultiTimeframe && history.length >= 50) {
-    const mtf = analyzeMultiTimeframe(history, barrier, isUnder);
-    if (!mtf.aligned) {
-      return { 
-        canEnter: false, 
-        streak, 
-        reason: `MTF Divergence (S:${mtf.short.probability}% L:${mtf.long.probability}%)`,
-        multiTimeframe: mtf
-      };
-    }
-    return { canEnter: true, streak, reason: 'MTF ALIGNED', multiTimeframe: mtf };
+  if (!mtfOk) {
+    return { canEnter: false, streak, reason: `MTF Divergence${mtf?` (S:${mtf.short.probability}% L:${mtf.long.probability}%)`:'')}`, multiTimeframe: mtf };
   }
 
-  return { canEnter: true, streak, reason: 'CONDITIONS MET' };
+  if (probOk) {
+    return { canEnter: true, streak, reason: requireMultiTimeframe && mtf ? 'MTF ALIGNED' : 'CONDITIONS MET', multiTimeframe: mtf };
+  }
+
+  // OVER-BOT SPECIAL: allow a relaxed fallback when the only failing
+  // check is probability. In practice operators asked that the Over bot
+  // should be permitted to fire in marginal markets — treat it as if
+  // it were 80% when otherwise all gates pass. This only applies to the
+  // Over bot (isUnder === false).
+  if (!isUnder && recOk && mtfOk) {
+    // Only allow the fallback when probability isn't abysmal — require
+    // a sensible floor (50%). If you prefer a different floor, we can
+    // expose this as a config option.
+    if (analysis.probability >= 50) {
+      return { canEnter: true, streak, reason: `OVER_FALLBACK (treated as ${minProbability}%)`, multiTimeframe: mtf };
+    }
+  }
+
+  return { canEnter: false, streak, reason: `Prob ${analysis.probability}%/${minProbability}%` };
 }
 
 /**
@@ -9600,9 +9615,9 @@ window.NexusTrading = exports;
         const sorted = [...markets].sort((a, b) => b.score - a.score);
         const maxScore = sorted[0] ? sorted[0].score : 1;
         const normalised = sorted.map((m, i) => ({
-          ...m,
-          score: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
-        }));
+        ...m,
+        displayScore: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
+      }));
         this.onUpdate({ markets, bestMarket: sorted[0] || null, topThree: normalised.slice(0, 3), isScanning: true, lastUpdate: Date.now() });
       }
 
@@ -9743,7 +9758,7 @@ window.NexusTrading = exports;
       const maxScore = sorted[0] ? sorted[0].score : 1;
       const normalised = sorted.map((m, i) => ({
         ...m,
-        score: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
+        displayScore: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
       }));
       this.onUpdate({ markets, bestMarket: sorted[0] || null, topThree: normalised.slice(0, 3), isScanning: true, lastUpdate: Date.now() });
     }
@@ -9845,7 +9860,7 @@ window.NexusTrading = exports;
       const maxScore = sorted[0] ? sorted[0].score : 1;
       const normalised = sorted.map((m, i) => ({
         ...m,
-        score: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
+        displayScore: maxScore > 0 ? Math.max(0, Math.min(100, Math.round((m.score / maxScore) * 100) - (i * 4))) : 0,
       }));
       this.onUpdate({ markets, bestMarket: sorted[0] || null, topThree: normalised.slice(0, 3), isScanning: true, lastUpdate: Date.now() });
     }
@@ -11233,6 +11248,7 @@ window.NexusStrategies=exports;
       this.runsSinceRefresh = 0;
       this.lastTickTime = Date.now(); this.lastTradeTime = Date.now();
       this.latestLiveAnalysis = null; this.connectRef = null;
+      this.lastAutoSwitchAt = 0;
 
       this._init();
       const sharedToken = window.HubStore.getState().apiToken;
@@ -12355,6 +12371,23 @@ window.NexusStrategies=exports;
         this.lastTickTime = now; this.lastTradeTime = now;
         if (this.state.active && this.config.autoPilot) setTimeout(() => { this.executionGuard = false; }, 2000);
       }
+
+      // Auto-switch to a better market if we've been waiting too long
+      // while active and AutoPilot is enabled. Fires at ~2 minutes idle.
+      try {
+        const idleMs = now - this.lastTradeTime;
+        if (this.state.active && this.config.autoPilot && idleMs > 120000 && (!this.lastAutoSwitchAt || now - this.lastAutoSwitchAt > 120000)) {
+          if (this.scanner && window.BenzPickNextMarket) {
+            const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
+            if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
+              this.addLog('engine', 'AUTOSWITCH', `Auto-switching to ${best.symbol} after ${Math.round(idleMs/1000)}s idle (score: ${best.score||'?'})`);
+              this.setConfig({ selectedMarket: best.symbol });
+              this.changeMarket(best.symbol);
+              this.lastAutoSwitchAt = now;
+            }
+          }
+        }
+      } catch (e) { /* non-fatal */ }
     }
   }
 
@@ -13183,11 +13216,11 @@ window.NexusStrategies=exports;
               ${isSel?`<span style="font-size:7.5px;font-weight:900;color:hsl(var(--primary));animation:ahub-pulse 1.5s infinite;flex-shrink:0">● ACTIVE</span>`:''}
             </div>
             <div style="text-align:right;flex-shrink:0">
-              <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${rc};text-shadow:0 0 10px ${rc}40;line-height:1">${m.score}%</div>
+              <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${rc};text-shadow:0 0 10px ${rc}40;line-height:1">${m.displayScore||m.score}%</div>
               <div style="font-size:6.5px;color:hsl(var(--muted-foreground)/0.8);letter-spacing:1px;margin-top:2px">SCORE</div>
             </div>
           </div>
-          <div class="ahub-mkt-gauge"><div class="ahub-mkt-gauge-fill" style="width:${m.score}%;background:linear-gradient(90deg,${rc}99,${rc});box-shadow:0 0 8px ${rc}80"></div></div>
+          <div class="ahub-mkt-gauge"><div class="ahub-mkt-gauge-fill" style="width:${m.displayScore||m.score}%;background:linear-gradient(90deg,${rc}99,${rc});box-shadow:0 0 8px ${rc}80"></div></div>
           <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
             <span class="ahub-mkt-chip" style="background:${hc}15;color:${hc};border:1px solid ${hc}40">${health==='HEALTHY'?'✓':health==='MODERATE'?'●':'⚠'} ${health}</span>
             ${trendArrow?`<span class="ahub-mkt-chip" style="background:hsl(var(--bg)/0.6);color:${trendColor};border:1px solid hsl(var(--border)/0.4)">${trendArrow} ${trend}</span>`:''}
@@ -16317,11 +16350,11 @@ window.NexusStrategies=exports;
               ${isSel?`<span style="font-size:7.5px;font-weight:900;color:hsl(var(--primary));animation:ahub-pulse 1.5s infinite;flex-shrink:0">● ACTIVE</span>`:''}
             </div>
             <div style="text-align:right;flex-shrink:0">
-              <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${rc};text-shadow:0 0 10px ${rc}40;line-height:1">${m.score}%</div>
+              <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${rc};text-shadow:0 0 10px ${rc}40;line-height:1">${m.displayScore||m.score}%</div>
               <div style="font-size:6.5px;color:hsl(var(--muted-foreground)/0.8);letter-spacing:1px;margin-top:2px">SCORE</div>
             </div>
           </div>
-          <div class="ahub-mkt-gauge"><div class="ahub-mkt-gauge-fill" style="width:${m.score}%;background:linear-gradient(90deg,${rc}99,${rc});box-shadow:0 0 8px ${rc}80"></div></div>
+          <div class="ahub-mkt-gauge"><div class="ahub-mkt-gauge-fill" style="width:${m.displayScore||m.score}%;background:linear-gradient(90deg,${rc}99,${rc});box-shadow:0 0 8px ${rc}80"></div></div>
           <span class="ahub-mkt-chip" style="background:${hc}15;color:${hc};border:1px solid ${hc}40">${health==='HEALTHY'?'✓':health==='MODERATE'?'●':'⚠'} ${health}</span>
         </button>`;
       }).join('') || `<div style="text-align:center;padding:22px 16px;color:hsl(var(--muted-foreground));font-size:10px">
