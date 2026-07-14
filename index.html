@@ -9258,7 +9258,8 @@ function checkEntryConditions(
   }
 
   if (!mtfOk) {
-    return { canEnter: false, streak, reason: `MTF Divergence${mtf?` (S:${mtf.short.probability}% L:${mtf.long.probability}%)`:'')}`, multiTimeframe: mtf };
+    const mtfReason = mtf ? ` (S:${mtf.short.probability}% L:${mtf.long.probability}%)` : '';
+    return { canEnter: false, streak, reason: `MTF Divergence${mtfReason}`, multiTimeframe: mtf };
   }
 
   if (probOk) {
