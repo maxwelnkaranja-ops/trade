@@ -4224,6 +4224,211 @@ html.light body::before { display: none; }
 }
 .equity-svg { border-radius: 10px; }
 
+/* ── INTERACTIVE EQUITY CHART ── */
+.eq-chart-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.eq-chart-stage {
+  position: relative;
+  flex: 1;
+  min-height: 260px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, hsl(240 8% 3% / 0.9) 0%, hsl(240 6% 2% / 0.95) 100%);
+  border: 1px solid hsl(var(--border) / 0.6);
+  overflow: hidden;
+  cursor: crosshair;
+  box-shadow: inset 0 1px 0 hsl(255 100% 100% / 0.03), 0 8px 32px hsl(0 0% 0% / 0.35);
+}
+.eq-chart-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 85% 15%, hsl(var(--win) / 0.06) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 10% 85%, hsl(var(--primary) / 0.05) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+.eq-chart-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+.eq-chart-crosshair {
+  position: absolute;
+  top: 12px;
+  bottom: 28px;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, hsl(var(--primary) / 0.7) 15%, hsl(var(--primary) / 0.7) 85%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 3;
+  box-shadow: 0 0 12px hsl(var(--primary) / 0.45);
+}
+.eq-chart-crosshair::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: hsl(var(--primary));
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.8);
+}
+.eq-chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  min-width: 168px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: hsl(240 8% 6% / 0.94);
+  border: 1px solid hsl(var(--border-bright) / 0.5);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 40px hsl(0 0% 0% / 0.55), 0 0 0 1px hsl(var(--primary) / 0.08);
+}
+.eq-chart-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.eq-chart-tooltip-time {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 6px;
+}
+.eq-chart-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+.eq-chart-tooltip-row:last-child { margin-bottom: 0; }
+.eq-chart-tooltip-label { color: hsl(var(--muted-foreground) / 0.75); }
+.eq-chart-tooltip-val { font-weight: 700; font-family: 'Outfit', sans-serif; font-size: 12px; }
+.eq-chart-tooltip-val.win { color: hsl(var(--win)); text-shadow: 0 0 10px hsl(var(--win) / 0.5); }
+.eq-chart-tooltip-val.loss { color: hsl(var(--loss)); }
+.eq-chart-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+.eq-chart-range {
+  font-family: 'DM Mono', monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.6px;
+  color: hsl(var(--muted-foreground) / 0.7);
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.eq-chart-scrubber {
+  flex: 2;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: hsl(var(--border) / 0.5);
+  outline: none;
+  cursor: pointer;
+}
+.eq-chart-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+  border: 2px solid hsl(var(--bg));
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.6);
+  cursor: grab;
+}
+.eq-chart-scrubber::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+  border: 2px solid hsl(var(--bg));
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.6);
+  cursor: grab;
+}
+.eq-chart-hint {
+  font-family: 'DM Mono', monospace;
+  font-size: 7.5px;
+  letter-spacing: 1px;
+  color: hsl(var(--muted-foreground) / 0.45);
+  white-space: nowrap;
+}
+.eq-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  z-index: 2;
+  pointer-events: none;
+}
+.eq-chart-empty-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: hsl(var(--muted-foreground));
+}
+.eq-chart-empty-sub {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: hsl(var(--muted-foreground) / 0.55);
+}
+.eq-chart-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: 'DM Mono', monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: hsl(var(--win));
+  background: hsl(var(--win) / 0.08);
+  border: 1px solid hsl(var(--win) / 0.25);
+}
+.eq-chart-live-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--win));
+  box-shadow: 0 0 8px hsl(var(--win));
+  animation: eq-live-pulse 2s ease-in-out infinite;
+}
+@keyframes eq-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
 /* ── EXEC / ACTIVE ENGINES PANEL ── */
 .exec-panel {
   border-radius: 16px !important;
@@ -5698,6 +5903,8 @@ html body #panel-dashboard .dash-row-full .glass-panel { width: 100% !important;
 /* Equity curve — full width, taller SVG */
 html body #panel-dashboard .dash-equity-panel { padding: 18px 20px !important; }
 html body #panel-dashboard .equity-svg { height: auto !important; width: 100% !important; min-height: 280px !important; }
+html body #panel-dashboard .eq-chart-root { min-height: 300px !important; }
+html body #panel-dashboard .eq-chart-stage { min-height: 280px !important; }
 /* Active engines — compact horizontal layout */
 html body #panel-dashboard .exec-panel { padding: 14px 16px !important; }
 html body #panel-dashboard .exec-list { max-height: 200px !important; overflow-y: auto !important; display: grid !important; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)) !important; gap: 8px !important; }
@@ -14376,11 +14583,11 @@ window.NexusStrategies=exports;
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-shrink:0">
               <div>
                 <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
-                <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · all engines · most recent last</div>
+                <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · scroll up to 24h · hover for details</div>
               </div>
               <div style="display:flex;align-items:center;gap:12px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
-                <span style="display:flex;align-items:center;gap:5px"><span style="width:20px;height:2px;background:linear-gradient(90deg,hsl(var(--secondary)),hsl(var(--win)));border-radius:2px;display:inline-block"></span>P&amp;L Line</span>
-                <span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:hsl(var(--win));display:inline-block;box-shadow:0 0 6px hsl(var(--win))"></span>Live</span>
+                <span class="eq-chart-live-badge" id="dash-equity-live-badge" style="display:none">LIVE</span>
+                <span id="dash-equity-meta" style="opacity:0.65"></span>
               </div>
             </div>
             <div id="dash-equity-wrap" style="flex:1;min-height:0"></div>
@@ -14431,6 +14638,384 @@ window.NexusStrategies=exports;
 
 
       </div>`;
+  }
+
+  const EQUITY_STORAGE_KEY = 'benz_equity_curve';
+  const EQUITY_LEGACY_KEY = 'benz_journal_cache';
+  const EQUITY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  const EQUITY_VIEW_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+  const EquityStore = {
+    _points: null,
+    load() {
+      if (this._points) return this._points;
+      try {
+        const raw = localStorage.getItem(EQUITY_STORAGE_KEY) || localStorage.getItem(EQUITY_LEGACY_KEY);
+        this._points = raw ? JSON.parse(raw) : [];
+      } catch (_) {
+        this._points = [];
+      }
+      if (!Array.isArray(this._points)) this._points = [];
+      return this._points;
+    },
+    prune() {
+      const cutoff = Date.now() - EQUITY_MAX_AGE_MS;
+      this._points = this._points.filter((p) => (p.ts || 0) >= cutoff);
+    },
+    merge(entries) {
+      this.load();
+      const seen = new Set(this._points.map((p) => p.contractId || p.id));
+      entries.forEach((e) => {
+        const key = e.contractId || e.id;
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        this._points.push({
+          id: e.id,
+          contractId: e.contractId,
+          ts: e.ts || Date.now(),
+          profit: e.profit,
+          type: e.type,
+          botId: e.botId,
+          time: e.time,
+        });
+      });
+      this.prune();
+      this._points.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      this.save();
+      return this.getCurve();
+    },
+    save() {
+      try {
+        localStorage.setItem(EQUITY_STORAGE_KEY, JSON.stringify(this._points));
+      } catch (_) {}
+    },
+    getCurve() {
+      this.load();
+      this.prune();
+      let running = 0;
+      return this._points.map((p) => {
+        running += p.profit || 0;
+        return { ...p, cumulative: running };
+      });
+    },
+  };
+
+  function formatEquityTime(ts, timeStr) {
+    if (timeStr) return timeStr;
+    if (!ts) return '—';
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function formatEquityDate(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function ensureEquityChartShell(wrap) {
+    if (wrap._eqChartInit) return;
+    wrap.innerHTML = `
+      <div class="eq-chart-root">
+        <div class="eq-chart-stage" id="eq-chart-stage">
+          <canvas class="eq-chart-canvas" id="eq-chart-canvas"></canvas>
+          <div class="eq-chart-crosshair" id="eq-chart-crosshair"></div>
+          <div class="eq-chart-tooltip" id="eq-chart-tooltip">
+            <div class="eq-chart-tooltip-time" id="eq-tooltip-time"></div>
+            <div class="eq-chart-tooltip-row"><span class="eq-chart-tooltip-label">Trade P/L</span><span class="eq-chart-tooltip-val" id="eq-tooltip-trade"></span></div>
+            <div class="eq-chart-tooltip-row"><span class="eq-chart-tooltip-label">Cumulative</span><span class="eq-chart-tooltip-val" id="eq-tooltip-cum"></span></div>
+          </div>
+          <div class="eq-chart-empty" id="eq-chart-empty">
+            <div class="eq-chart-empty-title">NO EQUITY DATA</div>
+            <div class="eq-chart-empty-sub">Curve persists up to 24h · appears after first closed trade</div>
+          </div>
+        </div>
+        <div class="eq-chart-footer">
+          <div class="eq-chart-range" id="eq-chart-range">—</div>
+          <input type="range" class="eq-chart-scrubber" id="eq-chart-scrubber" min="0" max="100" value="100" title="Scroll through equity history">
+          <span class="eq-chart-hint">SCROLL / DRAG</span>
+        </div>
+      </div>`;
+    const stage = wrap.querySelector('#eq-chart-stage');
+    const canvas = wrap.querySelector('#eq-chart-canvas');
+    const scrubber = wrap.querySelector('#eq-chart-scrubber');
+    const crosshair = wrap.querySelector('#eq-chart-crosshair');
+    const tooltip = wrap.querySelector('#eq-chart-tooltip');
+
+    wrap._eqState = { pan: 1, dragging: false, dragStartX: 0, dragStartPan: 1 };
+
+    scrubber.addEventListener('input', () => {
+      wrap._eqState.pan = parseFloat(scrubber.value) / 100;
+      drawEquityChart(wrap);
+    });
+
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.04 : 0.04;
+      wrap._eqState.pan = Math.max(0, Math.min(1, wrap._eqState.pan + delta));
+      scrubber.value = Math.round(wrap._eqState.pan * 100);
+      drawEquityChart(wrap);
+    }, { passive: false });
+
+    stage.addEventListener('mousedown', (e) => {
+      wrap._eqState.dragging = true;
+      wrap._eqState.dragStartX = e.clientX;
+      wrap._eqState.dragStartPan = wrap._eqState.pan;
+    });
+    window.addEventListener('mouseup', () => { wrap._eqState.dragging = false; });
+    stage.addEventListener('mousemove', (e) => {
+      if (wrap._eqState.dragging) {
+        const rect = stage.getBoundingClientRect();
+        const dx = (e.clientX - wrap._eqState.dragStartX) / rect.width;
+        wrap._eqState.pan = Math.max(0, Math.min(1, wrap._eqState.dragStartPan - dx));
+        scrubber.value = Math.round(wrap._eqState.pan * 100);
+        drawEquityChart(wrap);
+      }
+      handleEquityHover(wrap, e);
+    });
+    stage.addEventListener('mouseleave', () => {
+      crosshair.style.opacity = '0';
+      tooltip.classList.remove('visible');
+    });
+
+    wrap._eqChartInit = true;
+    wrap._eqRefs = { stage, canvas, scrubber, crosshair, tooltip };
+  }
+
+  function getEquityViewport(points, pan) {
+    if (points.length < 2) return { slice: points, startIdx: 0, endIdx: 0 };
+    const firstTs = points[0].ts || 0;
+    const lastTs = points[points.length - 1].ts || Date.now();
+    const span = Math.max(lastTs - firstTs, 60000);
+    const windowMs = Math.min(EQUITY_VIEW_WINDOW_MS, span);
+    const maxStart = Math.max(firstTs, lastTs - windowMs);
+    const viewStart = firstTs + (maxStart - firstTs) * (1 - pan);
+    const viewEnd = viewStart + windowMs;
+    let startIdx = 0;
+    let endIdx = points.length - 1;
+    for (let i = 0; i < points.length; i++) {
+      if ((points[i].ts || 0) >= viewStart) { startIdx = Math.max(0, i - 1); break; }
+    }
+    for (let i = points.length - 1; i >= 0; i--) {
+      if ((points[i].ts || 0) <= viewEnd) { endIdx = Math.min(points.length - 1, i + 1); break; }
+    }
+    if (endIdx <= startIdx) endIdx = Math.min(points.length - 1, startIdx + 1);
+    return { slice: points.slice(startIdx, endIdx + 1), startIdx, endIdx, viewStart, viewEnd };
+  }
+
+  function drawEquityChart(wrap) {
+    const refs = wrap._eqRefs;
+    if (!refs) return;
+    const points = wrap._eqChartData || [];
+    const emptyEl = wrap.querySelector('#eq-chart-empty');
+    const rangeEl = wrap.querySelector('#eq-chart-range');
+    const canvas = refs.canvas;
+    const stage = refs.stage;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = stage.getBoundingClientRect();
+    const w = Math.max(rect.width, 300);
+    const h = Math.max(rect.height, 240);
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    if (points.length < 2) {
+      emptyEl.style.display = 'flex';
+      ctx.clearRect(0, 0, w, h);
+      if (rangeEl) rangeEl.textContent = 'No data in last 24h';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    const pan = wrap._eqState ? wrap._eqState.pan : 1;
+    const { slice, viewStart, viewEnd } = getEquityViewport(points, pan);
+    wrap._eqViewport = { slice, viewStart, viewEnd, pad: 40, w, h };
+
+    const pad = 40;
+    const values = slice.map((p) => p.cumulative);
+    const min = Math.min(0, ...values);
+    const max = Math.max(0, ...values);
+    const range = max - min || 1;
+    const chartW = w - pad * 2;
+    const chartH = h - pad * 2;
+    const xAt = (i) => pad + (i / Math.max(slice.length - 1, 1)) * chartW;
+    const yAt = (v) => pad + chartH - ((v - min) / range) * chartH;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Grid
+    const gridCount = 4;
+    ctx.strokeStyle = 'hsla(240, 6%, 20%, 0.35)';
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([2, 6]);
+    for (let i = 0; i <= gridCount; i++) {
+      const y = pad + (i / gridCount) * chartH;
+      ctx.beginPath();
+      ctx.moveTo(pad, y);
+      ctx.lineTo(w - pad, y);
+      ctx.stroke();
+      const val = max - (i / gridCount) * range;
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'hsla(220, 10%, 55%, 0.55)';
+      ctx.font = '8px "DM Mono", monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText((val >= 0 ? '+' : '') + val.toFixed(2), pad - 6, y + 3);
+      ctx.setLineDash([2, 6]);
+    }
+    ctx.setLineDash([]);
+
+    // Zero line
+    const zeroY = yAt(0);
+    const last = values[values.length - 1];
+    const isPos = last >= 0;
+    const lineColor = isPos ? 'hsl(142, 76%, 46%)' : 'hsl(0, 72%, 55%)';
+    const lineColor2 = isPos ? 'hsl(199, 89%, 48%)' : 'hsl(262, 83%, 58%)';
+
+    ctx.strokeStyle = 'hsla(240, 6%, 30%, 0.5)';
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    ctx.moveTo(pad, zeroY);
+    ctx.lineTo(w - pad, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Area fill
+    const grad = ctx.createLinearGradient(0, pad, 0, h - pad);
+    grad.addColorStop(0, isPos ? 'rgba(34, 197, 94, 0.28)' : 'rgba(239, 68, 68, 0.22)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.beginPath();
+    slice.forEach((p, i) => {
+      const x = xAt(i);
+      const y = yAt(p.cumulative);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.lineTo(xAt(slice.length - 1), h - pad);
+    ctx.lineTo(xAt(0), h - pad);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line with glow
+    ctx.shadowColor = isPos ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.5)';
+    ctx.shadowBlur = 8;
+    const lineGrad = ctx.createLinearGradient(pad, 0, w - pad, 0);
+    lineGrad.addColorStop(0, lineColor2);
+    lineGrad.addColorStop(1, lineColor);
+    ctx.strokeStyle = lineGrad;
+    ctx.lineWidth = 2.2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    slice.forEach((p, i) => {
+      const x = xAt(i);
+      const y = yAt(p.cumulative);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Trade dots
+    slice.forEach((p, i) => {
+      const win = (p.profit || 0) >= 0;
+      ctx.beginPath();
+      ctx.arc(xAt(i), yAt(p.cumulative), 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = win ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.6)';
+      ctx.fill();
+    });
+
+    // Live end dot
+    const endX = xAt(slice.length - 1);
+    const endY = yAt(last);
+    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 400);
+    ctx.beginPath();
+    ctx.arc(endX, endY, 6 + pulse * 3, 0, Math.PI * 2);
+    ctx.fillStyle = isPos ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(endX, endY, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = lineColor;
+    ctx.fill();
+    ctx.strokeStyle = 'hsl(240, 6%, 4%)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // End label
+    ctx.fillStyle = lineColor;
+    ctx.font = 'bold 9px "DM Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText((last >= 0 ? '+' : '') + last.toFixed(2), endX, endY - 12);
+
+    if (rangeEl) {
+      const startLabel = formatEquityDate(viewStart || points[0].ts);
+      const endLabel = formatEquityDate(viewEnd || points[points.length - 1].ts);
+      rangeEl.textContent = `${startLabel} → ${endLabel} · ${points.length} trades · 24h max`;
+    }
+  }
+
+  function handleEquityHover(wrap, e) {
+    const refs = wrap._eqRefs;
+    const vp = wrap._eqViewport;
+    if (!refs || !vp || !vp.slice || vp.slice.length < 1) return;
+    const stage = refs.stage;
+    const rect = stage.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pad = vp.pad;
+    const chartW = vp.w - pad * 2;
+    const relX = Math.max(0, Math.min(1, (x - pad) / chartW));
+    const idx = Math.round(relX * Math.max(vp.slice.length - 1, 0));
+    const point = vp.slice[idx];
+    if (!point) return;
+
+    const crosshair = refs.crosshair;
+    const tooltip = refs.tooltip;
+    const stageRect = stage.getBoundingClientRect();
+    const pointX = pad + (idx / Math.max(vp.slice.length - 1, 1)) * chartW;
+
+    crosshair.style.left = pointX + 'px';
+    crosshair.style.opacity = '1';
+
+    const tipTime = tooltip.querySelector('#eq-tooltip-time');
+    const tipTrade = tooltip.querySelector('#eq-tooltip-trade');
+    const tipCum = tooltip.querySelector('#eq-tooltip-cum');
+    const profit = point.profit || 0;
+    const cum = point.cumulative || 0;
+    tipTime.textContent = formatEquityTime(point.ts, point.time);
+    tipTrade.textContent = (profit >= 0 ? '+' : '') + profit.toFixed(2);
+    tipTrade.className = 'eq-chart-tooltip-val ' + (profit >= 0 ? 'win' : 'loss');
+    tipCum.textContent = (cum >= 0 ? '+' : '') + cum.toFixed(2);
+    tipCum.className = 'eq-chart-tooltip-val ' + (cum >= 0 ? 'win' : 'loss');
+
+    let tipX = pointX + 14;
+    let tipY = 16;
+    if (tipX + 180 > vp.w) tipX = pointX - 190;
+    tooltip.style.left = tipX + 'px';
+    tooltip.style.top = tipY + 'px';
+    tooltip.classList.add('visible');
+  }
+
+  function renderEquityChart(wrap, curve) {
+    if (!wrap) return;
+    ensureEquityChartShell(wrap);
+    const sig = curve.length + ':' + (curve.length ? curve[curve.length - 1].ts + ':' + curve[curve.length - 1].cumulative : '0');
+    wrap._eqChartData = curve;
+    if (wrap._eqLastSig !== sig) {
+      wrap._eqLastSig = sig;
+      drawEquityChart(wrap);
+    } else if (!wrap._eqAnimFrame) {
+      wrap._eqAnimFrame = requestAnimationFrame(() => {
+        wrap._eqAnimFrame = null;
+        drawEquityChart(wrap);
+      });
+    }
   }
 
   function buildEquitySVG(points) {
@@ -14667,18 +15252,20 @@ window.NexusStrategies=exports;
     allEntries.length = 0;
     dedupedEntries.forEach(e => allEntries.push(e));
 
-    // Persist a small snapshot for the equity curve across page reloads
-    if (allEntries.length > 0) {
-      try {
-        const toSave = allEntries.slice(-50).map(e => ({ id: e.id, contractId: e.contractId, ts: e.ts, profit: e.profit, type: e.type, botId: e.botId, time: e.time, barrier: e.barrier, exitDigit: e.exitDigit, entryDigit: e.entryDigit }));
-        localStorage.setItem('benz_journal_cache', JSON.stringify(toSave));
-      } catch(_) {}
-    }
+    // Merge live trades into persistent 24h equity store (survives reload & CLEAR STATS)
+    const curve = EquityStore.merge(allEntries);
 
-    allEntries.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-    let running = 0;
-    const curve = allEntries.map((e) => { running += e.profit; return { ...e, cumulative: running }; });
-    global.setHtmlIfChanged(el('dash-equity-wrap', root), buildEquitySVG(curve));
+    const equityWrap = el('dash-equity-wrap', root);
+    renderEquityChart(equityWrap, curve);
+    const liveBadge = el('dash-equity-live-badge', root);
+    const equityMeta = el('dash-equity-meta', root);
+    if (liveBadge) liveBadge.style.display = curve.length >= 2 ? 'inline-flex' : 'none';
+    if (equityMeta && curve.length >= 2) {
+      const last = curve[curve.length - 1];
+      equityMeta.textContent = `${curve.length} pts · ${(last.cumulative >= 0 ? '+' : '')}${last.cumulative.toFixed(2)} total`;
+    } else if (equityMeta) {
+      equityMeta.textContent = '';
+    }
 
     const perBotHtml = botIds.map((id) => {
       const meta = BOT_META[id]; const b = perBot[id];
@@ -14961,14 +15548,13 @@ window.NexusStrategies=exports;
     if (clearAllBtn && !clearAllBtn._bound) {
       clearAllBtn._bound = true;
       clearAllBtn.addEventListener('click', () => {
-        if (!confirm('Clear all trade stats and journal for all bots?')) return;
+        if (!confirm('Clear all trade stats and journal for all bots?\n\nEquity curve history (last 24h) will be preserved.')) return;
         botIds.forEach((id) => {
           const eng = engines[id];
           if (!eng) return;
-          if (id === 'differ') { eng.dispatch && eng.dispatch({ type: 'CLEAR_STATS' }); }
+          if (id === 'differ') { eng.dispatch && eng.dispatch({ type: 'RESET_JOURNAL' }); }
           else { eng.clearStats && eng.clearStats(); }
         });
-        try { localStorage.removeItem('benz_journal_cache'); } catch(_) {}
         render(root, engines);
       });
     }
