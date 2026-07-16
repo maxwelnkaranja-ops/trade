@@ -7641,6 +7641,57 @@ function isOdd(d) {
 }
 
 /**
+ * HYBRID PARITY SHAPE — the graded, non-gated version of the "top-2/bottom-2
+ * bar" idea (green/blue = 2 most-frequent digits, red/yellow = 2 least-
+ * frequent digits). Unlike the original Odd Strategy, this does NOT require
+ * hitting a specific percentage (≥10.5%, ≤8.6%, etc.) — it only checks
+ * PARITY (is the dominant pair on the target side, is the cold pair on the
+ * opposite side) and grades each of the 4 slots independently instead of
+ * an all-or-nothing gate. A market that gets 3 of 4 right now scores
+ * meaningfully higher than one that gets 1 of 4 right, instead of both
+ * being lumped into "not qualified."
+ *   targetOdd = true  → Odd Bot's shape: green/blue should be ODD,  red/yellow should be EVEN
+ *   targetOdd = false → Even Bot's shape: green/blue should be EVEN, red/yellow should be ODD
+ */
+function computeParityShape(percentages, targetOdd) {
+  const ranked = percentages.map((p, i) => ({ digit: i, pct: p })).sort((a, b) => b.pct - a.pct);
+  const green = ranked[0], blue = ranked[1], yellow = ranked[8], red = ranked[9];
+  const wantDominant = targetOdd ? isOdd : isEven; // what green/blue SHOULD be
+  const wantCold = targetOdd ? isEven : isOdd;     // what red/yellow SHOULD be
+  const greenMatch = wantDominant(green.digit), blueMatch = wantDominant(blue.digit);
+  const redMatch = wantCold(red.digit), yellowMatch = wantCold(yellow.digit);
+  return {
+    green: green.digit, blue: blue.digit, red: red.digit, yellow: yellow.digit,
+    greenPct: green.pct, bluePct: blue.pct, redPct: red.pct, yellowPct: yellow.pct,
+    greenMatch, blueMatch, redMatch, yellowMatch,
+    // 0-50: 15 for each of green/blue matching, 10 for each of red/yellow
+    // matching — but a slot that misses still banks partial credit (5 or 3)
+    // instead of zero, since we deliberately dropped the hard % cutoffs.
+    shapeScore: (greenMatch ? 15 : 5) + (blueMatch ? 15 : 5) + (redMatch ? 10 : 3) + (yellowMatch ? 10 : 3),
+  };
+}
+
+/**
+ * HYBRID PROBABILITY — blends the Even Bot's continuous "market quality"
+ * signals (trend, momentum, volatility, concentration, stability — up to
+ * 50 pts) with the graded parity-shape score above (up to 50 pts) into one
+ * smooth 0-100 ranking used by BOTH the Even and Odd bots. This replaces
+ * Even's old shape-blind formula and Odd's old all-or-nothing gate with a
+ * single shared model so "Top Markets" behaves the same way for both bots.
+ */
+function computeHybridProbability({ shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern }) {
+  let score = 0;
+  score += shapeScore; // 0-50, from computeParityShape
+  score += Math.min(15, (oddDigitWeight / 50) * 15);
+  if (trendScore > 55) score += 10; else if (trendScore > 50) score += 5;
+  if (momentumScore > 55) score += 10;
+  if (stablePattern) score += 5;
+  if (volatilityIndex > 50) score += 5;
+  if (rareDigits) score += 5;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+/**
  * ADVANCED ANALYSIS ENGINE - EVEN/ODD EDITION
  * Analyzes digit dominance, momentum, and trend for whichever parity this
  * bot instance actually trades. `targetOdd` = true means "measure ODD
@@ -7713,26 +7764,13 @@ function analyzeDigits(history, tickPeriod = 50, targetOdd = true) {
   const lowVolatility = volatilityIndex > 50;
 
   // CALCULATE PROBABILITY
-  let probability = 0;
-  
-  // Base probability from target-parity digit weight
-  probability += Math.min(30, oddDigitWeight / 2);
-  
-  // Trend bonus
-  if (trendScore > 55) probability += 20;
-  else if (trendScore > 50) probability += 10;
-  
-  // Momentum bonus
-  if (momentumUp) probability += 15;
-  
-  // Stability bonus
-  if (stablePattern) probability += 10;
-  
-  // Low volatility bonus
-  if (lowVolatility) probability += 10;
-  
-  // Rare digits pattern bonus
-  if (rareDigits) probability += 15;
+  // HYBRID SCORE — parity shape (top-2/bottom-2, graded not gated) blended
+  // with the continuous market-quality signals above. Replaces the old
+  // shape-blind additive formula so Even and Odd now share one model.
+  const shape = computeParityShape(percentages, targetOdd);
+  const probability = computeHybridProbability({
+    shapeScore: shape.shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern,
+  });
 
   // Best barrier kept for compatibility (not used in even/odd)
   let bestBarrier = 0;
@@ -7751,7 +7789,7 @@ function analyzeDigits(history, tickPeriod = 50, targetOdd = true) {
   }));
 
   return {
-    probability: Math.min(100, Math.round(probability)),
+    probability,
     digitCounts: counts,
     digitPercentages: percentages,
     frequencies,
@@ -7771,6 +7809,7 @@ function analyzeDigits(history, tickPeriod = 50, targetOdd = true) {
     },
     recommendation,
     bestBarrier,
+    shape,
   };
 }
 
@@ -7847,26 +7886,59 @@ function analyzeOddStrategyCondition(history, tickPeriod = 50) {
     coldEvenDigit, lastDigit, isTouchingNow, reason,
   };
 
+  // Real trend/momentum/volatility (previously hardcoded to 50/50/50 here)
+  // — same weighted-recency technique analyzeDigits() uses, so the Odd
+  // bot's hybrid score is computed on genuine live signals, not stand-ins.
+  const isTarget = isOdd;
+  const recentWeight = 3;
+  let weightedTargetCount = 0, totalWeight = 0;
+  data.forEach((digit, index) => {
+    const weight = index < data.length / 2 ? 1 : recentWeight;
+    totalWeight += weight;
+    if (isTarget(digit)) weightedTargetCount += weight;
+  });
+  const trendScore = (weightedTargetCount / totalWeight) * 100;
+  const recentSlice = data.slice(-10);
+  const previousSlice = data.slice(-20, -10);
+  const recentTargetRate = recentSlice.filter((d) => isTarget(d)).length / recentSlice.length;
+  const previousTargetRate = previousSlice.length > 0 ? previousSlice.filter((d) => isTarget(d)).length / previousSlice.length : 0.5;
+  const momentumScore = ((recentTargetRate - previousTargetRate) + 1) * 50;
+  const volatility = calculateVolatility(data);
+  const volatilityIndex = Math.max(0, 100 - volatility * 10);
+  const coldDigitCount = percentages.filter((p) => p < 8).length;
+  const rareDigits = coldDigitCount >= 4;
+  const stablePattern = data.length >= 25;
+  // Same graded shape score as computeParityShape(), reusing the green/
+  // blue/red/yellow booleans already computed above for the hard gate.
+  const shapeScore = (greenOdd ? 15 : 5) + (blueOdd ? 15 : 5) + (redEven ? 10 : 3) + (yellowEven ? 10 : 3);
+  const probability = computeHybridProbability({
+    shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern,
+  });
+
   return {
-    // Same formula used to rank every market in the scanner — see
-    // scoreOddStrategyMarket below — so the Top Markets % matches what
-    // you see once you switch to that market.
-    probability: scoreOddStrategyMarket(oddStrategy),
+    // HYBRID SCORE — same model the Even bot now uses (parity shape,
+    // graded not gated, blended with trend/momentum/volatility). The
+    // strict `oddStrategy` gate above still exists unchanged and still
+    // decides whether a trade can actually fire (that's the trigger
+    // logic, unaffected by this) — this `probability` only drives
+    // ranking/"Top Markets" and the Min Signal % control.
+    probability,
     digitCounts: counts,
     digitPercentages: percentages,
     frequencies,
     hotDigits: percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct > 15).map((d) => d.digit),
     coldDigits: percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct < 8).map((d) => d.digit),
-    trendScore: 50, momentumScore: 50, volatilityIndex: 50,
+    trendScore: Math.round(trendScore), momentumScore: Math.round(momentumScore), volatilityIndex: Math.round(volatilityIndex),
     oddDigitWeight: Math.round(oddDigitWeight),
     targetParity: 'odd',
     conditions: {
-      rareDigits: bottomOk, dominantOdd: topOk, stablePattern: marketGood,
-      momentumUp: isTouchingNow, lowVolatility: redThreshold && yellowThreshold,
+      rareDigits, dominantOdd: topOk, stablePattern,
+      momentumUp: momentumScore > 55, lowVolatility: volatilityIndex > 50,
     },
-    recommendation: isTouchingNow ? 'STRONG_BUY' : marketGood ? 'HOLD' : 'AVOID',
+    recommendation: probability >= 85 ? 'STRONG_BUY' : probability >= 70 ? 'BUY' : probability < 50 ? 'AVOID' : 'HOLD',
     bestBarrier: 0,
     oddStrategy,
+    shape: { green: green.digit, blue: blue.digit, red: red.digit, yellow: yellow.digit, greenPct: green.pct, bluePct: blue.pct, redPct: red.pct, yellowPct: yellow.pct, greenMatch: greenOdd, blueMatch: blueOdd, redMatch: redEven, yellowMatch: yellowEven, shapeScore },
   };
 }
 
@@ -8357,9 +8429,11 @@ window.EvenTrading = exports;
         const health = market.health;
         if (!analysis) return 0;
         if (analysis.oddStrategy) {
-          // Exact same formula the live analyzer uses for the currently
-          // selected market — keeps Top Markets and the live view in sync.
-          return scoreOddStrategyMarket(analysis.oddStrategy);
+          // analysis.probability is now the same hybrid score the live
+          // analyzer computes (parity shape + trend/momentum/volatility) —
+          // keeps Top Markets and the live view in sync without the old
+          // all-or-nothing scoreOddStrategyMarket() gate.
+          return analysis.probability;
         }
         let score = analysis.probability;
         if (health) {
@@ -9166,7 +9240,7 @@ function analyzeDigits(history, tickPeriod = 50, barrier = 3, isUnder = false) {
  * plus an `over3` sub-object carrying the real rule-by-rule breakdown for
  * the dedicated Over 3 conditions panel.
  */
-function analyzeOver3Condition(history, tickPeriod = 50) {
+function analyzeOver3Condition(history, tickPeriod = 50, minStreak = 3, minSignal = 55) {
   const data = history.slice(-tickPeriod);
   const ZONE = [0, 1, 2, 3];
 
@@ -9184,6 +9258,7 @@ function analyzeOver3Condition(history, tickPeriod = 50) {
       reason: 'Collecting ticks…', greenDigit: -1, redDigit: -1, zoneUnder10: false,
       greenOutsideZone: false, redOutsideZone: false, greenIsOdd: false, redIsOdd: false,
       lastDigit: -1, zoneTrend: {},
+      underStreak: 0, minStreak, minSignal, pctGateOk: false, streakGateOk: false, endDigitOk: false,
     },
   };
   if (data.length < 10) return empty;
@@ -9228,45 +9303,100 @@ function analyzeOver3Condition(history, tickPeriod = 50) {
     zoneTrend[d] = { first: p1, second: p2, direction: p2 > p1 + 1 ? 'increasing' : p2 < p1 - 1 ? 'decreasing' : 'flat' };
   });
 
+  const overDigitWeight = percentages.filter((_, i) => i > 3).reduce((a, b) => a + b, 0);
+
+  // Real trend/momentum/volatility (previously hardcoded to 50/50/50 here,
+  // same fix already applied to the Odd bot) — target zone is "digit > 3",
+  // same weighted-recency technique used everywhere else. Computed BEFORE
+  // the entry decision below since firing now gates on this blended
+  // probability (Min Signal %) instead of the old hard 4-condition gate.
+  const isTarget = (d) => d > 3;
+  const recentWeight = 3;
+  let weightedTargetCount = 0, totalWeight = 0;
+  data.forEach((digit, index) => {
+    const weight = index < data.length / 2 ? 1 : recentWeight;
+    totalWeight += weight;
+    if (isTarget(digit)) weightedTargetCount += weight;
+  });
+  const trendScore = (weightedTargetCount / totalWeight) * 100;
+  const recentSlice = data.slice(-10);
+  const previousSlice = data.slice(-20, -10);
+  const recentTargetRate = recentSlice.filter(isTarget).length / recentSlice.length;
+  const previousTargetRate = previousSlice.length > 0 ? previousSlice.filter(isTarget).length / previousSlice.length : 0.5;
+  const momentumScore = ((recentTargetRate - previousTargetRate) + 1) * 50;
+  const volatility = calculateVolatility(data);
+  const volatilityIndex = Math.max(0, 100 - volatility * 10);
+  // NOTE: this was previously referenced before being declared anywhere in
+  // this function — a latent ReferenceError on every real analysis call,
+  // since the early-return above only fires when data.length < 10. It's now
+  // declared properly, same as the other analyzers.
+  const coldDigits = percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct < 8).map((d) => d.digit);
+  const rareDigits = coldDigits.length >= 4;
+  const stablePattern = data.length >= 25;
+
+  // Graded shape score (0-50) — the same 4 hard bar-placement conditions
+  // (green/red outside the 0-3 zone, green/red both on an odd digit), but
+  // each now banks partial credit independently instead of an all-or-
+  // nothing gate. zoneUnder10 stays a pure bonus, same as before (folded
+  // into the quality half via trendScore/rareDigits rather than the gate).
+  const shapeScore = (greenOutsideZone ? 12.5 : 4) + (redOutsideZone ? 12.5 : 4) + (greenIsOdd ? 12.5 : 4) + (redIsOdd ? 12.5 : 4);
+  const probability = computeHybridProbability({
+    shapeScore, oddDigitWeight: overDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern,
+  });
+
+  // ── ENTRY DECISION (mirrors the engine's live dispatch logic, kept here
+  // too so the radar/status UI — which reads over3.canEnter/reason directly
+  // — never disagrees with what actually fires) ──────────────────────────
+  // 1) Min Signal % gate — blended probability above must clear minSignal.
+  // 2) Under-zone streak — consecutive digits ≤3 counting back from the
+  //    most recent tick, must reach minStreak length.
+  // 3) End-digit rule — whatever minStreak is set to, the streak must END
+  //    on digit 1 or 3 specifically (not 0 or 2) to fire.
+  let underStreak = 0;
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (data[i] <= 3) underStreak++;
+    else break;
+  }
   const lastDigit = data[data.length - 1];
-  const entryDigitOk = lastDigit === 1 || lastDigit === 3;
-  const entryTrendOk = entryDigitOk && zoneTrend[lastDigit].direction === 'flat';
-  // Fires off the 4 hard conditions + the entry point — zoneUnder10 no
-  // longer gates firing, it only affects the displayed % (see below).
-  const canEnter = coreOk && entryDigitOk && entryTrendOk;
+  const endDigitOk = lastDigit === 1 || lastDigit === 3;
+  const pctGateOk = probability >= minSignal;
+  const streakGateOk = underStreak >= minStreak;
+  const canEnter = pctGateOk && streakGateOk && endDigitOk;
 
   let reason;
-  if (!coreOk) reason = 'Market conditions not met';
-  else if (!entryDigitOk) reason = `Waiting for digit 1 or 3 (last: ${lastDigit})`;
-  else if (!entryTrendOk) reason = `Digit ${lastDigit} is ${zoneTrend[lastDigit].direction} — waiting for flat`;
-  else reason = `ENTRY — digit ${lastDigit} stable${marketAcceptable ? ' (zone check skipped)' : ''}`;
+  if (!pctGateOk) reason = `Signal ${Math.round(probability)}% / needs ${minSignal}%`;
+  else if (!streakGateOk) reason = `Under-zone streak ${underStreak}/${minStreak}`;
+  else if (!endDigitOk) reason = `Streak ready (${underStreak}) — waiting for it to end on 1 or 3 (last: ${lastDigit})`;
+  else reason = `ENTRY — ${underStreak}-streak ended on ${lastDigit}, signal ${Math.round(probability)}%`;
 
-  const overDigitWeight = percentages.filter((_, i) => i > 3).reduce((a, b) => a + b, 0);
   const over3 = {
     ready: true, marketGood, marketAcceptable, coreOk, canEnter, reason,
     greenDigit, redDigit, zoneUnder10, greenOutsideZone, redOutsideZone,
     greenIsOdd, redIsOdd, lastDigit, zoneTrend,
+    underStreak, minStreak, minSignal, pctGateOk, streakGateOk, endDigitOk,
   };
 
   return {
-    // Same formula used to rank every market in the Top Markets scanner
-    // (see scoreOver3Market below) — so the % shown before you switch is
-    // the same % you see for that market after you switch to it.
-    probability: scoreOver3Market(over3),
+    // HYBRID SCORE — same model Even/Odd now use: graded shape (0-50)
+    // blended with real trend/momentum/volatility/concentration (0-50).
+    // `over3` above still carries the strict hard-gate fields unchanged —
+    // those still decide whether a trade can actually fire; this score
+    // only drives ranking/Top Markets and the Min Signal % control.
+    probability,
     digitCounts: counts,
     digitPercentages: percentages,
     frequencies,
     hotDigits: percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct > 15).map((d) => d.digit),
     coldDigits: percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct < 8).map((d) => d.digit),
-    trendScore: 50, momentumScore: 50, volatilityIndex: 50,
+    trendScore: Math.round(trendScore), momentumScore: Math.round(momentumScore), volatilityIndex: Math.round(volatilityIndex),
     overDigitWeight: Math.round(overDigitWeight),
     conditions: {
-      stablePattern: zoneUnder10, dominantOdd: greenIsOdd, momentumUp: redIsOdd,
-      lowVolatility: greenOutsideZone, rareDigits: redOutsideZone,
+      stablePattern, dominantOdd: greenIsOdd, momentumUp: momentumScore > 55,
+      lowVolatility: volatilityIndex > 50, rareDigits,
     },
-    recommendation: canEnter ? 'STRONG_BUY' : (marketGood || marketAcceptable) ? 'HOLD' : 'AVOID',
+    recommendation: probability >= 85 ? 'STRONG_BUY' : probability >= 70 ? 'BUY' : probability < 50 ? 'AVOID' : 'HOLD',
     bestBarrier: 3,
-    over3,
+    over3: { ...over3, shapeScore },
   };
 }
 
@@ -9304,6 +9434,24 @@ function calculateVolatility(data) {
   }
   
   return changes / (data.length - 1);
+}
+
+// HYBRID PROBABILITY — same model the Even/Odd bots use (blends graded shape
+// score with real trend/momentum/volatility/concentration into one 0-100
+// ranking). This module (Over/Under) lives in its own IIFE closure separate
+// from EvenTrading's copy, so it needs its own local definition — without
+// this, every call from analyzeOver3Condition below threw a ReferenceError
+// on any real tick data (the function simply didn't exist in this scope).
+function computeHybridProbability({ shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern }) {
+  let score = 0;
+  score += shapeScore; // 0-50, from the graded shape conditions
+  score += Math.min(15, (oddDigitWeight / 50) * 15);
+  if (trendScore > 55) score += 10; else if (trendScore > 50) score += 5;
+  if (momentumScore > 55) score += 10;
+  if (stablePattern) score += 5;
+  if (volatilityIndex > 50) score += 5;
+  if (rareDigits) score += 5;
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 function getEmptyAnalysis() {
@@ -11454,6 +11602,7 @@ window.NexusStrategies=exports;
         soundEnabled: true, currentStrategy: 1, alternatingRecovery: true, alternatingRecoveryB: false,
         alternatingRecoveryC: false, alternatingRecoveryR: false, altAutomation: false,
         smartRecovery: false, autoRefresh: true, tradeMode: this.fixedTradeMode || 'odd',
+        armWindow: 6, // ticks the touch-arm window stays open (Even/Odd hybrid trigger)
         // Considerate ranges: barrier 2-6 (70%-30% win — avoids the extreme,
         // near-guaranteed or near-impossible edges 0/1/8/9), streak 2-4
         // (a light-to-moderate confirmation window, not razor-thin or so
@@ -11484,7 +11633,7 @@ window.NexusStrategies=exports;
       // 'manual' (operator locks in a fixed digit via manualDigit).
       const matchesDefaults = {
         stake: 1, targetRuns: 1, minSignal: 55, preset: 'auto', manualDigit: 5,
-        strategyGroup: 'one', burstMaxTrades: 5,
+        strategyGroup: 'one', burstMaxTrades: 5, numTicks: 2,
         martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 3,
         autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         soundEnabled: true, autoRefresh: true, smartRecovery: false,
@@ -11514,6 +11663,7 @@ window.NexusStrategies=exports;
         pendingTrade: this.pendingTrade,
         currentStrategyName: this.getStrategy(this.config.currentStrategy).shortName,
         fixedTradeMode: this.fixedTradeMode, botLabel: this.botLabel, _cdMax: this._cdMax || 25,
+        previousMarket: this.previousMarket || null,
       };
     }
 
@@ -11599,9 +11749,17 @@ window.NexusStrategies=exports;
         // Odd Strategy 2026 — top-2/bottom-2 bar market analysis + touch/
         // arm/window entry. Odd Bot only; Even Bot keeps its existing logic.
         const isOddStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'odd';
+        const isEvenStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'even';
         let streak = 0;
         if (isOver3) {
-          // streak intentionally left at 0 — Over 3 no longer uses it
+          // Under-zone (digit ≤ 3) streak — mean-reversion setup: wait for
+          // a run of under-zone digits, then fire OVER once it ends
+          // specifically on digit 1 or 3 (not 0 or 2), gated first by the
+          // min percentage check below.
+          for (let i = fullHistory.length - 1; i >= 0; i--) {
+            if (fullHistory[i] <= 3) streak++;
+            else break;
+          }
         } else if (this.mode === 'evenodd') {
           const isOddMode = this.config.tradeMode === 'odd';
           for (let i = fullHistory.length - 1; i >= 0; i--) {
@@ -11643,7 +11801,14 @@ window.NexusStrategies=exports;
           result = window.MatchesAnalyzer.analyze(history, tickPeriod, this.config);
           this.analysis = result;
         } else if (isOver3) {
-          result = this.T.analyzeOver3Condition(history, tickPeriod);
+          result = this.T.analyzeOver3Condition(history, tickPeriod, this.config.minStreak, this.config.minSignal);
+          // Over 3 fires off fast streak+digit gates, not a slow drifting
+          // trend — holding the DISPLAYED analysis back for up to 20s
+          // (ANALYSIS_HOLD, used by the other digit bots to cut down on UI
+          // flicker) made the panel look stuck/behind reality even though
+          // actual firing below always used fresh per-tick data. Bypass the
+          // hold here so what's on screen never lags what's about to fire.
+          this.analysis = result;
         } else if (isOddStrat) {
           result = this.T.analyzeOddStrategyCondition(history, tickPeriod);
         } else {
@@ -11687,21 +11852,36 @@ window.NexusStrategies=exports;
         const health = this.socket.getHealth(market);
         if (health && health.longTerm === 'POOR') { this.emit(); return; }
         if (isOver3) {
-          // No streak logic, no strategy list — fire strictly off the Over 3
-          // market-condition + entry-point rules computed above.
+          // New hybrid trigger: min percentage gate → wait for an
+          // under-zone (≤3) streak of Min Streak length → fire OVER the
+          // instant that streak ends specifically on digit 1 or 3 (0 or 2
+          // don't count, streak just keeps waiting). The old hard
+          // green/red-bar gate is still computed and shown in the radar
+          // for reference, but no longer blocks entry on its own.
           const o3 = result.over3 || {};
-          if (o3.canEnter) {
+          const pctGateOk = result.probability >= this.config.minSignal;
+          const streakOk = streak >= this.config.minStreak;
+          const lastDigit = data.digit;
+          const endsRight = lastDigit === 1 || lastDigit === 3;
+          const canEnter = pctGateOk && streakOk && endsRight;
+          if (canEnter) {
             this._over3WaitStart = null;
-            this.strategyPhase = 'firing'; this.strategyWaitReason = o3.reason;
-            this.addLog('win', 'ENTRY', o3.reason);
+            this.strategyPhase = 'firing';
+            this.strategyWaitReason = `ENTRY — ${streak}-under streak ended on digit ${lastDigit}, firing OVER`;
+            this.addLog('win', 'ENTRY', this.strategyWaitReason);
             this.startChainExecution();
             setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
           } else {
-            if (!this._over3WaitStart) this._over3WaitStart = Date.now();
-            this.strategyPhase = 'waiting'; this.strategyWaitReason = o3.reason || 'Analyzing…';
+            this.strategyPhase = 'waiting';
+            this.strategyWaitReason = !pctGateOk
+              ? `Min percentage not met (${result.probability}%/${this.config.minSignal}%)`
+              : !streakOk
+              ? `Under-streak ${streak}/${this.config.minStreak} — waiting`
+              : `Streak of ${streak} ended on digit ${lastDigit} — need 1 or 3`;
             // Anti-stall: this market hasn't produced a fireable setup in 2
             // minutes straight — rather than sit here indefinitely, rotate
             // into whatever market is currently scoring best.
+            if (!this._over3WaitStart) this._over3WaitStart = Date.now();
             if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
               const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
@@ -11713,10 +11893,15 @@ window.NexusStrategies=exports;
             }
           }
         } else if (isOddStrat) {
-          // Odd Strategy 2026 — touch coldest-even digit arms a 6-tick
-          // window; if an even streak of Min Streak length lands inside
-          // that window, fire ODD immediately. No generic strategy list.
+          // Odd Strategy 2026 (hybrid triggers): min percentage (hybrid
+          // score vs Min Signal %) gates whether a touch can arm at all;
+          // once armed, an even streak of Min Streak length inside the
+          // 6-tick window fires ODD immediately. The old hard 4-condition
+          // gate (green/blue ≥10.5% odd, red/yellow ≤8.6%/9.5% even) no
+          // longer blocks entry — it's still computed and shown in the
+          // radar for reference, but the live percentage is the real gate.
           const os = result.oddStrategy || {};
+          const pctGateOk = result.probability >= this.config.minSignal;
           let fired = false;
           if (this._oddArmed) {
             this._oddArmTicksLeft--;
@@ -11734,14 +11919,14 @@ window.NexusStrategies=exports;
             } else {
               this.strategyWaitReason = `Armed — ${this._oddArmTicksLeft} ticks left, even streak ${streak}/${this.config.minStreak}`;
             }
-          } else if (os.marketGood && os.isTouchingNow) {
-            this._oddArmed = true; this._oddArmTicksLeft = 6;
-            this.strategyWaitReason = `Armed — touched digit ${os.coldEvenDigit}, waiting for ${this.config.minStreak}-even streak within 6 ticks`;
+          } else if (pctGateOk && os.isTouchingNow) {
+            this._oddArmed = true; this._oddArmTicksLeft = this.config.armWindow || 6;
+            this.strategyWaitReason = `Armed — touched digit ${os.coldEvenDigit}, waiting for ${this.config.minStreak}-even streak within ${this.config.armWindow || 6} ticks`;
             this.addLog('engine', 'ARM', this.strategyWaitReason);
           } else {
-            this.strategyWaitReason = os.marketGood
+            this.strategyWaitReason = pctGateOk
               ? `Waiting for touch of digit ${os.coldEvenDigit ?? '—'}`
-              : 'Market conditions not met (top-2 odd / bottom-2 even)';
+              : `Min percentage not met (${result.probability}%/${this.config.minSignal}%)`;
           }
 
           if (fired) {
@@ -11764,6 +11949,64 @@ window.NexusStrategies=exports;
                 this.changeMarket(best.symbol);
               }
               this._oddWaitStart = Date.now();
+            }
+          }
+        } else if (isEvenStrat) {
+          // Even Strategy (mirrored Odd Strategy 2026, hybrid triggers):
+          // min percentage gates whether a touch of the coldest ODD digit
+          // can arm; once armed, an odd streak of Min Streak length inside
+          // the tick window fires EVEN immediately. Same shared shape data
+          // (result.shape) the hybrid analyzer now computes for this bot.
+          const shape = result.shape || {};
+          const coldOddDigit = (shape.redPct != null && shape.yellowPct != null)
+            ? (shape.redPct <= shape.yellowPct ? shape.red : shape.yellow)
+            : null;
+          const isTouchingNow = coldOddDigit != null && data.digit === coldOddDigit;
+          const pctGateOk = result.probability >= this.config.minSignal;
+          const armWindow = this.config.armWindow || 6;
+          let fired = false;
+          if (this._evenArmed) {
+            this._evenArmTicksLeft--;
+            if (streak >= this.config.minStreak) {
+              fired = true;
+              this.strategyWaitReason = `ENTRY — ${streak}-odd streak inside window, firing EVEN`;
+              this._evenArmed = false; this._evenArmTicksLeft = 0;
+            } else if (isTouchingNow) {
+              this._evenArmTicksLeft = armWindow;
+              this.strategyWaitReason = `Re-armed — touched digit ${coldOddDigit} again, window refreshed`;
+            } else if (this._evenArmTicksLeft <= 0) {
+              this._evenArmed = false;
+              this.strategyWaitReason = `Window expired — waiting for touch of digit ${coldOddDigit ?? '—'} again`;
+            } else {
+              this.strategyWaitReason = `Armed — ${this._evenArmTicksLeft} ticks left, odd streak ${streak}/${this.config.minStreak}`;
+            }
+          } else if (pctGateOk && isTouchingNow) {
+            this._evenArmed = true; this._evenArmTicksLeft = armWindow;
+            this.strategyWaitReason = `Armed — touched digit ${coldOddDigit}, waiting for ${this.config.minStreak}-odd streak within ${armWindow} ticks`;
+            this.addLog('engine', 'ARM', this.strategyWaitReason);
+          } else {
+            this.strategyWaitReason = pctGateOk
+              ? `Waiting for touch of digit ${coldOddDigit ?? '—'}`
+              : `Min percentage not met (${result.probability}%/${this.config.minSignal}%)`;
+          }
+
+          if (fired) {
+            this._evenWaitStart = null;
+            this.strategyPhase = 'firing';
+            this.addLog('win', 'ENTRY', this.strategyWaitReason);
+            this.startChainExecution();
+            setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
+          } else {
+            this.strategyPhase = 'waiting';
+            if (!this._evenWaitStart) this._evenWaitStart = Date.now();
+            if (Date.now() - this._evenWaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
+              if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
+                this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
+                this.setConfig({ selectedMarket: best.symbol });
+                this.changeMarket(best.symbol);
+              }
+              this._evenWaitStart = Date.now();
             }
           }
         } else {
@@ -11997,7 +12240,7 @@ window.NexusStrategies=exports;
       const accountCurrency = window.HubStore.getState().currency || 'USD';
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
-        currency: accountCurrency, duration: this.isPriceMode ? (cfg.duration || 5) : 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
+        currency: accountCurrency, duration: this.isPriceMode ? (cfg.duration || 5) : this.isMatchMode ? (cfg.numTicks || 2) : 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
       };
       if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER') || contractType.includes('MATCH')) params.barrier = barrierValue;
       this.sound.playExecute();
@@ -12349,15 +12592,17 @@ window.NexusStrategies=exports;
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
       if (st.active) {
-        // Higher/Lower has no session-level TP/SL of its own anymore — it
-        // always defers to whatever is set in the Dashboard's master gate,
-        // read live so changes made mid-session apply immediately.
+        // Higher/Lower and Matches have no session-level TP/SL of their own
+        // anymore — they always defer to whatever is set in the
+        // Dashboard's master gate, read live so changes made mid-session
+        // apply immediately.
         const isRiseFall = this.mode === 'risefall';
-        const gate = isRiseFall && window.getMasterGateValues ? window.getMasterGateValues() : null;
+        const usesDashboardGate = isRiseFall || this.isMatchMode;
+        const gate = usesDashboardGate && window.getMasterGateValues ? window.getMasterGateValues() : null;
         const tp = gate ? gate.tp : cfg.takeProfit;
         const sl = gate ? gate.sl : cfg.stopLoss;
-        if (st.stats.profit >= tp) { this.addLog('win', 'AUTO', isRiseFall ? 'DASHBOARD TAKE PROFIT REACHED' : 'TAKE PROFIT REACHED'); showResultPopup('tp', tp, st.stats.profit); this.completeSession(true); return; }
-        if (st.stats.profit <= -sl) { this.addLog('loss', 'AUTO', isRiseFall ? 'DASHBOARD STOP LOSS REACHED' : 'STOP LOSS REACHED'); showResultPopup('sl', sl, st.stats.profit); this.completeSession(false); return; }
+        if (st.stats.profit >= tp) { this.addLog('win', 'AUTO', usesDashboardGate ? 'DASHBOARD TAKE PROFIT REACHED' : 'TAKE PROFIT REACHED'); showResultPopup('tp', tp, st.stats.profit); this.completeSession(true); return; }
+        if (st.stats.profit <= -sl) { this.addLog('loss', 'AUTO', usesDashboardGate ? 'DASHBOARD STOP LOSS REACHED' : 'STOP LOSS REACHED'); showResultPopup('sl', sl, st.stats.profit); this.completeSession(false); return; }
       }
       // Matches Strategy Two: "keep trading as digits appear until we win
       // or reach a certain max" — martingaleStep already counts consecutive
@@ -12623,6 +12868,13 @@ window.NexusStrategies=exports;
     }
 
     changeMarket(market) {
+      // Snapshot the outgoing market's last-known analysis before we wipe
+      // it, so the UI can still show "what the previous market looked
+      // like" right alongside the new one — useful for the Odd bot's
+      // rule-by-rule readout when auto market-switching fires.
+      if (this.config.selectedMarket && this.config.selectedMarket !== market && this.analysis) {
+        this.previousMarket = { symbol: this.config.selectedMarket, analysis: this.analysis, at: Date.now() };
+      }
       this.setConfig({ selectedMarket: market });
       this.state.history = []; this.pendingTrade = null; this.latestLiveAnalysis = null; this.analysis = null;
       this._over3WaitStart = null;
@@ -13233,7 +13485,9 @@ window.NexusStrategies=exports;
     const isOver3 = engine.mode === 'over' && c.overBarrier === 3;
     const o3 = (a && a.over3) || {};
     const isOddStrat = engine.mode === 'evenodd' && engine.fixedTradeMode === 'odd';
+    const isEvenBot = engine.mode === 'evenodd' && engine.fixedTradeMode === 'even';
     const os = (a && a.oddStrategy) || {};
+    const shape = (a && a.shape) || null;
     const prob = a ? a.probability : 0;
     const rec = a ? a.recommendation : '—';
     const mtf = a && a.mtfAligned !== false ? 'MTF ALIGNED' : 'MTF DIVERGENT';
@@ -13288,6 +13542,12 @@ window.NexusStrategies=exports;
       [`Red(${os.red ?? '—'}) even ≤8.6% (${(os.redPct||0).toFixed(1)}%)`,      os.redOk   || false],
       [`Yellow(${os.yellow ?? '—'}) even ≤9.5% (${(os.yellowPct||0).toFixed(1)}%)`, os.yellowOk || false],
       [`Touching digit ${os.coldEvenDigit ?? '—'}`,  os.isTouchingNow || false],
+    ] : isEvenBot && shape ? [
+      [`Green(${shape.green}) even (${shape.greenPct.toFixed(1)}%)`, shape.greenMatch],
+      [`Blue(${shape.blue}) even (${shape.bluePct.toFixed(1)}%)`,   shape.blueMatch],
+      [`Red(${shape.red}) odd (${shape.redPct.toFixed(1)}%)`,      shape.redMatch],
+      [`Yellow(${shape.yellow}) odd (${shape.yellowPct.toFixed(1)}%)`, shape.yellowMatch],
+      ['Momentum',    a?.conditions?.momentumUp       || false],
     ] : [
       ['Stable',      a?.conditions?.stablePattern   || false],
       ['Dominant',    a?.conditions?.dominantOdd      || false],
@@ -13424,30 +13684,72 @@ window.NexusStrategies=exports;
             Met: <span style="color:hsl(var(--win));font-weight:800">${radarConds.filter(([,v])=>v).length}</span> / ${radarConds.length}
           </div>
           ${isOver3 ? `
-          <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${o3.marketGood ? 'hsl(var(--win)/0.12)' : o3.marketAcceptable ? '#f5a62320' : 'hsl(var(--bg)/0.6)'};border:1px solid ${o3.marketGood ? 'hsl(var(--win)/0.4)' : o3.marketAcceptable ? '#f5a62360' : 'hsl(var(--border)/0.4)'};text-align:center;margin-bottom:8px">
-            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">MARKET SCORE</div>
-            <div style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:900;margin-top:2px;color:${o3.marketGood ? 'hsl(var(--win))' : o3.marketAcceptable ? '#f5a623' : 'hsl(var(--loss))'}">${prob}% — ${o3.marketGood ? 'GOOD' : o3.marketAcceptable ? 'OK (zone check skipped)' : 'WAIT'}</div>
-          </div>
           <div style="padding:8px 10px;border-radius:8px;background:${o3.canEnter ? 'hsl(var(--win)/0.12)' : 'hsl(var(--bg)/0.6)'};border:1px solid ${o3.canEnter ? 'hsl(var(--win)/0.4)' : 'hsl(var(--border)/0.4)'};text-align:center">
-            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">ENTRY POINT · digit 1 or 3, flat trend</div>
+            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">ENTRY POINT · under-streak ends on 1 or 3</div>
             <div style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:800;margin-top:3px;color:${o3.canEnter ? 'hsl(var(--win))' : 'hsl(var(--foreground)/0.75)'}">${o3.reason || 'Analyzing…'}</div>
           </div>
           ` : isOddStrat ? (() => {
             const armed = engine._oddArmed;
             const firing = snap.strategyPhase === 'firing';
+            const win = c.armWindow || 6;
             return `
-          <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:${os.marketGood ? 'hsl(var(--win)/0.12)' : 'hsl(var(--bg)/0.6)'};border:1px solid ${os.marketGood ? 'hsl(var(--win)/0.4)' : 'hsl(var(--border)/0.4)'};text-align:center;margin-bottom:8px">
-            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">MARKET SCORE</div>
-            <div style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:900;margin-top:2px;color:${os.marketGood ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${prob}% — ${os.marketGood ? 'GOOD (gate passed)' : 'WAIT (gate not met)'}</div>
-          </div>
           <div style="padding:8px 10px;border-radius:8px;background:${firing ? 'hsl(var(--win)/0.12)' : armed ? '#f5a62320' : 'hsl(var(--bg)/0.6)'};border:1px solid ${firing ? 'hsl(var(--win)/0.4)' : armed ? '#f5a62360' : 'hsl(var(--border)/0.4)'};text-align:center">
-            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">${firing ? 'ENTRY' : armed ? 'ARMED · 6-TICK WINDOW' : 'ENTRY POINT · touch + even-streak'}</div>
+            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">${firing ? 'ENTRY' : armed ? `ARMED · ${win}-TICK WINDOW` : 'ENTRY POINT · pct + touch + even-streak'}</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:800;margin-top:3px;color:${firing ? 'hsl(var(--win))' : armed ? '#f5a623' : 'hsl(var(--foreground)/0.75)'}">${snap.strategyWaitReason || 'Analyzing…'}</div>
+          </div>`;
+          })() : isEvenBot ? (() => {
+            const armed = engine._evenArmed;
+            const firing = snap.strategyPhase === 'firing';
+            const win = c.armWindow || 6;
+            return `
+          <div style="padding:8px 10px;border-radius:8px;background:${firing ? 'hsl(var(--win)/0.12)' : armed ? '#f5a62320' : 'hsl(var(--bg)/0.6)'};border:1px solid ${firing ? 'hsl(var(--win)/0.4)' : armed ? '#f5a62360' : 'hsl(var(--border)/0.4)'};text-align:center">
+            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">${firing ? 'ENTRY' : armed ? `ARMED · ${win}-TICK WINDOW` : 'ENTRY POINT · pct + touch + odd-streak'}</div>
             <div style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:800;margin-top:3px;color:${firing ? 'hsl(var(--win))' : armed ? '#f5a623' : 'hsl(var(--foreground)/0.75)'}">${snap.strategyWaitReason || 'Analyzing…'}</div>
           </div>`;
           })() : ''}
         </div>
       </div>
     </div>
+
+    ${shape && (isOddStrat || isEvenBot) ? `
+    <!-- ── HYBRID SCORE BREAKDOWN ─────────────────────────── -->
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--primary));box-shadow:0 0 8px hsl(var(--primary))"></span>Hybrid Score Breakdown</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div>
+          <div style="display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:9.5px;color:hsl(var(--muted-foreground));margin-bottom:3px">
+            <span>Shape (green/blue/red/yellow parity)</span><span style="color:hsl(var(--foreground));font-weight:800">${shape.shapeScore}/50</span>
+          </div>
+          <div style="height:7px;border-radius:4px;background:hsl(var(--bg)/0.7);border:1px solid hsl(var(--border)/0.3);overflow:hidden">
+            <div style="height:100%;width:${(shape.shapeScore/50)*100}%;background:hsl(var(--primary));box-shadow:0 0 6px hsl(var(--primary)/0.6);transition:width .6s"></div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:9.5px;color:hsl(var(--muted-foreground));margin-bottom:3px">
+            <span>Quality (trend/momentum/vol/stability)</span><span style="color:hsl(var(--foreground));font-weight:800">${Math.max(0, prob - shape.shapeScore)}/50</span>
+          </div>
+          <div style="height:7px;border-radius:4px;background:hsl(var(--bg)/0.7);border:1px solid hsl(var(--border)/0.3);overflow:hidden">
+            <div style="height:100%;width:${(Math.max(0, prob - shape.shapeScore)/50)*100}%;background:hsl(var(--secondary));box-shadow:0 0 6px hsl(var(--secondary)/0.6);transition:width .6s"></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:2px">
+          ${[
+            ['G', shape.green, shape.greenPct, shape.greenMatch],
+            ['B', shape.blue, shape.bluePct, shape.blueMatch],
+            ['R', shape.red, shape.redPct, shape.redMatch],
+            ['Y', shape.yellow, shape.yellowPct, shape.yellowMatch],
+          ].map(([label, digit, pct, match]) => `
+          <div style="text-align:center;padding:6px 2px;border-radius:8px;background:${match ? 'hsl(var(--win)/0.1)' : 'hsl(var(--bg)/0.5)'};border:1px solid ${match ? 'hsl(var(--win)/0.35)' : 'hsl(var(--border)/0.3)'}">
+            <div style="font-size:7px;letter-spacing:1px;color:hsl(var(--muted-foreground))">${label}</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:900;color:${match ? 'hsl(var(--win))' : 'hsl(var(--foreground)/0.7)'}">${digit}</div>
+            <div style="font-size:8px;color:hsl(var(--muted-foreground))">${pct.toFixed(1)}%</div>
+          </div>`).join('')}
+        </div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground)/0.75);text-align:center;line-height:1.4;padding-top:2px">
+          Graded shape, no fixed % cutoffs — a slot still banks partial credit when it misses.${isOddStrat ? ' Live entry still requires the strict gate above, unaffected by this score.' : ''}
+        </div>
+      </div>
+    </div>` : ''}
 
     <!-- ── DIGIT HEATMAP ──────────────────────────────────── -->
     <div class="ahub-card" style="margin-bottom:10px">
@@ -13578,6 +13880,7 @@ window.NexusStrategies=exports;
     const o3 = (snap.analysis && snap.analysis.over3) || {};
     const o3Prob = Math.round((snap.analysis && snap.analysis.probability) || 0);
     const isOddStrat = engine.mode === 'evenodd' && engine.fixedTradeMode === 'odd';
+    const isEvenStrat = engine.mode === 'evenodd' && engine.fixedTradeMode === 'even';
     const os = (snap.analysis && snap.analysis.oddStrategy) || {};
     const markets = engine.T.MARKETS.map((m) => `<option value="${m.symbol}" ${m.symbol === c.selectedMarket ? 'selected' : ''}>${m.name}</option>`).join('');
     const winChance = isOver ? (9 - c.overBarrier) * 10 : isUnder ? c.overBarrier * 10 : 50;
@@ -13612,12 +13915,12 @@ window.NexusStrategies=exports;
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <div class="cp-stat-pill">
         ${isOver3 ? `
-        <div class="cp-stat-pill-val" style="color:${o3.marketGood ? 'hsl(var(--win))' : o3.marketAcceptable ? '#f5a623' : 'hsl(var(--loss))'};font-size:12px;letter-spacing:1px;margin-top:4px" id="${rootId}-streak">${o3.marketGood ? 'GOOD' : o3.marketAcceptable ? 'OK' : 'WAIT'}</div>
-        <div class="cp-stat-pill-label">MARKET · ${o3Prob}%</div>
-        <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${o3Prob}%;background:${o3.marketGood ? 'hsl(var(--win))' : o3.marketAcceptable ? '#f5a623' : 'hsl(var(--loss))'};box-shadow:0 0 6px ${o3.marketGood ? 'hsl(var(--win)/0.5)' : o3.marketAcceptable ? '#f5a62380' : 'hsl(var(--loss)/0.5)'}"></div></div>
+        <div class="cp-stat-pill-val" style="color:${o3.canEnter ? 'hsl(var(--win))' : o3.streakGateOk ? '#f5a623' : 'hsl(var(--foreground)/0.75)'}" id="${rootId}-streak">${o3.underStreak ?? 0}</div>
+        <div class="cp-stat-pill-label">U-STREAK / ${c.minStreak}</div>
+        <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${Math.min(100, ((o3.underStreak || 0) / Math.max(1, c.minStreak)) * 100)}%;background:${o3.canEnter ? 'hsl(var(--win))' : '#f5a623'};box-shadow:0 0 6px ${o3.canEnter ? 'hsl(var(--win)/0.5)' : '#f5a62380'}"></div></div>
         ` : isOddStrat ? `
-        <div class="cp-stat-pill-val" style="color:${engine._oddArmed ? '#f5a623' : os.marketGood ? 'hsl(var(--win))' : 'hsl(var(--loss))'}" id="${rootId}-streak">${cpStreak}</div>
-        <div class="cp-stat-pill-label">${engine._oddArmed ? `ARMED · EVEN/${c.minStreak}` : os.marketGood ? 'GATE OK · WAIT TOUCH' : 'GATE NOT MET'}</div>
+        <div class="cp-stat-pill-val" style="color:${engine._oddArmed ? '#f5a623' : (o3Prob >= c.minSignal) ? 'hsl(var(--win))' : 'hsl(var(--loss))'}" id="${rootId}-streak">${cpStreak}</div>
+        <div class="cp-stat-pill-label">${engine._oddArmed ? `ARMED · EVEN/${c.minStreak}` : (o3Prob >= c.minSignal) ? 'PCT OK · WAIT TOUCH' : `PCT ${o3Prob}%/${c.minSignal}%`}</div>
         <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${streakPct}%;background:${engine._oddArmed ? '#f5a623' : 'hsl(var(--accent))'};box-shadow:0 0 6px ${engine._oddArmed ? '#f5a62380' : 'hsl(var(--accent)/0.5)'}"></div></div>
         ` : `
         <div class="cp-stat-pill-val" style="color:hsl(var(--accent))" id="${rootId}-streak">${cpStreak}</div>
@@ -13690,16 +13993,20 @@ window.NexusStrategies=exports;
           <span class="cp-input-label">Target Runs</span>
           <input class="cp-input" type="number" id="${rootId}-runs-in" value="${c.targetRuns}">
         </div>
-        ${isOver3 ? '' : `
         <div class="cp-input-group">
           <span class="cp-input-label">Min Signal %</span>
-          <input class="cp-input" type="number" id="${rootId}-signal" value="${c.minSignal}">
+          <input class="cp-input" type="number" min="0" max="100" id="${rootId}-signal" value="${c.minSignal}">
         </div>
         <div class="cp-input-group">
           <span class="cp-input-label">Min Streak</span>
-          <input class="cp-input" type="number" id="${rootId}-streak-in" value="${c.minStreak}">
+          <input class="cp-input" type="number" min="1" id="${rootId}-streak-in" value="${c.minStreak}">
         </div>
-        `}
+        ${isOddStrat || isEvenStrat ? `
+        <div class="cp-input-group">
+          <span class="cp-input-label">Arm Window (ticks)</span>
+          <input class="cp-input" type="number" min="2" max="20" id="${rootId}-armwindow" value="${c.armWindow || 6}">
+        </div>
+        ` : ''}
       </div>
       ${isOver3 ? `
       <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
@@ -13908,7 +14215,7 @@ window.NexusStrategies=exports;
     // changed/blurred. Persisting to localStorage now happens only via
     // the navbar's global "SAVE SETTINGS" button (see saveAllSettings),
     // not from a per-tab button — this tab has none anymore.
-    [`${rootId}-stake`,`${rootId}-runs-in`,`${rootId}-signal`,`${rootId}-streak-in`,`${rootId}-mult`].forEach(id => {
+    [`${rootId}-stake`,`${rootId}-runs-in`,`${rootId}-signal`,`${rootId}-streak-in`,`${rootId}-armwindow`,`${rootId}-mult`].forEach(id => {
       const inp = el(id);
       if (inp) {
         inp.onchange = () => {
@@ -13917,11 +14224,13 @@ window.NexusStrategies=exports;
           const runsVal = parseInt(el(`${rootId}-runs-in`)?.value);
           const signalVal = parseInt(el(`${rootId}-signal`)?.value);
           const streakVal = parseInt(el(`${rootId}-streak-in`)?.value);
+          const armWindowVal = parseInt(el(`${rootId}-armwindow`)?.value);
           const multVal = parseFloat(el(`${rootId}-mult`)?.value);
           if (!isNaN(stakeVal) && stakeVal > 0) patch.stake = Math.max(0.01, stakeVal);
           if (!isNaN(runsVal) && runsVal > 0) patch.targetRuns = Math.max(1, runsVal);
           if (!isNaN(signalVal)) patch.minSignal = Math.min(100, Math.max(0, signalVal));
           if (!isNaN(streakVal) && streakVal > 0) patch.minStreak = Math.max(1, streakVal);
+          if (!isNaN(armWindowVal) && armWindowVal > 0) patch.armWindow = Math.min(20, Math.max(2, armWindowVal));
           if (!isNaN(multVal) && multVal >= 1.01) patch.martingaleMultiplier = multVal;
           if (Object.keys(patch).length) engine.setConfig(patch);
         };
@@ -17537,6 +17846,9 @@ window.NexusStrategies=exports;
           <div class="cp-input-group"><span class="cp-input-label">Min Signal %</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-signal" value="${c.minSignal}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Tick Window</span><input class="cp-input" type="number" min="20" max="100" id="${rootId}-tickperiod" value="${c.tickPeriod}"></div>
         </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Number of Ticks</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-ticks" value="${c.numTicks || 2}"></div>
+        </div>
       </div>
 
       <div class="cp-card">
@@ -17574,12 +17886,29 @@ window.NexusStrategies=exports;
       </div>
 
       <div class="cp-card">
-        <div class="cp-section-label">Session Limits</div>
-        <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Take Profit</span><input class="cp-input" type="number" step="1" id="${rootId}-tp" value="${c.takeProfit}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Stop Loss</span><input class="cp-input" type="number" step="1" id="${rootId}-sl" value="${c.stopLoss}"></div>
+        <div class="cp-section-label" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Session Limits</span>
+          <span style="font-size:8px;font-family:'DM Mono',monospace;letter-spacing:1px;color:hsl(var(--primary));background:hsl(var(--primary)/0.1);border:1px solid hsl(var(--primary)/0.3);padding:2px 7px;border-radius:20px">DASHBOARD-CONTROLLED</span>
         </div>
-        <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
+        <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
+          Matches no longer has its own Take Profit / Stop Loss — it always follows the master gate set on the Dashboard, live, even mid-session.
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group">
+            <span class="cp-input-label">Take Profit (master)</span>
+            <div id="${rootId}-tp-readout" style="padding:9px 10px;border-radius:10px;border:1px solid hsl(var(--win)/0.35);background:hsl(var(--win)/0.07);color:hsl(var(--win));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;text-align:center">+$${(window.getMasterGateValues ? window.getMasterGateValues().tp : 50).toFixed(2)}</div>
+          </div>
+          <div class="cp-input-group">
+            <span class="cp-input-label">Stop Loss (master)</span>
+            <div id="${rootId}-sl-readout" style="padding:9px 10px;border-radius:10px;border:1px solid hsl(var(--loss)/0.35);background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;text-align:center">-$${(window.getMasterGateValues ? window.getMasterGateValues().sl : 20).toFixed(2)}</div>
+          </div>
+        </div>
+        <button id="${rootId}-goto-dash" style="
+          width:100%; margin-top:8px; padding:8px; border-radius:10px; border:1px dashed hsl(var(--border)/0.6);
+          background:transparent; color:hsl(var(--muted-foreground)); font-family:'Outfit',sans-serif; font-size:9.5px;
+          font-weight:800; letter-spacing:1.5px; cursor:pointer; transition:all .18s;
+        ">⚙ EDIT IN DASHBOARD →</button>
+        <div style="margin-top:10px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
           Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
         </div>
       </div>`;
@@ -17588,6 +17917,7 @@ window.NexusStrategies=exports;
       el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
+      el(`${rootId}-ticks`, host).onchange = (e) => { engine.setConfig({ numTicks: Math.min(10, Math.max(1, parseInt(e.target.value) || 2)) }); };
       el(`${rootId}-tickperiod`, host).onchange = (e) => { engine.setConfig({ tickPeriod: Math.min(100, Math.max(20, parseInt(e.target.value) || 50)) }); };
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
@@ -17595,8 +17925,19 @@ window.NexusStrategies=exports;
       el(`${rootId}-smart-toggle`, host).onclick = () => { engine.setConfig({ smartRecovery: !c.smartRecovery }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-auto`, host).onclick = () => { engine.setConfig({ autoPilot: !c.autoPilot }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-autorefresh`, host).onclick = () => { engine.setConfig({ autoRefresh: !c.autoRefresh }); renderCenter(engine, rootId, engine.getSnapshot()); };
-      el(`${rootId}-tp`, host).onchange = (e) => { engine.setConfig({ takeProfit: parseFloat(e.target.value) || 15 }); };
-      el(`${rootId}-sl`, host).onchange = (e) => { engine.setConfig({ stopLoss: parseFloat(e.target.value) || 20 }); };
+      const gotoDashBtn = el(`${rootId}-goto-dash`, host);
+      if (gotoDashBtn) gotoDashBtn.onclick = () => { if (window.UnifiedHub) window.UnifiedHub.switchApp('dashboard'); };
+      // Keep the master-gate readouts live even while this panel sits open
+      // (e.g. the user tweaks TP/SL on the Dashboard tab in the background).
+      clearInterval(host._mxGateInterval);
+      host._mxGateInterval = setInterval(() => {
+        if (!document.body.contains(host)) { clearInterval(host._mxGateInterval); return; }
+        const tpEl = el(`${rootId}-tp-readout`, host), slEl = el(`${rootId}-sl-readout`, host);
+        if (!tpEl || !slEl || !window.getMasterGateValues) return;
+        const g = window.getMasterGateValues();
+        tpEl.textContent = `+$${g.tp.toFixed(2)}`;
+        slEl.textContent = `-$${g.sl.toFixed(2)}`;
+      }, 2000);
       host.querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => { engine.setConfig({ preset: b.dataset.preset }); renderCenter(engine, rootId, engine.getSnapshot()); });
       host.querySelectorAll('[data-digit]').forEach((b) => b.onclick = () => { engine.setConfig({ manualDigit: parseInt(b.dataset.digit, 10) }); renderCenter(engine, rootId, engine.getSnapshot()); });
       host.querySelectorAll('[data-strat-group]').forEach((b) => b.onclick = () => { engine.setConfig({ strategyGroup: b.dataset.stratGroup }); renderCenter(engine, rootId, engine.getSnapshot()); });
