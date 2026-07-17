@@ -115,6 +115,11 @@
           <span class="hub-tab-label">Higher/Lower</span>
           <span class="dot live"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="updown" data-label="Ups & Downs" title="Ups &amp; Downs — second independent Higher/Lower bot, scans all markets">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l6 6 4-4 8 8"/><path d="M15 17h6v-6"/></svg></span>
+          <span class="hub-tab-label">Ups & Downs</span>
+          <span class="dot live"></span>
+        </button>
         <button type="button" class="hub-tab" data-app="matches" data-label="Matches" title="Matches — digit prediction bot">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.5" fill="currentColor"/></svg></span>
           <span class="hub-tab-label">Matches</span>
@@ -175,6 +180,9 @@
 
     <section id="panel-risefall" class="app-panel" aria-label="Higher/Lower dashboard">
       <div id="risefall-root" class="app-root"></div>
+    </section>
+    <section id="panel-updown" class="app-panel" aria-label="Ups &amp; Downs dashboard">
+      <div id="updown-root" class="app-root"></div>
     </section>
 
     <section id="panel-matches" class="app-panel" aria-label="Matches dashboard">
@@ -11525,6 +11533,8 @@ window.NexusStrategies=exports;
       this.id = opts.id;
       this.mode = opts.mode; // 'evenodd' | 'over' | 'under' | 'risefall'
       this.fixedTradeMode = opts.fixedTradeMode || null; // 'odd' | 'even' | null
+      this.fixedDirection = opts.fixedDirection || null; // 'higher' | 'lower' | null — locks a risefall bot to one side
+      this.fixedMarket = opts.fixedMarket || null; // e.g. 'R_75' — locks a bot to a single symbol, no auto-rotation
       this.botLabel = opts.botLabel || opts.id;
       this.T = opts.trading;
       this.socket = (opts.socket && opts.socket.globalSocket) || null;
@@ -11643,6 +11653,8 @@ window.NexusStrategies=exports;
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
         if (this.fixedTradeMode) merged.tradeMode = this.fixedTradeMode;
+        if (this.fixedDirection) merged.direction = this.fixedDirection;
+        if (this.fixedMarket) merged.selectedMarket = this.fixedMarket;
         return merged;
       } catch (e) { return defaults; }
     }
@@ -12358,7 +12370,7 @@ window.NexusStrategies=exports;
           // 1s ("V.. (1S)") markets are prioritised first, normal markets
           // stay in the fallback pool so they're still used whenever there's
           // no good 1s candidate available.
-          if (this.scanner && window.BenzPickNextMarket) {
+          if (this.scanner && window.BenzPickNextMarket && !this.fixedMarket) {
             const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
             if (best && best.symbol) {
               const label = best._forcedSwitch ? `🔀 Switching to ${best.symbol}` : `↻ Staying on ${best.symbol} (only viable market)`;
@@ -12875,6 +12887,7 @@ window.NexusStrategies=exports;
     }
 
     changeMarket(market) {
+      if (this.fixedMarket && market !== this.fixedMarket) return; // locked bot — ignore any attempt to move off its one symbol
       // Snapshot the outgoing market's last-known analysis before we wipe
       // it, so the UI can still show "what the previous market looked
       // like" right alongside the new one — useful for the Odd bot's
@@ -15236,6 +15249,7 @@ window.NexusStrategies=exports;
     nexus: { label: 'Over Bot', dot: 'hsl(var(--accent))' },
     under: { label: 'Under Bot', dot: 'hsl(var(--loss))' },
     risefall: { label: 'Higher/Lower Bot', dot: 'hsl(var(--win))' },
+    updown: { label: 'Ups & Downs Bot', dot: 'hsl(var(--secondary))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
   };
 
@@ -16027,7 +16041,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches'];
+    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -17214,7 +17228,9 @@ window.NexusStrategies=exports;
         <div style="display:flex;align-items:center;gap:6px"><span class="ahub-label-dot" style="background:hsl(var(--win));box-shadow:0 0 8px hsl(var(--win))"></span>Top Markets</div>
         <span style="font-size:8px;color:hsl(var(--win));animation:ahub-pulse 1.5s infinite">⬤ LIVE SCAN</span>
       </div>
-      ${(scannerState && scannerState.topThree || []).map((m, idx) => {
+      ${engine.fixedMarket ? `<div style="text-align:center;padding:14px 10px;color:hsl(var(--muted-foreground));font-size:9.5px;line-height:1.6">
+        🔒 This bot is locked to <b style="color:hsl(var(--foreground))">${c.selectedMarket}</b> and won't rotate to another market — its signal engine only ever trades this one symbol.
+      </div>` : (scannerState && scannerState.topThree || []).map((m, idx) => {
         const isSel = m.symbol === c.selectedMarket;
         const is1s = (m.symbol||'').startsWith('1HZ');
         const health = (m.health && m.health.longTerm) || m.longTerm || '—';
@@ -17242,11 +17258,11 @@ window.NexusStrategies=exports;
         <div style="width:26px;height:26px;margin:0 auto 8px;border-radius:50%;border:2px solid hsl(var(--border)/0.4);border-top-color:hsl(var(--primary));animation:settings-spin 0.9s linear infinite"></div>
         <span style="animation:ahub-pulse 1.5s infinite;display:inline-block">Scanning markets…</span>
       </div>`}
-      ${marketHealth ? `<div style="margin-top:6px;padding:8px 10px;background:hsl(var(--bg)/0.6);border-radius:8px;border:1px solid hsl(var(--border)/0.3);display:flex;align-items:center;gap:8px">
+      ${engine.fixedMarket ? '' : (marketHealth ? `<div style="margin-top:6px;padding:8px 10px;background:hsl(var(--bg)/0.6);border-radius:8px;border:1px solid hsl(var(--border)/0.3);display:flex;align-items:center;gap:8px">
         <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Active:</span>
         <b style="font-size:8.5px;color:${marketHealth.longTerm==='HEALTHY'?'hsl(var(--win))':marketHealth.longTerm==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))'}">${marketHealth.longTerm}</b>
         <span style="margin-left:auto;font-size:8.5px;color:hsl(var(--muted-foreground))">1s markets prioritized, normal markets kept as fallback</span>
-      </div>` : ''}
+      </div>` : '')}
     </div>`;
     if (shHtml(host, html)) {
       host.querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
@@ -17305,11 +17321,15 @@ window.NexusStrategies=exports;
         </div>
         <div class="cp-input-group">
           <span class="cp-input-label">Direction</span>
+          ${engine.fixedDirection ? `
+          <div class="cp-input" style="display:flex;align-items:center;gap:6px;color:${dirColor};font-weight:800;letter-spacing:0.5px">
+            🔒 ${engine.fixedDirection.toUpperCase()} ONLY — locked
+          </div>` : `
           <select class="cp-input" id="${rootId}-direction">
             <option value="auto" ${c.direction==='auto'?'selected':''}>Auto</option>
             <option value="higher" ${c.direction==='higher'?'selected':''}>Higher only</option>
             <option value="lower" ${c.direction==='lower'?'selected':''}>Lower only</option>
-          </select>
+          </select>`}
         </div>
       </div>
 
@@ -17363,7 +17383,8 @@ window.NexusStrategies=exports;
       el(`${rootId}-duration`, host).onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
-      el(`${rootId}-direction`, host).onchange = (e) => { engine.setConfig({ direction: e.target.value }); };
+      const dirSel = el(`${rootId}-direction`, host);
+      if (dirSel) dirSel.onchange = (e) => { engine.setConfig({ direction: e.target.value }); };
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); };
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
@@ -18085,7 +18106,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches'];
+  const BOT_IDS = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -18097,13 +18118,13 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches'];
+  const VALID_APPS = ['dashboard', 'differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { differ: null, even: null, odd: null, nexus: null, under: null, risefall: null };
-  const titanBuilt = { even: false, odd: false, nexus: false, under: false, risefall: false };
+  const engines = { differ: null, even: null, odd: null, nexus: null, under: null, risefall: null, updown: null };
+  const titanBuilt = { even: false, odd: false, nexus: false, under: false, risefall: false, updown: false };
 
   function queueDashboardRender() {
     if (dashRenderQueued) return;
@@ -18138,7 +18159,7 @@ window.NexusStrategies=exports;
     const isOver = id === 'nexus';
     const isUnder = id === 'under';
     const isOU = isOver || isUnder;
-    const isRiseFall = id === 'risefall';
+    const isRiseFall = id === 'risefall' || id === 'updown';
     const isMatches = id === 'matches';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
@@ -18170,8 +18191,19 @@ window.NexusStrategies=exports;
           // Higher/Lower shares the Over/Under market socket/scanner (both
           // just need live tick + health data for the same 10 markets) but
           // runs its own price-direction analyzer and CALL/PUT execution
-          // path inside TitanEngine (mode: 'risefall').
-          id, mode: 'risefall', fixedTradeMode: null, botLabel: 'Higher/Lower Bot',
+          // path inside TitanEngine (mode: 'risefall'). Ups & Downs is a
+          // SECOND, fully independent instance of that same engine — its
+          // own config/stats/journal/storage prefix — left completely
+          // unlocked: auto direction (follows the analyzer's own
+          // CALL/PUT signal, same as Higher/Lower) and free to scan +
+          // auto-rotate across every market, exactly like the other bots.
+          // Running two independent instances lets you use different
+          // stake/martingale/signal settings on each without them fighting
+          // over the same session state.
+          id, mode: 'risefall', fixedTradeMode: null,
+          botLabel: id === 'updown' ? 'Ups & Downs Bot' : 'Higher/Lower Bot',
+          fixedDirection: null,
+          fixedMarket: null,
           trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
           strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         }
@@ -18217,8 +18249,8 @@ window.NexusStrategies=exports;
     }
     const eng = ensureTitanEngine(id);
     if (!eng) return;
-    if (id === 'risefall') {
-      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', 'HIGHER/LOWER BOT');
+    if (id === 'risefall' || id === 'updown') {
+      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', id === 'updown' ? 'UPS & DOWNS' : 'HIGHER/LOWER BOT');
       titanBuilt[id] = true;
       return;
     }
@@ -18596,10 +18628,10 @@ window.NexusStrategies=exports;
       if (id === 'differ') {
         eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp });
         eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl });
-      } else if (id !== 'risefall') {
-        // Higher/Lower is excluded on purpose: it reads the master gate
-        // live (window.getMasterGateValues) rather than a locally-set
-        // takeProfit/stopLoss, so there is nothing to push into it here.
+      } else if (id !== 'risefall' && id !== 'updown') {
+        // Higher/Lower and Ups & Downs are excluded on purpose: both read the
+        // master gate live (window.getMasterGateValues) rather than a
+        // locally-set takeProfit/stopLoss, so there is nothing to push here.
         eng.setConfig && eng.setConfig({ takeProfit: tp, stopLoss: sl });
       }
     });
@@ -18727,7 +18759,7 @@ window.NexusStrategies=exports;
         savedAny = true;
       }
     } catch (e) { console.error('[Hub] Differ save error:', e); }
-    ['even', 'odd', 'nexus', 'under', 'risefall', 'matches'].forEach((id) => {
+    ['even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
         try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
