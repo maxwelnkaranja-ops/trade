@@ -120,16 +120,6 @@
           <span class="hub-tab-label">Matches</span>
           <span class="dot live"></span>
         </button>
-        <button type="button" class="hub-tab" data-app="accumulator" data-label="Accumulator" title="Accumulator — volatility squeeze bot">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg></span>
-          <span class="hub-tab-label">Accumulator</span>
-          <span class="dot live"></span>
-        </button>
-        <button type="button" class="hub-tab" data-app="multiplier" data-label="Multiplier" title="Multiplier — leveraged directional bot">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l16 16M20 4L4 20"/></svg></span>
-          <span class="hub-tab-label">Multiplier</span>
-          <span class="dot live"></span>
-        </button>
         <div class="hub-nav-label">Account</div>
         <div class="hub-balance-pill glass-pill font-mono" id="hub-balance-pill" style="display:none;width:100%;box-sizing:border-box;justify-content:center"></div>
       </nav>
@@ -189,14 +179,6 @@
 
     <section id="panel-matches" class="app-panel" aria-label="Matches dashboard">
       <div id="matches-root" class="app-root"></div>
-    </section>
-
-    <section id="panel-accumulator" class="app-panel" aria-label="Accumulator dashboard">
-      <div id="accumulator-root" class="app-root"></div>
-    </section>
-
-    <section id="panel-multiplier" class="app-panel" aria-label="Multiplier dashboard">
-      <div id="multiplier-root" class="app-root"></div>
     </section>
     </div>
 
@@ -11599,21 +11581,6 @@ window.NexusStrategies=exports;
     // digit (0-9) instead of parity/over-under/direction, using its own
     // frequency-based analyzer (MatchesAnalyzer).
     get isMatchMode() { return this.mode === 'matches'; }
-    // true only for the Accumulators bot — bets on price STAYING inside a
-    // narrow range (contract knocks out the instant it doesn't), using its
-    // own volatility-squeeze analyzer (AccumulatorAnalyzer) instead of a
-    // digit/direction signal.
-    get isAccumulatorMode() { return this.mode === 'accumulator'; }
-    // true only for the Multipliers bot — bets CALL/PUT-style direction
-    // like Rise/Fall, but with leveraged linear payout (MULTUP/MULTDOWN)
-    // instead of a fixed-duration binary contract. Reuses RiseFallAnalyzer
-    // directly since the directional signal is identical.
-    get isMultiplierMode() { return this.mode === 'multiplier'; }
-    // true only for the Only Ups/Only Downs bot — bets that N consecutive
-    // ticks all move the same way (RUNHIGH/RUNLOW), using its own
-    // trend-persistence analyzer (RunsAnalyzer) that scores directional
-    // consistency (low whipsaw) rather than just net direction.
-    get isRunsMode() { return this.mode === 'runs'; }
 
     // Extra args passed into the shared Trading module's analyzeDigits /
     // checkEntryConditions / MarketScanner so each bot instance scores and
@@ -11671,50 +11638,7 @@ window.NexusStrategies=exports;
         autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         soundEnabled: true, autoRefresh: true, smartRecovery: false,
       };
-      // Accumulators: bets on LOW volatility (calmScore gate via minSignal)
-      // instead of digit/direction. growthRate is auto-picked per trade by
-      // the analyzer (0.01-0.05) unless growthRateMode is 'manual', in
-      // which case manualGrowthRate is used every trade. takeProfitPct is
-      // the target return (as % of stake) the contract auto-closes at —
-      // Deriv's own tips call this "using a trading system" (close after a
-      // few ticks rather than riding it indefinitely), so we always set
-      // limit_order.take_profit rather than leaving the position open-ended.
-      const accumulatorDefaults = {
-        stake: 1, targetRuns: 1, minSignal: 65, growthRateMode: 'auto', manualGrowthRate: 0.02,
-        takeProfitPct: 8, // close once profit reaches 8% of stake
-        martingaleEnabled: false, martingaleMultiplier: 1.8, martingaleStopStep: 3,
-        autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
-        soundEnabled: true, autoRefresh: true,
-      };
-      // Multipliers: same directional signal as Rise/Fall (RiseFallAnalyzer),
-      // but leveraged linear payout instead of a fixed binary contract.
-      // stopLossPct/takeProfitPct are % of stake, converted to absolute
-      // limit_order amounts at buy time — a hard stop_loss on TOP of the
-      // built-in stop-out level, since relying on stop-out alone (which
-      // exists only to floor losses at the full stake) gives no early-exit
-      // control at all.
-      const multiplierDefaults = {
-        stake: 1, targetRuns: 1, minSignal: 60, multiplierValue: 100,
-        stopLossPct: 40, takeProfitPct: 60, dealCancellation: 'none',
-        martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 3,
-        autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
-        soundEnabled: true, autoRefresh: true, direction: 'auto',
-      };
-      // Only Ups/Only Downs (RUNHIGH/RUNLOW): pays out only if every one of
-      // N consecutive ticks moves the same direction — a single tick that
-      // reverses or repeats the entry spot kills the whole contract. duration
-      // here is the number of ticks the run must hold; durationMode 'auto'
-      // takes RunsAnalyzer's own suggestion (scaled to how smooth/streaky
-      // the market currently is) each trade, 'manual' locks in manualDuration.
-      const runsDefaults = {
-        stake: 1, targetRuns: 1, minSignal: 65, durationMode: 'auto', manualDuration: 3,
-        martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 3,
-        autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
-        soundEnabled: true, autoRefresh: true, direction: 'auto',
-      };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults
-        : this.isMatchMode ? matchesDefaults : this.isAccumulatorMode ? accumulatorDefaults
-        : this.isMultiplierMode ? multiplierDefaults : this.isRunsMode ? runsDefaults : evenDefaults;
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -11813,7 +11737,7 @@ window.NexusStrategies=exports;
       if (this.tickUnsub) this.tickUnsub();
       this.executionGuard = false;
       this.addLog('engine', 'RADAR', `Locked on ${market}`);
-      if (this.isPriceMode || this.isMultiplierMode || this.isAccumulatorMode || this.isRunsMode) this.priceHistory = []; // fresh price series for the new market
+      if (this.isPriceMode) this.priceHistory = []; // fresh price series for the new market
       this.tickUnsub = this.socket.subscribe(market, (data) => {
         this.lastTickTime = Date.now();
         const fullHistory = this.socket.getHistory(market);
@@ -11857,40 +11781,21 @@ window.NexusStrategies=exports;
               else break;
             }
           }
-        } else if (!this.isPriceMode && !this.isMatchMode && !this.isMultiplierMode && !this.isAccumulatorMode && !this.isRunsMode) {
+        } else if (!this.isPriceMode && !this.isMatchMode) {
           for (let i = fullHistory.length - 1; i >= 0; i--) {
             if (fullHistory[i] <= this.config.overBarrier) streak++;
             else break;
           }
         }
         let result;
-        if (this.isPriceMode || this.isMultiplierMode) {
+        if (this.isPriceMode) {
           // Own rolling price buffer — the shared socket's tickHistory only
           // stores last-digit (used by the digit bots), not the raw quote,
           // so RSI/Bollinger/EMA/ROC need their own price series here.
-          // Multipliers shares this same buffer + analyzer as Rise/Fall
-          // since the directional signal (CALL/PUT-style) is identical —
-          // only the contract shape (leveraged, no fixed duration) differs.
           if (!this.priceHistory) this.priceHistory = [];
           this.priceHistory.push(data.quote);
           if (this.priceHistory.length > 120) this.priceHistory.shift();
           result = window.RiseFallAnalyzer.analyze(this.priceHistory, market);
-          this.analysis = result;
-        } else if (this.isAccumulatorMode) {
-          if (!this.priceHistory) this.priceHistory = [];
-          this.priceHistory.push(data.quote);
-          if (this.priceHistory.length > 120) this.priceHistory.shift();
-          result = window.AccumulatorAnalyzer.analyze(this.priceHistory);
-          this.analysis = result;
-        } else if (this.isRunsMode) {
-          // Only Ups/Only Downs shares the same rolling price buffer as
-          // Rise/Fall/Multiplier but scores directional CONSISTENCY (low
-          // whipsaw) rather than just net trend, since RUNHIGH/RUNLOW needs
-          // every single tick to move the same way for N ticks straight.
-          if (!this.priceHistory) this.priceHistory = [];
-          this.priceHistory.push(data.quote);
-          if (this.priceHistory.length > 120) this.priceHistory.shift();
-          result = window.RunsAnalyzer.analyze(this.priceHistory, market);
           this.analysis = result;
         } else if (this.isMatchMode) {
           result = window.MatchesAnalyzer.analyze(history, tickPeriod, this.config);
@@ -11926,52 +11831,6 @@ window.NexusStrategies=exports;
           if (meetsSignal && dir) {
             this._riseFallDirection = dir;
             this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 HIGHER' : '📉 LOWER'} signal ${result.strength}% — ${(result.reasons && result.reasons[0]) || ''}`);
-            this.startChainExecution();
-          }
-          this.emit();
-          return;
-        }
-        if (this.isMultiplierMode) {
-          // Same directional gate as Rise/Fall — the only difference is what
-          // happens downstream at buy time (multiplier + limit_order instead
-          // of a fixed duration binary contract).
-          let dir = result.direction;
-          if (this.config.direction === 'higher') dir = 'CALL';
-          else if (this.config.direction === 'lower') dir = 'PUT';
-          const meetsSignal = this.config.direction !== 'auto' ? result.ready : (result.ready && dir && result.strength >= this.config.minSignal);
-          if (meetsSignal && dir) {
-            this._riseFallDirection = dir;
-            this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 UP' : '📉 DOWN'} signal ${result.strength}% — ${(result.reasons && result.reasons[0]) || ''}`);
-            this.startChainExecution();
-          }
-          this.emit();
-          return;
-        }
-        if (this.isAccumulatorMode) {
-          // No direction to pick — Accumulators just need the market calm
-          // enough (squeeze score above Min Signal %) before entering.
-          const meetsSignal = result.ready && result.calmScore >= this.config.minSignal;
-          if (meetsSignal) {
-            this._accuGrowthRate = this.config.growthRateMode === 'manual' ? this.config.manualGrowthRate : result.growthRate;
-            this.addLog('win', 'SIGNAL', `Calm score ${result.calmScore}% — entering at ${(this._accuGrowthRate * 100).toFixed(0)}% growth — ${(result.reasons && result.reasons[0]) || ''}`);
-            this.startChainExecution();
-          }
-          this.emit();
-          return;
-        }
-        if (this.isRunsMode) {
-          // Direction gate is the same auto/forced pattern as Rise/Fall and
-          // Multiplier, but here it also carries the analyzer's suggested
-          // run length (durationMode 'auto') since a shakier trend can only
-          // sustain a shorter guaranteed run than a very smooth one.
-          let dir = result.direction;
-          if (this.config.direction === 'higher') dir = 'CALL';
-          else if (this.config.direction === 'lower') dir = 'PUT';
-          const meetsSignal = this.config.direction !== 'auto' ? result.ready : (result.ready && dir && result.strength >= this.config.minSignal);
-          if (meetsSignal && dir) {
-            this._riseFallDirection = dir;
-            this._runsDuration = this.config.durationMode === 'manual' ? this.config.manualDuration : result.suggestedDuration;
-            this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 ONLY UPS' : '📉 ONLY DOWNS'} signal ${result.strength}% — run ${this._runsDuration} ticks — ${(result.reasons && result.reasons[0]) || ''}`);
             this.startChainExecution();
           }
           this.emit();
@@ -12269,20 +12128,6 @@ window.NexusStrategies=exports;
         // now favoured, so there's no flip-on-recovery logic here.
         contractType = this._riseFallDirection || 'CALL';
         barrierValue = 0;
-      } else if (this.isMultiplierMode) {
-        // Multipliers: same directional persistence logic as Rise/Fall —
-        // recovery keeps betting the same direction as the base signal.
-        contractType = this._riseFallDirection === 'PUT' ? 'MULTDOWN' : 'MULTUP';
-        barrierValue = 0;
-      } else if (this.isAccumulatorMode) {
-        // Accumulators: no direction, no barrier — contract type is fixed.
-        contractType = 'ACCU';
-        barrierValue = 0;
-      } else if (this.isRunsMode) {
-        // Only Ups/Only Downs: recovery keeps betting the same direction as
-        // the base signal, same persistence rule as Rise/Fall/Multiplier.
-        contractType = this._riseFallDirection === 'PUT' ? 'RUNLOW' : 'RUNHIGH';
-        barrierValue = 0;
       } else if (this.isMatchMode) {
         // Matches: bet DIGITMATCH on whichever digit the analyzer most
         // recently flagged. On recovery, Smart Toggle re-reads the live
@@ -12395,36 +12240,9 @@ window.NexusStrategies=exports;
       const accountCurrency = window.HubStore.getState().currency || 'USD';
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
-        currency: accountCurrency, underlying_symbol: cfg.selectedMarket,
+        currency: accountCurrency, duration: this.isPriceMode ? (cfg.duration || 5) : this.isMatchMode ? (cfg.numTicks || 2) : 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
       };
-      if (this.isAccumulatorMode) {
-        // No duration — Accumulators run tick-by-tick until knockout, the
-        // take-profit limit order, or the platform's own 230-tick cap.
-        params.growth_rate = this._accuGrowthRate || cfg.manualGrowthRate || 0.02;
-        params.limit_order = { take_profit: +(st.currentStake * (cfg.takeProfitPct / 100)).toFixed(2) };
-      } else if (this.isMultiplierMode) {
-        // No duration — Multipliers run until stop-out, the limit orders
-        // below, or a manual close. stop_loss here is an EARLY exit on top
-        // of the platform's built-in stop-out (which only floors the loss
-        // at the full stake) — without it there's no risk control until
-        // the entire stake is already gone.
-        params.multiplier = cfg.multiplierValue || 100;
-        params.limit_order = {
-          stop_loss: +(st.currentStake * (cfg.stopLossPct / 100)).toFixed(2),
-          take_profit: +(st.currentStake * (cfg.takeProfitPct / 100)).toFixed(2),
-        };
-        if (cfg.dealCancellation && cfg.dealCancellation !== 'none') params.cancellation = cfg.dealCancellation;
-      } else if (this.isRunsMode) {
-        // Duration is the number of consecutive ticks the run must hold —
-        // Deriv caps Only Ups/Only Downs at 2-10 ticks, so clamp whatever
-        // the analyzer (or a manual override) suggested into that range.
-        params.duration = Math.min(10, Math.max(2, Math.round(this._runsDuration || cfg.manualDuration || 3)));
-        params.duration_unit = 't';
-      } else {
-        params.duration = this.isPriceMode ? (cfg.duration || 5) : this.isMatchMode ? (cfg.numTicks || 2) : 1;
-        params.duration_unit = 't';
-        if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER') || contractType.includes('MATCH')) params.barrier = barrierValue;
-      }
+      if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER') || contractType.includes('MATCH')) params.barrier = barrierValue;
       this.sound.playExecute();
       this.addLog('engine', 'BOLT', `${contractType} @ ${st.currentStake.toFixed(2)} ${accountCurrency}`);
       this.state.lastTradedDigit = st.currentDigit;
@@ -12855,7 +12673,7 @@ window.NexusStrategies=exports;
       if (!this.state.active || this.state.isCooldown) return;
       this.executionGuard = true;
       const health = this.socket.getHealth(this.config.selectedMarket);
-      if (health && health.longTerm === 'POOR' && !this.isPriceMode && !this.isMultiplierMode && !this.isAccumulatorMode && !this.isRunsMode) { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
+      if (health && health.longTerm === 'POOR' && !this.isPriceMode) { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
       this.sound.playEngineStart();
       this.addLog('win', 'ENGINE', `STREAK HIT — FIRING CHAIN (${health?.longTerm || 'SCANNING'})`);
       // Only reset base chain state when we are NOT already mid-recovery.
@@ -15419,8 +15237,6 @@ window.NexusStrategies=exports;
     under: { label: 'Under Bot', dot: 'hsl(var(--loss))' },
     risefall: { label: 'Higher/Lower Bot', dot: 'hsl(var(--win))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
-    accumulator: { label: 'Accumulator Bot', dot: 'hsl(var(--win))' },
-    multiplier: { label: 'Multiplier Bot', dot: 'hsl(var(--accent))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -16211,7 +16027,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator', 'multiplier'];
+    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -16826,130 +16642,6 @@ window.NexusStrategies=exports;
 })();
 </script>
 
-<script>
-(function () {
-  'use strict';
-  // ── Accumulators signal analyzer ─────────────────────────────────────
-  // Accumulators pay out for STABILITY, not direction — the contract knocks
-  // out the instant price leaves a narrow range around the previous tick.
-  // Community strategy guides converge on the same idea: enter during a
-  // Bollinger Band "squeeze" (contracted bands + flat MACD, i.e. volatility
-  // compressed to a low), because compressed volatility tends to persist
-  // briefly before mean-reverting to an expansion — the opposite setup from
-  // a breakout trade. Avoid trades when bands are expanding or momentum is
-  // building (rising MACD histogram).
-  //
-  // Absolute band-width thresholds don't transfer across Deriv's volatility
-  // indices (V10 is calm at a width that would be a raging squeeze on
-  // V100), so both the band width and tick volatility are scored as a
-  // PERCENTILE against that same market's own recent history rather than a
-  // fixed cutoff — "calmer than usual for THIS market" instead of "below
-  // some universal number".
-  function sma(arr, period) {
-    if (arr.length < period) return null;
-    const slice = arr.slice(-period);
-    return slice.reduce((a, b) => a + b, 0) / period;
-  }
-  function stdDev(arr, period, mean) {
-    const slice = arr.slice(-period);
-    const variance = slice.reduce((a, b) => a + (b - mean) * (b - mean), 0) / period;
-    return Math.sqrt(variance);
-  }
-  function computeEMA(arr, period) {
-    if (arr.length < period) return null;
-    const k = 2 / (period + 1);
-    let ema = sma(arr.slice(0, period), period);
-    for (let i = period; i < arr.length; i++) ema = arr[i] * k + ema * (1 - k);
-    return ema;
-  }
-  function computeMACD(arr) {
-    if (arr.length < 26) return null;
-    const macdSeries = [];
-    for (let end = 26; end <= arr.length; end++) {
-      const slice = arr.slice(0, end);
-      const e12 = computeEMA(slice, 12), e26 = computeEMA(slice, 26);
-      if (e12 != null && e26 != null) macdSeries.push(e12 - e26);
-    }
-    if (!macdSeries.length) return null;
-    const macd = macdSeries[macdSeries.length - 1];
-    const signal = macdSeries.length >= 9 ? computeEMA(macdSeries, 9) : macd;
-    return { macd, signal, histogram: macd - (signal != null ? signal : macd) };
-  }
-  function computeVolatility(arr, period) {
-    if (arr.length < period + 1) return null;
-    const slice = arr.slice(-(period + 1));
-    let sum = 0;
-    for (let i = 1; i < slice.length; i++) sum += Math.abs(slice[i] - slice[i - 1]);
-    return sum / period;
-  }
-  function percentileRank(value, historyArr) {
-    if (!historyArr.length) return 50;
-    const below = historyArr.filter((v) => v <= value).length;
-    return Math.round((below / historyArr.length) * 100);
-  }
-
-  const RANK_HISTORY_MAX = 60; // rolling window this market's own bbWidth/volatility is ranked against
-  let _bbwHistory = [];
-  let _volHistory = [];
-
-  function analyze(prices) {
-    const MIN_TICKS = 30;
-    if (!prices || prices.length < MIN_TICKS) {
-      return {
-        ready: false, calmScore: 0, growthRate: 0.01,
-        reasons: [`Warming up — collecting price history (${prices ? prices.length : 0}/${MIN_TICKS} ticks)…`],
-        bbWidthPct: null, bbwRank: null, volPct: null, volRank: null, macdHistogramPct: null,
-        price: prices && prices.length ? prices[prices.length - 1] : null,
-      };
-    }
-    const price = prices[prices.length - 1];
-    const mean20 = sma(prices, 20);
-    const sd20 = stdDev(prices, 20, mean20);
-    const upper = mean20 + 2 * sd20, lower = mean20 - 2 * sd20;
-    // Bollinger Band Width normalised to % of price, so it's comparable
-    // across markets even before the percentile ranking is applied.
-    const bbWidthPct = mean20 !== 0 ? ((upper - lower) / mean20) * 100 : 0;
-    const vol = computeVolatility(prices, 14);
-    const volPct = price !== 0 ? (vol / price) * 100 : 0;
-    const macdData = computeMACD(prices);
-    const histPct = macdData && price !== 0 ? Math.abs(macdData.histogram / price) * 100 : null;
-
-    _bbwHistory.push(bbWidthPct); if (_bbwHistory.length > RANK_HISTORY_MAX) _bbwHistory.shift();
-    _volHistory.push(volPct); if (_volHistory.length > RANK_HISTORY_MAX) _volHistory.shift();
-
-    const bbwRank = percentileRank(bbWidthPct, _bbwHistory); // 0 = tightest squeeze seen recently
-    const volRank = percentileRank(volPct, _volHistory);     // 0 = calmest tick-to-tick move seen recently
-
-    const reasons = [];
-    // Squeeze component (0-50): rewards a LOW percentile rank (tight bands).
-    const squeezePts = Math.max(0, 50 - (bbwRank / 100) * 50);
-    reasons.push(`BB width ${bbWidthPct.toFixed(4)}% — ${bbwRank}th percentile of this market's recent range`);
-    // Volatility component (0-30): rewards a LOW percentile rank.
-    const volPts = Math.max(0, 30 - (volRank / 100) * 30);
-    reasons.push(`Tick volatility ${volRank}th percentile (lower = calmer)`);
-    // MACD flatness component (0-20): small histogram = no directional push building.
-    let macdPts = 10;
-    if (histPct != null) {
-      macdPts = histPct < 0.01 ? 20 : histPct < 0.03 ? 12 : 4;
-      reasons.push(`MACD histogram ${histPct.toFixed(4)}% of price — ${macdPts >= 12 ? 'flat' : 'momentum building, avoid'}`);
-    }
-    const calmScore = Math.round(Math.max(0, Math.min(100, squeezePts + volPts + macdPts)));
-
-    // Growth rate recommendation scales with how calm the market is — a
-    // narrower range (higher growth rate) is only worth the added knockout
-    // risk when the squeeze is convincing on all three legs.
-    const growthRate = calmScore >= 85 ? 0.05 : calmScore >= 70 ? 0.03 : calmScore >= 55 ? 0.02 : 0.01;
-
-    return {
-      ready: true, calmScore, growthRate, bbWidthPct, bbwRank, volPct, volRank,
-      macdHistogramPct: histPct, reasons, price,
-    };
-  }
-
-  window.AccumulatorAnalyzer = { analyze };
-})();
-</script>
-
 </script>
 
 <script>
@@ -17428,16 +17120,10 @@ window.NexusStrategies=exports;
     const a = snap.analysis || {};
     const { scannerState, marketHealth, config: c } = snap;
     const call = a.callScore || 0, put = a.putScore || 0, maxScore = Math.max(1, call, put);
-    const isAccu = !!engine.isAccumulatorMode;
-    const isMult = !!engine.isMultiplierMode;
-    const strength = isAccu ? (a.calmScore || 0) : (a.strength || 0);
+    const strength = a.strength || 0;
     const dir = a.direction;
-    const dirLabel = isAccu
-      ? (a.ready ? (a.calmScore >= 70 ? '😌 CALM — SQUEEZE' : a.calmScore >= 50 ? '〰️ SETTLING' : '⚡ VOLATILE') : 'WARMING UP…')
-      : (dir === 'CALL' ? (isMult ? '📈 UP' : '📈 HIGHER') : dir === 'PUT' ? (isMult ? '📉 DOWN' : '📉 LOWER') : '— NEUTRAL —');
-    const dirColor = isAccu
-      ? (a.ready ? (a.calmScore >= 70 ? '#00e676' : a.calmScore >= 50 ? '#ffd740' : '#ff5252') : '#8a8f98')
-      : (dir === 'CALL' ? '#00e676' : dir === 'PUT' ? '#ff5252' : '#8a8f98');
+    const dirLabel = dir === 'CALL' ? '📈 HIGHER' : dir === 'PUT' ? '📉 LOWER' : '— NEUTRAL —';
+    const dirColor = dir === 'CALL' ? '#00e676' : dir === 'PUT' ? '#ff5252' : '#8a8f98';
     const circumference = 2 * Math.PI * 44;
     const ringOffset = circumference - (strength / 100) * circumference;
 
@@ -17455,7 +17141,7 @@ window.NexusStrategies=exports;
 
     <!-- SIGNAL STRENGTH RING -->
     <div class="ahub-card" style="margin-bottom:10px">
-      <div class="ahub-label"><span class="ahub-label-dot"></span>${isAccu ? 'Volatility Squeeze' : 'Direction Signal'}</div>
+      <div class="ahub-label"><span class="ahub-label-dot"></span>Direction Signal</div>
       <div style="display:flex;align-items:center;gap:16px">
         <div style="position:relative;width:110px;height:110px;flex-shrink:0;animation:ahub-float 3s ease-in-out infinite">
           <svg width="110" height="110" viewBox="0 0 110 110">
@@ -17470,40 +17156,26 @@ window.NexusStrategies=exports;
           </svg>
           <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
             <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:900;color:${dirColor};text-shadow:0 0 12px ${dirColor}80">${strength}%</div>
-            <div style="font-size:7px;letter-spacing:1px;color:hsl(var(--muted-foreground))">${isAccu ? 'CALM SCORE' : 'STRENGTH'}</div>
+            <div style="font-size:7px;letter-spacing:1px;color:hsl(var(--muted-foreground))">STRENGTH</div>
           </div>
         </div>
         <div style="flex:1">
           <div class="font-display" style="text-align:center;font-size:15px;font-weight:800;letter-spacing:1px;color:${dirColor};margin-bottom:8px">${dirLabel}</div>
-          ${a.ready ? (isAccu ? `
-          <div style="display:flex;gap:6px">
-            <div style="flex:1;text-align:center">
-              <div style="height:5px;border-radius:3px;background:hsl(var(--muted));overflow:hidden;margin-bottom:3px">
-                <div style="height:100%;width:${100 - (a.bbwRank || 0)}%;background:#00e676;transition:width .5s"></div>
-              </div>
-              <div style="font-size:8px;color:hsl(var(--muted-foreground))">SQUEEZE ${100 - (a.bbwRank || 0)}</div>
-            </div>
-            <div style="flex:1;text-align:center">
-              <div style="height:5px;border-radius:3px;background:hsl(var(--muted));overflow:hidden;margin-bottom:3px">
-                <div style="height:100%;width:${100 - (a.volRank || 0)}%;background:hsl(var(--secondary));transition:width .5s"></div>
-              </div>
-              <div style="font-size:8px;color:hsl(var(--muted-foreground))">STILLNESS ${100 - (a.volRank || 0)}</div>
-            </div>
-          </div>` : `
+          ${a.ready ? `
           <div style="display:flex;gap:6px">
             <div style="flex:1;text-align:center">
               <div style="height:5px;border-radius:3px;background:hsl(var(--muted));overflow:hidden;margin-bottom:3px">
                 <div style="height:100%;width:${(call/maxScore)*100}%;background:#00e676;transition:width .5s"></div>
               </div>
-              <div style="font-size:8px;color:hsl(var(--muted-foreground))">${isMult ? 'UP' : 'HIGH'} ${call}</div>
+              <div style="font-size:8px;color:hsl(var(--muted-foreground))">HIGH ${call}</div>
             </div>
             <div style="flex:1;text-align:center">
               <div style="height:5px;border-radius:3px;background:hsl(var(--muted));overflow:hidden;margin-bottom:3px">
                 <div style="height:100%;width:${(put/maxScore)*100}%;background:#ff5252;transition:width .5s"></div>
               </div>
-              <div style="font-size:8px;color:hsl(var(--muted-foreground))">${isMult ? 'DOWN' : 'LOW'} ${put}</div>
+              <div style="font-size:8px;color:hsl(var(--muted-foreground))">LOW ${put}</div>
             </div>
-          </div>`) : `<div style="font-size:9px;color:hsl(var(--muted-foreground));text-align:center">${(a.reasons&&a.reasons[0])||'Warming up…'}</div>`}
+          </div>` : `<div style="font-size:9px;color:hsl(var(--muted-foreground));text-align:center">${(a.reasons&&a.reasons[0])||'Warming up…'}</div>`}
         </div>
       </div>
       ${a.ready && a.reasons && a.reasons.length ? `<div style="margin-top:10px;font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:8px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid ${dirColor}66">${a.reasons.slice(0,2).join(' · ')}</div>` : ''}
@@ -17522,17 +17194,6 @@ window.NexusStrategies=exports;
         <span style="color:hsl(var(--muted-foreground))">${snap.config.selectedMarket||'—'}</span>
         <span style="font-weight:700">${fmtNum(a.price,4)}</span>
       </div>
-      ${isAccu ? `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px">
-        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--secondary))">${fmtNum(a.bbWidthPct,4)}%</div><div class="rf-ind-label">BB WIDTH</div></div>
-        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${(a.bbwRank||0)<=30?'#00e676':(a.bbwRank||0)<=60?'#ffd740':'#ff5252'}">${a.bbwRank!=null?a.bbwRank:'—'}</div><div class="rf-ind-label">BBW RANK</div></div>
-        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--accent))">${fmtNum(a.volPct,4)}%</div><div class="rf-ind-label">TICK VOL</div></div>
-        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${(a.volRank||0)<=30?'#00e676':(a.volRank||0)<=60?'#ffd740':'#ff5252'}">${a.volRank!=null?a.volRank:'—'}</div><div class="rf-ind-label">VOL RANK</div></div>
-        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${(a.macdHistogramPct||0)<0.01?'#00e676':'#ff5252'}">${fmtNum(a.macdHistogramPct,4)}%</div><div class="rf-ind-label">MACD HIST</div></div>
-        <div class="rf-ind-card"><div class="rf-ind-val" style="font-size:14px;color:hsl(var(--primary))">${a.growthRate!=null?(a.growthRate*100).toFixed(0)+'%':'—'}</div><div class="rf-ind-label">SUGGESTED RATE</div></div>
-      </div>
-      <div style="margin-top:2px;font-size:8.5px;color:hsl(var(--muted-foreground));text-align:center">All ranks are this market's own recent history (0 = calmest seen, 100 = most volatile seen) — not a fixed universal cutoff</div>
-      ` : `
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px">
         <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.rsi>70?'#ff5252':a.rsi<30?'#00e676':'hsl(var(--foreground))'}">${fmtNum(a.rsi,0)}</div><div class="rf-ind-label">RSI(14)</div></div>
         <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--secondary))">${fmtNum(a.bbPos,2)}</div><div class="rf-ind-label">BB POS</div></div>
@@ -17545,7 +17206,6 @@ window.NexusStrategies=exports;
         <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.accuracy==null?'hsl(var(--muted-foreground))':a.accuracy>=60?'#00e676':a.accuracy>=45?'#ffd740':'#ff5252'}">${a.accuracy!=null?a.accuracy+'%':'—'}</div><div class="rf-ind-label">ACCURACY</div></div>
       </div>
       ${a.accuracy!=null ? `<div style="margin-top:2px;font-size:8.5px;color:hsl(var(--muted-foreground));text-align:center">Rolling hit-rate of this analyzer's own recent HIGHER/LOWER calls, checked 8 ticks later</div>` : ''}
-      `}
     </div>
 
     <!-- TOP MARKETS -->
@@ -17601,8 +17261,6 @@ window.NexusStrategies=exports;
     const host = el(`${rootId}-center`);
     const c = snap.config, s = snap.state;
     const running = !!s.active;
-    const isAccu = !!engine.isAccumulatorMode;
-    const isMult = !!engine.isMultiplierMode;
     // ── Runs progress — same currentRuns/targetRuns gate the shared
     // TitanEngine already enforces for every other bot; Higher/Lower just
     // never surfaced it in its own panel, so wire it up to match.
@@ -17639,54 +17297,12 @@ window.NexusStrategies=exports;
         <div class="cp-section-label">Trade Settings</div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Stake</span><input class="cp-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}"></div>
-          ${isAccu ? `
-          <div class="cp-input-group">
-            <span class="cp-input-label">Growth Rate Mode</span>
-            <select class="cp-input" id="${rootId}-grmode">
-              <option value="auto" ${c.growthRateMode==='auto'?'selected':''}>Auto (analyzer-scaled)</option>
-              <option value="manual" ${c.growthRateMode==='manual'?'selected':''}>Manual</option>
-            </select>
-          </div>` : isMult ? `
-          <div class="cp-input-group"><span class="cp-input-label">Multiplier ×</span><input class="cp-input" type="number" step="10" min="1" id="${rootId}-multval" value="${c.multiplierValue}"></div>` : `
-          <div class="cp-input-group"><span class="cp-input-label">Duration (ticks)</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-duration" value="${c.duration}"></div>`}
+          <div class="cp-input-group"><span class="cp-input-label">Duration (ticks)</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-duration" value="${c.duration}"></div>
         </div>
-        ${isAccu && c.growthRateMode === 'manual' ? `
-        <div class="cp-input-group">
-          <span class="cp-input-label">Manual Growth Rate</span>
-          <select class="cp-input" id="${rootId}-grmanual">
-            ${[0.01,0.02,0.03,0.04,0.05].map((r) => `<option value="${r}" ${Math.abs((c.manualGrowthRate||0.02)-r)<0.001?'selected':''}>${(r*100).toFixed(0)}%</option>`).join('')}
-          </select>
-        </div>` : ''}
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Target Runs</span><input class="cp-input" type="number" min="1" id="${rootId}-runs-in" value="${targetRuns}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Min Signal %</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-signal" value="${c.minSignal}"></div>
         </div>
-        ${isAccu ? `
-        <div class="cp-input-group"><span class="cp-input-label">Take Profit % (of stake)</span><input class="cp-input" type="number" step="1" min="1" id="${rootId}-tppct" value="${c.takeProfitPct}"></div>
-        ` : isMult ? `
-        <div class="cp-input-group">
-          <span class="cp-input-label">Direction</span>
-          <select class="cp-input" id="${rootId}-direction">
-            <option value="auto" ${c.direction==='auto'?'selected':''}>Auto</option>
-            <option value="higher" ${c.direction==='higher'?'selected':''}>Up only</option>
-            <option value="lower" ${c.direction==='lower'?'selected':''}>Down only</option>
-          </select>
-        </div>
-        <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Stop Loss % (of stake)</span><input class="cp-input" type="number" step="1" min="1" id="${rootId}-slpct" value="${c.stopLossPct}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Take Profit % (of stake)</span><input class="cp-input" type="number" step="1" min="1" id="${rootId}-tppct" value="${c.takeProfitPct}"></div>
-        </div>
-        <div class="cp-input-group">
-          <span class="cp-input-label">Deal Cancellation</span>
-          <select class="cp-input" id="${rootId}-dealcancel">
-            <option value="none" ${c.dealCancellation==='none'?'selected':''}>None</option>
-            <option value="5m" ${c.dealCancellation==='5m'?'selected':''}>5 minutes</option>
-            <option value="15m" ${c.dealCancellation==='15m'?'selected':''}>15 minutes</option>
-            <option value="30m" ${c.dealCancellation==='30m'?'selected':''}>30 minutes</option>
-            <option value="1h" ${c.dealCancellation==='1h'?'selected':''}>1 hour</option>
-          </select>
-        </div>
-        ` : `
         <div class="cp-input-group">
           <span class="cp-input-label">Direction</span>
           <select class="cp-input" id="${rootId}-direction">
@@ -17694,7 +17310,7 @@ window.NexusStrategies=exports;
             <option value="higher" ${c.direction==='higher'?'selected':''}>Higher only</option>
             <option value="lower" ${c.direction==='lower'?'selected':''}>Lower only</option>
           </select>
-        </div>`}
+        </div>
       </div>
 
       <div class="cp-card">
@@ -17744,26 +17360,10 @@ window.NexusStrategies=exports;
       // "SAVE SETTINGS" button) persists anything to disk.
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
       el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
-      const durationEl = el(`${rootId}-duration`, host);
-      if (durationEl) durationEl.onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); };
+      el(`${rootId}-duration`, host).onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
-      const directionEl = el(`${rootId}-direction`, host);
-      if (directionEl) directionEl.onchange = (e) => { engine.setConfig({ direction: e.target.value }); };
-      // ── Accumulator-only inputs ──
-      const grModeEl = el(`${rootId}-grmode`, host);
-      if (grModeEl) grModeEl.onchange = (e) => { engine.setConfig({ growthRateMode: e.target.value }); };
-      const grManualEl = el(`${rootId}-grmanual`, host);
-      if (grManualEl) grManualEl.onchange = (e) => { engine.setConfig({ manualGrowthRate: parseFloat(e.target.value) || 0.02 }); };
-      const tpPctEl = el(`${rootId}-tppct`, host);
-      if (tpPctEl) tpPctEl.onchange = (e) => { engine.setConfig({ takeProfitPct: Math.max(1, parseFloat(e.target.value) || 8) }); };
-      // ── Multiplier-only inputs ──
-      const multValEl = el(`${rootId}-multval`, host);
-      if (multValEl) multValEl.onchange = (e) => { engine.setConfig({ multiplierValue: Math.max(1, parseInt(e.target.value) || 100) }); };
-      const slPctEl = el(`${rootId}-slpct`, host);
-      if (slPctEl) slPctEl.onchange = (e) => { engine.setConfig({ stopLossPct: Math.max(1, parseFloat(e.target.value) || 40) }); };
-      const dealCancelEl = el(`${rootId}-dealcancel`, host);
-      if (dealCancelEl) dealCancelEl.onchange = (e) => { engine.setConfig({ dealCancellation: e.target.value }); };
+      el(`${rootId}-direction`, host).onchange = (e) => { engine.setConfig({ direction: e.target.value }); };
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); };
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
@@ -18485,7 +18085,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator', 'multiplier'];
+  const BOT_IDS = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -18497,13 +18097,13 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator', 'multiplier'];
+  const VALID_APPS = ['dashboard', 'differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { differ: null, even: null, odd: null, nexus: null, under: null, risefall: null, matches: null, accumulator: null, multiplier: null };
-  const titanBuilt = { even: false, odd: false, nexus: false, under: false, risefall: false, matches: false, accumulator: false, multiplier: false };
+  const engines = { differ: null, even: null, odd: null, nexus: null, under: null, risefall: null };
+  const titanBuilt = { even: false, odd: false, nexus: false, under: false, risefall: false };
 
   function queueDashboardRender() {
     if (dashRenderQueued) return;
@@ -18540,11 +18140,9 @@ window.NexusStrategies=exports;
     const isOU = isOver || isUnder;
     const isRiseFall = id === 'risefall';
     const isMatches = id === 'matches';
-    const isAccumulator = id === 'accumulator';
-    const isMultiplier = id === 'multiplier';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
-    const safeSocket = (isOU || isRiseFall || isAccumulator || isMultiplier ? window.NexusSocket : window.EvenSocket)
+    const safeSocket = (isOU || isRiseFall ? window.NexusSocket : window.EvenSocket)
       || { globalSocket: null };
     // Higher/Lower gets its OWN scanner (RiseFallScanner) that ranks markets
     // by price-trend/RSI/Bollinger confluence via RiseFallAnalyzer — the same
@@ -18553,31 +18151,12 @@ window.NexusStrategies=exports;
     // for a price-direction (CALL/PUT) bot and left "best market" completely
     // disconnected from what the signal engine actually believed.
     const scannerFallback = { MarketScanner: class { constructor(cb){this._cb=cb;} setTickPeriod(){} async start(){} getBestMarket(){return null;} getGoldenMarkets(){return [];} getAllMarkets(){return [];} } };
-    const safeScanner = (isRiseFall || isAccumulator || isMultiplier)
+    const safeScanner = isRiseFall
       ? (window.RiseFallScanner || scannerFallback)
       : isMatches
       ? (window.MatchesScanner || scannerFallback)
       : (isOU ? window.NexusScanner : window.EvenScanner) || scannerFallback;
-    const opts = isAccumulator
-      ? {
-          // Accumulators reuse Higher/Lower's price socket/scanner (same
-          // live tick + market-health feed) but run their own volatility-
-          // squeeze analyzer and knockout-style execution path inside
-          // TitanEngine (mode: 'accumulator').
-          id, mode: 'accumulator', fixedTradeMode: null, botLabel: 'Accumulator Bot',
-          trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
-          strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
-        }
-      : isMultiplier
-      ? {
-          // Multipliers reuse the exact same directional analyzer/signal
-          // path as Higher/Lower (RiseFallAnalyzer) but execute leveraged
-          // MULTUP/MULTDOWN contracts instead of a fixed binary payout.
-          id, mode: 'multiplier', fixedTradeMode: null, botLabel: 'Multiplier Bot',
-          trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
-          strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
-        }
-      : isMatches
+    const opts = isMatches
       ? {
           // Matches gets its own frequency-based analyzer/scanner (digit
           // ticks only, no barrier/parity math) but shares the Even/Odd
@@ -18618,9 +18197,9 @@ window.NexusStrategies=exports;
     eng.onUpdate = function () {
       const rootId = id + '-root';
       if (activeApp === id && titanBuilt[id]) {
-        if ((isRiseFall || isAccumulator || isMultiplier) && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
+        if (isRiseFall && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
         else if (isMatches && window.MatchesUI) window.MatchesUI.renderLive(eng, rootId, opts.botLabel);
-        else if (!isRiseFall && !isMatches && !isAccumulator && !isMultiplier && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
+        else if (!isRiseFall && !isMatches && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
       }
       if (activeApp === 'dashboard') queueDashboardRender();
     };
@@ -18645,16 +18224,6 @@ window.NexusStrategies=exports;
     }
     if (id === 'matches') {
       if (window.MatchesUI) window.MatchesUI.render(eng, id + '-root', 'MATCHES BOT');
-      titanBuilt[id] = true;
-      return;
-    }
-    if (id === 'accumulator') {
-      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', 'ACCUMULATOR BOT');
-      titanBuilt[id] = true;
-      return;
-    }
-    if (id === 'multiplier') {
-      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', 'MULTIPLIER BOT');
       titanBuilt[id] = true;
       return;
     }
