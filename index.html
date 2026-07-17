@@ -2461,6 +2461,26 @@ html.light .hub-live-badge { background: hsl(var(--muted) / .5); }
 /* Frequency bars */
 .freq-bar-grid { display: flex; gap: 3px; align-items: flex-end; height: 76px; background: hsl(var(--bg)); border-radius: var(--radius-sm); padding: 7px 5px 3px; }
 .freq-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+/* Least-appearing digit(s) on the digit map — cold-digit padding/border
+   highlight so the coldest bars are visible at a glance instead of only
+   being named in the text conditions above. */
+.freq-bar-col.is-coldest {
+  padding: 3px 2px 4px; margin: -3px -2px -4px; border-radius: 7px;
+  background: hsl(var(--loss)/0.10); border: 1px solid hsl(var(--loss)/0.45);
+  box-shadow: 0 0 6px hsl(var(--loss)/0.2);
+}
+/* The single digit currently being watched as the live "touch" arm target
+   (coldEvenDigit / coldOddDigit) — brighter ring + pulse so it reads as
+   "this is the one we're waiting to touch right now". */
+.freq-bar-col.is-touch-target {
+  padding: 3px 2px 4px; margin: -3px -2px -4px; border-radius: 7px;
+  background: hsl(var(--accent)/0.14); border: 1px solid hsl(var(--accent)/0.7);
+  box-shadow: 0 0 10px hsl(var(--accent)/0.4); animation: ahub-pulse 1.6s infinite;
+}
+.freq-bar-col .freq-bar-cold-tag {
+  font-size: 6px; letter-spacing: 0.5px; color: hsl(var(--loss)); font-weight: 800; margin-top: 1px;
+}
+.freq-bar-col.is-touch-target .freq-bar-cold-tag { color: hsl(var(--accent)); }
 .freq-bar-pct { font-size: 7px; color: hsl(var(--muted-foreground)); font-family: 'DM Mono', monospace; }
 .freq-bar-fill { width: 100%; border-radius: 3px 3px 0 0; transition: height .4s ease; background: hsl(var(--primary)); min-height: 2px; }
 .freq-bar-digit { font-family: 'Outfit', sans-serif; font-size: 8.5px; font-weight: 800; }
@@ -13513,6 +13533,16 @@ window.NexusStrategies=exports;
     const mtf = a && a.mtfAligned !== false ? 'MTF ALIGNED' : 'MTF DIVERGENT';
     const mtfClass = a && a.mtfAligned !== false ? 'text-success' : 'text-accent';
 
+    // Live "touch" arm-target digit — the colder of red/yellow (bottom-2
+    // least-frequent) — same rule the engine itself uses to arm the
+    // hybrid trigger, for both the Odd bot (os.coldEvenDigit) and the
+    // Even bot (mirrored: coldest of red/yellow, computed the same way
+    // since shape.red/yellow are already oriented per-mode).
+    const touchTargetDigit = (isOddStrat || isEvenBot) && shape
+      ? (shape.redPct <= shape.yellowPct ? shape.red : shape.yellow)
+      : null;
+    const coldDigitSet = new Set((a && a.coldDigits) || []);
+
     const freqBars = a && a.frequencies
       ? a.frequencies.map((f) => {
           const isLive = snap.liveDigit === f.digit;
@@ -13520,10 +13550,15 @@ window.NexusStrategies=exports;
           const winZone = isOUBot && (engine.mode === 'under' ? f.digit < c.overBarrier : f.digit > c.overBarrier);
           const lossZone = isOUBot && (engine.mode === 'under' ? f.digit > c.overBarrier : f.digit < c.overBarrier);
           const barColor = winZone ? 'hsl(var(--win)/0.7)' : lossZone ? 'hsl(var(--loss)/0.6)' : f.digit === c.overBarrier ? 'hsl(var(--accent)/0.7)' : isLive ? 'hsl(var(--accent))' : 'hsl(var(--primary)/0.65)';
-          return `<div class="freq-bar-col">
+          const isTouchTarget = touchTargetDigit === f.digit;
+          const isColdest = !isTouchTarget && coldDigitSet.has(f.digit);
+          const colClass = isTouchTarget ? 'is-touch-target' : isColdest ? 'is-coldest' : '';
+          const tag = isTouchTarget ? '<div class="freq-bar-cold-tag">TOUCH</div>' : isColdest ? '<div class="freq-bar-cold-tag">COLD</div>' : '';
+          return `<div class="freq-bar-col ${colClass}">
             <div class="freq-bar-pct">${f.percentage.toFixed(0)}%</div>
             <div class="freq-bar-fill" style="height:${Math.max(4, f.percentage * 0.7)}px;background:${barColor};margin:auto 0 0;"></div>
             <div class="freq-bar-digit" style="${isLive ? 'color:hsl(var(--accent))' : ''}">${f.digit}</div>
+            ${tag}
           </div>`;
         }).join('')
       : Array.from({ length: 10 }, (_, i) => `<div class="freq-bar-col"><div class="freq-bar-digit" style="opacity:.4">${i}</div></div>`).join('');
