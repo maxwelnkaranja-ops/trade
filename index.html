@@ -7806,9 +7806,9 @@ function analyzeDigits(history, tickPeriod = 50, targetOdd = true) {
 
   // Get recommendation
   let recommendation = 'HOLD';
-  if (probability >= 85) recommendation = 'STRONG_BUY';
-  else if (probability >= 70) recommendation = 'BUY';
-  else if (probability < 50) recommendation = 'AVOID';
+  if (probability >= 90) recommendation = 'STRONG_BUY';
+  else if (probability >= 78) recommendation = 'BUY';
+  else if (probability < 58) recommendation = 'AVOID';
 
   // Build frequencies array for renderLeft bar chart
   const frequencies = Array.from({length: 10}, (_, i) => ({
@@ -7966,7 +7966,7 @@ function analyzeOddStrategyCondition(history, tickPeriod = 50) {
       rareDigits, dominantOdd: topOk, stablePattern,
       momentumUp: momentumScore > 55, lowVolatility: volatilityIndex > 50,
     },
-    recommendation: probability >= 85 ? 'STRONG_BUY' : probability >= 70 ? 'BUY' : probability < 50 ? 'AVOID' : 'HOLD',
+    recommendation: probability >= 90 ? 'STRONG_BUY' : probability >= 78 ? 'BUY' : probability < 58 ? 'AVOID' : 'HOLD',
     bestBarrier: 0,
     oddStrategy,
     shape: { green: green.digit, blue: blue.digit, red: red.digit, yellow: yellow.digit, greenPct: green.pct, bluePct: blue.pct, redPct: red.pct, yellowPct: yellow.pct, greenMatch: greenOdd, blueMatch: blueOdd, redMatch: redEven, yellowMatch: yellowEven, shapeScore },
@@ -9226,9 +9226,9 @@ function analyzeDigits(history, tickPeriod = 50, barrier = 3, isUnder = false) {
 
   // Get recommendation
   let recommendation = 'HOLD';
-  if (probability >= 85) recommendation = 'STRONG_BUY';
-  else if (probability >= 70) recommendation = 'BUY';
-  else if (probability < 50) recommendation = 'AVOID';
+  if (probability >= 90) recommendation = 'STRONG_BUY';
+  else if (probability >= 78) recommendation = 'BUY';
+  else if (probability < 58) recommendation = 'AVOID';
 
   return {
     probability: Math.min(100, Math.round(probability)),
@@ -9425,7 +9425,7 @@ function analyzeOver3Condition(history, tickPeriod = 50, minStreak = 3, minSigna
       stablePattern, dominantOdd: greenIsOdd, momentumUp: momentumScore > 55,
       lowVolatility: volatilityIndex > 50, rareDigits,
     },
-    recommendation: probability >= 85 ? 'STRONG_BUY' : probability >= 70 ? 'BUY' : probability < 50 ? 'AVOID' : 'HOLD',
+    recommendation: probability >= 90 ? 'STRONG_BUY' : probability >= 78 ? 'BUY' : probability < 58 ? 'AVOID' : 'HOLD',
     bestBarrier: 3,
     over3: { ...over3, shapeScore },
   };
@@ -9574,7 +9574,7 @@ function analyzeUnderZoneCondition(history, tickPeriod = 50, minStreak = 3, minS
       stablePattern, dominantOdd: greenIsOdd, momentumUp: momentumScore > 55,
       lowVolatility: volatilityIndex > 50, rareDigits,
     },
-    recommendation: probability >= 85 ? 'STRONG_BUY' : probability >= 70 ? 'BUY' : probability < 50 ? 'AVOID' : 'HOLD',
+    recommendation: probability >= 90 ? 'STRONG_BUY' : probability >= 78 ? 'BUY' : probability < 58 ? 'AVOID' : 'HOLD',
     bestBarrier: barrier,
     over3: { ...over3, shapeScore },
   };
@@ -11085,6 +11085,12 @@ window.NexusStrategies=exports;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
       this.executionGuard = false; this.pendingTrade = null;
       this.runsSinceRefresh = 0;
+      // First-Tick Handling trackers (see loadConfig's firstTickMode comment).
+      // _skipArmed: 'skip' mode has consumed the entry tick and is waiting
+      // for exactly one more tick before force-firing.
+      // _isSacrificeTrade: the trade currently in flight is a 'sacrifice'
+      // test trade whose result must be excluded from Runs/stats.
+      this._skipArmed = false; this._isSacrificeTrade = false;
       this.lastTickTime = Date.now(); this.lastTradeTime = Date.now();
       this.latestLiveAnalysis = null; this.connectRef = null;
 
@@ -11146,6 +11152,20 @@ window.NexusStrategies=exports;
         barrierShuffle: false, barrierMin: 2, barrierMax: 6,
         recBarrierShuffle: false, recBarrierMin: 2, recBarrierMax: 6,
         streakShuffle: false, streakMin: 2, streakMax: 4,
+        // ── FIRST-TICK HANDLING ────────────────────────────────────────
+        // 'normal'    : first trade of a fresh run fires at the normal Stake,
+        //               exactly like every other run — no special handling.
+        // 'sacrifice' : the entry tick fires a small "test" trade at
+        //               firstTickStake instead of Stake. Its win/loss result
+        //               is logged but NOT counted toward Runs or the
+        //               win/loss stats — the moment it settles, the real
+        //               run fires immediately afterward at the normal Stake.
+        // 'skip'      : the entry tick is skipped entirely (no trade placed
+        //               at all); the engine waits exactly one more tick and
+        //               then fires the real run at the normal Stake,
+        //               regardless of whether that next tick still matches
+        //               the entry condition on its own.
+        firstTickMode: 'normal', firstTickStake: 0.35,
       };
       const overDefaults = { ...evenDefaults, autoPilot: false, autoRefresh: false, tradeMode: undefined };
       // Under gets its own default barrier picks (Under 7 / recovery Under 6)
@@ -11420,6 +11440,16 @@ window.NexusStrategies=exports;
         }
         if (this.pendingTrade) this._predictiveCheck(data.digit);
         if (!this.state.active || this.state.isLocked || this.state.isCooldown) { this.emit(); return; }
+        // ── FIRST-TICK HANDLING: 'skip' mode ─────────────────────────
+        // The entry tick was intentionally skipped (see startChainExecution).
+        // This is the very next tick — fire the real run now unconditionally,
+        // without re-checking streak/signal/touch gates, exactly as configured.
+        if (this._skipArmed) {
+          this.addLog('win', 'ENGINE', '▶ Skip-tick window passed — firing chain now (First-Tick Handling).');
+          this.startChainExecution(true);
+          this.emit();
+          return;
+        }
         if (this.isMultiplierMode) {
           // A multiplier position stays open until it's sold or Deriv
           // auto-closes it (position take-profit/stop-loss hit) — so unlike
@@ -12102,6 +12132,7 @@ window.NexusStrategies=exports;
 
     completeSession(wonSession = true) {
       this.executionGuard = false; this.pendingTrade = null;
+      this._skipArmed = false; this._isSacrificeTrade = false;
       // Alt Automation: if this session ended in a loss (recovery exhausted,
       // stop-rule hit, or stop-loss hit) rather than a win, rotate to the
       // next recovery pattern for next session — only when the toggle is on
@@ -12322,7 +12353,7 @@ window.NexusStrategies=exports;
       // ────────────────────────────────────────────────────────────────
       this.pendingTrade = null;
       if (win) this.sound.playWin(); else this.sound.playLoss();
-      this.addLog(win ? 'win' : 'loss', 'BOLT', `Entry:${entryDigitResolved ?? '?'} Exit:${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
+      this.addLog(win ? 'win' : 'loss', 'BOLT', `${this._isSacrificeTrade ? '🧪 TEST — ' : ''}Entry:${entryDigitResolved ?? '?'} Exit:${exitDigit} | ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
       // Deduplicate: skip if this contract_id was already journaled
       const contractKey = contract.contract_id ? contract.contract_id.toString() : null;
       if (contractKey) {
@@ -12343,6 +12374,7 @@ window.NexusStrategies=exports;
         payout: win ? (parseFloat(contract.buy_price) || this.state.currentStake) + Math.abs(profit) : parseFloat(contract.buy_price) || this.state.currentStake,
         martingaleStep: this.state.martingaleStep,
         inRecovery: this.state.inRecovery,
+        isTest: !!this._isSacrificeTrade,
         recoveryMode: this.state.inRecovery ? (
           this.config.smartRecovery ? 'SMART-REC' :
           this.config.alternatingRecovery ? 'ALT-A' :
@@ -12353,6 +12385,20 @@ window.NexusStrategies=exports;
         ) : '',
       }, ...this.journal].slice(0, 500);
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
+      // ── FIRST-TICK HANDLING: 'sacrifice' test trade settling ──────────
+      // Logged and notified above like any other trade, but deliberately
+      // excluded from Runs/win-loss stats/martingale — it was only there to
+      // test the entry tick. The real run fires immediately at normal Stake,
+      // whether the test won or lost.
+      if (this._isSacrificeTrade) {
+        this._isSacrificeTrade = false;
+        this.addLog('engine', 'TEST-STAKE', `Test stake result: ${win ? 'WIN' : 'LOSS'} (not counted) — firing real entry now at $${this.config.stake.toFixed(2)}.`);
+        this.state = { ...this.state, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+        this.executionGuard = false;
+        this.executeBoltPurchase();
+        this.emit();
+        return;
+      }
       const cfg = this.config;
       const stats = { ...this.state.stats, profit: this.state.stats.profit + profit, win: this.state.stats.win + (win ? 1 : 0), loss: this.state.stats.loss + (win ? 0 : 1) };
       let ns = { ...this.state, stats };
@@ -12467,12 +12513,30 @@ window.NexusStrategies=exports;
       }
     }
 
-    startChainExecution() {
+    // forceFire=true means "this call must actually place a trade" — used
+    // by the 'skip' mode's next-tick force-fire (see subscribeToMarket) so
+    // it doesn't re-enter its own skip branch a second time.
+    startChainExecution(forceFire) {
       if (this.executionGuard) return;
       if (!this.state.active || this.state.isCooldown) return;
       this.executionGuard = true;
       const health = this.socket.getHealth(this.config.selectedMarket);
       if (health && health.longTerm === 'POOR' && !this.isPriceMode) { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
+
+      // ── FIRST-TICK HANDLING: 'skip' mode ─────────────────────────────
+      // Only applies to a fresh (non-recovery) entry, and only once per
+      // armed signal — the entry tick itself is skipped; the next tick
+      // (see subscribeToMarket) force-fires the real trade instead.
+      const ftMode = this.config.firstTickMode || 'normal';
+      if (!forceFire && !this.state.inRecovery && ftMode === 'skip' && !this._skipArmed) {
+        this._skipArmed = true;
+        this.executionGuard = false;
+        this.addLog('engine', 'SKIP-TICK', '⏭ Entry met — skipping this tick per First-Tick Handling. Firing on the very next tick.');
+        this.emit();
+        return;
+      }
+      this._skipArmed = false;
+
       this.sound.playEngineStart();
       this.addLog('win', 'ENGINE', `STREAK HIT — FIRING CHAIN (${health?.longTerm || 'SCANNING'})`);
       // Only reset base chain state when we are NOT already mid-recovery.
@@ -12480,8 +12544,19 @@ window.NexusStrategies=exports;
       // count is not erased by every new signal.
       if (this.state.inRecovery) {
         this.state = { ...this.state, isLocked: true };
-      } else {
-        this.state = { ...this.state, isLocked: true, martingaleStep: 0, inRecovery: false, currentStake: this.config.stake };
+        this.executeBoltPurchase();
+        return;
+      }
+      // ── FIRST-TICK HANDLING: 'sacrifice' mode ─────────────────────────
+      // Fires a small test trade at firstTickStake instead of Stake. Its
+      // result is excluded from Runs/stats in handleContractResult, which
+      // immediately re-fires the real run at the normal Stake once it settles.
+      const useSacrifice = !forceFire && ftMode === 'sacrifice';
+      this.state = { ...this.state, isLocked: true, martingaleStep: 0, inRecovery: false,
+        currentStake: useSacrifice ? (parseFloat(this.config.firstTickStake) || this.config.stake) : this.config.stake };
+      this._isSacrificeTrade = useSacrifice;
+      if (useSacrifice) {
+        this.addLog('engine', 'TEST-STAKE', `🧪 Test stake $${this.state.currentStake.toFixed(2)} firing on the entry tick — result won't count toward Runs/stats; the real run fires right after.`);
       }
       this.executeBoltPurchase();
     }
@@ -12657,6 +12732,7 @@ window.NexusStrategies=exports;
       }
       this.executionGuard = false;
       this.pendingTrade = null;
+      this._skipArmed = false; this._isSacrificeTrade = false;
       if (newActive) {
         this.sound.playEngineStart();
         this.state = {
@@ -13341,6 +13417,29 @@ window.NexusStrategies=exports;
           <input class="cp-input" type="number" min="1" id="${rootId}-streak-in" value="${c.minStreak}">
         </div>
       </div>
+
+      <div class="cp-section-label" style="margin-top:10px">First-Tick Handling</div>
+      <div class="cp-input-row">
+        <div class="cp-input-group" style="flex:1.4">
+          <span class="cp-input-label">Mode</span>
+          <select class="cp-input" id="${rootId}-firsttick-mode" style="font-size:11px">
+            <option value="normal" ${(c.firstTickMode||'normal')==='normal'?'selected':''}>Normal — no special handling</option>
+            <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — small probe trade first</option>
+            <option value="skip" ${c.firstTickMode==='skip'?'selected':''}>Skip Tick — wait 1 tick, then trade</option>
+          </select>
+        </div>
+        <div class="cp-input-group">
+          <span class="cp-input-label">Test Stake $</span>
+          <input class="cp-input" type="number" step="0.01" min="0.01" id="${rootId}-firsttick-stake" value="${c.firstTickStake}" ${c.firstTickMode!=='sacrifice'?'disabled style="opacity:.45"':''}>
+        </div>
+      </div>
+      <div style="margin-top:4px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px">
+        ${c.firstTickMode==='sacrifice'
+          ? 'Fires a small test trade on the entry tick — win or lose, it is NOT counted toward Runs/stats, and the real run at Stake $ fires immediately after it settles.'
+          : c.firstTickMode==='skip'
+          ? 'Entry tick is skipped (no trade placed); the real run at Stake $ fires unconditionally on the very next tick.'
+          : 'Every run trades normally from the entry tick — no probe or skip.'}
+      </div>
       ${isOver3 ? `
       <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
         Market conditions &amp; entry point live in the <b style="color:hsl(var(--primary))">Analysis Hub → Over 3 · Market Conditions</b> panel on the left
@@ -13567,6 +13666,21 @@ window.NexusStrategies=exports;
         };
       }
     });
+
+    const ftModeEl = el(`${rootId}-firsttick-mode`);
+    if (ftModeEl) {
+      ftModeEl.onchange = (e) => {
+        engine.setConfig({ firstTickMode: e.target.value });
+        renderCenterConfig(engine, rootId, engine.getSnapshot()); // re-render so the Test Stake input enables/disables + helper text updates
+      };
+    }
+    const ftStakeEl = el(`${rootId}-firsttick-stake`);
+    if (ftStakeEl) {
+      ftStakeEl.onchange = (e) => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v) && v > 0) engine.setConfig({ firstTickStake: Math.max(0.01, v) });
+      };
+    }
 
     el(`${rootId}-mart`).onclick = (e) => { e.stopPropagation(); const en = !c.martingaleEnabled; engine.setConfig({ martingaleEnabled: en }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     const martHeader = el(`${rootId}-mart-header`);
@@ -14241,7 +14355,7 @@ window.NexusStrategies=exports;
           <div>✅ momentumUp: score &gt; 55</div>
           <div>✅ lowVolatility: volatilityIndex &gt; 50</div>
           <div>✅ Probability formula: additive, capped at 100</div>
-          <div>✅ STRONG_BUY ≥85 · BUY ≥70 · AVOID &lt;50 · HOLD else</div>
+          <div>✅ STRONG_BUY ≥90 · BUY ≥78 · AVOID &lt;58 · HOLD else</div>
           <div>✅ MTF: short×0.6 + long×0.4 confidence</div>
           <div>✅ ANALYSIS_HOLD = 20s snapshot freeze</div>
           <div>✅ Market health gate: POOR blocks chain start</div>
