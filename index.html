@@ -12449,15 +12449,22 @@ window.NexusStrategies=exports;
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
       // ── FIRST-TICK HANDLING: 'sacrifice' test trade settling ──────────
       // Logged and notified above like any other trade, but deliberately
-      // excluded from Runs/win-loss stats/martingale — it was only there to
-      // test the entry tick. The real run fires immediately at normal Stake,
-      // whether the test won or lost.
+      // excluded from Runs/win-loss stats/martingale — it's a probe, not a
+      // counted run. It now also acts as a GATE on the real run: a WIN
+      // fires the real trade at Stake $ immediately (same as before); a
+      // LOSS rejects the signal outright and releases the engine straight
+      // back to scouting — no real-stake trade fires this cycle.
       if (this._isSacrificeTrade) {
         this._isSacrificeTrade = false;
-        this.addLog('engine', 'TEST-STAKE', `Test stake result: ${win ? 'WIN' : 'LOSS'} (not counted) — firing real entry now at $${this.config.stake.toFixed(2)}.`);
-        this.state = { ...this.state, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
         this.executionGuard = false;
-        this.executeBoltPurchase();
+        this.state = { ...this.state, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+        if (win) {
+          this.addLog('win', 'TEST-STAKE', `Test stake WON (not counted) — firing real entry now at $${this.config.stake.toFixed(2)}.`);
+          this.executeBoltPurchase();
+        } else {
+          this.addLog('loss', 'TEST-STAKE', `Test stake LOST (not counted) — signal rejected, real run skipped. Back to scouting for the next signal.`);
+          this.state = { ...this.state, isLocked: false };
+        }
         this.emit();
         return;
       }
@@ -13524,7 +13531,7 @@ window.NexusStrategies=exports;
           <span class="cp-input-label">Mode</span>
           <select class="cp-input" id="${rootId}-firsttick-mode" style="font-size:11px">
             <option value="normal" ${(c.firstTickMode||'normal')==='normal'?'selected':''}>Normal — no special handling</option>
-            <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — small probe trade first</option>
+            <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — probe trade gates the real run</option>
             <option value="skip" ${c.firstTickMode==='skip'?'selected':''}>Skip Tick — wait 1 tick, then trade</option>
           </select>
         </div>
@@ -13535,7 +13542,7 @@ window.NexusStrategies=exports;
       </div>
       <div style="margin-top:4px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px">
         ${c.firstTickMode==='sacrifice'
-          ? 'Fires a small test trade on the entry tick — win or lose, it is NOT counted toward Runs/stats, and the real run at Stake $ fires immediately after it settles.'
+          ? 'Fires a small test trade on the entry tick (not counted toward Runs/stats). WIN → real run at Stake $ fires immediately. LOSS → signal rejected, real run is skipped and the engine goes back to scouting.'
           : c.firstTickMode==='skip'
           ? 'Entry tick is skipped (no trade placed); the real run at Stake $ fires unconditionally on the very next tick.'
           : 'Every run trades normally from the entry tick — no probe or skip.'}
@@ -16979,7 +16986,7 @@ window.NexusStrategies=exports;
             <span class="cp-input-label">Mode</span>
             <select class="cp-input" id="${rootId}-firsttick-mode" style="font-size:11px">
               <option value="normal" ${(c.firstTickMode||'normal')==='normal'?'selected':''}>Normal — no special handling</option>
-              <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — small probe trade first</option>
+              <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — probe trade gates the real run</option>
               <option value="skip" ${c.firstTickMode==='skip'?'selected':''}>Skip Tick — wait 1 tick, then trade</option>
             </select>
           </div>
@@ -16990,7 +16997,7 @@ window.NexusStrategies=exports;
         </div>
         <div style="margin-top:4px;margin-bottom:2px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px">
           ${c.firstTickMode==='sacrifice'
-            ? 'Fires a small test trade on the entry tick — win or lose, it is NOT counted toward Runs/stats, and the real run at Stake $ fires immediately after it settles.'
+            ? 'Fires a small test trade on the entry tick (not counted toward Runs/stats). WIN → real run at Stake $ fires immediately. LOSS → signal rejected, real run is skipped and the engine goes back to scouting.'
             : c.firstTickMode==='skip'
             ? 'Entry tick is skipped (no trade placed); the real run at Stake $ fires unconditionally on the very next tick.'
             : 'Every run trades normally from the entry tick — no probe or skip.'}
