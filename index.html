@@ -120,6 +120,11 @@
           <span class="hub-tab-label">Matches</span>
           <span class="dot live"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="multiplier" data-label="Multiplier" title="Multiplier — leveraged MULTUP/MULTDOWN bot">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 15l5-5 4 4 7-8"/><path d="M20 6h-4v4"/></svg></span>
+          <span class="hub-tab-label">Multiplier</span>
+          <span class="dot live"></span>
+        </button>
         <div class="hub-nav-label">Account</div>
         <div class="hub-balance-pill glass-pill font-mono" id="hub-balance-pill" style="display:none;width:100%;box-sizing:border-box;justify-content:center"></div>
       </nav>
@@ -7841,9 +7846,11 @@ function analyzeDigits(history, tickPeriod = 50, targetOdd = true) {
  *     B. Red (#1 least-frequent) & Yellow (#2 least-frequent) digits are
  *        both EVEN, red ≤8.6%, yellow ≤9.5%
  *   ENTRY (tracked live by the engine, not here — this only reports the
- *   ingredients): the live digit "touching" the colder of red/yellow arms a
- *   6-tick window; if an EVEN streak of the operator's Min Streak length
- *   lands inside that window, fire an ODD contract.
+ *   ingredients): Gate 1 (percentage) must hold before anything can arm.
+ *   Gate 2 opens the instant the live digit "touches" the colder of
+ *   red/yellow — from that tick on, the EVEN streak is counted continuously
+ *   (no expiry) and the moment it reaches the operator's Min Streak length,
+ *   an ODD contract fires immediately.
  * Shaped like analyzeDigits()'s output for compatibility with shared UI,
  * plus an `oddStrategy` sub-object with the real rule breakdown.
  */
@@ -7894,7 +7901,7 @@ function analyzeOddStrategyCondition(history, tickPeriod = 50) {
   let reason;
   if (!marketGood) reason = 'Market conditions not met (top-2 odd / bottom-2 even)';
   else if (!isTouchingNow) reason = `Waiting for touch of digit ${coldEvenDigit}`;
-  else reason = `Touch — digit ${coldEvenDigit} (arms 6-tick window)`;
+  else reason = `Touch — digit ${coldEvenDigit} (Gate 2 armed, counting streak)`;
 
   const oddDigitWeight = percentages.filter((_, i) => isOdd(i)).reduce((a, b) => a + b, 0);
   const oddStrategy = {
@@ -10878,6 +10885,7 @@ window.NexusStrategies=exports;
     div.onclick = dismiss;
   }
   function showCongratulationsPopup(target) { showResultPopup('tp', target); }
+  window.showResultPopup = showResultPopup;
 
   class TitanEngine {
     constructor(opts) {
@@ -10942,6 +10950,11 @@ window.NexusStrategies=exports;
     // digit (0-9) instead of parity/over-under/direction, using its own
     // frequency-based analyzer (MatchesAnalyzer).
     get isMatchMode() { return this.mode === 'matches'; }
+    // true only for the Multiplier bot — bets MULTUP/MULTDOWN, a leveraged
+    // position that stays open (no fixed tick duration) until it's sold,
+    // or Deriv auto-closes it because the position's own take-profit /
+    // stop-loss (limit_order, set per-trade in dollars) was hit.
+    get isMultiplierMode() { return this.mode === 'multiplier'; }
 
     // Extra args passed into the shared Trading module's analyzeDigits /
     // checkEntryConditions / MarketScanner so each bot instance scores and
@@ -10963,7 +10976,9 @@ window.NexusStrategies=exports;
         soundEnabled: true, currentStrategy: 1, alternatingRecovery: true, alternatingRecoveryB: false,
         alternatingRecoveryC: false, alternatingRecoveryR: false, altAutomation: false,
         smartRecovery: false, autoRefresh: true, tradeMode: this.fixedTradeMode || 'odd',
-        armWindow: 6, // ticks the touch-arm window stays open (Even/Odd hybrid trigger)
+        // armWindow removed — Gate 2 (touch-arm) no longer expires on a
+        // fixed tick count; once armed it waits indefinitely for the
+        // streak to complete, per the two-gate design below.
         // Considerate ranges: barrier 2-6 (70%-30% win — avoids the extreme,
         // near-guaranteed or near-impossible edges 0/1/8/9), streak 2-4
         // (a light-to-moderate confirmation window, not razor-thin or so
@@ -11003,7 +11018,27 @@ window.NexusStrategies=exports;
         // "hottest digit" condition from re-firing on the very next tick.
         matchesCooldownTicks: 3,
       };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : evenDefaults;
+      // Multiplier: bets MULTUP/MULTDOWN — a leveraged position, not a
+      // fixed-duration contract. Flat stake (no martingale — doubling into
+      // an already-leveraged position compounds risk fast). takeProfit /
+      // stopLoss here are the SESSION target (same meaning as every other
+      // bot — total accumulated profit/loss before the bot pauses).
+      // positionTakeProfitRatio / positionStopLossRatio are per-trade
+      // limits expressed as a MULTIPLE OF STAKE (not a flat dollar amount)
+      // — e.g. 2.4 means "close this position once profit reaches 2.4x
+      // the stake". A flat-dollar limit doesn't scale: raise the stake and
+      // the same $5 target becomes a tiny fraction of it, so trades close
+      // (or should close) almost immediately for a much smaller relative
+      // win. Sizing both limits off the stake keeps the profit/stake ratio
+      // constant no matter what you stake — the actual $ sent to Deriv is
+      // computed at execution time as stake × ratio.
+      const multiplierDefaults = {
+        stake: 10, multiplierLevel: 150, positionTakeProfitRatio: 2.4, positionStopLossRatio: 1,
+        direction: 'auto', minSignal: 60, tickPeriod: 50, selectedMarket: '1HZ100V',
+        takeProfit: 50, stopLoss: 20, martingaleEnabled: false,
+        autoPilot: true, soundEnabled: true, autoRefresh: true,
+      };
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isMultiplierMode ? multiplierDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -11104,7 +11139,7 @@ window.NexusStrategies=exports;
       if (this.tickUnsub) this.tickUnsub();
       this.executionGuard = false;
       this.addLog('engine', 'RADAR', `Locked on ${market}`);
-      if (this.isPriceMode) this.priceHistory = []; // fresh price series for the new market
+      if (this.isPriceMode || this.isMultiplierMode) this.priceHistory = []; // fresh price series for the new market
       this.tickUnsub = this.socket.subscribe(market, (data) => {
         this.lastTickTime = Date.now();
         const fullHistory = this.socket.getHistory(market);
@@ -11155,7 +11190,7 @@ window.NexusStrategies=exports;
           }
         }
         let result;
-        if (this.isPriceMode) {
+        if (this.isPriceMode || this.isMultiplierMode) {
           // Own rolling price buffer — the shared socket's tickHistory only
           // stores last-digit (used by the digit bots), not the raw quote,
           // so RSI/Bollinger/EMA/ROC need their own price series here.
@@ -11193,6 +11228,34 @@ window.NexusStrategies=exports;
         }
         if (this.pendingTrade) this._predictiveCheck(data.digit);
         if (!this.state.active || this.state.isLocked || this.state.isCooldown) { this.emit(); return; }
+        if (this.isMultiplierMode) {
+          // A multiplier position stays open until it's sold or Deriv
+          // auto-closes it (position take-profit/stop-loss hit) — so unlike
+          // the fixed-duration bots, "locked" here just means "already have
+          // an open position", checked via state.openTrade instead of a
+          // ticks-remaining counter.
+          if (this.state.openTrade) { this.emit(); return; }
+          let dir = result.direction;
+          if (this.config.direction === 'up') dir = 'CALL';
+          else if (this.config.direction === 'down') dir = 'PUT';
+          const meetsSignal = this.config.direction !== 'auto' ? result.ready : (result.ready && dir && result.strength >= this.config.minSignal);
+          // Same 2-tick confirmation idea as Higher/Lower — a leveraged
+          // position amplifies both wins and losses, so it's worth extra
+          // care not to open one on a single noisy tick.
+          if (meetsSignal && dir) {
+            if (this._mpConfirmDir === dir) this._mpConfirmCount = (this._mpConfirmCount || 1) + 1;
+            else { this._mpConfirmDir = dir; this._mpConfirmCount = 1; }
+          } else {
+            this._mpConfirmDir = null; this._mpConfirmCount = 0;
+          }
+          if (meetsSignal && dir && this._mpConfirmCount >= 2) {
+            this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 UP' : '📉 DOWN'} signal ${result.strength}% (confirmed) — ${(result.reasons && result.reasons[0]) || ''}`);
+            this._mpConfirmCount = 0;
+            this.executeMultiplierPurchase(dir);
+          }
+          this.emit();
+          return;
+        }
         if (this.isPriceMode) {
           // Direction: follow the analyzer's signal in auto mode, or force
           // Higher/Lower if the operator overrode it — either way we still
@@ -11305,36 +11368,39 @@ window.NexusStrategies=exports;
             }
           }
         } else if (isOddStrat) {
-          // Odd Strategy 2026 (hybrid triggers): min percentage (hybrid
-          // score vs Min Signal %) gates whether a touch can arm at all;
-          // once armed, an even streak of Min Streak length inside the
-          // 6-tick window fires ODD immediately. The old hard 4-condition
-          // gate (green/blue ≥10.5% odd, red/yellow ≤8.6%/9.5% even) no
-          // longer blocks entry — it's still computed and shown in the
-          // radar for reference, but the live percentage is the real gate.
+          // Odd Strategy 2026 — two gates, no time limit:
+          // Gate 1: live percentage vs Min Signal % — has to be true before
+          // anything can arm.
+          // Gate 2: touch of the coldest even digit (the "red bar") — the
+          // moment that happens, the even-digit streak starts counting.
+          // As soon as that streak reaches Min Streak, it fires ODD
+          // immediately. No expiry — it just keeps waiting once armed.
           const os = result.oddStrategy || {};
           const pctGateOk = result.probability >= this.config.minSignal;
           let fired = false;
           if (this._oddArmed) {
-            this._oddArmTicksLeft--;
             if (streak >= this.config.minStreak) {
               fired = true;
-              this.strategyWaitReason = `ENTRY — ${streak}-even streak inside window, firing ODD`;
-              this._oddArmed = false; this._oddArmTicksLeft = 0;
-            } else if (os.isTouchingNow) {
-              // Fresh touch while still armed — refresh the window.
-              this._oddArmTicksLeft = 6;
-              this.strategyWaitReason = `Re-armed — touched digit ${os.coldEvenDigit} again, window refreshed`;
-            } else if (this._oddArmTicksLeft <= 0) {
+              this.strategyWaitReason = `ENTRY — ${streak}-even streak hit, firing ODD`;
               this._oddArmed = false;
-              this.strategyWaitReason = `Window expired — waiting for touch of digit ${os.coldEvenDigit ?? '—'} again`;
+            } else if (os.isTouchingNow) {
+              this.strategyWaitReason = `Touched digit ${os.coldEvenDigit} again — even streak ${streak}/${this.config.minStreak}`;
             } else {
-              this.strategyWaitReason = `Armed — ${this._oddArmTicksLeft} ticks left, even streak ${streak}/${this.config.minStreak}`;
+              this.strategyWaitReason = `Armed — even streak ${streak}/${this.config.minStreak}`;
             }
           } else if (pctGateOk && os.isTouchingNow) {
-            this._oddArmed = true; this._oddArmTicksLeft = this.config.armWindow || 6;
-            this.strategyWaitReason = `Armed — touched digit ${os.coldEvenDigit}, waiting for ${this.config.minStreak}-even streak within ${this.config.armWindow || 6} ticks`;
-            this.addLog('engine', 'ARM', this.strategyWaitReason);
+            this._oddArmed = true;
+            if (streak >= this.config.minStreak) {
+              // Gate 2 just opened on this exact tick AND the even-streak
+              // requirement is already satisfied right now — fire
+              // immediately instead of waiting for another tick to confirm.
+              fired = true;
+              this.strategyWaitReason = `ENTRY — ${streak}-even streak hit, firing ODD`;
+              this._oddArmed = false;
+            } else {
+              this.strategyWaitReason = `Armed — touched digit ${os.coldEvenDigit}, counting ${this.config.minStreak}-even streak`;
+              this.addLog('engine', 'ARM', this.strategyWaitReason);
+            }
           } else {
             this.strategyWaitReason = pctGateOk
               ? `Waiting for touch of digit ${os.coldEvenDigit ?? '—'}`
@@ -11366,36 +11432,39 @@ window.NexusStrategies=exports;
         } else if (isEvenStrat) {
           // Even Strategy (mirrored Odd Strategy 2026, hybrid triggers):
           // min percentage gates whether a touch of the coldest ODD digit
-          // can arm; once armed, an odd streak of Min Streak length inside
-          // the tick window fires EVEN immediately. Same shared shape data
-          // (result.shape) the hybrid analyzer now computes for this bot.
+          // can arm (Gate 2); once armed, an odd streak of Min Streak
+          // length fires EVEN immediately — no expiry. Same shared shape
+          // data (result.shape) the hybrid analyzer now computes for this bot.
           const shape = result.shape || {};
           const coldOddDigit = (shape.redPct != null && shape.yellowPct != null)
             ? (shape.redPct <= shape.yellowPct ? shape.red : shape.yellow)
             : null;
           const isTouchingNow = coldOddDigit != null && data.digit === coldOddDigit;
           const pctGateOk = result.probability >= this.config.minSignal;
-          const armWindow = this.config.armWindow || 6;
           let fired = false;
           if (this._evenArmed) {
-            this._evenArmTicksLeft--;
             if (streak >= this.config.minStreak) {
               fired = true;
-              this.strategyWaitReason = `ENTRY — ${streak}-odd streak inside window, firing EVEN`;
-              this._evenArmed = false; this._evenArmTicksLeft = 0;
-            } else if (isTouchingNow) {
-              this._evenArmTicksLeft = armWindow;
-              this.strategyWaitReason = `Re-armed — touched digit ${coldOddDigit} again, window refreshed`;
-            } else if (this._evenArmTicksLeft <= 0) {
+              this.strategyWaitReason = `ENTRY — ${streak}-odd streak hit, firing EVEN`;
               this._evenArmed = false;
-              this.strategyWaitReason = `Window expired — waiting for touch of digit ${coldOddDigit ?? '—'} again`;
+            } else if (isTouchingNow) {
+              this.strategyWaitReason = `Touched digit ${coldOddDigit} again — odd streak ${streak}/${this.config.minStreak}`;
             } else {
-              this.strategyWaitReason = `Armed — ${this._evenArmTicksLeft} ticks left, odd streak ${streak}/${this.config.minStreak}`;
+              this.strategyWaitReason = `Armed — odd streak ${streak}/${this.config.minStreak}`;
             }
           } else if (pctGateOk && isTouchingNow) {
-            this._evenArmed = true; this._evenArmTicksLeft = armWindow;
-            this.strategyWaitReason = `Armed — touched digit ${coldOddDigit}, waiting for ${this.config.minStreak}-odd streak within ${armWindow} ticks`;
-            this.addLog('engine', 'ARM', this.strategyWaitReason);
+            this._evenArmed = true;
+            if (streak >= this.config.minStreak) {
+              // Gate 2 just opened on this exact tick AND the odd-streak
+              // requirement is already satisfied right now — fire
+              // immediately instead of waiting for another tick to confirm.
+              fired = true;
+              this.strategyWaitReason = `ENTRY — ${streak}-odd streak hit, firing EVEN`;
+              this._evenArmed = false;
+            } else {
+              this.strategyWaitReason = `Armed — touched digit ${coldOddDigit}, counting ${this.config.minStreak}-odd streak`;
+              this.addLog('engine', 'ARM', this.strategyWaitReason);
+            }
           } else {
             this.strategyWaitReason = pctGateOk
               ? `Waiting for touch of digit ${coldOddDigit ?? '—'}`
@@ -11443,7 +11512,7 @@ window.NexusStrategies=exports;
     _predictiveCheck(digit) {
       const trade = this.pendingTrade;
       if (!trade || Date.now() - trade.entryTime < 200) return;
-      if (trade.contractType === 'CALL' || trade.contractType === 'PUT') return; // price-direction result isn't knowable from one digit
+      if (trade.contractType === 'CALL' || trade.contractType === 'PUT' || trade.contractType === 'MULTUP' || trade.contractType === 'MULTDOWN') return; // price-direction result isn't knowable from one digit
       let win = false;
       if (trade.contractType === 'DIGITODD') win = this.T.isOdd(digit);
       else if (trade.contractType === 'DIGITEVEN') win = this.T.isEven(digit);
@@ -11451,6 +11520,66 @@ window.NexusStrategies=exports;
       else if (trade.contractType === 'DIGITUNDER') win = digit < trade.barrier;
       else if (trade.contractType === 'DIGITMATCH') win = digit === trade.barrier;
       this.addLog('engine', 'PREDICT', `${win ? '✅ WIN' : '❌ LOSS'} predicted (digit ${digit})`);
+    }
+
+    // Multiplier positions are a different shape than every other contract
+    // here — no fixed duration, no barrier, flat stake (no martingale), and
+    // the take-profit/stop-loss is a per-position dollar limit sent to
+    // Deriv directly (limit_order) rather than something this app monitors
+    // itself. Kept as its own method instead of another branch inside
+    // executeBoltPurchase, which is already deeply branched for the
+    // fixed-duration bots' barrier/martingale/recovery logic.
+    executeMultiplierPurchase(direction) {
+      const st = this.state, cfg = this.config;
+      if (!st.active || this.executionGuard) return;
+      this.executionGuard = true;
+      const contractType = direction === 'PUT' ? 'MULTDOWN' : 'MULTUP';
+      this.pendingTrade = { contractType, barrier: 0, entryTime: Date.now() };
+      this._lastTradedBarrier = null;
+      this._lastTradedContractType = contractType;
+      this.lastTradeTime = Date.now();
+      const accountCurrency = window.HubStore.getState().currency || 'USD';
+      const params = {
+        amount: cfg.stake, basis: 'stake', contract_type: contractType,
+        currency: accountCurrency, symbol: cfg.selectedMarket, multiplier: cfg.multiplierLevel || 100,
+        limit_order: {
+          take_profit: Math.max(0.1, parseFloat(cfg.positionTakeProfit) || 5),
+          stop_loss: Math.max(0.1, parseFloat(cfg.positionStopLoss) || 5),
+        },
+      };
+      this.sound.playExecute();
+      this.addLog('engine', 'BOLT', `${contractType} @ ${cfg.stake.toFixed(2)} ${accountCurrency} · x${cfg.multiplierLevel || 100}`);
+      this.state = { ...this.state, isLocked: true };
+      this.state.openTrade = {
+        contractType, stake: cfg.stake, multiplier: cfg.multiplierLevel || 100,
+        market: cfg.selectedMarket, entrySpot: this.liveQuote ?? null, currentSpot: this.liveQuote ?? null,
+        profit: 0, takeProfit: params.limit_order.take_profit, stopLoss: params.limit_order.stop_loss,
+        firedAt: Date.now(),
+      };
+      this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: cfg.stake, parameters: params }));
+      // Stuck watchdog — same 45s safety net the fixed-duration bots use, in
+      // case the buy ack never arrives.
+      if (this.stuckWatchdog) clearTimeout(this.stuckWatchdog);
+      this.stuckWatchdog = setTimeout(() => {
+        if (!this.pendingTrade) return;
+        this.addLog('error', 'TRADE', 'No confirmation received for 45s — releasing trade lock so the engine can continue.');
+        this.pendingTrade = null;
+        this.state = { ...this.state, isLocked: false, openTrade: null };
+        this.executionGuard = false;
+        this.stuckWatchdog = null;
+        this.emit();
+      }, 45000);
+      this.emit();
+    }
+
+    // Manual close — sells the open multiplier position at market instead
+    // of waiting for the position's own take-profit/stop-loss to hit.
+    sellOpenMultiplierPosition() {
+      if (!this.state.openTrade || !this.state.openTrade.contractId || !this.tradingSocket) return;
+      try {
+        this.tradingSocket.send(JSON.stringify({ sell: this.state.openTrade.contractId, price: 0 }));
+        this.addLog('engine', 'CLOSE', 'Manual close requested');
+      } catch (_) {}
     }
 
     executeBoltPurchase() {
@@ -11967,7 +12096,7 @@ window.NexusStrategies=exports;
         contractId: contractKey,
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
         market: contract.underlying || this.config.selectedMarket,
-        barrier: this._lastTradedBarrier != null ? this._lastTradedBarrier : (contract.barrier !== undefined && contract.barrier !== null && contract.barrier !== '' ? parseInt(contract.barrier) : (this.config.overBarrier ?? 0)),
+        barrier: this.isMultiplierMode ? null : (this._lastTradedBarrier != null ? this._lastTradedBarrier : (contract.barrier !== undefined && contract.barrier !== null && contract.barrier !== '' ? parseInt(contract.barrier) : (this.config.overBarrier ?? 0))),
         contractType: this._lastTradedContractType || '',
         exitDigit: exitDigitResolved, entryDigit: entryDigitResolved,
         entrySpot: contract.entry_spot != null ? parseFloat(contract.entry_spot) : null,
@@ -12016,17 +12145,25 @@ window.NexusStrategies=exports;
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
       if (st.active) {
-        // Higher/Lower and Matches have no session-level TP/SL of their own
-        // anymore — they always defer to whatever is set in the
-        // Dashboard's master gate, read live so changes made mid-session
-        // apply immediately.
-        const isRiseFall = this.mode === 'risefall';
+        // Higher/Lower, Multiplier, and Matches have no session-level TP/SL
+        // of their own anymore — they always defer to whatever is set in
+        // the Dashboard's master gate, read live so changes made
+        // mid-session apply immediately.
+        const isRiseFall = this.mode === 'risefall' || this.mode === 'multiplier';
         const usesDashboardGate = isRiseFall || this.isMatchMode;
         const gate = usesDashboardGate && window.getMasterGateValues ? window.getMasterGateValues() : null;
         const tp = gate ? gate.tp : cfg.takeProfit;
         const sl = gate ? gate.sl : cfg.stopLoss;
         if (st.stats.profit >= tp) { this.addLog('win', 'AUTO', usesDashboardGate ? 'DASHBOARD TAKE PROFIT REACHED' : 'TAKE PROFIT REACHED'); showResultPopup('tp', tp, st.stats.profit); this.completeSession(true); return; }
         if (st.stats.profit <= -sl) { this.addLog('loss', 'AUTO', usesDashboardGate ? 'DASHBOARD STOP LOSS REACHED' : 'STOP LOSS REACHED'); showResultPopup('sl', sl, st.stats.profit); this.completeSession(false); return; }
+      }
+      if (this.isMultiplierMode) {
+        // No martingale/target-runs chaining here — flat stake, one
+        // position open at a time. Just release the lock so the tick
+        // handler goes back to scouting for the next signal.
+        this.executionGuard = false;
+        this.state = { ...this.state, isLocked: false };
+        return;
       }
       // Matches Strategy Two: "keep trading as digits appear until we win
       // or reach a certain max" — martingaleStep already counts consecutive
@@ -12221,12 +12358,16 @@ window.NexusStrategies=exports;
                 _titan.addLog('engine', 'QUEUE', `Early result queued for contract #${_c.contract_id}`);
               }
             } else if (_c && !_c.is_sold && _titan.state.openTrade) {
-              // Contract still running — mirror the server's live spot onto
-              // the open-trade widget (best-effort; some contract types omit
-              // current_spot, in which case the widget just keeps showing
-              // the tick count from our own feed instead).
+              // Contract still running — mirror the server's live spot (and,
+              // for Multiplier, live running profit) onto the open-trade
+              // widget. Best-effort: some contract types omit current_spot,
+              // in which case the widget just keeps showing the tick count
+              // from our own feed instead.
               const spot = _c.current_spot_display_value ?? _c.current_spot;
-              if (spot != null) _titan.state.openTrade = { ..._titan.state.openTrade, currentSpot: spot };
+              const patch = {};
+              if (spot != null) patch.currentSpot = spot;
+              if (_titan.isMultiplierMode && _c.profit != null) patch.profit = parseFloat(_c.profit);
+              if (Object.keys(patch).length) _titan.state.openTrade = { ..._titan.state.openTrade, ...patch };
               _titan.emit();
             }
           }
@@ -12242,6 +12383,7 @@ window.NexusStrategies=exports;
             } else if (data.buy && data.buy.contract_id) {
               const cid = data.buy.contract_id.toString();
               _titan.addLog('engine', 'CONFIRMED', `Contract #${cid} accepted @ ${data.buy.buy_price}`);
+              if (_titan.state.openTrade) _titan.state.openTrade = { ..._titan.state.openTrade, contractId: cid };
               // Check if we already got the result (early result race condition)
               if (_titan._earlyResults && _titan._earlyResults.has(cid)) {
                 const earlyResult = _titan._earlyResults.get(cid);
@@ -12361,7 +12503,7 @@ window.NexusStrategies=exports;
     _watchdog() {
       const now = Date.now();
       const tickStale = now - this.lastTickTime > 12000;
-      const tradeStuck = this.state.active && this.state.isLocked && now - this.lastTradeTime > 60000 && !this.pendingTrade;
+      const tradeStuck = !this.isMultiplierMode && this.state.active && this.state.isLocked && now - this.lastTradeTime > 60000 && !this.pendingTrade;
       if (tickStale || tradeStuck) {
         this.addLog('engine', 'WATCHDOG', `🚨 ${tickStale ? 'No ticks 12s' : 'No trade 60s'} — reconnecting`);
         const token = window.HubStore.getState().apiToken;
@@ -12652,19 +12794,17 @@ window.NexusStrategies=exports;
           ` : isOddStrat ? (() => {
             const armed = engine._oddArmed;
             const firing = snap.strategyPhase === 'firing';
-            const win = c.armWindow || 6;
             return `
           <div style="padding:8px 10px;border-radius:8px;background:${firing ? 'hsl(var(--win)/0.12)' : armed ? '#f5a62320' : 'hsl(var(--bg)/0.6)'};border:1px solid ${firing ? 'hsl(var(--win)/0.4)' : armed ? '#f5a62360' : 'hsl(var(--border)/0.4)'};text-align:center">
-            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">${firing ? 'ENTRY' : armed ? `ARMED · ${win}-TICK WINDOW` : 'ENTRY POINT · pct + touch + even-streak'}</div>
+            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">${firing ? 'ENTRY' : armed ? 'ARMED · COUNTING EVEN-STREAK' : 'ENTRY POINT · pct + touch + even-streak'}</div>
             <div style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:800;margin-top:3px;color:${firing ? 'hsl(var(--win))' : armed ? '#f5a623' : 'hsl(var(--foreground)/0.75)'}">${snap.strategyWaitReason || 'Analyzing…'}</div>
           </div>`;
           })() : isEvenBot ? (() => {
             const armed = engine._evenArmed;
             const firing = snap.strategyPhase === 'firing';
-            const win = c.armWindow || 6;
             return `
           <div style="padding:8px 10px;border-radius:8px;background:${firing ? 'hsl(var(--win)/0.12)' : armed ? '#f5a62320' : 'hsl(var(--bg)/0.6)'};border:1px solid ${firing ? 'hsl(var(--win)/0.4)' : armed ? '#f5a62360' : 'hsl(var(--border)/0.4)'};text-align:center">
-            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">${firing ? 'ENTRY' : armed ? `ARMED · ${win}-TICK WINDOW` : 'ENTRY POINT · pct + touch + odd-streak'}</div>
+            <div style="font-size:8px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">${firing ? 'ENTRY' : armed ? 'ARMED · COUNTING ODD-STREAK' : 'ENTRY POINT · pct + touch + odd-streak'}</div>
             <div style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:800;margin-top:3px;color:${firing ? 'hsl(var(--win))' : armed ? '#f5a623' : 'hsl(var(--foreground)/0.75)'}">${snap.strategyWaitReason || 'Analyzing…'}</div>
           </div>`;
           })() : ''}
@@ -12962,12 +13102,6 @@ window.NexusStrategies=exports;
           <span class="cp-input-label">Min Streak</span>
           <input class="cp-input" type="number" min="1" id="${rootId}-streak-in" value="${c.minStreak}">
         </div>
-        ${isOddStrat || isEvenStrat ? `
-        <div class="cp-input-group">
-          <span class="cp-input-label">Arm Window (ticks)</span>
-          <input class="cp-input" type="number" min="2" max="20" id="${rootId}-armwindow" value="${c.armWindow || 6}">
-        </div>
-        ` : ''}
       </div>
       ${isOver3 ? `
       <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
@@ -13176,7 +13310,7 @@ window.NexusStrategies=exports;
     // changed/blurred. Persisting to localStorage now happens only via
     // the navbar's global "SAVE SETTINGS" button (see saveAllSettings),
     // not from a per-tab button — this tab has none anymore.
-    [`${rootId}-stake`,`${rootId}-runs-in`,`${rootId}-signal`,`${rootId}-streak-in`,`${rootId}-armwindow`,`${rootId}-mult`].forEach(id => {
+    [`${rootId}-stake`,`${rootId}-runs-in`,`${rootId}-signal`,`${rootId}-streak-in`,`${rootId}-mult`].forEach(id => {
       const inp = el(id);
       if (inp) {
         inp.onchange = () => {
@@ -13185,13 +13319,11 @@ window.NexusStrategies=exports;
           const runsVal = parseInt(el(`${rootId}-runs-in`)?.value);
           const signalVal = parseInt(el(`${rootId}-signal`)?.value);
           const streakVal = parseInt(el(`${rootId}-streak-in`)?.value);
-          const armWindowVal = parseInt(el(`${rootId}-armwindow`)?.value);
           const multVal = parseFloat(el(`${rootId}-mult`)?.value);
           if (!isNaN(stakeVal) && stakeVal > 0) patch.stake = Math.max(0.01, stakeVal);
           if (!isNaN(runsVal) && runsVal > 0) patch.targetRuns = Math.max(1, runsVal);
           if (!isNaN(signalVal)) patch.minSignal = Math.min(100, Math.max(0, signalVal));
           if (!isNaN(streakVal) && streakVal > 0) patch.minStreak = Math.max(1, streakVal);
-          if (!isNaN(armWindowVal) && armWindowVal > 0) patch.armWindow = Math.min(20, Math.max(2, armWindowVal));
           if (!isNaN(multVal) && multVal >= 1.01) patch.martingaleMultiplier = multVal;
           if (Object.keys(patch).length) engine.setConfig(patch);
         };
@@ -14191,6 +14323,7 @@ window.NexusStrategies=exports;
     risefall: { label: 'Higher/Lower Bot', dot: 'hsl(var(--win))' },
     updown: { label: 'Ups & Downs Bot', dot: 'hsl(var(--secondary))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
+    multiplier: { label: 'Multiplier Bot', dot: 'hsl(var(--accent))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -14982,7 +15115,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches'];
+    const botIds = ['even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches', 'multiplier'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -16090,7 +16223,7 @@ window.NexusStrategies=exports;
     const call = a.callScore || 0, put = a.putScore || 0, maxScore = Math.max(1, call, put);
     const strength = a.strength || 0;
     const dir = a.direction;
-    const dirLabel = dir === 'CALL' ? '📈 HIGHER' : dir === 'PUT' ? '📉 LOWER' : '— NEUTRAL —';
+    const dirLabel = dir === 'CALL' ? (engine.isMultiplierMode ? '📈 MULTUP' : '📈 HIGHER') : dir === 'PUT' ? (engine.isMultiplierMode ? '📉 MULTDOWN' : '📉 LOWER') : '— NEUTRAL —';
     const dirColor = dir === 'CALL' ? '#00e676' : dir === 'PUT' ? '#ff5252' : '#8a8f98';
     const circumference = 2 * Math.PI * 44;
     const ringOffset = circumference - (strength / 100) * circumference;
@@ -16248,9 +16381,32 @@ window.NexusStrategies=exports;
 
       ${s.openTrade ? (() => {
         const ot = s.openTrade;
+        const isMultiplierPos = engine.isMultiplierMode;
+        const isCall = ot.contractType === 'CALL' || ot.contractType === 'MULTUP';
+        const oColor = isMultiplierPos ? ((ot.profit || 0) >= 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))') : (isCall ? 'hsl(var(--win))' : 'hsl(var(--loss))');
+        if (isMultiplierPos) {
+          return `<div class="cp-card" style="margin-top:10px;border:1.5px solid ${oColor}55;background:${oColor}0d">
+            <div class="cp-section-label" style="display:flex;align-items:center;justify-content:space-between">
+              <span>🔴 OPEN POSITION</span>
+              <span style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${ot.market || ''}</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 6px">
+              <span style="font-family:'Outfit',sans-serif;font-weight:800;font-size:13px;color:${oColor}">${isCall ? '📈 MULTUP' : '📉 MULTDOWN'} · x${ot.multiplier || 100}</span>
+              <span style="font-family:'DM Mono',monospace;font-size:11px;color:hsl(var(--muted-foreground))">Stake $${(ot.stake||0).toFixed(2)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+              <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--muted-foreground))">Live P&amp;L</span>
+              <span style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:900;color:${oColor}">${(ot.profit||0)>=0?'+':''}$${(ot.profit||0).toFixed(2)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">
+              <span>TP +$${(ot.takeProfit||0).toFixed(2)}</span>
+              <span>SL -$${(ot.stopLoss||0).toFixed(2)}</span>
+              ${ot.currentSpot != null ? `<span>Spot: ${ot.currentSpot}</span>` : ''}
+            </div>
+            <button id="${rootId}-close-position" style="width:100%;padding:8px;border-radius:10px;border:1px solid ${oColor}55;background:${oColor}14;color:${oColor};font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px;cursor:pointer">✕ CLOSE POSITION NOW</button>
+          </div>`;
+        }
         const pct = Math.min(100, (ot.ticksElapsed / Math.max(1, ot.durationTicks)) * 100);
-        const isCall = ot.contractType === 'CALL';
-        const oColor = isCall ? 'hsl(var(--win))' : 'hsl(var(--loss))';
         return `<div class="cp-card" style="margin-top:10px;border:1.5px solid ${oColor}55;background:${oColor}0d">
           <div class="cp-section-label" style="display:flex;align-items:center;justify-content:space-between">
             <span>🔴 OPEN POSITION</span>
@@ -16291,12 +16447,22 @@ window.NexusStrategies=exports;
         <div class="cp-section-label">Trade Settings</div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Stake</span><input class="cp-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Duration (ticks)</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-duration" value="${c.duration}"></div>
+          ${engine.isMultiplierMode
+            ? `<div class="cp-input-group"><span class="cp-input-label">Multiplier Level (×)</span><input class="cp-input" type="number" min="1" max="1000" step="1" id="${rootId}-multlevel" value="${c.multiplierLevel || 100}"></div>`
+            : `<div class="cp-input-group"><span class="cp-input-label">Duration (ticks)</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-duration" value="${c.duration}"></div>`}
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Target Runs</span><input class="cp-input" type="number" min="1" id="${rootId}-runs-in" value="${targetRuns}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Min Signal %</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-signal" value="${c.minSignal}"></div>
         </div>
+        ${engine.isMultiplierMode ? `
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Position Take Profit ($)</span><input class="cp-input" type="number" step="0.1" min="0.1" id="${rootId}-postp" value="${c.positionTakeProfit ?? 5}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Position Stop Loss ($)</span><input class="cp-input" type="number" step="0.1" min="0.1" id="${rootId}-possl" value="${c.positionStopLoss ?? 5}"></div>
+        </div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:8px 9px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid hsl(var(--primary)/0.4);margin-bottom:2px">
+          Sent to Deriv as a <b>limit order</b> on the position itself, so it closes on its own take-profit/stop-loss even if this tab is closed. Separate from the session Take Profit / Stop Loss below.
+        </div>` : ''}
         <div class="cp-input-group">
           <span class="cp-input-label">Direction</span>
           ${engine.fixedDirection ? `
@@ -16305,13 +16471,13 @@ window.NexusStrategies=exports;
           </div>` : `
           <select class="cp-input" id="${rootId}-direction">
             <option value="auto" ${c.direction==='auto'?'selected':''}>Auto</option>
-            <option value="higher" ${c.direction==='higher'?'selected':''}>Higher only</option>
-            <option value="lower" ${c.direction==='lower'?'selected':''}>Lower only</option>
+            <option value="higher" ${c.direction==='higher'?'selected':''}>${engine.isMultiplierMode ? 'Up only' : 'Higher only'}</option>
+            <option value="lower" ${c.direction==='lower'?'selected':''}>${engine.isMultiplierMode ? 'Down only' : 'Lower only'}</option>
           </select>`}
         </div>
       </div>
 
-      <div class="cp-card">
+      <div class="cp-card" style="${engine.isMultiplierMode ? 'display:none' : ''}">
         <div class="cp-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
           <div class="cp-section-label" style="margin:0">Martingale</div>
           <button class="titan-toggle ${c.martingaleEnabled?'on':''}" id="${rootId}-mg-toggle"></button>
@@ -16330,7 +16496,7 @@ window.NexusStrategies=exports;
           <span style="font-size:8px;font-family:'DM Mono',monospace;letter-spacing:1px;color:hsl(var(--primary));background:hsl(var(--primary)/0.1);border:1px solid hsl(var(--primary)/0.3);padding:2px 7px;border-radius:20px">DASHBOARD-CONTROLLED</span>
         </div>
         <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
-          Higher/Lower no longer has its own Take Profit / Stop Loss — it always follows the master gate set on the Dashboard, live, even mid-session.
+          This bot doesn't have its own session Take Profit / Stop Loss — it always follows the master gate set on the Dashboard, live, even mid-session.${engine.isMultiplierMode ? ' (Separate from the per-position TP/SL above, which Deriv enforces directly on the open position.)' : ''}
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group">
@@ -16358,14 +16524,26 @@ window.NexusStrategies=exports;
       // "SAVE SETTINGS" button) persists anything to disk.
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
       el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
-      el(`${rootId}-duration`, host).onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); };
+      const durationEl = el(`${rootId}-duration`, host);
+      if (durationEl) durationEl.onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); };
+      const multLevelEl = el(`${rootId}-multlevel`, host);
+      if (multLevelEl) multLevelEl.onchange = (e) => { engine.setConfig({ multiplierLevel: Math.max(1, parseInt(e.target.value) || 100) }); };
+      const posTpEl = el(`${rootId}-postp`, host);
+      if (posTpEl) posTpEl.onchange = (e) => { engine.setConfig({ positionTakeProfit: Math.max(0.1, parseFloat(e.target.value) || 5) }); };
+      const posSlEl = el(`${rootId}-possl`, host);
+      if (posSlEl) posSlEl.onchange = (e) => { engine.setConfig({ positionStopLoss: Math.max(0.1, parseFloat(e.target.value) || 5) }); };
+      const closePosBtn = el(`${rootId}-close-position`, host);
+      if (closePosBtn) closePosBtn.onclick = () => { if (engine.sellOpenMultiplierPosition) engine.sellOpenMultiplierPosition(); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
       const dirSel = el(`${rootId}-direction`, host);
       if (dirSel) dirSel.onchange = (e) => { engine.setConfig({ direction: e.target.value }); };
-      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); };
-      el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
-      el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
+      const mgToggleEl = el(`${rootId}-mg-toggle`, host);
+      if (mgToggleEl) mgToggleEl.onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); };
+      const multEl = el(`${rootId}-mult`, host);
+      if (multEl) multEl.onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
+      const stopStepEl = el(`${rootId}-stop-step`, host);
+      if (stopStepEl) stopStepEl.onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
       const gotoDashBtn = el(`${rootId}-goto-dash`, host);
       if (gotoDashBtn) gotoDashBtn.onclick = () => { if (window.UnifiedHub) window.UnifiedHub.switchApp('dashboard'); };
       // Keep the master-gate readouts live even while this panel sits open
@@ -16461,14 +16639,15 @@ window.NexusStrategies=exports;
         </div>` :
         journal.slice(0,60).map(j => {
           const isWin = j.type === 'win';
-          const isCall = j.contractType === 'CALL';
+          const isCall = j.contractType === 'CALL' || j.contractType === 'MULTUP';
+          const isMultJournal = j.contractType === 'MULTUP' || j.contractType === 'MULTDOWN';
           const dirColor = isCall ? 'hsl(var(--win))' : 'hsl(var(--loss))';
           const entrySpot = j.entrySpot != null ? j.entrySpot.toFixed(4) : '—';
           const exitSpot = j.exitSpot != null ? j.exitSpot.toFixed(4) : '—';
           return `<div class="jnl-entry ${isWin?'win':'loss'}">
             <div class="jnl-top-row">
               <span class="jnl-badge ${isWin?'win':'loss'}">${isWin?'✓':'✕'}</span>
-              <span class="jnl-ct-pill" style="background:${dirColor}15;color:${dirColor};border:1.5px solid ${dirColor}44">${isCall?'📈 HIGHER':'📉 LOWER'}</span>
+              <span class="jnl-ct-pill" style="background:${dirColor}15;color:${dirColor};border:1.5px solid ${dirColor}44">${isMultJournal ? (isCall?'📈 MULTUP':'📉 MULTDOWN') : (isCall?'📈 HIGHER':'📉 LOWER')}</span>
               ${j.inRecovery ? `<span class="jnl-rec-tag">${j.recoveryMode||'REC'}</span>` : ''}
               <span style="margin-left:auto;font-size:9px;font-family:'DM Mono',monospace;font-weight:800;color:${isWin?'hsl(var(--win))':'hsl(var(--loss))'}">${(j.profit>=0?'+':'')}$${Math.abs(j.profit).toFixed(2)}</span>
             </div>
@@ -16873,10 +17052,9 @@ window.NexusStrategies=exports;
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Min Signal %</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-signal" value="${c.minSignal}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Tick Window</span><input class="cp-input" type="number" min="20" max="100" id="${rootId}-tickperiod" value="${c.tickPeriod}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Number of Ticks</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-ticks" value="${c.numTicks || 2}"></div>
         </div>
         <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Number of Ticks</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-ticks" value="${c.numTicks || 2}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Cooldown Between Trades (ticks)</span><input class="cp-input" type="number" min="0" max="20" id="${rootId}-tradegap" value="${c.matchesCooldownTicks ?? 3}"></div>
         </div>
       </div>
@@ -16949,7 +17127,6 @@ window.NexusStrategies=exports;
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
       el(`${rootId}-ticks`, host).onchange = (e) => { engine.setConfig({ numTicks: Math.min(10, Math.max(1, parseInt(e.target.value) || 2)) }); };
       el(`${rootId}-tradegap`, host).onchange = (e) => { engine.setConfig({ matchesCooldownTicks: Math.min(20, Math.max(0, parseInt(e.target.value) || 0)) }); };
-      el(`${rootId}-tickperiod`, host).onchange = (e) => { engine.setConfig({ tickPeriod: Math.min(100, Math.max(20, parseInt(e.target.value) || 50)) }); };
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
@@ -17109,7 +17286,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches'];
+  const BOT_IDS = ['even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches', 'multiplier'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -17121,7 +17298,7 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches'];
+  const VALID_APPS = ['dashboard', 'even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches', 'multiplier'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
@@ -17149,9 +17326,10 @@ window.NexusStrategies=exports;
     const isOU = isOver || isUnder;
     const isRiseFall = id === 'risefall' || id === 'updown';
     const isMatches = id === 'matches';
+    const isMultiplier = id === 'multiplier';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
-    const safeSocket = (isOU || isRiseFall ? window.NexusSocket : window.EvenSocket)
+    const safeSocket = (isOU || isRiseFall || isMultiplier ? window.NexusSocket : window.EvenSocket)
       || { globalSocket: null };
     // Higher/Lower gets its OWN scanner (RiseFallScanner) that ranks markets
     // by price-trend/RSI/Bollinger confluence via RiseFallAnalyzer — the same
@@ -17160,12 +17338,26 @@ window.NexusStrategies=exports;
     // for a price-direction (CALL/PUT) bot and left "best market" completely
     // disconnected from what the signal engine actually believed.
     const scannerFallback = { MarketScanner: class { constructor(cb){this._cb=cb;} setTickPeriod(){} async start(){} getBestMarket(){return null;} getGoldenMarkets(){return [];} getAllMarkets(){return [];} } };
-    const safeScanner = isRiseFall
+    const safeScanner = isRiseFall || isMultiplier
       ? (window.RiseFallScanner || scannerFallback)
       : isMatches
       ? (window.MatchesScanner || scannerFallback)
       : (isOU ? window.NexusScanner : window.EvenScanner) || scannerFallback;
-    const opts = isMatches
+    const opts = isMultiplier
+      ? {
+          // Multiplier bets MULTUP/MULTDOWN — a leveraged position rather
+          // than a fixed-duration digit/direction contract. It reuses the
+          // exact same price-trend/RSI/Bollinger/momentum analyzer as
+          // Higher/Lower for its strategy signal (mode: 'multiplier' inside
+          // TitanEngine already branches execution to
+          // executeMultiplierPurchase / sellOpenMultiplierPosition), so it
+          // shares Higher/Lower's market socket + scanner too.
+          id, mode: 'multiplier', fixedTradeMode: null, botLabel: 'Multiplier Bot',
+          fixedDirection: null, fixedMarket: null,
+          trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
+          strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
+        }
+      : isMatches
       ? {
           // Matches gets its own frequency-based analyzer/scanner (digit
           // ticks only, no barrier/parity math) but shares the Even/Odd
@@ -17217,9 +17409,9 @@ window.NexusStrategies=exports;
     eng.onUpdate = function () {
       const rootId = id + '-root';
       if (activeApp === id && titanBuilt[id]) {
-        if (isRiseFall && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
+        if ((isRiseFall || isMultiplier) && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
         else if (isMatches && window.MatchesUI) window.MatchesUI.renderLive(eng, rootId, opts.botLabel);
-        else if (!isRiseFall && !isMatches && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
+        else if (!isRiseFall && !isMatches && !isMultiplier && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
       }
       if (activeApp === 'dashboard') queueDashboardRender();
     };
@@ -17231,8 +17423,8 @@ window.NexusStrategies=exports;
   function initBotTab(id) {
     const eng = ensureTitanEngine(id);
     if (!eng) return;
-    if (id === 'risefall' || id === 'updown') {
-      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', id === 'updown' ? 'UPS & DOWNS' : 'HIGHER/LOWER BOT');
+    if (id === 'risefall' || id === 'updown' || id === 'multiplier') {
+      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', id === 'updown' ? 'UPS & DOWNS' : id === 'multiplier' ? 'MULTIPLIER BOT' : 'HIGHER/LOWER BOT');
       titanBuilt[id] = true;
       return;
     }
@@ -17570,9 +17762,11 @@ window.NexusStrategies=exports;
 
     if (pnl <= -Math.abs(slVal)) {
       _gateTriggered = true;
+      if (window.showResultPopup) window.showResultPopup('sl', Math.abs(slVal), pnl);
       terminateAllEngines(`LOSS GATE -$${Math.abs(slVal).toFixed(2)}`);
     } else if (pnl >= Math.abs(tpVal)) {
       _gateTriggered = true;
+      if (window.showResultPopup) window.showResultPopup('tp', Math.abs(tpVal), pnl);
       terminateAllEngines(`PROFIT GATE +$${Math.abs(tpVal).toFixed(2)}`);
     } else {
       // Update badge with live P&L
@@ -17741,7 +17935,7 @@ window.NexusStrategies=exports;
         savedAny = true;
       }
     } catch (e) { console.error('[Hub] Differ save error:', e); }
-    ['even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches'].forEach((id) => {
+    ['even', 'odd', 'nexus', 'under', 'risefall', 'updown', 'matches', 'multiplier'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
         try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
