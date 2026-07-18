@@ -9432,6 +9432,155 @@ function analyzeOver3Condition(history, tickPeriod = 50, minStreak = 3, minSigna
 }
 
 /**
+ * UNDER 7 — the vice-versa mirror of analyzeOver3Condition above, built for
+ * the Under bot at its own default barrier (7) instead of reusing Over's
+ * barrier-3 zone. Previously the Under bot had NO equivalent of this
+ * enhanced streak+bar-placement gate at all — it always fell back to the
+ * generic analyzeDigits() scoring, even at its own default settings, so
+ * "same strategy, vice versa" wasn't actually true. This fixes that.
+ *
+ * Mirroring rule: Under wins on digit < barrier, so its LOSE zone is
+ * [barrier..9] (barrier=7 → [7,8,9]) — the mirror of Over's LOSE zone
+ * [0..barrier] (barrier=3 → [0,1,2,3]). Everywhere Over-3 checked "is this
+ * digit in the WIN zone [4-9] and odd (5,7,9)", Under-7 checks "is this
+ * digit in the WIN zone [0-6] and odd (1,3,5)" — the odd digits reflect
+ * around the same center, just on Under's side of the barrier. Everywhere
+ * Over-3 required a streak of LOSE-zone digits ending on 1 or 3, Under-7
+ * requires a streak of LOSE-zone digits ending on 7 or 9 (its zone's own
+ * odd members).
+ */
+function analyzeUnderZoneCondition(history, tickPeriod = 50, minStreak = 3, minSignal = 55, barrier = 7) {
+  const data = history.slice(-tickPeriod);
+  const ZONE = []; // lose zone: barrier..9
+  for (let d = barrier; d <= 9; d++) ZONE.push(d);
+  const WIN_ODD = [1, 3, 5]; // odd digits inside the win zone [0..barrier-1] — mirror of Over-3's 5,7,9
+
+  const empty = {
+    probability: 0,
+    digitCounts: Array(10).fill(0),
+    digitPercentages: Array(10).fill(0),
+    frequencies: Array.from({ length: 10 }, (_, i) => ({ digit: i, count: 0, percentage: 0 })),
+    hotDigits: [], coldDigits: [],
+    trendScore: 50, momentumScore: 50, volatilityIndex: 50, overDigitWeight: 50,
+    conditions: { stablePattern: false, dominantOdd: false, momentumUp: false, lowVolatility: false, rareDigits: false },
+    recommendation: 'HOLD', bestBarrier: barrier,
+    over3: {
+      ready: false, marketGood: false, marketAcceptable: false, coreOk: false, canEnter: false,
+      reason: 'Collecting ticks…', greenDigit: -1, redDigit: -1, zoneUnder10: false,
+      greenOutsideZone: false, redOutsideZone: false, greenIsOdd: false, redIsOdd: false,
+      lastDigit: -1, zoneTrend: {},
+      underStreak: 0, minStreak, minSignal, pctGateOk: false, streakGateOk: false, endDigitOk: false,
+    },
+  };
+  if (data.length < 10) return empty;
+
+  const counts = Array(10).fill(0);
+  data.forEach((d) => counts[d]++);
+  const percentages = counts.map((c) => (c / data.length) * 100);
+  const frequencies = counts.map((c, i) => ({ digit: i, count: c, percentage: percentages[i] }));
+
+  let greenDigit = 0, redDigit = 0;
+  for (let i = 1; i < 10; i++) {
+    if (percentages[i] > percentages[greenDigit]) greenDigit = i;
+    if (percentages[i] < percentages[redDigit]) redDigit = i;
+  }
+  const isOddTarget = (d) => WIN_ODD.includes(d);
+
+  const zoneUnder10 = ZONE.every((d) => percentages[d] < 10);
+  const greenOutsideZone = !ZONE.includes(greenDigit);
+  const redOutsideZone = !ZONE.includes(redDigit);
+  const greenIsOdd = isOddTarget(greenDigit);
+  const redIsOdd = isOddTarget(redDigit);
+  const coreOk = greenOutsideZone && redOutsideZone && greenIsOdd && redIsOdd;
+  const marketGood = coreOk && zoneUnder10;
+  const marketAcceptable = coreOk && !zoneUnder10;
+
+  const half = Math.floor(data.length / 2);
+  const firstHalf = data.slice(0, half);
+  const secondHalf = data.slice(half);
+  const pctIn = (arr, d) => (arr.length ? (arr.filter((x) => x === d).length / arr.length) * 100 : 0);
+  const zoneTrend = {};
+  ZONE.forEach((d) => {
+    const p1 = pctIn(firstHalf, d), p2 = pctIn(secondHalf, d);
+    zoneTrend[d] = { first: p1, second: p2, direction: p2 > p1 + 1 ? 'increasing' : p2 < p1 - 1 ? 'decreasing' : 'flat' };
+  });
+
+  const overDigitWeight = percentages.filter((_, i) => i < barrier).reduce((a, b) => a + b, 0);
+
+  const isTarget = (d) => d < barrier; // Under's actual win condition
+  const recentWeight = 3;
+  let weightedTargetCount = 0, totalWeight = 0;
+  data.forEach((digit, index) => {
+    const weight = index < data.length / 2 ? 1 : recentWeight;
+    totalWeight += weight;
+    if (isTarget(digit)) weightedTargetCount += weight;
+  });
+  const trendScore = (weightedTargetCount / totalWeight) * 100;
+  const recentSlice = data.slice(-10);
+  const previousSlice = data.slice(-20, -10);
+  const recentTargetRate = recentSlice.filter(isTarget).length / recentSlice.length;
+  const previousTargetRate = previousSlice.length > 0 ? previousSlice.filter(isTarget).length / previousSlice.length : 0.5;
+  const momentumScore = ((recentTargetRate - previousTargetRate) + 1) * 50;
+  const volatility = calculateVolatility(data);
+  const volatilityIndex = Math.max(0, 100 - volatility * 10);
+  const coldDigits = percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct < 8).map((d) => d.digit);
+  const rareDigits = coldDigits.length >= 4;
+  const stablePattern = data.length >= 25;
+
+  const shapeScore = (greenOutsideZone ? 12.5 : 4) + (redOutsideZone ? 12.5 : 4) + (greenIsOdd ? 12.5 : 4) + (redIsOdd ? 12.5 : 4);
+  const probability = computeHybridProbability({
+    shapeScore, oddDigitWeight: overDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern,
+  });
+
+  // ENTRY DECISION — mirror of Over-3's: streak of LOSE-zone digits
+  // (>= barrier here, vs <= barrier for Over) must reach minStreak AND end
+  // on an odd digit that itself sits inside the lose zone (7 or 9 for
+  // barrier=7, vs 1 or 3 for Over's barrier=3).
+  let underStreak = 0;
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (data[i] >= barrier) underStreak++;
+    else break;
+  }
+  const lastDigit = data[data.length - 1];
+  const zoneOdd = ZONE.filter((d) => d % 2 === 1);
+  const endDigitOk = zoneOdd.includes(lastDigit);
+  const pctGateOk = probability >= minSignal;
+  const streakGateOk = underStreak >= minStreak;
+  const canEnter = pctGateOk && streakGateOk && endDigitOk;
+
+  let reason;
+  if (!pctGateOk) reason = `Signal ${Math.round(probability)}% / needs ${minSignal}%`;
+  else if (!streakGateOk) reason = `Over-zone streak ${underStreak}/${minStreak}`;
+  else if (!endDigitOk) reason = `Streak ready (${underStreak}) — waiting for it to end on ${zoneOdd.join(' or ')} (last: ${lastDigit})`;
+  else reason = `ENTRY — ${underStreak}-streak ended on ${lastDigit}, signal ${Math.round(probability)}%`;
+
+  const over3 = {
+    ready: true, marketGood, marketAcceptable, coreOk, canEnter, reason,
+    greenDigit, redDigit, zoneUnder10, greenOutsideZone, redOutsideZone,
+    greenIsOdd, redIsOdd, lastDigit, zoneTrend,
+    underStreak, minStreak, minSignal, pctGateOk, streakGateOk, endDigitOk,
+  };
+
+  return {
+    probability,
+    digitCounts: counts,
+    digitPercentages: percentages,
+    frequencies,
+    hotDigits: percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct > 15).map((d) => d.digit),
+    coldDigits: percentages.map((p, i) => ({ digit: i, pct: p })).filter((d) => d.pct < 8).map((d) => d.digit),
+    trendScore: Math.round(trendScore), momentumScore: Math.round(momentumScore), volatilityIndex: Math.round(volatilityIndex),
+    overDigitWeight: Math.round(overDigitWeight),
+    conditions: {
+      stablePattern, dominantOdd: greenIsOdd, momentumUp: momentumScore > 55,
+      lowVolatility: volatilityIndex > 50, rareDigits,
+    },
+    recommendation: probability >= 85 ? 'STRONG_BUY' : probability >= 70 ? 'BUY' : probability < 50 ? 'AVOID' : 'HOLD',
+    bestBarrier: barrier,
+    over3: { ...over3, shapeScore },
+  };
+}
+
+/**
  * Single source of truth for "how good is this market for Over 3", used
  * BOTH by the live analyzer above (for the currently-selected market) and
  * by the Top Markets scanner (for every other market) — so the percentage
@@ -9668,6 +9817,7 @@ function createLogEntry(
 exports.MARKETS = MARKETS;
 exports.analyzeDigits = analyzeDigits;
 exports.analyzeOver3Condition = analyzeOver3Condition;
+exports.analyzeUnderZoneCondition = analyzeUnderZoneCondition;
 exports.scoreOver3Market = scoreOver3Market;
 exports.calculateVolatility = calculateVolatility;
 exports.getEmptyAnalysis = getEmptyAnalysis;
@@ -9852,7 +10002,7 @@ window.NexusTrading = exports;
 (function () {
   'use strict';
   function createMarketScanner(Trading, Socket, ns) {
-    const { analyzeDigits, analyzeOver3Condition, scoreOver3Market, MARKETS } = Trading;
+    const { analyzeDigits, analyzeOver3Condition, analyzeUnderZoneCondition, scoreOver3Market, MARKETS } = Trading;
     const { globalSocket } = Socket;
 
     class MarketScanner {
@@ -9869,6 +10019,9 @@ window.NexusTrading = exports;
         // feeds "Top Markets" and the golden-market pool that autopilot
         // switches into once the current market goes cold.
         this.isOver3Scan = barrier === 3 && !isUnder && !!analyzeOver3Condition;
+        // Vice-versa mirror for Under at its own default barrier (7) — same
+        // green/red-bar quality scoring, just built for Under's own zone.
+        this.isUnderZoneScan = barrier === 7 && !!isUnder && !!analyzeUnderZoneCondition;
         this.marketData = new Map();
         this.unsubscribes = [];
         this.tickPeriod = 50;
@@ -9889,6 +10042,7 @@ window.NexusTrading = exports;
         this.barrier = barrier;
         this.isUnder = !!isUnder;
         this.isOver3Scan = this.barrier === 3 && !this.isUnder && !!analyzeOver3Condition;
+        this.isUnderZoneScan = this.barrier === 7 && !!this.isUnder && !!analyzeUnderZoneCondition;
       }
 
       async start() {
@@ -9913,9 +10067,11 @@ window.NexusTrading = exports;
         if (market.history.length >= 10) {
           market.analysis = this.isOver3Scan
             ? analyzeOver3Condition(market.history, this.tickPeriod)
+            : this.isUnderZoneScan
+            ? analyzeUnderZoneCondition(market.history, this.tickPeriod, 3, 55, this.barrier)
             : analyzeDigits(market.history, this.tickPeriod, this.barrier, this.isUnder);
           market.score = this.calculateScore(market);
-          market.isGolden = this.isOver3Scan
+          market.isGolden = (this.isOver3Scan || this.isUnderZoneScan)
             ? !!(market.analysis.over3 && (market.analysis.over3.marketGood || market.analysis.over3.marketAcceptable) &&
                  (!market.health || market.health.longTerm !== 'POOR'))
             : (market.health && market.health.longTerm === 'HEALTHY' &&
@@ -11004,7 +11160,24 @@ window.NexusStrategies=exports;
         martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 3,
         autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         soundEnabled: true, autoRefresh: true, direction: 'auto',
+        // confirmTicks: how many CONSECUTIVE ticks the signal must hold the
+        // same direction before firing (was hardcoded to 2 for every
+        // risefall-mode bot). minConfidence: a second, independent gate on
+        // top of minSignal — minSignal checks the score's raw strength,
+        // minConfidence checks how LOPSIDED callScore vs putScore is (i.e.
+        // how clean the read is, not just how strong). Requiring both
+        // stops a noisy near-tie (e.g. callScore 6 / putScore 5, which
+        // clears a strength gate but is barely a real signal) from firing.
+        confirmTicks: 2, minConfidence: 0,
       };
+      // Ups & Downs (id 'updown') is a second, independent risefall
+      // instance that scans every market at once, so in aggregate it fires
+      // far more often than a single-market Higher/Lower bot even though
+      // each individual trade passes the identical analyzer. Give it a
+      // stricter default gate out of the box: one more tick of
+      // confirmation, a higher strength floor, and a confidence floor that
+      // Higher/Lower doesn't enforce at all (0 = off).
+      const updownDefaults = { ...risefallDefaults, minSignal: 72, confirmTicks: 3, minConfidence: 65 };
       // Matches (DIGITMATCH): bets one predicted digit (0-9) each tick.
       // preset selects which heuristic picks the digit: 'auto' (chase the
       // statistically hottest digit live), 'prediction2' / 'prediction4'
@@ -11042,7 +11215,7 @@ window.NexusStrategies=exports;
         takeProfit: 50, stopLoss: 20, martingaleEnabled: false,
         autoPilot: true, soundEnabled: true, autoRefresh: true,
       };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isMultiplierMode ? multiplierDefaults : evenDefaults;
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? (this.id === 'updown' ? updownDefaults : risefallDefaults) : this.isMatchMode ? matchesDefaults : this.isMultiplierMode ? multiplierDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -11152,6 +11325,11 @@ window.NexusStrategies=exports;
         // Over 3 runs on the green/red-bar market-condition analysis instead
         // of streak counting — no streak to compute or gate on here at all.
         const isOver3 = this.mode === 'over' && this.config.overBarrier === 3;
+        // Under's own vice-versa version of Over 3, gated the same way —
+        // only kicks in at Under's own default barrier (7) — so Under gets
+        // the same quality of enhanced entry gate Over gets, without you
+        // having to move off barrier 7.
+        const isUnderZone = this.mode === 'under' && this.config.overBarrier === 7;
         // Odd Strategy 2026 — top-2/bottom-2 bar market analysis + touch/
         // arm/window entry. Odd Bot only; Even Bot keeps its existing logic.
         const isOddStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'odd';
@@ -11164,6 +11342,13 @@ window.NexusStrategies=exports;
           // min percentage check below.
           for (let i = fullHistory.length - 1; i >= 0; i--) {
             if (fullHistory[i] <= 3) streak++;
+            else break;
+          }
+        } else if (isUnderZone) {
+          // Mirror of the above: Over-zone (digit >= 7) streak, fire UNDER
+          // once it ends specifically on digit 7 or 9 (not 8).
+          for (let i = fullHistory.length - 1; i >= 0; i--) {
+            if (fullHistory[i] >= 7) streak++;
             else break;
           }
         } else if (this.mode === 'evenodd') {
@@ -11214,6 +11399,9 @@ window.NexusStrategies=exports;
           // flicker) made the panel look stuck/behind reality even though
           // actual firing below always used fresh per-tick data. Bypass the
           // hold here so what's on screen never lags what's about to fire.
+          this.analysis = result;
+        } else if (isUnderZone) {
+          result = this.T.analyzeUnderZoneCondition(history, tickPeriod, this.config.minStreak, this.config.minSignal, this.config.overBarrier);
           this.analysis = result;
         } else if (isOddStrat) {
           result = this.T.analyzeOddStrategyCondition(history, tickPeriod);
@@ -11267,13 +11455,21 @@ window.NexusStrategies=exports;
           let dir = result.direction;
           if (this.config.direction === 'higher') dir = 'CALL';
           else if (this.config.direction === 'lower') dir = 'PUT';
-          const meetsSignal = this.config.direction !== 'auto' ? result.ready : (result.ready && dir && result.strength >= this.config.minSignal);
-          // 2-tick confirmation gate: a signal has to hold (same direction,
-          // still above minSignal) on two consecutive ticks before firing.
-          // This doesn't create an edge that isn't already there — it just
-          // filters out single-tick noise spikes that used to fire and
-          // reverse a moment later, which was adding losing trades without
-          // adding any real win-rate benefit.
+          const meetsConfidence = !this.config.minConfidence || (result.confidence != null && result.confidence >= this.config.minConfidence);
+          const meetsSignal = this.config.direction !== 'auto'
+            ? result.ready
+            : (result.ready && dir && result.strength >= this.config.minSignal && meetsConfidence);
+          // Confirmation gate: a signal has to hold (same direction, still
+          // above minSignal/minConfidence) for `confirmTicks` consecutive
+          // ticks before firing — configurable per bot instance instead of
+          // a hardcoded 2, so a bot that trades more often in aggregate
+          // (e.g. one that scans every market) can be tuned to demand a
+          // longer, cleaner hold before it pulls the trigger. This doesn't
+          // create an edge that isn't already there — it just filters out
+          // single-tick noise spikes that used to fire and reverse a
+          // moment later, which was adding losing trades without adding
+          // any real win-rate benefit.
+          const neededConfirmTicks = this.config.confirmTicks || 2;
           if (meetsSignal && dir) {
             if (this._rfConfirmDir === dir) {
               this._rfConfirmCount = (this._rfConfirmCount || 1) + 1;
@@ -11285,7 +11481,7 @@ window.NexusStrategies=exports;
             this._rfConfirmDir = null;
             this._rfConfirmCount = 0;
           }
-          if (meetsSignal && dir && this._rfConfirmCount >= 2) {
+          if (meetsSignal && dir && this._rfConfirmCount >= neededConfirmTicks) {
             this._riseFallDirection = dir;
             this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 HIGHER' : '📉 LOWER'} signal ${result.strength}% (confirmed 2 ticks) — ${(result.reasons && result.reasons[0]) || ''}`);
             this.startChainExecution();
@@ -11360,6 +11556,44 @@ window.NexusStrategies=exports;
             // Anti-stall: this market hasn't produced a fireable setup in 2
             // minutes straight — rather than sit here indefinitely, rotate
             // into whatever market is currently scoring best.
+            if (!this._over3WaitStart) this._over3WaitStart = Date.now();
+            if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
+              if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
+                this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
+                this.setConfig({ selectedMarket: best.symbol });
+                this.changeMarket(best.symbol);
+              }
+            }
+          }
+          this.emit();
+          return;
+        }
+        if (isUnderZone) {
+          // Vice-versa mirror of the isOver3 block above: min percentage
+          // gate → wait for an over-zone (>=7) streak of Min Streak length
+          // → fire UNDER the instant that streak ends specifically on
+          // digit 7 or 9 (8 doesn't count, streak keeps waiting).
+          const o3 = result.over3 || {};
+          const pctGateOk = result.probability >= this.config.minSignal;
+          const streakOk = streak >= this.config.minStreak;
+          const lastDigit = data.digit;
+          const endsRight = lastDigit === 7 || lastDigit === 9;
+          const canEnter = pctGateOk && streakOk && endsRight;
+          if (canEnter) {
+            this._over3WaitStart = null;
+            this.strategyPhase = 'firing';
+            this.strategyWaitReason = `ENTRY — ${streak}-over streak ended on digit ${lastDigit}, firing UNDER`;
+            this.addLog('win', 'ENTRY', this.strategyWaitReason);
+            this.startChainExecution();
+            setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
+          } else {
+            this.strategyPhase = 'waiting';
+            this.strategyWaitReason = !pctGateOk
+              ? `Min percentage not met (${result.probability}%/${this.config.minSignal}%)`
+              : !streakOk
+              ? `Over-streak ${streak}/${this.config.minStreak} — waiting`
+              : `Streak of ${streak} ended on digit ${lastDigit} — need 7 or 9`;
             if (!this._over3WaitStart) this._over3WaitStart = Date.now();
             if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
               const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
@@ -15898,11 +16132,31 @@ window.NexusStrategies=exports;
         reasons.push('Waiting for enough digit spread to compare #1 vs #2…');
       }
     } else {
-      // AUTO: chase the statistically hottest digit while its bar rises.
+      // AUTO: previously chased whichever digit was merely the statistical
+      // #1 with NO real setup condition — unlike prediction2/prediction4/
+      // strategy2 above, which all require a specific multi-part setup
+      // (bar placement, direction, a real gap) before targetDigit even
+      // gets set. That meant Auto's `ready` was true on almost every tick
+      // (any digit sitting even 0.1% ahead of the rest counted), so the
+      // cooldown/confirm gates downstream were the only thing slowing it
+      // down — it was firing on noise, not on a setup. This brings Auto in
+      // line with the other three: only bet the hottest digit once it's a
+      // genuine outlier — clearly ahead of the field AND still rising —
+      // not just whichever digit happened to nose ahead this tick.
       const dir = directionOf(data, hottest.digit);
-      targetDigit = hottest.digit;
-      strength = Math.max(0, Math.min(100, Math.round(hottest.percentage * 5 + (dir > 0 ? 10 : 0))));
-      reasons.push(`Digit ${hottest.digit} is hottest at ${hottest.percentage.toFixed(1)}% over the last ${n} ticks`);
+      const gap = secondHottest ? hottest.percentage - secondHottest.percentage : 999;
+      const setupMet = hottest.percentage >= 13 && dir > 0 && gap >= 1.5;
+      if (setupMet) {
+        targetDigit = hottest.digit;
+        strength = Math.max(0, Math.min(100, Math.round(hottest.percentage * 5 + dir * 3 + gap * 2)));
+        reasons.push(`Digit ${hottest.digit} hottest at ${hottest.percentage.toFixed(1)}%, rising (+${dir.toFixed(1)}pp), ${gap.toFixed(1)}pp clear of #2`);
+      } else {
+        const missing = [];
+        if (hottest.percentage < 13) missing.push(`hottest digit only ${hottest.percentage.toFixed(1)}% (need ≥13%)`);
+        if (dir <= 0) missing.push('not rising');
+        if (gap < 1.5) missing.push(`gap ${gap.toFixed(1)}pp over #2 (need ≥1.5)`);
+        reasons.push('Waiting: ' + missing.join(' · '));
+      }
     }
 
     const ready = targetDigit != null && strength > 0;
@@ -16459,6 +16713,14 @@ window.NexusStrategies=exports;
           <div class="cp-input-group"><span class="cp-input-label">Target Runs</span><input class="cp-input" type="number" min="1" id="${rootId}-runs-in" value="${targetRuns}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Min Signal %</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-signal" value="${c.minSignal}"></div>
         </div>
+        ${!engine.isMultiplierMode ? `
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Confirm Ticks</span><input class="cp-input" type="number" min="1" max="6" id="${rootId}-confirmticks" value="${c.confirmTicks || 2}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Min Confidence % (0=off)</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-minconf" value="${c.minConfidence || 0}"></div>
+        </div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:6px 9px;margin-bottom:2px">
+          Confirm Ticks = how many consecutive ticks the signal must hold before it fires (higher = fewer, cleaner trades). Min Confidence = how lopsided callScore vs putScore must be, on top of Min Signal — a second filter for how clean the read is, not just how strong.
+        </div>` : ''}
         ${engine.isMultiplierMode ? `
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Position Take Profit ($)</span><input class="cp-input" type="number" step="0.1" min="0.1" id="${rootId}-postp" value="${c.positionTakeProfit ?? 5}"></div>
@@ -16540,6 +16802,10 @@ window.NexusStrategies=exports;
       if (closePosBtn) closePosBtn.onclick = () => { if (engine.sellOpenMultiplierPosition) engine.sellOpenMultiplierPosition(); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
+      const confirmTicksEl = el(`${rootId}-confirmticks`, host);
+      if (confirmTicksEl) confirmTicksEl.onchange = (e) => { engine.setConfig({ confirmTicks: Math.min(6, Math.max(1, parseInt(e.target.value) || 2)) }); };
+      const minConfEl = el(`${rootId}-minconf`, host);
+      if (minConfEl) minConfEl.onchange = (e) => { engine.setConfig({ minConfidence: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
       const dirSel = el(`${rootId}-direction`, host);
       if (dirSel) dirSel.onchange = (e) => { engine.setConfig({ direction: e.target.value }); };
       const mgToggleEl = el(`${rootId}-mg-toggle`, host);
