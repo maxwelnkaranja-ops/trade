@@ -110,11 +110,6 @@
           <span class="hub-tab-label">Higher/Lower</span>
           <span class="dot live"></span>
         </button>
-        <button type="button" class="hub-tab" data-app="riseandfall" data-label="Rise & Fall" title="Rise &amp; Fall — 1-tick candlestick automation, full indicator stack, fast entries">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="3" height="8"/><path d="M5.5 9V5"/><rect x="10.5" y="4" width="3" height="13"/><path d="M12 4V2"/><rect x="17" y="11" width="3" height="6"/><path d="M18.5 11V7"/></svg></span>
-          <span class="hub-tab-label">Rise & Fall</span>
-          <span class="dot live"></span>
-        </button>
         <button type="button" class="hub-tab" data-app="matches" data-label="Matches" title="Matches — digit prediction bot">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.5" fill="currentColor"/></svg></span>
           <span class="hub-tab-label">Matches</span>
@@ -178,10 +173,6 @@
     <section id="panel-risefall" class="app-panel" aria-label="Higher/Lower dashboard">
       <div id="risefall-root" class="app-root"></div>
     </section>
-    <section id="panel-riseandfall" class="app-panel" aria-label="Rise &amp; Fall dashboard">
-      <div id="riseandfall-root" class="app-root"></div>
-    </section>
-
     <section id="panel-matches" class="app-panel" aria-label="Matches dashboard">
       <div id="matches-root" class="app-root"></div>
     </section>
@@ -2649,6 +2640,29 @@ html.light .live-tick-cell { background: hsl(var(--muted) / .3); }
 /* Equity panel */
 .dash-equity-panel { padding: 14px; }
 .equity-svg { width: 100%; height: 220px; display: block; }
+
+/* Equity curve side rail — small "top bots by profit" leaderboard */
+.eq-rank-rail {
+  flex-shrink: 0; width: 128px; min-width: 128px; display: flex; flex-direction: column;
+  border-left: 1px solid hsl(var(--border)/0.4); padding-left: 12px;
+}
+.eq-rank-rail-title {
+  font-family: 'Space Grotesk', sans-serif; font-size: 8px; font-weight: 800;
+  letter-spacing: 2px; color: hsl(var(--muted-foreground)/0.7); margin-bottom: 8px; flex-shrink: 0;
+}
+.eq-rank-rail-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.eq-rank-row {
+  display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 8px;
+  background: hsl(var(--bg)/0.5); border: 1px solid hsl(var(--border)/0.25); cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.eq-rank-row:hover { border-color: hsl(var(--border-bright)/0.6); background: hsl(var(--bg)/0.8); }
+.eq-rank-rail-pos { font-family: 'DM Mono', monospace; font-size: 8.5px; font-weight: 800; color: hsl(var(--muted-foreground)/0.7); width: 11px; flex-shrink: 0; }
+.eq-rank-rail-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.eq-rank-rail-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.eq-rank-rail-name { font-family: 'Outfit', sans-serif; font-size: 8.5px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: hsl(var(--foreground)/0.85); }
+.eq-rank-rail-val { font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 800; }
+.eq-rank-rail-empty { font-family: 'DM Mono', monospace; font-size: 8.5px; color: hsl(var(--muted-foreground)/0.6); text-align: center; padding: 10px 0; }
 
 /* Per-bot grid */
 .dash-perbot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
@@ -11225,23 +11239,6 @@ window.NexusStrategies=exports;
         // was just missing these two config defaults and its UI control.
         firstTickMode: 'normal', firstTickStake: 0.35,
       };
-      // Rise & Fall (id 'riseandfall') is a second, fully independent
-      // risefall-mode instance — its own config/stats/journal/storage
-      // prefix — but tuned for fast, short candle entries instead of a
-      // slow single-market grind: a tighter tickPeriod
-      // (25-candle lookback instead of 50) so the price-trend/RSI/
-      // Bollinger/momentum analyzer reacts to the most recent candles, the
-      // shortest tradeable duration (3 ticks) so a signal is acted on
-      // immediately, and just 1 confirm tick so it doesn't wait around for
-      // a slow-moving multi-tick confirmation before firing. It shares the
-      // exact same full-indicator analyzer as Higher/Lower — RSI, Bollinger
-      // Bands, momentum and price-trend confluence all
-      // feed the same callScore/putScore signal — just gated more
-      // aggressively for speed.
-      const riseandfallDefaults = {
-        ...risefallDefaults, tickPeriod: 25, duration: 3, confirmTicks: 1,
-        minSignal: 58, minConfidence: 0, martingaleMultiplier: 2,
-      };
       // Matches (DIGITMATCH): bets one predicted digit (0-9) each tick.
       // preset selects which heuristic picks the digit: 'auto' (chase the
       // statistically hottest digit live), 'prediction2' / 'prediction4'
@@ -11279,7 +11276,7 @@ window.NexusStrategies=exports;
         takeProfit: 50, stopLoss: 20, martingaleEnabled: false,
         autoPilot: true, soundEnabled: true, autoRefresh: true,
       };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? (this.id === 'riseandfall' ? riseandfallDefaults : risefallDefaults) : this.isMatchMode ? matchesDefaults : this.isMultiplierMode ? multiplierDefaults : evenDefaults;
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isMultiplierMode ? multiplierDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -14776,7 +14773,6 @@ window.NexusStrategies=exports;
     nexus: { label: 'Over Bot', dot: 'hsl(var(--accent))' },
     under: { label: 'Under Bot', dot: 'hsl(var(--loss))' },
     risefall: { label: 'Higher/Lower Bot', dot: 'hsl(var(--win))' },
-    riseandfall: { label: 'Rise & Fall Bot', dot: 'hsl(var(--accent))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
     multiplier: { label: 'Multiplier Bot', dot: 'hsl(var(--accent))' },
   };
@@ -15023,7 +15019,13 @@ window.NexusStrategies=exports;
                 </button>
               </div>
             </div>
-            <div id="dash-equity-wrap" style="flex:1;min-height:0"></div>
+            <div style="display:flex;gap:12px;flex:1;min-height:0">
+              <div id="dash-equity-wrap" style="flex:1;min-width:0"></div>
+              <div class="eq-rank-rail" id="dash-equity-rankrail">
+                <div class="eq-rank-rail-title">TOP BOTS</div>
+                <div class="eq-rank-rail-list" id="dash-equity-rankrail-list"></div>
+              </div>
+            </div>
           </div>
           <div class="glass-panel journal-panel" style="flex:2;min-width:0;display:flex;flex-direction:column;min-height:420px">
             <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 16px 0;flex-shrink:0">
@@ -15570,7 +15572,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['even', 'odd', 'nexus', 'under', 'risefall', 'riseandfall', 'matches', 'multiplier'];
+    const botIds = ['even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -15691,6 +15693,39 @@ window.NexusStrategies=exports;
       equityMeta.textContent = `${curve.length} pts · ${(last.cumulative >= 0 ? '+' : '')}${last.cumulative.toFixed(2)} total`;
     } else if (equityMeta) {
       equityMeta.textContent = '';
+    }
+
+    // ── Equity panel side rail: small "top bots by profit" leaderboard.
+    // Reuses the same perBot stats the full-width Engine Overview table
+    // below already computes — just sorted by profit and trimmed to a
+    // compact list so it fits the narrow strip next to the chart.
+    const rankRailList = el('dash-equity-rankrail-list', root);
+    if (rankRailList) {
+      const ranked = botIds
+        .map((id) => ({ id, meta: BOT_META[id], ...perBot[id] }))
+        .filter((b) => b.trades > 0)
+        .sort((a, b) => b.profit - a.profit);
+      const rankRailHtml = ranked.length
+        ? ranked.map((b, idx) => {
+            const isProfit = b.profit >= 0;
+            const color = isProfit ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+            return `<div class="eq-rank-row" data-nav-bot="${b.id}" title="${b.meta.label} — ${b.trades} trades, ${b.win}W/${b.loss}L">
+              <span class="eq-rank-rail-pos">#${idx + 1}</span>
+              <span class="eq-rank-rail-dot" style="background:${b.active ? b.meta.dot : 'hsl(var(--border))'}"></span>
+              <div class="eq-rank-rail-body">
+                <span class="eq-rank-rail-name">${b.meta.label.replace(' Bot', '')}</span>
+                <span class="eq-rank-rail-val" style="color:${color}">${isProfit ? '+' : ''}$${b.profit.toFixed(2)}</span>
+              </div>
+            </div>`;
+          }).join('')
+        : `<div class="eq-rank-rail-empty">No trades yet</div>`;
+      if (global.setHtmlIfChanged(rankRailList, rankRailHtml)) {
+        rankRailList.querySelectorAll('[data-nav-bot]').forEach((row) => {
+          row.onclick = () => {
+            if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(row.dataset.navBot);
+          };
+        });
+      }
     }
 
     const perBotHtml = botIds.map((id) => {
@@ -17809,7 +17844,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['even', 'odd', 'nexus', 'under', 'risefall', 'riseandfall', 'matches', 'multiplier'];
+  const BOT_IDS = ['even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -17821,13 +17856,13 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'even', 'odd', 'nexus', 'under', 'risefall', 'riseandfall', 'matches', 'multiplier'];
+  const VALID_APPS = ['dashboard', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { even: null, odd: null, nexus: null, under: null, risefall: null, riseandfall: null };
-  const titanBuilt = { even: false, odd: false, nexus: false, under: false, risefall: false, riseandfall: false };
+  const engines = { even: null, odd: null, nexus: null, under: null, risefall: null };
+  const titanBuilt = { even: false, odd: false, nexus: false, under: false, risefall: false };
 
   function queueDashboardRender() {
     if (dashRenderQueued) return;
@@ -17847,7 +17882,7 @@ window.NexusStrategies=exports;
     const isOver = id === 'nexus';
     const isUnder = id === 'under';
     const isOU = isOver || isUnder;
-    const isRiseFall = id === 'risefall' || id === 'riseandfall';
+    const isRiseFall = id === 'risefall';
     const isMatches = id === 'matches';
     const isMultiplier = id === 'multiplier';
     // Provide safe fallback stubs if socket/scanner globals failed to load
@@ -17894,17 +17929,9 @@ window.NexusStrategies=exports;
           // Higher/Lower shares the Over/Under market socket/scanner (both
           // just need live tick + health data for the same 10 markets) but
           // runs its own price-direction analyzer and CALL/PUT execution
-          // path inside TitanEngine (mode: 'risefall'). Rise & Fall is a
-          // SECOND, fully independent instance of that same engine — its
-          // own config/stats/journal/storage prefix — left completely
-          // unlocked: auto direction (follows the analyzer's own
-          // CALL/PUT signal, same as Higher/Lower) and free to scan +
-          // auto-rotate across every market, exactly like the other bots.
-          // Running two independent instances lets you use different
-          // stake/martingale/signal settings on each without them fighting
-          // over the same session state.
+          // path inside TitanEngine (mode: 'risefall').
           id, mode: 'risefall', fixedTradeMode: null,
-          botLabel: id === 'riseandfall' ? 'Rise & Fall Bot' : 'Higher/Lower Bot',
+          botLabel: 'Higher/Lower Bot',
           fixedDirection: null,
           fixedMarket: null,
           trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
@@ -17946,8 +17973,8 @@ window.NexusStrategies=exports;
   function initBotTab(id) {
     const eng = ensureTitanEngine(id);
     if (!eng) return;
-    if (id === 'risefall' || id === 'riseandfall' || id === 'multiplier') {
-      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', id === 'riseandfall' ? 'RISE & FALL' : id === 'multiplier' ? 'MULTIPLIER BOT' : 'HIGHER/LOWER BOT');
+    if (id === 'risefall' || id === 'multiplier') {
+      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', id === 'multiplier' ? 'MULTIPLIER BOT' : 'HIGHER/LOWER BOT');
       titanBuilt[id] = true;
       return;
     }
@@ -18327,8 +18354,8 @@ window.NexusStrategies=exports;
       if (id === 'differ') {
         eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp });
         eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl });
-      } else if (id !== 'risefall' && id !== 'riseandfall') {
-        // Higher/Lower and Rise & Fall are excluded on purpose: both read the
+      } else if (id !== 'risefall') {
+        // Higher/Lower is excluded on purpose: it reads the
         // master gate live (window.getMasterGateValues) rather than a
         // locally-set takeProfit/stopLoss, so there is nothing to push here.
         eng.setConfig && eng.setConfig({ takeProfit: tp, stopLoss: sl });
@@ -18458,7 +18485,7 @@ window.NexusStrategies=exports;
         savedAny = true;
       }
     } catch (e) { console.error('[Hub] Differ save error:', e); }
-    ['even', 'odd', 'nexus', 'under', 'risefall', 'riseandfall', 'matches', 'multiplier'].forEach((id) => {
+    ['even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
         try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
