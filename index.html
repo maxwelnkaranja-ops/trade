@@ -7708,16 +7708,32 @@ function computeParityShape(percentages, targetOdd) {
  * Even's old shape-blind formula and Odd's old all-or-nothing gate with a
  * single shared model so "Top Markets" behaves the same way for both bots.
  */
-function computeHybridProbability({ shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern }) {
-  let score = 0;
-  score += shapeScore; // 0-50, from computeParityShape
-  score += Math.min(15, (oddDigitWeight / 50) * 15);
-  if (trendScore > 55) score += 10; else if (trendScore > 50) score += 5;
-  if (momentumScore > 55) score += 10;
-  if (stablePattern) score += 5;
-  if (volatilityIndex > 50) score += 5;
-  if (rareDigits) score += 5;
-  return Math.max(0, Math.min(100, Math.round(score)));
+// Each component now RAMPS across a range instead of firing a fixed block
+// of points the instant a single threshold is crossed. Previously e.g.
+// trendScore ticking from 55.1 to 54.9 dropped the score by a hard 5-10
+// points in one tick with nothing in between — that's what produced the
+// "0 → 80 → 0" spiking behavior. Ramping the same signals over a band
+// around each threshold keeps the total moving smoothly tick-to-tick.
+// Returns { score, components } — components is exposed so the UI can
+// diff this tick's breakdown against last tick's and show what actually
+// moved (e.g. "Trend -8, Volatility -5") instead of just a bare number.
+function computeHybridProbability({ shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, coldDigitsCount, stablePattern, tickCount }) {
+  const components = {
+    shape: shapeScore, // 0-50, from computeParityShape — already continuous
+    parity: Math.min(15, (oddDigitWeight / 50) * 15), // 0-15 — already continuous
+    // Ramp 0-10 as trendScore moves through 45-70 (was a hard step at 50/55)
+    trend: Math.max(0, Math.min(10, (trendScore - 45) / 2.5)),
+    // Ramp 0-10 as momentumScore moves through 45-65 (was a hard step at 55)
+    momentum: Math.max(0, Math.min(10, (momentumScore - 45) / 2)),
+    // Ramp 0-5 as history builds from 20-40 ticks (was a hard step at 25)
+    stability: Math.max(0, Math.min(5, ((tickCount || 0) - 20) / 4)),
+    // Ramp 0-5 as volatilityIndex moves through 35-65 (was a hard step at 50)
+    volatility: Math.max(0, Math.min(5, (volatilityIndex - 35) / 6)),
+    // Ramp 0-5 by how many cold digits exist (was a hard step at >=4)
+    rareDigits: coldDigitsCount != null ? Math.min(5, coldDigitsCount * 1.25) : (rareDigits ? 5 : 0),
+  };
+  const total = Object.values(components).reduce((a, b) => a + b, 0);
+  return { score: Math.max(0, Math.min(100, Math.round(total))), components };
 }
 
 /**
@@ -7797,8 +7813,9 @@ function analyzeDigits(history, tickPeriod = 50, targetOdd = true) {
   // with the continuous market-quality signals above. Replaces the old
   // shape-blind additive formula so Even and Odd now share one model.
   const shape = computeParityShape(percentages, targetOdd);
-  const probability = computeHybridProbability({
-    shapeScore: shape.shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern,
+  const { score: probability, components: hybridComponents } = computeHybridProbability({
+    shapeScore: shape.shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits,
+    coldDigitsCount: coldDigits.length, stablePattern, tickCount: data.length,
   });
 
   // Best barrier kept for compatibility (not used in even/odd)
@@ -7819,6 +7836,7 @@ function analyzeDigits(history, tickPeriod = 50, targetOdd = true) {
 
   return {
     probability,
+    hybridComponents,
     digitCounts: counts,
     digitPercentages: percentages,
     frequencies,
@@ -7942,8 +7960,9 @@ function analyzeOddStrategyCondition(history, tickPeriod = 50) {
   // Same graded shape score as computeParityShape(), reusing the green/
   // blue/red/yellow booleans already computed above for the hard gate.
   const shapeScore = (greenOdd ? 15 : 5) + (blueOdd ? 15 : 5) + (redEven ? 10 : 3) + (yellowEven ? 10 : 3);
-  const probability = computeHybridProbability({
-    shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern,
+  const { score: probability, components: hybridComponents } = computeHybridProbability({
+    shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits,
+    coldDigitsCount: coldDigitCount, stablePattern, tickCount: data.length,
   });
 
   return {
@@ -7954,6 +7973,7 @@ function analyzeOddStrategyCondition(history, tickPeriod = 50) {
     // logic, unaffected by this) — this `probability` only drives
     // ranking/"Top Markets" and the Min Signal % control.
     probability,
+    hybridComponents,
     digitCounts: counts,
     digitPercentages: percentages,
     frequencies,
@@ -9371,8 +9391,9 @@ function analyzeOver3Condition(history, tickPeriod = 50, minStreak = 3, minSigna
   // nothing gate. zoneUnder10 stays a pure bonus, same as before (folded
   // into the quality half via trendScore/rareDigits rather than the gate).
   const shapeScore = (greenOutsideZone ? 12.5 : 4) + (redOutsideZone ? 12.5 : 4) + (greenIsOdd ? 12.5 : 4) + (redIsOdd ? 12.5 : 4);
-  const probability = computeHybridProbability({
-    shapeScore, oddDigitWeight: overDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern,
+  const { score: probability, components: hybridComponents } = computeHybridProbability({
+    shapeScore, oddDigitWeight: overDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits,
+    coldDigitsCount: coldDigits.length, stablePattern, tickCount: data.length,
   });
 
   // ── ENTRY DECISION (mirrors the engine's live dispatch logic, kept here
@@ -9414,6 +9435,7 @@ function analyzeOver3Condition(history, tickPeriod = 50, minStreak = 3, minSigna
     // those still decide whether a trade can actually fire; this score
     // only drives ranking/Top Markets and the Min Signal % control.
     probability,
+    hybridComponents,
     digitCounts: counts,
     digitPercentages: percentages,
     frequencies,
@@ -9528,8 +9550,9 @@ function analyzeUnderZoneCondition(history, tickPeriod = 50, minStreak = 3, minS
   const stablePattern = data.length >= 25;
 
   const shapeScore = (greenOutsideZone ? 12.5 : 4) + (redOutsideZone ? 12.5 : 4) + (greenIsOdd ? 12.5 : 4) + (redIsOdd ? 12.5 : 4);
-  const probability = computeHybridProbability({
-    shapeScore, oddDigitWeight: overDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern,
+  const { score: probability, components: hybridComponents } = computeHybridProbability({
+    shapeScore, oddDigitWeight: overDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits,
+    coldDigitsCount: coldDigits.length, stablePattern, tickCount: data.length,
   });
 
   // ENTRY DECISION — mirror of Over-3's: streak of LOSE-zone digits
@@ -9563,6 +9586,7 @@ function analyzeUnderZoneCondition(history, tickPeriod = 50, minStreak = 3, minS
 
   return {
     probability,
+    hybridComponents,
     digitCounts: counts,
     digitPercentages: percentages,
     frequencies,
@@ -9622,16 +9646,22 @@ function calculateVolatility(data) {
 // from EvenTrading's copy, so it needs its own local definition — without
 // this, every call from analyzeOver3Condition below threw a ReferenceError
 // on any real tick data (the function simply didn't exist in this scope).
-function computeHybridProbability({ shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, stablePattern }) {
-  let score = 0;
-  score += shapeScore; // 0-50, from the graded shape conditions
-  score += Math.min(15, (oddDigitWeight / 50) * 15);
-  if (trendScore > 55) score += 10; else if (trendScore > 50) score += 5;
-  if (momentumScore > 55) score += 10;
-  if (stablePattern) score += 5;
-  if (volatilityIndex > 50) score += 5;
-  if (rareDigits) score += 5;
-  return Math.max(0, Math.min(100, Math.round(score)));
+// Same graded-ramp fix as the Even/Odd copy of this function (see that
+// file section for the full rationale) — replaces the hard on/off point
+// blocks with smooth ramps so the ring doesn't jump 0→80→0 between ticks,
+// and returns a component breakdown so the UI can show what moved.
+function computeHybridProbability({ shapeScore, oddDigitWeight, trendScore, momentumScore, volatilityIndex, rareDigits, coldDigitsCount, stablePattern, tickCount }) {
+  const components = {
+    shape: shapeScore, // 0-50, from the graded shape conditions — already continuous
+    parity: Math.min(15, (oddDigitWeight / 50) * 15), // 0-15 — already continuous
+    trend: Math.max(0, Math.min(10, (trendScore - 45) / 2.5)),
+    momentum: Math.max(0, Math.min(10, (momentumScore - 45) / 2)),
+    stability: Math.max(0, Math.min(5, ((tickCount || 0) - 20) / 4)),
+    volatility: Math.max(0, Math.min(5, (volatilityIndex - 35) / 6)),
+    rareDigits: coldDigitsCount != null ? Math.min(5, coldDigitsCount * 1.25) : (rareDigits ? 5 : 0),
+  };
+  const total = Object.values(components).reduce((a, b) => a + b, 0);
+  return { score: Math.max(0, Math.min(100, Math.round(total))), components };
 }
 
 function getEmptyAnalysis() {
@@ -11189,6 +11219,11 @@ window.NexusStrategies=exports;
         // stops a noisy near-tie (e.g. callScore 6 / putScore 5, which
         // clears a strength gate but is barely a real signal) from firing.
         confirmTicks: 2, minConfidence: 0,
+        // First-Tick Handling — same 'normal' / 'sacrifice' (Test Stake) /
+        // 'skip' modes the other bots have; the engine's startChainExecution
+        // already implements this generically (mode-agnostic), Higher/Lower
+        // was just missing these two config defaults and its UI control.
+        firstTickMode: 'normal', firstTickStake: 0.35,
       };
       // Ups & Downs (id 'updown') is a second, independent risefall
       // instance that scans every market at once, so in aggregate it fires
@@ -11473,6 +11508,7 @@ window.NexusStrategies=exports;
           if (meetsSignal && dir && this._mpConfirmCount >= 2) {
             this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 UP' : '📉 DOWN'} signal ${result.strength}% (confirmed) — ${(result.reasons && result.reasons[0]) || ''}`);
             this._mpConfirmCount = 0;
+            this._multiplierDirection = dir;
             this.executeMultiplierPurchase(dir);
           }
           this.emit();
@@ -11800,7 +11836,27 @@ window.NexusStrategies=exports;
     executeMultiplierPurchase(direction) {
       const st = this.state, cfg = this.config;
       if (!st.active || this.executionGuard) return;
+      // BUG FIX: this guard was missing entirely — unlike executeBoltPurchase,
+      // this method went straight to `this.tradingSocket.send(...)` with no
+      // check that tradingSocket exists or is actually open. Any time the
+      // trading socket wasn't connected yet (e.g. right after Start, before
+      // the auth handshake finishes, or after a drop), this threw a silent
+      // "Cannot read properties of null/undefined (reading 'send')" error on
+      // the tick's event-listener callback — which isn't wrapped in a
+      // try/catch — so the signal was lost with no trade placed and no
+      // visible error in the UI. This is the most likely cause of "signal
+      // fires but no trade happens" on the Multiplier bot.
       this.executionGuard = true;
+      direction = direction || this._multiplierDirection;
+      if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
+        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting (multiplier will auto-retry on connect)...');
+        this._multiplierDirection = direction;
+        this.executionGuard = false; // release guard so engine isn't stuck if socket drops
+        this.state = { ...this.state, isLocked: true };
+        const token = window.HubStore.getState().apiToken;
+        if (token) this.connect(token);
+        return;
+      }
       const contractType = direction === 'PUT' ? 'MULTDOWN' : 'MULTUP';
       this.pendingTrade = { contractType, barrier: 0, entryTime: Date.now() };
       this._lastTradedBarrier = null;
@@ -12634,9 +12690,20 @@ window.NexusStrategies=exports;
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
           // If the engine was mid-chain when socket reconnected (isLocked+active, no pending),
           // retry the bolt now that the socket is ready — otherwise the chain silently stalls.
+          // BUG FIX: this always called executeBoltPurchase(), even for the
+          // Multiplier engine — executeBoltPurchase has no branch for
+          // isMultiplierMode, so it fell into the digit-contract fallback
+          // branch and built a bogus contract_type/barrier instead of
+          // MULTUP/MULTDOWN, meaning a Multiplier bot that reconnected
+          // mid-signal never actually placed the leveraged trade it meant to.
           if (_titan.state.active && _titan.state.isLocked && !_titan.pendingTrade && !_titan.executionGuard && !_titan.state.isCooldown) {
-            _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing bolt');
-            setTimeout(() => _titan.executeBoltPurchase(), 300);
+            if (_titan.isMultiplierMode) {
+              _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing multiplier position');
+              setTimeout(() => _titan.executeMultiplierPurchase(_titan._multiplierDirection || 'CALL'), 300);
+            } else {
+              _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing bolt');
+              setTimeout(() => _titan.executeBoltPurchase(), 300);
+            }
           }
           _titan.emit();
         };
@@ -12878,7 +12945,7 @@ window.NexusStrategies=exports;
         <div class="benz-col"><div class="benz-scroll" id="${rootId}-right"></div></div>
       </div>`;
 
-    shells[rootId] = { configBuilt: false, lastStrategy: null };
+    shells[rootId] = { configBuilt: false, lastStrategy: null, lastHybridComponents: null };
     return root;
   }
 
@@ -12892,6 +12959,32 @@ window.NexusStrategies=exports;
     const shape = (a && a.shape) || null;
     const prob = a ? a.probability : 0;
     const rec = a ? a.recommendation : '—';
+
+    // ── "What changed" readout — diffs this tick's hybrid score components
+    // against last tick's so a jump in the ring always comes with a reason
+    // (e.g. "Trend -8, Volatility -5") instead of just a bare number moving.
+    // Only Even/Odd/Over/Under expose hybridComponents; other bots skip this.
+    const COMPONENT_LABELS = { shape: 'Shape', parity: 'Parity', trend: 'Trend', momentum: 'Momentum', stability: 'Stability', volatility: 'Volatility', rareDigits: 'Cold digits' };
+    let signalDeltaHtml = '';
+    if (a && a.hybridComponents) {
+      const shell = shells[rootId] || (shells[rootId] = { configBuilt: false, lastStrategy: null, lastHybridComponents: null });
+      const prev = shell.lastHybridComponents;
+      if (prev) {
+        const deltas = Object.keys(a.hybridComponents)
+          .map((k) => ({ key: k, delta: a.hybridComponents[k] - (prev[k] || 0) }))
+          .filter((d) => Math.abs(d.delta) >= 0.5)
+          .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta))
+          .slice(0, 3);
+        if (deltas.length) {
+          signalDeltaHtml = deltas.map((d) => {
+            const sign = d.delta > 0 ? '+' : '';
+            const color = d.delta > 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+            return `<span style="color:${color}">${COMPONENT_LABELS[d.key] || d.key} ${sign}${d.delta.toFixed(0)}</span>`;
+          }).join('<span style="color:hsl(var(--muted-foreground));opacity:.5"> · </span>');
+        }
+      }
+      shell.lastHybridComponents = a.hybridComponents;
+    }
     const mtf = a && a.mtfAligned !== false ? 'MTF ALIGNED' : 'MTF DIVERGENT';
     const mtfClass = a && a.mtfAligned !== false ? 'text-success' : 'text-accent';
 
@@ -13041,6 +13134,7 @@ window.NexusStrategies=exports;
         </div>
         <div style="flex:1;display:flex;flex-direction:column;gap:8px">
           <div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;color:${probColor};text-shadow:${probGlow}">${rec || 'ANALYZING…'}</div>
+          ${signalDeltaHtml ? `<div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:0.3px">${signalDeltaHtml}</div>` : ''}
           <div style="display:flex;gap:5px;flex-wrap:wrap">
             <span style="font-size:9px;padding:3px 9px;border-radius:999px;font-weight:800;font-family:'Outfit',sans-serif;
               background:${a?.mtfAligned !== false ? 'hsl(var(--win)/0.12)' : 'hsl(var(--accent)/0.12)'};
@@ -16834,6 +16928,28 @@ window.NexusStrategies=exports;
         </div>
         <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:6px 9px;margin-bottom:2px">
           Confirm Ticks = how many consecutive ticks the signal must hold before it fires (higher = fewer, cleaner trades). Min Confidence = how lopsided callScore vs putScore must be, on top of Min Signal — a second filter for how clean the read is, not just how strong.
+        </div>
+        <div class="cp-section-label" style="margin-top:10px">First-Tick Handling</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group" style="flex:1.4">
+            <span class="cp-input-label">Mode</span>
+            <select class="cp-input" id="${rootId}-firsttick-mode" style="font-size:11px">
+              <option value="normal" ${(c.firstTickMode||'normal')==='normal'?'selected':''}>Normal — no special handling</option>
+              <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — small probe trade first</option>
+              <option value="skip" ${c.firstTickMode==='skip'?'selected':''}>Skip Tick — wait 1 tick, then trade</option>
+            </select>
+          </div>
+          <div class="cp-input-group">
+            <span class="cp-input-label">Test Stake $</span>
+            <input class="cp-input" type="number" step="0.01" min="0.01" id="${rootId}-firsttick-stake" value="${c.firstTickStake ?? 0.35}" ${c.firstTickMode!=='sacrifice'?'disabled style="opacity:.45"':''}>
+          </div>
+        </div>
+        <div style="margin-top:4px;margin-bottom:2px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px">
+          ${c.firstTickMode==='sacrifice'
+            ? 'Fires a small test trade on the entry tick — win or lose, it is NOT counted toward Runs/stats, and the real run at Stake $ fires immediately after it settles.'
+            : c.firstTickMode==='skip'
+            ? 'Entry tick is skipped (no trade placed); the real run at Stake $ fires unconditionally on the very next tick.'
+            : 'Every run trades normally from the entry tick — no probe or skip.'}
         </div>` : ''}
         ${engine.isMultiplierMode ? `
         <div class="cp-input-row">
@@ -16920,6 +17036,20 @@ window.NexusStrategies=exports;
       if (confirmTicksEl) confirmTicksEl.onchange = (e) => { engine.setConfig({ confirmTicks: Math.min(6, Math.max(1, parseInt(e.target.value) || 2)) }); };
       const minConfEl = el(`${rootId}-minconf`, host);
       if (minConfEl) minConfEl.onchange = (e) => { engine.setConfig({ minConfidence: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
+      const ftModeEl = el(`${rootId}-firsttick-mode`, host);
+      if (ftModeEl) {
+        ftModeEl.onchange = (e) => {
+          engine.setConfig({ firstTickMode: e.target.value });
+          renderCenter(engine, rootId, engine.getSnapshot()); // re-render so the Test Stake input enables/disables + helper text updates
+        };
+      }
+      const ftStakeEl = el(`${rootId}-firsttick-stake`, host);
+      if (ftStakeEl) {
+        ftStakeEl.onchange = (e) => {
+          const v = parseFloat(e.target.value);
+          if (!isNaN(v) && v > 0) engine.setConfig({ firstTickStake: Math.max(0.01, v) });
+        };
+      }
       const dirSel = el(`${rootId}-direction`, host);
       if (dirSel) dirSel.onchange = (e) => { engine.setConfig({ direction: e.target.value }); };
       const mgToggleEl = el(`${rootId}-mg-toggle`, host);
