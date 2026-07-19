@@ -16194,7 +16194,8 @@ window.NexusStrategies=exports;
   function el(id, parent) { return (parent || document).querySelector(id.startsWith('#') ? id : '#' + id); }
 
   const BOT_META = {
-        even: { label: 'Even Bot', dot: 'hsl(var(--win))' },
+        differ: { label: 'Differ Bot', dot: 'hsl(var(--primary))' },
+    even: { label: 'Even Bot', dot: 'hsl(var(--win))' },
     odd: { label: 'Odd Bot', dot: 'hsl(var(--primary-2))' },
     nexus: { label: 'Over Bot', dot: 'hsl(var(--accent))' },
     under: { label: 'Under Bot', dot: 'hsl(var(--loss))' },
@@ -16998,7 +16999,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'];
+    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
