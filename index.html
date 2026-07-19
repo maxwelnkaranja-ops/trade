@@ -120,9 +120,9 @@
           <span class="hub-tab-label">Matches</span>
           <span class="dot live"></span>
         </button>
-        <button type="button" class="hub-tab" data-app="multiplier" data-label="Multiplier" title="Multiplier — leveraged MULTUP/MULTDOWN bot">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 15l5-5 4 4 7-8"/><path d="M20 6h-4v4"/></svg></span>
-          <span class="hub-tab-label">Multiplier</span>
+        <button type="button" class="hub-tab" data-app="accumulator" data-label="Accumulator" title="Accumulator — calm-market ACCU bot">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l3-8 4 16 3-8h5"/></svg></span>
+          <span class="hub-tab-label">Accumulator</span>
           <span class="dot live"></span>
         </button>
         <div class="hub-nav-label">Account</div>
@@ -186,8 +186,8 @@
       <div id="matches-root" class="app-root"></div>
     </section>
 
-    <section id="panel-multiplier" class="app-panel" aria-label="Multiplier dashboard">
-      <div id="multiplier-root" class="app-root"></div>
+    <section id="panel-accumulator" class="app-panel" aria-label="Accumulator dashboard">
+      <div id="accumulator-root" class="app-root"></div>
     </section>
     </div>
 
@@ -10498,6 +10498,10 @@ window.NexusTrading = exports;
       // engine's journal. Every contract_id is added on buy confirmation and
       // removed once its result has been recorded.
       this.ownContractIds = new Set();
+      // Tiny post-trade "what came next" readout: after a trade settles, we
+      // watch the next 3 live ticks on the primary market and stash them on
+      // the journal entry once collected (see 'ADD_JOURNAL' / 'TICK_P' below).
+      this._pendingDigitCaptures = [];
       this.state = this.loadInitialState();
       this._bindMethods();
       this.connectAnalysis();
@@ -10641,6 +10645,18 @@ window.NexusTrading = exports;
             // the same fixed number every single cycle.
             s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : s.silenceTrigger;
           }
+          // Feed any journal entries still waiting on their post-trade
+          // 3-tick readout — once each has 3, stamp it onto that entry.
+          if (this._pendingDigitCaptures.length) {
+            this._pendingDigitCaptures.forEach((cap) => cap.digits.push(action.digit));
+            this._pendingDigitCaptures = this._pendingDigitCaptures.filter((cap) => {
+              if (cap.digits.length >= 3) {
+                s.journal = s.journal.map((j) => j.id === cap.id ? { ...j, followingDigits: cap.digits.slice(0, 3) } : j);
+                return false;
+              }
+              return true;
+            });
+          }
           break;
         }
         case 'TICK_G': s.historyG = [...s.historyG, action.digit].slice(-150); break;
@@ -10677,13 +10693,14 @@ window.NexusTrading = exports;
           const isWin = entry.type === 'win';
           s.totalProfit += entry.profit;
           s.journal = [entry, ...s.journal].slice(0, 500);
+          this._pendingDigitCaptures.push({ id: entry.id, digits: [] });
           s.totalWins += isWin ? 1 : 0;
           s.totalLoss += isWin ? 0 : 1;
           s.plHistory = [...s.plHistory, { time: entry.time, profit: entry.profit, cumulative: s.totalProfit }].slice(-200);
           if (s.experiment?.isRunning) s.experiment.trades = [...s.experiment.trades, entry];
           break;
         }
-        case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; this._tpSlLatched = false; break;
+        case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; this._tpSlLatched = false; this._pendingDigitCaptures = []; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'SET_LUCKY': s.luckyNumber = action.value; break;
         case 'SET_RECOMMENDED_MARKET': s.recommendedMarket = action.market; s.analysisConfidence = action.confidence; break;
@@ -11811,6 +11828,11 @@ window.NexusStrategies=exports;
         currentDigit: -1, currentQuote: 0, streak: 0, lastTradedDigit: null,
       };
       this.analysis = null; this.logs = []; this.journal = []; this.cooldownTime = 0;
+      // Tiny post-trade "what came next" readout for digit-based modes: after
+      // a trade settles, watch the next 3 live ticks and stash them on the
+      // journal entry once collected (see handleContractResult / the per-tick
+      // handler below).
+      this._pendingDigitCaptures = [];
       this._processedContracts = new Set();
       this.scannerState = { markets: [], bestMarket: null, topThree: [], isScanning: false, lastUpdate: 0 };
       this.marketHealth = null; this.liveDigit = -1; this.liveQuote = 0;
@@ -11854,11 +11876,12 @@ window.NexusStrategies=exports;
     // digit (0-9) instead of parity/over-under/direction, using its own
     // frequency-based analyzer (MatchesAnalyzer).
     get isMatchMode() { return this.mode === 'matches'; }
-    // true only for the Multiplier bot — bets MULTUP/MULTDOWN, a leveraged
-    // position that stays open (no fixed tick duration) until it's sold,
-    // or Deriv auto-closes it because the position's own take-profit /
-    // stop-loss (limit_order, set per-trade in dollars) was hit.
-    get isMultiplierMode() { return this.mode === 'multiplier'; }
+    // true only for the Accumulator bot — bets ACCU, a leveraged position
+    // with no direction (no CALL/PUT) that stays open (no fixed tick
+    // duration) until it's sold, hits its own take-profit (limit_order,
+    // set per-trade in dollars), or knocks out. Entries are gated on a
+    // calm-market streak rather than a directional signal.
+    get isAccumulatorMode() { return this.mode === 'accumulator'; }
 
     // Extra args passed into the shared Trading module's analyzeDigits /
     // checkEntryConditions / MarketScanner so each bot instance scores and
@@ -11950,27 +11973,32 @@ window.NexusStrategies=exports;
         // "hottest digit" condition from re-firing on the very next tick.
         matchesCooldownTicks: 3,
       };
-      // Multiplier: bets MULTUP/MULTDOWN — a leveraged position, not a
-      // fixed-duration contract. Flat stake (no martingale — doubling into
-      // an already-leveraged position compounds risk fast). takeProfit /
-      // stopLoss here are the SESSION target (same meaning as every other
+      // Accumulator: bets ACCU — a leveraged position with no direction,
+      // not a fixed-duration contract. Flat stake (no martingale — doubling
+      // into an already-leveraged position compounds risk fast). takeProfit
+      // / stopLoss here are the SESSION target (same meaning as every other
       // bot — total accumulated profit/loss before the bot pauses).
-      // positionTakeProfitRatio / positionStopLossRatio are per-trade
-      // limits expressed as a MULTIPLE OF STAKE (not a flat dollar amount)
-      // — e.g. 2.4 means "close this position once profit reaches 2.4x
-      // the stake". A flat-dollar limit doesn't scale: raise the stake and
-      // the same $5 target becomes a tiny fraction of it, so trades close
-      // (or should close) almost immediately for a much smaller relative
-      // win. Sizing both limits off the stake keeps the profit/stake ratio
-      // constant no matter what you stake — the actual $ sent to Deriv is
-      // computed at execution time as stake × ratio.
-      const multiplierDefaults = {
-        stake: 10, multiplierLevel: 150, positionTakeProfitRatio: 2.4, positionStopLossRatio: 1,
-        direction: 'auto', minSignal: 60, tickPeriod: 50, selectedMarket: '1HZ100V',
+      // positionTakeProfitRatio is the per-trade limit expressed as a
+      // MULTIPLE OF STAKE (not a flat dollar amount) — e.g. 2 means "close
+      // this position once profit reaches 2x the stake". Sizing it off the
+      // stake keeps the profit/stake ratio constant no matter what you
+      // stake — the actual $ sent to Deriv is computed at execution time as
+      // stake × ratio. There's no position stop-loss field: ACCU's
+      // limit_order only accepts take_profit — the position's own knock-out
+      // boundary is what plays the stop-loss role.
+      // calmStreakRequired / calmThresholdPct drive the entry trigger: the
+      // engine watches consecutive ticks whose move is under
+      // calmThresholdPct and only fires once calmStreakRequired of them
+      // have stacked up in a row — i.e. it only enters when the market has
+      // actually been calm, since that's when accumulators pay best.
+      const accumulatorDefaults = {
+        stake: 10, growthRate: 2, positionTakeProfitRatio: 2,
+        calmStreakRequired: 5, calmThresholdPct: 0.03,
+        minSignal: 60, tickPeriod: 50, selectedMarket: '1HZ100V',
         takeProfit: 50, stopLoss: 20, martingaleEnabled: false,
         autoPilot: true, soundEnabled: true, autoRefresh: true,
       };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isMultiplierMode ? multiplierDefaults : evenDefaults;
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isAccumulatorMode ? accumulatorDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -12071,7 +12099,8 @@ window.NexusStrategies=exports;
       if (this.tickUnsub) this.tickUnsub();
       this.executionGuard = false;
       this.addLog('engine', 'RADAR', `Locked on ${market}`);
-      if (this.isPriceMode || this.isMultiplierMode) this.priceHistory = []; // fresh price series for the new market
+      if (this.isPriceMode || this.isAccumulatorMode) this.priceHistory = []; // fresh price series for the new market
+      if (this.isAccumulatorMode) this.calmStreak = 0; // fresh calm-streak counter for the new market
       this.tickUnsub = this.socket.subscribe(market, (data) => {
         this.lastTickTime = Date.now();
         const fullHistory = this.socket.getHistory(market);
@@ -12134,7 +12163,32 @@ window.NexusStrategies=exports;
           }
         }
         let result;
-        if (this.isPriceMode || this.isMultiplierMode) {
+        if (this.isAccumulatorMode) {
+          // Own rolling price buffer, same as Higher/Lower, but used here
+          // just to measure tick-to-tick volatility rather than direction.
+          if (!this.priceHistory) this.priceHistory = [];
+          const prevQuote = this.priceHistory.length ? this.priceHistory[this.priceHistory.length - 1] : null;
+          this.priceHistory.push(data.quote);
+          if (this.priceHistory.length > 120) this.priceHistory.shift();
+          // Calm-streak: count consecutive ticks whose move is under the
+          // configured threshold. A single jumpy tick resets the streak to
+          // zero — accumulators only pay well when the market has been
+          // genuinely quiet for a run of ticks, not just on average.
+          let pctMove = null;
+          if (prevQuote != null && prevQuote !== 0) {
+            pctMove = Math.abs((data.quote - prevQuote) / prevQuote) * 100;
+            if (pctMove <= (this.config.calmThresholdPct ?? 0.03)) {
+              this.calmStreak = (this.calmStreak || 0) + 1;
+            } else {
+              this.calmStreak = 0;
+            }
+          }
+          this.analysis = {
+            pctMove, calmStreak: this.calmStreak || 0,
+            calmStreakRequired: this.config.calmStreakRequired || 5,
+            ready: (this.calmStreak || 0) >= (this.config.calmStreakRequired || 5),
+          };
+        } else if (this.isPriceMode) {
           // Own rolling price buffer — the shared socket's tickHistory only
           // stores last-digit (used by the digit bots), not the raw quote,
           // so RSI/Bollinger/EMA/ROC need their own price series here.
@@ -12167,6 +12221,18 @@ window.NexusStrategies=exports;
         this.marketHealth = this.socket.getHealth(market);
         this.liveDigit = data.digit; this.liveQuote = data.quote;
         this.state = { ...this.state, history, currentDigit: data.digit, currentQuote: data.quote, streak };
+        // Feed any journal entries still waiting on their post-trade 3-tick
+        // readout — once each has 3, stamp it onto that entry.
+        if (this._pendingDigitCaptures.length) {
+          this._pendingDigitCaptures.forEach((cap) => cap.digits.push(data.digit));
+          this._pendingDigitCaptures = this._pendingDigitCaptures.filter((cap) => {
+            if (cap.digits.length >= 3) {
+              this.journal = this.journal.map((j) => j.id === cap.id ? { ...j, followingDigits: cap.digits.slice(0, 3) } : j);
+              return false;
+            }
+            return true;
+          });
+        }
         // Advance the open-contract tick counter — counts real ticks on the
         // traded market, capped at the contract's duration, so the UI never
         // shows more ticks elapsed than the contract actually runs for.
@@ -12185,31 +12251,18 @@ window.NexusStrategies=exports;
           this.emit();
           return;
         }
-        if (this.isMultiplierMode) {
-          // A multiplier position stays open until it's sold or Deriv
-          // auto-closes it (position take-profit/stop-loss hit) — so unlike
-          // the fixed-duration bots, "locked" here just means "already have
-          // an open position", checked via state.openTrade instead of a
-          // ticks-remaining counter.
+        if (this.isAccumulatorMode) {
+          // An accumulator position stays open until it's sold, hits its
+          // own take-profit, or knocks out — so unlike the fixed-duration
+          // bots, "locked" here just means "already have an open position",
+          // checked via state.openTrade instead of a ticks-remaining
+          // counter. No direction to confirm (ACCU has none) — the only
+          // gate is the calm-streak the analysis block above just computed.
           if (this.state.openTrade) { this.emit(); return; }
-          let dir = result.direction;
-          if (this.config.direction === 'up') dir = 'CALL';
-          else if (this.config.direction === 'down') dir = 'PUT';
-          const meetsSignal = this.config.direction !== 'auto' ? result.ready : (result.ready && dir && result.strength >= this.config.minSignal);
-          // Same 2-tick confirmation idea as Higher/Lower — a leveraged
-          // position amplifies both wins and losses, so it's worth extra
-          // care not to open one on a single noisy tick.
-          if (meetsSignal && dir) {
-            if (this._mpConfirmDir === dir) this._mpConfirmCount = (this._mpConfirmCount || 1) + 1;
-            else { this._mpConfirmDir = dir; this._mpConfirmCount = 1; }
-          } else {
-            this._mpConfirmDir = null; this._mpConfirmCount = 0;
-          }
-          if (meetsSignal && dir && this._mpConfirmCount >= 2) {
-            this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 UP' : '📉 DOWN'} signal ${result.strength}% (confirmed) — ${(result.reasons && result.reasons[0]) || ''}`);
-            this._mpConfirmCount = 0;
-            this._multiplierDirection = dir;
-            this.executeMultiplierPurchase(dir);
+          if (this.analysis && this.analysis.ready) {
+            this.addLog('win', 'SIGNAL', `📉 Calm signal — ${this.analysis.calmStreak}/${this.analysis.calmStreakRequired} quiet ticks (last move ${(this.analysis.pctMove ?? 0).toFixed(3)}%)`);
+            this.calmStreak = 0;
+            this.executeAccumulatorPurchase();
           }
           this.emit();
           return;
@@ -12516,7 +12569,7 @@ window.NexusStrategies=exports;
     _predictiveCheck(digit) {
       const trade = this.pendingTrade;
       if (!trade || Date.now() - trade.entryTime < 200) return;
-      if (trade.contractType === 'CALL' || trade.contractType === 'PUT' || trade.contractType === 'MULTUP' || trade.contractType === 'MULTDOWN') return; // price-direction result isn't knowable from one digit
+      if (trade.contractType === 'CALL' || trade.contractType === 'PUT' || trade.contractType === 'ACCU') return; // price-direction / accumulator result isn't knowable from one digit
       let win = false;
       if (trade.contractType === 'DIGITODD') win = this.T.isOdd(digit);
       else if (trade.contractType === 'DIGITEVEN') win = this.T.isEven(digit);
@@ -12526,74 +12579,56 @@ window.NexusStrategies=exports;
       this.addLog('engine', 'PREDICT', `${win ? '✅ WIN' : '❌ LOSS'} predicted (digit ${digit})`);
     }
 
-    // Multiplier positions are a different shape than every other contract
-    // here — no fixed duration, no barrier, flat stake (no martingale), and
-    // the take-profit/stop-loss is a per-position dollar limit sent to
-    // Deriv directly (limit_order) rather than something this app monitors
-    // itself. Kept as its own method instead of another branch inside
-    // executeBoltPurchase, which is already deeply branched for the
-    // fixed-duration bots' barrier/martingale/recovery logic.
-    executeMultiplierPurchase(direction) {
+    // Accumulator positions are a different shape than every other contract
+    // here — no fixed duration, no barrier, no direction, flat stake (no
+    // martingale), and the take-profit is a per-position dollar limit sent
+    // to Deriv directly (limit_order) rather than something this app
+    // monitors itself. Kept as its own method instead of another branch
+    // inside executeBoltPurchase, which is already deeply branched for the
+    // fixed-duration bots' barrier/martingale/recovery logic. Uses the same
+    // proposal-first flow ACCU contracts need (Deriv's buy-shortcut
+    // rejects `symbol` in its restricted parameters schema for leveraged
+    // contract types on this API version) — request a `proposal` first
+    // (universal schema, `symbol` always valid), then `buy` off the
+    // returned proposal id + ask_price, no `parameters` object involved.
+    executeAccumulatorPurchase() {
       const st = this.state, cfg = this.config;
       if (!st.active || this.executionGuard) return;
-      // BUG FIX: this guard was missing entirely — unlike executeBoltPurchase,
-      // this method went straight to `this.tradingSocket.send(...)` with no
-      // check that tradingSocket exists or is actually open. Any time the
-      // trading socket wasn't connected yet (e.g. right after Start, before
-      // the auth handshake finishes, or after a drop), this threw a silent
-      // "Cannot read properties of null/undefined (reading 'send')" error on
-      // the tick's event-listener callback — which isn't wrapped in a
-      // try/catch — so the signal was lost with no trade placed and no
-      // visible error in the UI. This is the most likely cause of "signal
-      // fires but no trade happens" on the Multiplier bot.
       this.executionGuard = true;
-      direction = direction || this._multiplierDirection;
       if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
-        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting (multiplier will auto-retry on connect)...');
-        this._multiplierDirection = direction;
+        this.addLog('engine', 'TRADE', 'Socket not ready — reconnecting (accumulator will auto-retry on connect)...');
+        this._accumulatorPending = true;
         this.executionGuard = false; // release guard so engine isn't stuck if socket drops
         this.state = { ...this.state, isLocked: true };
         const token = window.HubStore.getState().apiToken;
         if (token) this.connect(token);
         return;
       }
-      const contractType = direction === 'PUT' ? 'MULTDOWN' : 'MULTUP';
+      const contractType = 'ACCU';
       this.pendingTrade = { contractType, barrier: 0, entryTime: Date.now() };
       this._lastTradedBarrier = null;
       this._lastTradedContractType = contractType;
       this.lastTradeTime = Date.now();
       const accountCurrency = window.HubStore.getState().currency || 'USD';
-      // BUG FIX: Deriv's buy-shortcut ({buy:'1', parameters:{...}}) rejects
-      // this account's MULTUP/MULTDOWN parameters with "Input validation
-      // failed: Properties not allowed: symbol" — its restricted schema for
-      // shortcut-buy parameters doesn't accept `symbol` for this contract
-      // type on this API version. The fix is to use the standard two-step
-      // flow Deriv's own docs describe for multipliers: request a `proposal`
-      // first (which uses the universal, unrestricted proposal schema where
-      // `symbol` is always valid), then `buy` using the returned proposal id
-      // and ask_price — no `parameters` object involved at all, so this
-      // schema mismatch can't happen on the buy call.
-      const reqId = (this._mpReqIdSeq = (this._mpReqIdSeq || 0) + 1);
+      const growthRate = (cfg.growthRate || 2) / 100; // Deriv expects a fraction (0.02 for 2%)
+      const takeProfit = Math.max(0.1, parseFloat((cfg.stake * (cfg.positionTakeProfitRatio || 2)).toFixed(2)));
+      const reqId = (this._accReqIdSeq = (this._accReqIdSeq || 0) + 1);
       const proposalParams = {
         proposal: 1, subscribe: 0, req_id: reqId,
         amount: cfg.stake, basis: 'stake', contract_type: contractType,
-        currency: accountCurrency, symbol: cfg.selectedMarket, multiplier: cfg.multiplierLevel || 100,
-        limit_order: {
-          take_profit: Math.max(0.1, parseFloat(cfg.positionTakeProfit) || 5),
-          stop_loss: Math.max(0.1, parseFloat(cfg.positionStopLoss) || 5),
-        },
+        currency: accountCurrency, symbol: cfg.selectedMarket, growth_rate: growthRate,
+        limit_order: { take_profit: takeProfit },
       };
       this._pendingProposal = { reqId, contractType };
       this.sound.playExecute();
-      this.addLog('engine', 'BOLT', `${contractType} @ ${cfg.stake.toFixed(2)} ${accountCurrency} · x${cfg.multiplierLevel || 100}`);
+      this.addLog('engine', 'BOLT', `ACCU @ ${cfg.stake.toFixed(2)} ${accountCurrency} · growth ${(growthRate * 100).toFixed(0)}% · TP $${takeProfit.toFixed(2)}`);
       this.state = { ...this.state, isLocked: true };
       this.state.openTrade = {
-        contractType, stake: cfg.stake, multiplier: cfg.multiplierLevel || 100,
+        contractType, stake: cfg.stake, growthRate: cfg.growthRate || 2,
         market: cfg.selectedMarket, entrySpot: this.liveQuote ?? null, currentSpot: this.liveQuote ?? null,
-        profit: 0, takeProfit: proposalParams.limit_order.take_profit, stopLoss: proposalParams.limit_order.stop_loss,
-        firedAt: Date.now(),
+        profit: 0, takeProfit, firedAt: Date.now(),
       };
-      console.log('[Multiplier] Requesting proposal:', proposalParams);
+      console.log('[Accumulator] Requesting proposal:', proposalParams);
       this.tradingSocket.send(JSON.stringify(proposalParams));
       // Stuck watchdog — same 45s safety net the fixed-duration bots use, in
       // case neither the proposal nor the buy ack ever arrives.
@@ -12611,9 +12646,9 @@ window.NexusStrategies=exports;
       this.emit();
     }
 
-    // Manual close — sells the open multiplier position at market instead
-    // of waiting for the position's own take-profit/stop-loss to hit.
-    sellOpenMultiplierPosition() {
+    // Manual close — sells the open accumulator position at market instead
+    // of waiting for its own take-profit to hit (or a knock-out).
+    sellOpenAccumulatorPosition() {
       if (!this.state.openTrade || !this.state.openTrade.contractId || !this.tradingSocket) return;
       try {
         this.tradingSocket.send(JSON.stringify({ sell: this.state.openTrade.contractId, price: 0 }));
@@ -13131,12 +13166,12 @@ window.NexusStrategies=exports;
         if (this._processedContracts.has(contractKey)) return;
         this._processedContracts.add(contractKey);
       }
-      this.journal = [{
+      const journalEntry = {
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
         contractId: contractKey,
         time: new Date().toLocaleTimeString(), ts: Date.now(), type: win ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
         market: contract.underlying || this.config.selectedMarket,
-        barrier: this.isMultiplierMode ? null : (this._lastTradedBarrier != null ? this._lastTradedBarrier : (contract.barrier !== undefined && contract.barrier !== null && contract.barrier !== '' ? parseInt(contract.barrier) : (this.config.overBarrier ?? 0))),
+        barrier: this.isAccumulatorMode ? null : (this._lastTradedBarrier != null ? this._lastTradedBarrier : (contract.barrier !== undefined && contract.barrier !== null && contract.barrier !== '' ? parseInt(contract.barrier) : (this.config.overBarrier ?? 0))),
         contractType: this._lastTradedContractType || '',
         exitDigit: exitDigitResolved, entryDigit: entryDigitResolved,
         entrySpot: contract.entry_spot != null ? parseFloat(contract.entry_spot) : null,
@@ -13154,7 +13189,14 @@ window.NexusStrategies=exports;
           this.config.alternatingRecoveryR ? 'ALT-R' :
           `STEP-${this.state.martingaleStep}`
         ) : '',
-      }, ...this.journal].slice(0, 500);
+      };
+      this.journal = [journalEntry, ...this.journal].slice(0, 500);
+      // Digit-based modes only (Even/Odd/Over/Under/Matches) — Higher/Lower
+      // and Accumulator trade on price direction / a leveraged position, not
+      // a single settled digit, so the "next 3 digits" readout doesn't apply.
+      if (!this.isPriceMode && !this.isAccumulatorMode) {
+        this._pendingDigitCaptures.push({ id: journalEntry.id, digits: [] });
+      }
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
       // ── FIRST-TICK HANDLING: 'sacrifice' test trade settling ──────────
       // Logged and notified above like any other trade, but deliberately
@@ -13207,11 +13249,11 @@ window.NexusStrategies=exports;
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
       if (st.active) {
-        // Higher/Lower, Multiplier, and Matches have no session-level TP/SL
+        // Higher/Lower, Accumulator, and Matches have no session-level TP/SL
         // of their own anymore — they always defer to whatever is set in
         // the Dashboard's master gate, read live so changes made
         // mid-session apply immediately.
-        const isRiseFall = this.mode === 'risefall' || this.mode === 'multiplier';
+        const isRiseFall = this.mode === 'risefall' || this.mode === 'accumulator';
         const usesDashboardGate = isRiseFall || this.isMatchMode;
         const gate = usesDashboardGate && window.getMasterGateValues ? window.getMasterGateValues() : null;
         const tp = gate ? gate.tp : cfg.takeProfit;
@@ -13219,7 +13261,7 @@ window.NexusStrategies=exports;
         if (st.stats.profit >= tp) { this.addLog('win', 'AUTO', usesDashboardGate ? 'DASHBOARD TAKE PROFIT REACHED' : 'TAKE PROFIT REACHED'); showResultPopup('tp', tp, st.stats.profit); this.completeSession(true); return; }
         if (st.stats.profit <= -sl) { this.addLog('loss', 'AUTO', usesDashboardGate ? 'DASHBOARD STOP LOSS REACHED' : 'STOP LOSS REACHED'); showResultPopup('sl', sl, st.stats.profit); this.completeSession(false); return; }
       }
-      if (this.isMultiplierMode) {
+      if (this.isAccumulatorMode) {
         // No martingale/target-runs chaining here — flat stake, one
         // position open at a time. Just release the lock so the tick
         // handler goes back to scouting for the next signal.
@@ -13413,15 +13455,15 @@ window.NexusStrategies=exports;
           // If the engine was mid-chain when socket reconnected (isLocked+active, no pending),
           // retry the bolt now that the socket is ready — otherwise the chain silently stalls.
           // BUG FIX: this always called executeBoltPurchase(), even for the
-          // Multiplier engine — executeBoltPurchase has no branch for
-          // isMultiplierMode, so it fell into the digit-contract fallback
+          // Accumulator engine — executeBoltPurchase has no branch for
+          // isAccumulatorMode, so it fell into the digit-contract fallback
           // branch and built a bogus contract_type/barrier instead of
-          // MULTUP/MULTDOWN, meaning a Multiplier bot that reconnected
-          // mid-signal never actually placed the leveraged trade it meant to.
+          // ACCU, meaning an Accumulator bot that reconnected mid-signal
+          // never actually placed the leveraged trade it meant to.
           if (_titan.state.active && _titan.state.isLocked && !_titan.pendingTrade && !_titan.executionGuard && !_titan.state.isCooldown) {
-            if (_titan.isMultiplierMode) {
-              _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing multiplier position');
-              setTimeout(() => _titan.executeMultiplierPurchase(_titan._multiplierDirection || 'CALL'), 300);
+            if (_titan.isAccumulatorMode) {
+              _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing accumulator position');
+              setTimeout(() => _titan.executeAccumulatorPurchase(), 300);
             } else {
               _titan.addLog('engine', 'RETRY', 'Socket reconnected mid-chain — re-firing bolt');
               setTimeout(() => _titan.executeBoltPurchase(), 300);
@@ -13461,20 +13503,20 @@ window.NexusStrategies=exports;
               }
             } else if (_c && !_c.is_sold && _titan.state.openTrade) {
               // Contract still running — mirror the server's live spot (and,
-              // for Multiplier, live running profit) onto the open-trade
+              // for Accumulator, live running profit) onto the open-trade
               // widget. Best-effort: some contract types omit current_spot,
               // in which case the widget just keeps showing the tick count
               // from our own feed instead.
               const spot = _c.current_spot_display_value ?? _c.current_spot;
               const patch = {};
               if (spot != null) patch.currentSpot = spot;
-              if (_titan.isMultiplierMode && _c.profit != null) patch.profit = parseFloat(_c.profit);
+              if (_titan.isAccumulatorMode && _c.profit != null) patch.profit = parseFloat(_c.profit);
               if (Object.keys(patch).length) _titan.state.openTrade = { ..._titan.state.openTrade, ...patch };
               _titan.emit();
             }
           }
 
-          // Response to the `proposal` request sent by executeMultiplierPurchase().
+          // Response to the `proposal` request sent by executeAccumulatorPurchase().
           // The proposal-first flow was added to dodge the "Properties not
           // allowed: symbol" rejection on the buy-shortcut, but nothing was
           // ever listening for msg_type 'proposal' — so the proposal went out,
@@ -13530,7 +13572,7 @@ window.NexusStrategies=exports;
                   else if (data.error.fields) extra = ' — fields: ' + JSON.stringify(data.error.fields);
                 } catch (_) {}
                 _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})${extra}`);
-                if (extra) console.error('[Multiplier] Full buy error:', data.error); else console.error('[Multiplier] Full buy error (no details field):', data.error);
+                if (extra) console.error('[Trade] Full buy error:', data.error); else console.error('[Trade] Full buy error (no details field):', data.error);
               }
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
@@ -13661,7 +13703,7 @@ window.NexusStrategies=exports;
     _watchdog() {
       const now = Date.now();
       const tickStale = now - this.lastTickTime > 12000;
-      const tradeStuck = !this.isMultiplierMode && this.state.active && this.state.isLocked && now - this.lastTradeTime > 60000 && !this.pendingTrade;
+      const tradeStuck = !this.isAccumulatorMode && this.state.active && this.state.isLocked && now - this.lastTradeTime > 60000 && !this.pendingTrade;
       if (tickStale || tradeStuck) {
         this.addLog('engine', 'WATCHDOG', `🚨 ${tickStale ? 'No ticks 12s' : 'No trade 60s'} — reconnecting`);
         const token = window.HubStore.getState().apiToken;
@@ -13698,7 +13740,7 @@ window.NexusStrategies=exports;
   let shellBuilt = false;
 
   // Self-contained copy of the same cp-card/cp-input/cp-engage-btn styling
-  // the Higher/Lower and Multiplier bots use (RiseFallUI's SELF_STYLE) — new
+  // the Higher/Lower and Accumulator bots use (RiseFallUI's SELF_STYLE) — new
   // look for Differ, duplicated here so it renders correctly even if Differ
   // is the very first tab opened in a session.
   const SELF_STYLE = (rootId) => `
@@ -14260,6 +14302,7 @@ window.NexusStrategies=exports;
               <span style="font-size:10px;font-family:'DM Mono',monospace;font-weight:700;color:${wc}">${pl}</span>
             </div>
           </div>
+          ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.4);letter-spacing:0.5px;margin-top:1px">traded ${enD} · next ${j.followingDigits.join(' ')}</div>` : ''}
         </div>`;
       }).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
       <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:'Outfit',sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
@@ -15851,6 +15894,7 @@ window.NexusStrategies=exports;
               </span>
             </div>
           </div>
+          ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.35);letter-spacing:0.5px;margin-top:1px">traded ${entD} · next ${j.followingDigits.join(' ')}</div>` : ''}
         </div>`;
       }).join('')}
     </div>
@@ -16201,7 +16245,7 @@ window.NexusStrategies=exports;
     under: { label: 'Under Bot', dot: 'hsl(var(--loss))' },
     risefall: { label: 'Higher/Lower Bot', dot: 'hsl(var(--win))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
-    multiplier: { label: 'Multiplier Bot', dot: 'hsl(var(--accent))' },
+    accumulator: { label: 'Accumulator Bot', dot: 'hsl(var(--accent))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -16999,7 +17043,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'];
+    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -17412,6 +17456,7 @@ window.NexusStrategies=exports;
               ${isWin ? '▲ WIN' : '▼ LOSS'}</span>
             ${recoveryChip}
           </div>
+          ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;color:hsl(var(--muted-foreground)/0.3);font-family:'DM Mono',monospace;letter-spacing:0.5px;margin-top:1px">next ${j.followingDigits.join(' ')}</div>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:3px;flex-shrink:0;margin:0 4px">
           <span style="font-size:9px;color:hsl(var(--muted-foreground)/0.35);font-family:'DM Mono',monospace">${entryD}</span>
@@ -18153,14 +18198,144 @@ window.NexusStrategies=exports;
   }
 
   // ── LEFT: Analysis Hub ────────────────────────────────────────────────
+  function renderTopMarketsBlock(engine, c, scannerState, marketHealth) {
+    return `
+    <div class="ahub-card">
+      <div class="ahub-label" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:6px"><span class="ahub-label-dot" style="background:hsl(var(--win));box-shadow:0 0 8px hsl(var(--win))"></span>Top Markets</div>
+        <span style="font-size:8px;color:hsl(var(--win));animation:ahub-pulse 1.5s infinite">⬤ LIVE SCAN</span>
+      </div>
+      ${engine.fixedMarket ? `<div style="text-align:center;padding:14px 10px;color:hsl(var(--muted-foreground));font-size:9.5px;line-height:1.6">
+        🔒 This bot is locked to <b style="color:hsl(var(--foreground))">${c.selectedMarket}</b> and won't rotate to another market — its signal engine only ever trades this one symbol.
+      </div>` : (scannerState && scannerState.topThree || []).map((m, idx) => {
+        const isSel = m.symbol === c.selectedMarket;
+        const is1s = (m.symbol||'').startsWith('1HZ');
+        const health = (m.health && m.health.longTerm) || m.longTerm || '—';
+        const rankColors = ['hsl(var(--win))','hsl(var(--primary))','hsl(var(--secondary))'];
+        const rc = rankColors[idx] || 'hsl(var(--muted-foreground))';
+        const hc = health==='HEALTHY'?'hsl(var(--win))':health==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))';
+        const medals = ['🥇','🥈','🥉'];
+        return `<button class="ahub-mkt-card ${isSel?'sel':''}" data-mkt="${m.symbol}" style="--rank-color:${rc};--rank-glow:${rc}66;--rank-bg:${rc}14">
+          <div style="display:flex;align-items:center;gap:9px">
+            <div class="ahub-mkt-rank">${idx<3?medals[idx]:'#'+(idx+1)}</div>
+            <div style="flex:1;min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span style="font-size:11.5px;font-weight:800;color:hsl(var(--foreground))">${m.name}</span>
+              ${is1s?`<span style="font-size:7px;padding:1px 5px;border-radius:999px;background:hsl(var(--primary)/0.15);color:hsl(var(--primary));font-weight:800">1S</span>`:''}
+              ${isSel?`<span style="font-size:7.5px;font-weight:900;color:hsl(var(--primary));animation:ahub-pulse 1.5s infinite;flex-shrink:0">● ACTIVE</span>`:''}
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${rc};text-shadow:0 0 10px ${rc}40;line-height:1">${m.score}%</div>
+              <div style="font-size:6.5px;color:hsl(var(--muted-foreground)/0.8);letter-spacing:1px;margin-top:2px">SCORE</div>
+            </div>
+          </div>
+          <div class="ahub-mkt-gauge"><div class="ahub-mkt-gauge-fill" style="width:${m.score}%;background:linear-gradient(90deg,${rc}99,${rc});box-shadow:0 0 8px ${rc}80"></div></div>
+          <span class="ahub-mkt-chip" style="background:${hc}15;color:${hc};border:1px solid ${hc}40">${health==='HEALTHY'?'✓':health==='MODERATE'?'●':'⚠'} ${health}</span>
+        </button>`;
+      }).join('') || `<div style="text-align:center;padding:22px 16px;color:hsl(var(--muted-foreground));font-size:10px">
+        <div style="width:26px;height:26px;margin:0 auto 8px;border-radius:50%;border:2px solid hsl(var(--border)/0.4);border-top-color:hsl(var(--primary));animation:settings-spin 0.9s linear infinite"></div>
+        <span style="animation:ahub-pulse 1.5s infinite;display:inline-block">Scanning markets…</span>
+      </div>`}
+      ${engine.fixedMarket ? '' : (marketHealth ? `<div style="margin-top:6px;padding:8px 10px;background:hsl(var(--bg)/0.6);border-radius:8px;border:1px solid hsl(var(--border)/0.3);display:flex;align-items:center;gap:8px">
+        <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Active:</span>
+        <b style="font-size:8.5px;color:${marketHealth.longTerm==='HEALTHY'?'hsl(var(--win))':marketHealth.longTerm==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))'}">${marketHealth.longTerm}</b>
+        <span style="margin-left:auto;font-size:8.5px;color:hsl(var(--muted-foreground))">1s markets prioritized, normal markets kept as fallback</span>
+      </div>` : '')}
+    </div>`;
+  }
+
+  // Accumulator's Analysis Hub — no direction to show (ACCU has none), so
+  // instead of the CALL/PUT ring this shows the calm-streak gauge that
+  // actually drives its entry trigger: consecutive ticks under the move
+  // threshold, and how close that streak is to firing a trade.
+  function renderLeftAccumulator(engine, rootId, snap) {
+    const host = el(`${rootId}-left`);
+    const a = snap.analysis || {};
+    const { scannerState, marketHealth, config: c } = snap;
+    const streak = a.calmStreak || 0;
+    const required = a.calmStreakRequired || c.calmStreakRequired || 5;
+    const pct = Math.min(100, (streak / Math.max(1, required)) * 100);
+    const calmColor = a.ready ? '#00e676' : streak > 0 ? 'hsl(var(--primary))' : '#8a8f98';
+    const circumference = 2 * Math.PI * 44;
+    const ringOffset = circumference - (pct / 100) * circumference;
+    const recentMoves = (engine.priceHistory || []).slice(-12);
+    const html = `
+    <!-- HEADER -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid hsl(var(--border)/0.3)">
+      <div style="position:relative;width:10px;height:10px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--primary));animation:ahub-pulse 1.5s infinite"></div>
+        <div style="position:absolute;inset:-4px;border-radius:50%;background:hsl(var(--primary)/0.2);animation:ahub-ping 1.5s infinite"></div>
+      </div>
+      <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:3px;color:hsl(var(--primary));text-transform:uppercase">Analysis Hub</span>
+      <div style="flex:1"></div>
+      <span style="font-family:'DM Mono',monospace;font-size:9px;color:hsl(var(--muted-foreground));animation:ahub-pulse 2s infinite">● LIVE</span>
+    </div>
+
+    <!-- CALM STREAK RING -->
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot"></span>Calm-Market Signal</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="position:relative;width:110px;height:110px;flex-shrink:0;animation:ahub-float 3s ease-in-out infinite">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <circle cx="55" cy="55" r="44" fill="none" stroke="hsl(var(--border)/0.3)" stroke-width="8"/>
+            <circle cx="55" cy="55" r="44" fill="none" stroke="${calmColor}" stroke-width="8" stroke-opacity="0.12" stroke-dasharray="${circumference}"/>
+            <circle cx="55" cy="55" r="44" fill="none" stroke="${calmColor}" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="${circumference}" stroke-dashoffset="${ringOffset}"
+              style="transform:rotate(-90deg);transform-origin:55px 55px;filter:drop-shadow(0 0 6px ${calmColor});transition:stroke-dashoffset .8s cubic-bezier(0.34,1.2,0.64,1)"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${calmColor};text-shadow:0 0 12px ${calmColor}80">${streak}/${required}</div>
+            <div style="font-size:7px;letter-spacing:1px;color:hsl(var(--muted-foreground))">QUIET TICKS</div>
+          </div>
+        </div>
+        <div style="flex:1">
+          <div class="font-display" style="text-align:center;font-size:14px;font-weight:800;letter-spacing:1px;color:${calmColor};margin-bottom:8px">${a.ready ? '✅ READY TO FIRE' : streak > 0 ? '⏳ BUILDING STREAK' : '— WATCHING —'}</div>
+          <div style="font-size:9px;color:hsl(var(--muted-foreground));text-align:center">
+            Last move: <b style="color:hsl(var(--foreground))">${a.pctMove != null ? a.pctMove.toFixed(3) + '%' : '—'}</b> · Threshold: ${(c.calmThresholdPct ?? 0.03)}%
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:8px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid ${calmColor}66">
+        Enters once ${required} consecutive ticks each move ≤ ${(c.calmThresholdPct ?? 0.03)}% — a single jumpy tick resets the streak to 0.
+      </div>
+    </div>
+
+    <!-- RECENT TICK MOVES -->
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Recent Quotes</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-family:'DM Mono',monospace;font-size:11px">
+        <span style="color:hsl(var(--muted-foreground))">${c.selectedMarket||'—'}</span>
+        <span style="font-weight:700">${fmtNum(recentMoves[recentMoves.length-1],4)}</span>
+      </div>
+      <div style="display:flex;gap:3px;align-items:flex-end;height:34px">
+        ${recentMoves.map((q, i) => {
+          if (i === 0) return `<div style="flex:1;background:hsl(var(--border)/0.3);height:8px;border-radius:2px"></div>`;
+          const prev = recentMoves[i - 1];
+          const move = prev ? Math.abs((q - prev) / prev) * 100 : 0;
+          const isCalm = move <= (c.calmThresholdPct ?? 0.03);
+          const h = Math.max(4, Math.min(34, (move / ((c.calmThresholdPct ?? 0.03) * 4)) * 34));
+          return `<div style="flex:1;background:${isCalm ? '#00e676' : '#ff5252'};height:${h}px;border-radius:2px;opacity:${isCalm?0.9:0.7}" title="${move.toFixed(3)}%"></div>`;
+        }).join('') || `<div style="width:100%;text-align:center;font-size:9px;color:hsl(var(--muted-foreground))">Warming up…</div>`}
+      </div>
+    </div>
+
+    ${renderTopMarketsBlock(engine, c, scannerState, marketHealth)}`;
+    if (shHtml(host, html)) {
+      host.querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
+        engine.changeMarket(b.dataset.mkt);
+        renderLeftAccumulator(engine, rootId, engine.getSnapshot());
+      });
+    }
+  }
+
   function renderLeft(engine, rootId, snap) {
+    if (engine.isAccumulatorMode) return renderLeftAccumulator(engine, rootId, snap);
     const host = el(`${rootId}-left`);
     const a = snap.analysis || {};
     const { scannerState, marketHealth, config: c } = snap;
     const call = a.callScore || 0, put = a.putScore || 0, maxScore = Math.max(1, call, put);
     const strength = a.strength || 0;
     const dir = a.direction;
-    const dirLabel = dir === 'CALL' ? (engine.isMultiplierMode ? '📈 MULTUP' : '📈 HIGHER') : dir === 'PUT' ? (engine.isMultiplierMode ? '📉 MULTDOWN' : '📉 LOWER') : '— NEUTRAL —';
+    const dirLabel = dir === 'CALL' ? '📈 HIGHER' : dir === 'PUT' ? '📉 LOWER' : '— NEUTRAL —';
     const dirColor = dir === 'CALL' ? '#00e676' : dir === 'PUT' ? '#ff5252' : '#8a8f98';
     const circumference = 2 * Math.PI * 44;
     const ringOffset = circumference - (strength / 100) * circumference;
@@ -18246,48 +18421,7 @@ window.NexusStrategies=exports;
       ${a.accuracy!=null ? `<div style="margin-top:2px;font-size:8.5px;color:hsl(var(--muted-foreground));text-align:center">Rolling hit-rate of this analyzer's own recent HIGHER/LOWER calls, checked 8 ticks later</div>` : ''}
     </div>
 
-    <!-- TOP MARKETS -->
-    <div class="ahub-card">
-      <div class="ahub-label" style="justify-content:space-between">
-        <div style="display:flex;align-items:center;gap:6px"><span class="ahub-label-dot" style="background:hsl(var(--win));box-shadow:0 0 8px hsl(var(--win))"></span>Top Markets</div>
-        <span style="font-size:8px;color:hsl(var(--win));animation:ahub-pulse 1.5s infinite">⬤ LIVE SCAN</span>
-      </div>
-      ${engine.fixedMarket ? `<div style="text-align:center;padding:14px 10px;color:hsl(var(--muted-foreground));font-size:9.5px;line-height:1.6">
-        🔒 This bot is locked to <b style="color:hsl(var(--foreground))">${c.selectedMarket}</b> and won't rotate to another market — its signal engine only ever trades this one symbol.
-      </div>` : (scannerState && scannerState.topThree || []).map((m, idx) => {
-        const isSel = m.symbol === c.selectedMarket;
-        const is1s = (m.symbol||'').startsWith('1HZ');
-        const health = (m.health && m.health.longTerm) || m.longTerm || '—';
-        const rankColors = ['hsl(var(--win))','hsl(var(--primary))','hsl(var(--secondary))'];
-        const rc = rankColors[idx] || 'hsl(var(--muted-foreground))';
-        const hc = health==='HEALTHY'?'hsl(var(--win))':health==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))';
-        const medals = ['🥇','🥈','🥉'];
-        return `<button class="ahub-mkt-card ${isSel?'sel':''}" data-mkt="${m.symbol}" style="--rank-color:${rc};--rank-glow:${rc}66;--rank-bg:${rc}14">
-          <div style="display:flex;align-items:center;gap:9px">
-            <div class="ahub-mkt-rank">${idx<3?medals[idx]:'#'+(idx+1)}</div>
-            <div style="flex:1;min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <span style="font-size:11.5px;font-weight:800;color:hsl(var(--foreground))">${m.name}</span>
-              ${is1s?`<span style="font-size:7px;padding:1px 5px;border-radius:999px;background:hsl(var(--primary)/0.15);color:hsl(var(--primary));font-weight:800">1S</span>`:''}
-              ${isSel?`<span style="font-size:7.5px;font-weight:900;color:hsl(var(--primary));animation:ahub-pulse 1.5s infinite;flex-shrink:0">● ACTIVE</span>`:''}
-            </div>
-            <div style="text-align:right;flex-shrink:0">
-              <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${rc};text-shadow:0 0 10px ${rc}40;line-height:1">${m.score}%</div>
-              <div style="font-size:6.5px;color:hsl(var(--muted-foreground)/0.8);letter-spacing:1px;margin-top:2px">SCORE</div>
-            </div>
-          </div>
-          <div class="ahub-mkt-gauge"><div class="ahub-mkt-gauge-fill" style="width:${m.score}%;background:linear-gradient(90deg,${rc}99,${rc});box-shadow:0 0 8px ${rc}80"></div></div>
-          <span class="ahub-mkt-chip" style="background:${hc}15;color:${hc};border:1px solid ${hc}40">${health==='HEALTHY'?'✓':health==='MODERATE'?'●':'⚠'} ${health}</span>
-        </button>`;
-      }).join('') || `<div style="text-align:center;padding:22px 16px;color:hsl(var(--muted-foreground));font-size:10px">
-        <div style="width:26px;height:26px;margin:0 auto 8px;border-radius:50%;border:2px solid hsl(var(--border)/0.4);border-top-color:hsl(var(--primary));animation:settings-spin 0.9s linear infinite"></div>
-        <span style="animation:ahub-pulse 1.5s infinite;display:inline-block">Scanning markets…</span>
-      </div>`}
-      ${engine.fixedMarket ? '' : (marketHealth ? `<div style="margin-top:6px;padding:8px 10px;background:hsl(var(--bg)/0.6);border-radius:8px;border:1px solid hsl(var(--border)/0.3);display:flex;align-items:center;gap:8px">
-        <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Active:</span>
-        <b style="font-size:8.5px;color:${marketHealth.longTerm==='HEALTHY'?'hsl(var(--win))':marketHealth.longTerm==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))'}">${marketHealth.longTerm}</b>
-        <span style="margin-left:auto;font-size:8.5px;color:hsl(var(--muted-foreground))">1s markets prioritized, normal markets kept as fallback</span>
-      </div>` : '')}
-    </div>`;
+    ${renderTopMarketsBlock(engine, c, scannerState, marketHealth)}`;
     if (shHtml(host, html)) {
       host.querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
         engine.changeMarket(b.dataset.mkt);
@@ -18307,7 +18441,7 @@ window.NexusStrategies=exports;
     const cpRuns = s.currentRuns || 0;
     const targetRuns = c.targetRuns || 1;
     const runsPct = Math.min(100, (cpRuns / Math.max(1, targetRuns)) * 100);
-    const dirLabel = (c.direction || 'auto').toUpperCase();
+    const dirLabel = engine.isAccumulatorMode ? 'N/A' : (c.direction || 'auto').toUpperCase();
     const dirColor = c.direction === 'higher' ? 'hsl(var(--win))' : c.direction === 'lower' ? 'hsl(var(--loss))' : 'hsl(var(--primary))';
     const html = `
       <button id="${rootId}-toggle" class="cp-engage-btn ${running?'active':''}">${running ? '⏹ STOP ENGINE' : '▶ ENGAGE ENGINE'}</button>
@@ -18318,17 +18452,17 @@ window.NexusStrategies=exports;
 
       ${s.openTrade ? (() => {
         const ot = s.openTrade;
-        const isMultiplierPos = engine.isMultiplierMode;
-        const isCall = ot.contractType === 'CALL' || ot.contractType === 'MULTUP';
-        const oColor = isMultiplierPos ? ((ot.profit || 0) >= 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))') : (isCall ? 'hsl(var(--win))' : 'hsl(var(--loss))');
-        if (isMultiplierPos) {
+        const isAccumulatorPos = engine.isAccumulatorMode;
+        const isCall = ot.contractType === 'CALL';
+        const oColor = isAccumulatorPos ? ((ot.profit || 0) >= 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))') : (isCall ? 'hsl(var(--win))' : 'hsl(var(--loss))');
+        if (isAccumulatorPos) {
           return `<div class="cp-card" style="margin-top:10px;border:1.5px solid ${oColor}55;background:${oColor}0d">
             <div class="cp-section-label" style="display:flex;align-items:center;justify-content:space-between">
               <span>🔴 OPEN POSITION</span>
               <span style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${ot.market || ''}</span>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 6px">
-              <span style="font-family:'Outfit',sans-serif;font-weight:800;font-size:13px;color:${oColor}">${isCall ? '📈 MULTUP' : '📉 MULTDOWN'} · x${ot.multiplier || 100}</span>
+              <span style="font-family:'Outfit',sans-serif;font-weight:800;font-size:13px;color:${oColor}">📊 ACCU · growth ${ot.growthRate || 2}%</span>
               <span style="font-family:'DM Mono',monospace;font-size:11px;color:hsl(var(--muted-foreground))">Stake $${(ot.stake||0).toFixed(2)}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
@@ -18337,7 +18471,6 @@ window.NexusStrategies=exports;
             </div>
             <div style="display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">
               <span>TP +$${(ot.takeProfit||0).toFixed(2)}</span>
-              <span>SL -$${(ot.stopLoss||0).toFixed(2)}</span>
               ${ot.currentSpot != null ? `<span>Spot: ${ot.currentSpot}</span>` : ''}
             </div>
             <button id="${rootId}-close-position" style="width:100%;padding:8px;border-radius:10px;border:1px solid ${oColor}55;background:${oColor}14;color:${oColor};font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px;cursor:pointer">✕ CLOSE POSITION NOW</button>
@@ -18384,15 +18517,15 @@ window.NexusStrategies=exports;
         <div class="cp-section-label">Trade Settings</div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Stake</span><input class="cp-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}"></div>
-          ${engine.isMultiplierMode
-            ? `<div class="cp-input-group"><span class="cp-input-label">Multiplier Level (×)</span><input class="cp-input" type="number" min="1" max="1000" step="1" id="${rootId}-multlevel" value="${c.multiplierLevel || 100}"></div>`
+          ${engine.isAccumulatorMode
+            ? `<div class="cp-input-group"><span class="cp-input-label">Growth Rate (%)</span><input class="cp-input" type="number" min="1" max="5" step="1" id="${rootId}-growthrate" value="${c.growthRate || 2}"></div>`
             : `<div class="cp-input-group"><span class="cp-input-label">Duration (ticks)</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-duration" value="${c.duration}"></div>`}
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Target Runs</span><input class="cp-input" type="number" min="1" id="${rootId}-runs-in" value="${targetRuns}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Min Signal %</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-signal" value="${c.minSignal}"></div>
         </div>
-        ${!engine.isMultiplierMode ? `
+        ${!engine.isAccumulatorMode ? `
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Confirm Ticks</span><input class="cp-input" type="number" min="1" max="6" id="${rootId}-confirmticks" value="${c.confirmTicks || 2}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Min Confidence % (0=off)</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-minconf" value="${c.minConfidence || 0}"></div>
@@ -18422,14 +18555,14 @@ window.NexusStrategies=exports;
             ? 'Entry tick is skipped (no trade placed); the real run at Stake $ fires unconditionally on the very next tick.'
             : 'Every run trades normally from the entry tick — no probe or skip.'}
         </div>` : ''}
-        ${engine.isMultiplierMode ? `
+        ${engine.isAccumulatorMode ? `
         <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Position Take Profit ($)</span><input class="cp-input" type="number" step="0.1" min="0.1" id="${rootId}-postp" value="${c.positionTakeProfit ?? 5}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Position Stop Loss ($)</span><input class="cp-input" type="number" step="0.1" min="0.1" id="${rootId}-possl" value="${c.positionStopLoss ?? 5}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Position Take Profit (× stake)</span><input class="cp-input" type="number" step="0.5" min="0.5" id="${rootId}-postpratio" value="${c.positionTakeProfitRatio ?? 2}"></div>
         </div>
         <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:8px 9px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid hsl(var(--primary)/0.4);margin-bottom:2px">
-          Sent to Deriv as a <b>limit order</b> on the position itself, so it closes on its own take-profit/stop-loss even if this tab is closed. Separate from the session Take Profit / Stop Loss below.
+          Sent to Deriv as a <b>limit order</b> on the position itself (take-profit only — ACCU has no stop-loss field on the position; the knock-out boundary plays that role), so it closes on its own even if this tab is closed. Separate from the session Take Profit / Stop Loss below.
         </div>` : ''}
+        ${!engine.isAccumulatorMode ? `
         <div class="cp-input-group">
           <span class="cp-input-label">Direction</span>
           ${engine.fixedDirection ? `
@@ -18438,13 +18571,13 @@ window.NexusStrategies=exports;
           </div>` : `
           <select class="cp-input" id="${rootId}-direction">
             <option value="auto" ${c.direction==='auto'?'selected':''}>Auto</option>
-            <option value="higher" ${c.direction==='higher'?'selected':''}>${engine.isMultiplierMode ? 'Up only' : 'Higher only'}</option>
-            <option value="lower" ${c.direction==='lower'?'selected':''}>${engine.isMultiplierMode ? 'Down only' : 'Lower only'}</option>
+            <option value="higher" ${c.direction==='higher'?'selected':''}>Higher only</option>
+            <option value="lower" ${c.direction==='lower'?'selected':''}>Lower only</option>
           </select>`}
-        </div>
+        </div>` : ''}
       </div>
 
-      <div class="cp-card" style="${engine.isMultiplierMode ? 'display:none' : ''}">
+      <div class="cp-card" style="${engine.isAccumulatorMode ? 'display:none' : ''}">
         <div class="cp-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
           <div class="cp-section-label" style="margin:0">Martingale</div>
           <button class="titan-toggle ${c.martingaleEnabled?'on':''}" id="${rootId}-mg-toggle"></button>
@@ -18463,7 +18596,7 @@ window.NexusStrategies=exports;
           <span style="font-size:8px;font-family:'DM Mono',monospace;letter-spacing:1px;color:hsl(var(--primary));background:hsl(var(--primary)/0.1);border:1px solid hsl(var(--primary)/0.3);padding:2px 7px;border-radius:20px">DASHBOARD-CONTROLLED</span>
         </div>
         <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
-          This bot doesn't have its own session Take Profit / Stop Loss — it always follows the master gate set on the Dashboard, live, even mid-session.${engine.isMultiplierMode ? ' (Separate from the per-position TP/SL above, which Deriv enforces directly on the open position.)' : ''}
+          This bot doesn't have its own session Take Profit / Stop Loss — it always follows the master gate set on the Dashboard, live, even mid-session.${engine.isAccumulatorMode ? ' (Separate from the per-position take-profit above, which Deriv enforces directly on the open position.)' : ''}
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group">
@@ -18493,14 +18626,12 @@ window.NexusStrategies=exports;
       el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
       const durationEl = el(`${rootId}-duration`, host);
       if (durationEl) durationEl.onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); };
-      const multLevelEl = el(`${rootId}-multlevel`, host);
-      if (multLevelEl) multLevelEl.onchange = (e) => { engine.setConfig({ multiplierLevel: Math.max(1, parseInt(e.target.value) || 100) }); };
-      const posTpEl = el(`${rootId}-postp`, host);
-      if (posTpEl) posTpEl.onchange = (e) => { engine.setConfig({ positionTakeProfit: Math.max(0.1, parseFloat(e.target.value) || 5) }); };
-      const posSlEl = el(`${rootId}-possl`, host);
-      if (posSlEl) posSlEl.onchange = (e) => { engine.setConfig({ positionStopLoss: Math.max(0.1, parseFloat(e.target.value) || 5) }); };
+      const growthRateEl = el(`${rootId}-growthrate`, host);
+      if (growthRateEl) growthRateEl.onchange = (e) => { engine.setConfig({ growthRate: Math.min(5, Math.max(1, parseInt(e.target.value) || 2)) }); };
+      const posTpRatioEl = el(`${rootId}-postpratio`, host);
+      if (posTpRatioEl) posTpRatioEl.onchange = (e) => { engine.setConfig({ positionTakeProfitRatio: Math.max(0.5, parseFloat(e.target.value) || 2) }); };
       const closePosBtn = el(`${rootId}-close-position`, host);
-      if (closePosBtn) closePosBtn.onclick = () => { if (engine.sellOpenMultiplierPosition) engine.sellOpenMultiplierPosition(); };
+      if (closePosBtn) closePosBtn.onclick = () => { if (engine.sellOpenAccumulatorPosition) engine.sellOpenAccumulatorPosition(); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
       const confirmTicksEl = el(`${rootId}-confirmticks`, host);
@@ -19233,6 +19364,7 @@ window.NexusStrategies=exports;
               <span>predicted ${j.barrier ?? '—'}</span><span class="jnl-arrow">→</span>
               <span style="font-weight:800;color:${isWin?'hsl(var(--win))':'hsl(var(--loss))'}">landed ${exiD}</span>
             </div>
+            ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.35);letter-spacing:0.5px;margin-top:1px;text-align:right">next ${j.followingDigits.join(' ')}</div>` : ''}
           </div>`;
         }).join('')}
       </div>
@@ -19271,7 +19403,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'];
+  const BOT_IDS = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -19283,7 +19415,7 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'];
+  const VALID_APPS = ['dashboard', 'differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
@@ -19326,10 +19458,10 @@ window.NexusStrategies=exports;
     const isOU = isOver || isUnder;
     const isRiseFall = id === 'risefall';
     const isMatches = id === 'matches';
-    const isMultiplier = id === 'multiplier';
+    const isAccumulator = id === 'accumulator';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
-    const safeSocket = (isOU || isRiseFall || isMultiplier ? window.NexusSocket : window.EvenSocket)
+    const safeSocket = (isOU || isRiseFall || isAccumulator ? window.NexusSocket : window.EvenSocket)
       || { globalSocket: null };
     // Higher/Lower gets its OWN scanner (RiseFallScanner) that ranks markets
     // by price-trend/RSI/Bollinger confluence via RiseFallAnalyzer — the same
@@ -19338,21 +19470,21 @@ window.NexusStrategies=exports;
     // for a price-direction (CALL/PUT) bot and left "best market" completely
     // disconnected from what the signal engine actually believed.
     const scannerFallback = { MarketScanner: class { constructor(cb){this._cb=cb;} setTickPeriod(){} async start(){} getBestMarket(){return null;} getGoldenMarkets(){return [];} getAllMarkets(){return [];} } };
-    const safeScanner = isRiseFall || isMultiplier
+    const safeScanner = isRiseFall || isAccumulator
       ? (window.RiseFallScanner || scannerFallback)
       : isMatches
       ? (window.MatchesScanner || scannerFallback)
       : (isOU ? window.NexusScanner : window.EvenScanner) || scannerFallback;
-    const opts = isMultiplier
+    const opts = isAccumulator
       ? {
-          // Multiplier bets MULTUP/MULTDOWN — a leveraged position rather
-          // than a fixed-duration digit/direction contract. It reuses the
-          // exact same price-trend/RSI/Bollinger/momentum analyzer as
-          // Higher/Lower for its strategy signal (mode: 'multiplier' inside
-          // TitanEngine already branches execution to
-          // executeMultiplierPurchase / sellOpenMultiplierPosition), so it
-          // shares Higher/Lower's market socket + scanner too.
-          id, mode: 'multiplier', fixedTradeMode: null, botLabel: 'Multiplier Bot',
+          // Accumulator bets ACCU — a leveraged position with no direction,
+          // not a fixed-duration digit/direction contract. It reuses the
+          // same price-tick feed as Higher/Lower but drives its entry off a
+          // calm/volatility-streak signal instead of a direction signal
+          // (mode: 'accumulator' inside TitanEngine already branches
+          // execution to executeAccumulatorPurchase / sellOpenAccumulatorPosition),
+          // so it shares Higher/Lower's market socket + scanner too.
+          id, mode: 'accumulator', fixedTradeMode: null, botLabel: 'Accumulator Bot',
           fixedDirection: null, fixedMarket: null,
           trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
           strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
@@ -19401,9 +19533,9 @@ window.NexusStrategies=exports;
     eng.onUpdate = function () {
       const rootId = id + '-root';
       if (activeApp === id && titanBuilt[id]) {
-        if ((isRiseFall || isMultiplier) && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
+        if ((isRiseFall || isAccumulator) && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
         else if (isMatches && window.MatchesUI) window.MatchesUI.renderLive(eng, rootId, opts.botLabel);
-        else if (!isRiseFall && !isMatches && !isMultiplier && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
+        else if (!isRiseFall && !isMatches && !isAccumulator && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
       }
       if (activeApp === 'dashboard') queueDashboardRender();
     };
@@ -19421,8 +19553,8 @@ window.NexusStrategies=exports;
     }
     const eng = ensureTitanEngine(id);
     if (!eng) return;
-    if (id === 'risefall' || id === 'multiplier') {
-      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', id === 'multiplier' ? 'MULTIPLIER BOT' : 'HIGHER/LOWER BOT');
+    if (id === 'risefall' || id === 'accumulator') {
+      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', id === 'accumulator' ? 'ACCUMULATOR BOT' : 'HIGHER/LOWER BOT');
       titanBuilt[id] = true;
       return;
     }
@@ -19933,7 +20065,7 @@ window.NexusStrategies=exports;
         savedAny = true;
       }
     } catch (e) { console.error('[Hub] Differ save error:', e); }
-    ['even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'multiplier'].forEach((id) => {
+    ['even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
         try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
