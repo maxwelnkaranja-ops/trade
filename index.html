@@ -10656,7 +10656,11 @@ window.NexusTrading = exports;
         case 'SET_SPEED': s.speed = action.value; break;
         case 'SET_TRIGGER': s.silenceTrigger = action.value; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : action.value; break;
         case 'TOGGLE_TRIGGER_SHUFFLE': s.triggerShuffle = !s.triggerShuffle; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : s.silenceTrigger; break;
-        case 'ARM': s.isArmed = true; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : s.silenceTrigger; break;
+        // Reset the silence streak to 0 on every ARM so the bot never fires
+        // off ticks that accumulated *before* Engage was pressed — it always
+        // starts counting fresh from the moment it's engaged, i.e. skips
+        // whatever streak was already in progress and begins a new one.
+        case 'ARM': s.isArmed = true; s.silenceCount = 0; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : s.silenceTrigger; break;
         case 'DISARM': s.isArmed = false; s.isRunning = false; break;
         case 'FIRING': s.isRunning = true; s.isArmed = false; s.firedCount = 0; break;
         case 'FIRE_COMPLETE': s.isRunning = false; s.firedCount = action.firedCount; break;
@@ -12559,7 +12563,19 @@ window.NexusStrategies=exports;
       this._lastTradedContractType = contractType;
       this.lastTradeTime = Date.now();
       const accountCurrency = window.HubStore.getState().currency || 'USD';
-      const params = {
+      // BUG FIX: Deriv's buy-shortcut ({buy:'1', parameters:{...}}) rejects
+      // this account's MULTUP/MULTDOWN parameters with "Input validation
+      // failed: Properties not allowed: symbol" — its restricted schema for
+      // shortcut-buy parameters doesn't accept `symbol` for this contract
+      // type on this API version. The fix is to use the standard two-step
+      // flow Deriv's own docs describe for multipliers: request a `proposal`
+      // first (which uses the universal, unrestricted proposal schema where
+      // `symbol` is always valid), then `buy` using the returned proposal id
+      // and ask_price — no `parameters` object involved at all, so this
+      // schema mismatch can't happen on the buy call.
+      const reqId = (this._mpReqIdSeq = (this._mpReqIdSeq || 0) + 1);
+      const proposalParams = {
+        proposal: 1, subscribe: 0, req_id: reqId,
         amount: cfg.stake, basis: 'stake', contract_type: contractType,
         currency: accountCurrency, symbol: cfg.selectedMarket, multiplier: cfg.multiplierLevel || 100,
         limit_order: {
@@ -12567,24 +12583,26 @@ window.NexusStrategies=exports;
           stop_loss: Math.max(0.1, parseFloat(cfg.positionStopLoss) || 5),
         },
       };
+      this._pendingProposal = { reqId, contractType };
       this.sound.playExecute();
       this.addLog('engine', 'BOLT', `${contractType} @ ${cfg.stake.toFixed(2)} ${accountCurrency} · x${cfg.multiplierLevel || 100}`);
       this.state = { ...this.state, isLocked: true };
       this.state.openTrade = {
         contractType, stake: cfg.stake, multiplier: cfg.multiplierLevel || 100,
         market: cfg.selectedMarket, entrySpot: this.liveQuote ?? null, currentSpot: this.liveQuote ?? null,
-        profit: 0, takeProfit: params.limit_order.take_profit, stopLoss: params.limit_order.stop_loss,
+        profit: 0, takeProfit: proposalParams.limit_order.take_profit, stopLoss: proposalParams.limit_order.stop_loss,
         firedAt: Date.now(),
       };
-      console.log('[Multiplier] Sending buy with params:', params);
-      this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: cfg.stake, parameters: params }));
+      console.log('[Multiplier] Requesting proposal:', proposalParams);
+      this.tradingSocket.send(JSON.stringify(proposalParams));
       // Stuck watchdog — same 45s safety net the fixed-duration bots use, in
-      // case the buy ack never arrives.
+      // case neither the proposal nor the buy ack ever arrives.
       if (this.stuckWatchdog) clearTimeout(this.stuckWatchdog);
       this.stuckWatchdog = setTimeout(() => {
         if (!this.pendingTrade) return;
         this.addLog('error', 'TRADE', 'No confirmation received for 45s — releasing trade lock so the engine can continue.');
         this.pendingTrade = null;
+        this._pendingProposal = null;
         this.state = { ...this.state, isLocked: false, openTrade: null };
         this.executionGuard = false;
         this.stuckWatchdog = null;
@@ -13456,6 +13474,45 @@ window.NexusStrategies=exports;
             }
           }
 
+          // Response to the `proposal` request sent by executeMultiplierPurchase().
+          // The proposal-first flow was added to dodge the "Properties not
+          // allowed: symbol" rejection on the buy-shortcut, but nothing was
+          // ever listening for msg_type 'proposal' — so the proposal went out,
+          // Deriv replied, and the reply was silently dropped: no buy was ever
+          // sent, and no error ever surfaced. This is why BOLT/PROPOSAL logs
+          // show up but the trade just hangs until the 45s stuck-watchdog
+          // clears it. Completing the flow here: take the returned proposal id
+          // + ask_price and fire the real buy off of them (no `parameters`
+          // object, so the symbol-schema mismatch can't happen).
+          if (data.msg_type === 'proposal' && _titan._pendingProposal && data.req_id === _titan._pendingProposal.reqId) {
+            if (data.error) {
+              let extra = '';
+              try {
+                const d = data.error.details;
+                if (d) extra = ' — details: ' + JSON.stringify(d);
+                else if (data.error.fields) extra = ' — fields: ' + JSON.stringify(data.error.fields);
+              } catch (_) {}
+              _titan.addLog('error', 'TRADE', `Proposal rejected: ${data.error.message} (code: ${data.error.code})${extra}`);
+              _titan.pendingTrade = null;
+              _titan._pendingProposal = null;
+              _titan.executionGuard = false;
+              _titan.state = { ..._titan.state, isLocked: false, openTrade: null };
+              if (_titan.stuckWatchdog) { clearTimeout(_titan.stuckWatchdog); _titan.stuckWatchdog = null; }
+            } else if (data.proposal && data.proposal.id) {
+              _titan.addLog('engine', 'PROPOSAL', `Proposal #${data.proposal.id} accepted — ask=${data.proposal.ask_price}`);
+              _titan._pendingProposal = null;
+              try {
+                _titan.tradingSocket.send(JSON.stringify({ buy: data.proposal.id, price: data.proposal.ask_price }));
+              } catch (e) {
+                _titan.addLog('error', 'TRADE', 'Failed to send buy for confirmed proposal — releasing lock.');
+                _titan.pendingTrade = null;
+                _titan.executionGuard = false;
+                _titan.state = { ..._titan.state, isLocked: false, openTrade: null };
+              }
+            }
+            _titan.emit();
+          }
+
           if (data.msg_type === 'buy') {
             if (data.error) {
               {
@@ -13640,35 +13697,139 @@ window.NexusStrategies=exports;
 
   let shellBuilt = false;
 
+  // Self-contained copy of the same cp-card/cp-input/cp-engage-btn styling
+  // the Higher/Lower and Multiplier bots use (RiseFallUI's SELF_STYLE) — new
+  // look for Differ, duplicated here so it renders correctly even if Differ
+  // is the very first tab opened in a session.
+  const SELF_STYLE = (rootId) => `
+    <style>
+      @keyframes cp-in   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes cp-glow { 0%,100%{box-shadow:0 0 16px hsl(var(--primary)/0.12)} 50%{box-shadow:0 0 32px hsl(var(--primary)/0.28)} }
+      #${rootId} .cp-card {
+        background: linear-gradient(150deg,hsl(var(--card)/0.92),hsl(var(--bg-soft)/0.7));
+        border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 14px; margin-bottom: 10px;
+        position: relative; overflow: hidden; backdrop-filter: blur(10px);
+        box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
+        transition: border-color .2s, box-shadow .2s;
+      }
+      #${rootId} .cp-card:hover { border-color: hsl(var(--border-bright)/0.6); }
+      #${rootId} .cp-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:1px;
+        background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.35) 40%, hsl(var(--secondary)/0.25) 65%, transparent);
+      }
+      #${rootId} .cp-section-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8.5px; font-weight: 800;
+        letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--muted-foreground)/0.6);
+        margin-bottom: 10px; display: flex; align-items: center; gap: 7px;
+      }
+      #${rootId} .cp-section-label::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, hsl(var(--primary)/0.2), transparent); }
+      #${rootId} .cp-input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+      #${rootId} .cp-input-group { display: flex; flex-direction: column; gap: 4px; }
+      #${rootId} .cp-input-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8px; font-weight: 700;
+        letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--primary)/0.75);
+      }
+      #${rootId} .cp-input {
+        background: hsl(var(--bg)/0.75) !important; border: 1px solid hsl(var(--border)/0.5) !important;
+        border-radius: 10px !important; color: hsl(var(--foreground)) !important;
+        font-family: 'DM Mono', monospace !important; font-size: 12px !important; font-weight: 500 !important;
+        padding: 8px 10px !important; width:100%; outline: none !important; backdrop-filter: blur(6px) !important;
+      }
+      #${rootId} .cp-input:focus { border-color: hsl(var(--primary)/0.55) !important; }
+      #${rootId} select.cp-input option { background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; }
+      #${rootId} .cp-toggle-row {
+        display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; margin-bottom: 8px;
+        background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px;
+        transition: background .16s, border-color .16s;
+      }
+      #${rootId} .cp-toggle-row:hover { background: hsl(var(--card)/0.5); border-color: hsl(var(--border)/0.5); }
+      #${rootId} .cp-engage-btn {
+        width: 100%; padding: 14px 18px; margin-top: 4px; font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 11px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+        border: 1px solid hsl(var(--primary)/0.3);
+        background: linear-gradient(135deg, hsl(var(--primary)/0.08), hsl(var(--primary-2, var(--primary))/0.04));
+        color: hsl(var(--primary)); border-radius: 14px; cursor: pointer;
+        box-shadow: 0 0 0 1px hsl(var(--primary)/0.08); transition: all .22s cubic-bezier(.34,1.56,.64,1);
+        position:relative; overflow:hidden;
+      }
+      #${rootId} .cp-engage-btn:hover { border-color: hsl(var(--primary)/0.55); transform: translateY(-2px); }
+      #${rootId} .cp-engage-btn.active {
+        background: linear-gradient(135deg, hsl(var(--loss)/0.12), hsl(var(--loss)/0.05));
+        border-color: hsl(var(--loss)/0.4); color: hsl(var(--loss));
+        box-shadow: 0 4px 20px hsl(var(--loss)/0.15); animation: cp-glow 3s ease-in-out infinite;
+      }
+      #${rootId} .cp-engage-btn::before {
+        content:''; position:absolute; top:0; bottom:0; width:35%; left:0;
+        background: linear-gradient(90deg, transparent, hsl(255 100% 100%/0.16), transparent);
+        animation: rf-sheen 2.8s ease-in-out infinite;
+      }
+      #${rootId} .cp-engage-btn:active { transform: scale(.97); }
+      @keyframes rf-sheen { 0% { transform: translateX(-120%) skewX(-15deg); } 100% { transform: translateX(220%) skewX(-15deg); } }
+      #${rootId} .rf-ind-card {
+        background: hsl(var(--bg)/0.8); border: 1px solid hsl(var(--border)/0.3); border-radius: 10px;
+        padding: 8px; text-align: center; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+      }
+      #${rootId} .rf-ind-val { font-family:'Outfit',sans-serif; font-size:15px; font-weight:900; }
+      #${rootId} .rf-ind-label { font-size:7.5px; font-family:'DM Mono',monospace; letter-spacing:1px; color:hsl(var(--muted-foreground)); margin-top:2px; }
+      #${rootId} .rf-ind-card:hover { transform: translateY(-2px); border-color: hsl(var(--primary)/0.4); box-shadow: 0 4px 14px hsl(0 0% 0%/0.25); }
+      @keyframes rf-header-sweep { 0% { background-position: 0% 50% } 100% { background-position: 200% 50% } }
+      #${rootId} .rf-header-glow {
+        background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.5), hsl(var(--secondary)/0.4), transparent);
+        background-size: 200% 100%; animation: rf-header-sweep 5s linear infinite;
+        height: 2px; width: 100%; position:absolute; bottom:0; left:0;
+      }
+      @keyframes rf-title-glow { 0%,100% { text-shadow: 0 0 10px hsl(var(--primary)/0.4) } 50% { text-shadow: 0 0 22px hsl(var(--primary)/0.75), 0 0 6px hsl(var(--secondary)/0.5) } }
+      #${rootId} h1.font-display { animation: rf-title-glow 3.2s ease-in-out infinite; }
+      @keyframes rf-entry-flash { 0% { background: hsl(var(--primary)/0.14); } 100% { background: transparent; } }
+      #${rootId} .jnl-entry:first-of-type { animation: rf-entry-flash 1.4s ease-out; }
+      #${rootId} .cp-card, #${rootId} .dahub-card { will-change: transform, opacity; }
+      @keyframes rf-stripe-move { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
+      #${rootId} .rf-cd-bar-wrap { margin:10px 0 4px; }
+      #${rootId} .rf-cd-bar-label { display:flex; justify-content:space-between; font-family:'DM Mono',monospace; font-size:9.5px; color:hsl(var(--accent)); margin-bottom:5px; letter-spacing:.5px; }
+      #${rootId} .rf-cd-bar-track { height:6px; border-radius:4px; background:hsl(var(--bg)/0.7); border:1px solid hsl(var(--border)/0.4); overflow:hidden; }
+      #${rootId} .rf-cd-bar-fill {
+        height:100%; border-radius:4px; transition: width 1s linear;
+        background: repeating-linear-gradient(45deg, hsl(var(--accent)), hsl(var(--accent)) 6px, hsl(var(--accent)/0.55) 6px, hsl(var(--accent)/0.55) 12px);
+        background-size: 28px 28px; animation: rf-stripe-move 1s linear infinite;
+        box-shadow: 0 0 8px hsl(var(--accent)/0.6);
+      }
+    </style>`;
+
   function buildShell(root) {
     if (shellBuilt) return;
     root.innerHTML = `
-      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0">
+      ${SELF_STYLE('differ-root')}
+      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0;position:relative">
         <div>
-          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:6px;font-family:'Orbitron',sans-serif;font-weight:700">DIFFER TERMINAL</h1>
-          <div style="font-size:8px;letter-spacing:3px;color:hsl(var(--muted-foreground))">ATOMIC BOLT ENGINE · V3.0 SUPERSONIC</div>
+          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700">DIFFER BOT</h1>
+          <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">COLD-DIGIT ANALYSIS · ATOMIC BOLT ENGINE · FULL AUTOMATION</div>
         </div>
         <div style="flex:1"></div>
         <div class="glass-panel" id="differ-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
         <div id="differ-conn-dot" style="width:10px;height:10px;border-radius:50%"></div>
+        <div class="rf-header-glow"></div>
       </header>
       <div class="benz-grid">
         <div class="benz-col"><div class="benz-scroll" id="differ-left"></div></div>
         <div class="benz-col"><div class="benz-scroll" id="differ-center"></div></div>
         <div class="benz-col">
-          <div style="display:flex;border-bottom:1px solid hsl(var(--border)/0.4)">
-            <button class="differ-subtab font-display active" data-tab="journal" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;background:none;border:none;color:hsl(var(--primary));cursor:pointer">JOURNAL</button>
-            <button class="differ-subtab font-display" data-tab="lab" style="flex:1;padding:8px;font-size:10px;letter-spacing:2px;background:none;border:none;color:hsl(var(--muted-foreground));cursor:pointer">🧪 LAB</button>
+          <div style="display:flex;gap:4px;padding:8px;border-bottom:1px solid hsl(var(--border)/0.4)">
+            <button class="differ-subtab active" data-tab="journal" style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;border-radius:10px;border:1px solid hsl(var(--primary)/0.35);background:hsl(var(--primary)/0.1);color:hsl(var(--primary));cursor:pointer;transition:all .18s">JOURNAL</button>
+            <button class="differ-subtab" data-tab="lab" style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;border-radius:10px;border:1px solid transparent;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;transition:all .18s">🧪 LAB</button>
           </div>
           <div class="benz-scroll" id="differ-right"></div>
         </div>
       </div>
-      <div class="glass-monitor" id="differ-statusbar" style="text-align:center;padding:10px;font-family:monospace;font-size:13px;border-top:1px solid hsl(var(--border)/0.5);border-radius:0;flex-shrink:0"></div>`;
+      <div id="differ-statusbar" style="text-align:center;padding:10px 16px;margin:8px 14px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;border-radius:12px;background:hsl(var(--bg)/0.6);border:1px solid hsl(var(--border)/0.4);flex-shrink:0;transition:border-color .2s,background .2s"></div>`;
 
     root.querySelectorAll('.differ-subtab').forEach((btn) => {
       btn.onclick = () => {
-        root.querySelectorAll('.differ-subtab').forEach((b) => { b.classList.remove('active'); b.style.color = 'hsl(var(--muted-foreground))'; });
-        btn.classList.add('active'); btn.style.color = 'hsl(var(--primary))';
+        root.querySelectorAll('.differ-subtab').forEach((b) => {
+          b.classList.remove('active');
+          b.style.color = 'hsl(var(--muted-foreground))'; b.style.background = 'transparent'; b.style.borderColor = 'transparent';
+        });
+        btn.classList.add('active');
+        btn.style.color = 'hsl(var(--primary))'; btn.style.background = 'hsl(var(--primary)/0.1)'; btn.style.borderColor = 'hsl(var(--primary)/0.35)';
         renderRight(global.benzEngine.state, btn.dataset.tab);
       };
     });
@@ -13813,35 +13974,27 @@ window.NexusStrategies=exports;
     const speedLabel = s.speed <= 100 ? 'SUPERSONIC' : s.speed <= 300 ? 'FAST' : s.speed <= 600 ? 'NORMAL' : 'SLOW';
     const batchPayout = s.batchSize * (s.stakeVary ? (s.stakeMin + s.stakeMax) / 2 : s.stake) * 1.95;
 
+    const differActive = s.isArmed || s.isRunning || s.isCooldown;
     el('differ-center').innerHTML = `
-      <div class="section-divider">Priority Monitor</div>
-      <div class="live-tick-display">
-        <div class="live-tick-cell">
-          <div class="cell-label">Current Tick</div>
-          <div id="differ-live-tick" class="cell-value text-primary">${s.currentTick ?? '—'}</div>
-        </div>
-        <div class="live-tick-cell" style="border-color:hsl(var(--primary)/0.3)">
-          <div class="cell-label">Differ Digit</div>
-          <div id="differ-live-cold" class="cell-value neon-text-primary">${s.coldDigit ?? '—'}</div>
+      <div class="cp-card">
+        <div class="cp-section-label">Priority Monitor</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div class="rf-ind-card"><div class="rf-ind-val" id="differ-live-tick" style="color:hsl(var(--primary))">${s.currentTick ?? '—'}</div><div class="rf-ind-label">CURRENT TICK</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val" id="differ-live-cold" style="color:hsl(var(--accent))">${s.coldDigit ?? '—'}</div><div class="rf-ind-label">DIFFER DIGIT</div></div>
         </div>
       </div>
-      <div class="section-divider">Configuration</div>
-      <div class="glass-panel" style="padding:12px">
-        <div class="labeled-input" style="margin-bottom:10px">
-          <span class="input-label">Market Index</span>
-          <select class="terminal-select" id="differ-market">${markets}</select>
+
+      <div class="cp-card">
+        <div class="cp-section-label">Configuration</div>
+        <div class="cp-input-group" style="margin-bottom:8px">
+          <span class="cp-input-label">Market Index</span>
+          <select class="cp-input" id="differ-market">${markets}</select>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-          <div class="labeled-input">
-            <span class="input-label">Stake ($)</span>
-            <input type="number" step="0.01" class="terminal-input" id="differ-stake" value="${s.stake}" ${s.stakeVary?'disabled style="opacity:.45"':''}>
-          </div>
-          <div class="labeled-input">
-            <span class="input-label">Batch Size</span>
-            <input type="number" class="terminal-input" id="differ-batch" value="${s.batchSize}">
-          </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Stake ($)</span><input class="cp-input" type="number" step="0.01" id="differ-stake" value="${s.stake}" ${s.stakeVary?'disabled style="opacity:.45"':''}></div>
+          <div class="cp-input-group"><span class="cp-input-label">Batch Size</span><input class="cp-input" type="number" id="differ-batch" value="${s.batchSize}"></div>
         </div>
-        <div class="cp-toggle-row" style="margin-bottom:10px;padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border))">
+        <div class="cp-toggle-row">
           <div style="display:flex;align-items:center;gap:10px">
             <button class="titan-toggle ${s.stakeVary?'on':''}" id="differ-stake-vary" onclick="event.stopPropagation()"></button>
             <div>
@@ -13850,32 +14003,26 @@ window.NexusStrategies=exports;
             </div>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;${s.stakeVary?'':'opacity:.45'}">
-          <div class="labeled-input">
-            <span class="input-label">Min Stake ($)</span>
-            <input type="number" step="0.01" class="terminal-input" id="differ-stake-min" value="${s.stakeMin}" ${s.stakeVary?'':'disabled'}>
-          </div>
-          <div class="labeled-input">
-            <span class="input-label">Max Stake ($)</span>
-            <input type="number" step="0.01" class="terminal-input" id="differ-stake-max" value="${s.stakeMax}" ${s.stakeVary?'':'disabled'}>
-          </div>
+        <div class="cp-input-row" style="${s.stakeVary?'':'opacity:.45'}">
+          <div class="cp-input-group"><span class="cp-input-label">Min Stake ($)</span><input class="cp-input" type="number" step="0.01" id="differ-stake-min" value="${s.stakeMin}" ${s.stakeVary?'':'disabled'}></div>
+          <div class="cp-input-group"><span class="cp-input-label">Max Stake ($)</span><input class="cp-input" type="number" step="0.01" id="differ-stake-max" value="${s.stakeMax}" ${s.stakeVary?'':'disabled'}></div>
         </div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin:-4px 0 10px;padding:6px 8px;background:hsl(var(--bg)/0.5);border-radius:7px;font-family:'DM Mono',monospace">💡 Take Profit / Stop Loss for Differ is managed from the Dashboard's master P&L gate — it stops every bot at once, including this one.</div>
-        <div class="glass-monitor" style="padding:8px;text-align:center;margin:0 0 10px;font-size:11px">BATCH PAYOUT (ALL WIN) <span class="neon-text-win font-mono-data">${batchPayout.toFixed(2)}</span></div>
-        <div class="burst-speed-row" style="margin-bottom:10px">
-          <div class="burst-speed-header">
-            <span>Burst Speed</span>
-            <span class="burst-speed-label" id="differ-speed-label">${speedLabel} · ${s.speed}ms</span>
-          </div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin:2px 0 10px;padding:8px 9px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid hsl(var(--primary)/0.4)">💡 Take Profit / Stop Loss for Differ is managed from the Dashboard's master P&L gate — it stops every bot at once, including this one.</div>
+        <div class="rf-ind-card" style="margin-bottom:10px">
+          <div class="rf-ind-val" style="color:hsl(var(--win));font-size:14px">${batchPayout.toFixed(2)}</div>
+          <div class="rf-ind-label">BATCH PAYOUT (ALL WIN)</div>
+        </div>
+        <div class="cp-input-group" style="margin-bottom:10px">
+          <span class="cp-input-label">Burst Speed · ${speedLabel} (${s.speed}ms)</span>
           <input type="range" id="differ-speed" min="50" max="1000" step="50" value="${s.speed}">
-          <div style="display:flex;justify-content:space-between;font-size:9px;color:hsl(var(--muted-foreground));margin-top:2px"><span>50ms (Fast)</span><span>1000ms (Slow)</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:8px;color:hsl(var(--muted-foreground))"><span>50ms (Fast)</span><span>1000ms (Slow)</span></div>
         </div>
-        <div class="labeled-input">
-          <span class="input-label">Silence Trigger · Lucky: ${s.luckyNumber}</span>
-          <input type="number" class="terminal-input" id="differ-trigger" value="${s.silenceTrigger}" min="5" max="30">
-          <span class="input-hint">Number of ticks the target digit must be silent before firing</span>
+        <div class="cp-input-group">
+          <span class="cp-input-label">Silence Trigger · Lucky: ${s.luckyNumber}</span>
+          <input class="cp-input" type="number" id="differ-trigger" value="${s.silenceTrigger}" min="5" max="30">
+          <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Number of ticks the target digit must be silent before firing</span>
         </div>
-        <div class="cp-toggle-row" style="margin-top:8px;padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border))">
+        <div class="cp-toggle-row" style="margin-top:8px">
           <div style="display:flex;align-items:center;gap:10px">
             <button class="titan-toggle ${s.triggerShuffle?'on':''}" id="differ-trigger-shuffle" onclick="event.stopPropagation()"></button>
             <div>
@@ -13888,26 +14035,33 @@ window.NexusStrategies=exports;
           Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
         </div>
       </div>
-      <div class="glass-panel" style="padding:12px;margin-top:8px">
-        <div class="settings-toggle-row">
-          <div class="settings-toggle-row-label">
-            <span class="label-title" style="color:hsl(var(--loss))">Abort on Loss</span>
-            <span class="label-sub">Stop all remaining contracts after first loss</span>
+
+      <div class="cp-card">
+        <div class="cp-toggle-row" style="margin-bottom:0">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="titan-toggle ${s.abortOnLoss ? 'on' : ''}" id="differ-abortonloss" onclick="event.stopPropagation()"></button>
+            <div>
+              <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;color:hsl(var(--loss))">⛔ Abort on Loss</div>
+              <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Stop all remaining contracts after first loss</div>
+            </div>
           </div>
-          <button class="toggle-pill ${s.abortOnLoss ? 'on' : ''}" id="differ-abortonloss"></button>
         </div>
       </div>
-      <div class="auto-section" style="margin-top:8px">
-        <div class="auto-header" id="differ-auto-header">
-          <span class="auto-header-title">⚙ Full Automation</span>
-          <button class="toggle-pill ${s.autoMode ? 'on' : ''}" id="differ-auto"></button>
+
+      <div class="cp-card">
+        <div class="cp-toggle-row" style="margin-bottom:0" id="differ-auto-header">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="titan-toggle ${s.autoMode ? 'on' : ''}" id="differ-auto" onclick="event.stopPropagation()"></button>
+            <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">⚙ Full Automation</div>
+          </div>
         </div>
-        <div id="differ-auto-panel" style="${s.autoMode ? '' : 'display:none'};padding:12px;background:hsl(var(--bg-soft)/0.6);border-top:1px solid hsl(var(--border)/0.5)">
+        <div id="differ-auto-panel" style="${s.autoMode ? '' : 'display:none'};margin-top:10px;padding:10px;background:hsl(var(--bg)/0.5);border-radius:10px">
           <div style="font-size:9px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">Uses the same Batch Size set above — auto-trigger cycles fire the same contract count as manual bursts.</div>
         </div>
       </div>
-      <button class="btn-engage ${s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : ''}" id="differ-engage" style="margin-top:12px">
-        ${s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT'}
+
+      <button class="cp-engage-btn ${differActive ? 'active' : ''}" id="differ-engage">
+        ${s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING…' : s.isArmed ? '🔋 STOP · BOLT ARMED' : '▶ ENGAGE ATOMIC BOLT'}
       </button>
       <button id="differ-abort" style="display:${s.isArmed || s.isRunning ? 'block' : 'none'};width:100%;margin-top:6px;padding:12px;border:1px solid hsl(var(--loss)/0.5);border-radius:10px;background:transparent;color:hsl(var(--loss));font-family:'Outfit',sans-serif;cursor:pointer">⛔ ABORT TRADES</button>`;
 
@@ -13975,29 +14129,89 @@ window.NexusStrategies=exports;
 
   function renderRight(s, tab) {
     if (tab === 'lab') {
-      el('differ-right').innerHTML = `<div class="section-divider neon-text-accent">🧪 Experiment Lab</div>
-        <div class="glass-panel" style="padding:12px"><p style="font-size:11px;color:hsl(var(--muted-foreground))">Start a timed experiment from the original Lab tab. Net P/L chart uses ${s.plHistory.length} data points.</p>
-        <div style="display:flex;gap:6px;margin-top:8px">${[15, 30, 60].map((d) => `<button class="glass-monitor" style="flex:1;padding:8px;cursor:pointer" data-exp="${d}">${d}m</button>`).join('')}</div>
-        <button id="differ-stop-exp" style="margin-top:8px;width:100%;padding:8px;cursor:pointer">Stop Experiment</button></div>`;
+      el('differ-right').innerHTML = `
+        <div class="cp-card">
+          <div class="cp-section-label">🧪 Experiment Lab</div>
+          <p style="font-size:11px;color:hsl(var(--muted-foreground));margin:0 0 10px">Start a timed experiment from the original Lab tab. Net P/L chart uses ${s.plHistory.length} data points.</p>
+          <div style="display:flex;gap:6px;margin-bottom:8px">${[15, 30, 60].map((d) => `<button class="cp-input" style="flex:1;padding:8px;cursor:pointer;text-align:center;font-weight:700" data-exp="${d}">${d}m</button>`).join('')}</div>
+          <button id="differ-stop-exp" class="cp-input" style="width:100%;padding:8px;cursor:pointer;text-align:center">Stop Experiment</button>
+        </div>
+        <div class="cp-card" style="text-align:center">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+            <div class="jnl-stat-box" style="background:hsl(var(--win)/0.06);border:1px solid hsl(var(--win)/0.2)"><div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--win))">${s.totalWins}</div><div class="jnl-stat-label">WINS</div></div>
+            <div class="jnl-stat-box" style="background:hsl(var(--loss)/0.06);border:1px solid hsl(var(--loss)/0.2)"><div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--loss))">${s.totalLoss}</div><div class="jnl-stat-label">LOSSES</div></div>
+            <div class="jnl-stat-box" style="background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.2)"><div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--accent))">${(s.totalWins+s.totalLoss)?((s.totalWins/(s.totalWins+s.totalLoss))*100).toFixed(0):0}%</div><div class="jnl-stat-label">WIN RATE</div></div>
+          </div>
+        </div>`;
       el('differ-right').querySelectorAll('[data-exp]').forEach((b) => b.onclick = () => global.benzEngine.dispatch({ type: 'START_EXPERIMENT', durationMinutes: parseInt(b.dataset.exp) }));
       el('differ-stop-exp').onclick = () => global.benzEngine.dispatch({ type: 'STOP_EXPERIMENT' });
       return;
     }
     const total = s.totalWins + s.totalLoss;
-    const wr = total ? ((s.totalWins / total) * 100).toFixed(1) : '0.0';
+    const wr = total ? ((s.totalWins / total) * 100) : 0;
+    const wrArc = 2 * Math.PI * 36;
+    const wrOffset = wrArc - (wr / 100) * wrArc;
+    const wrColor = wr >= 65 ? '#00e676' : wr >= 45 ? '#ffd740' : '#ff5252';
+    const recentStreak = (() => { let n = 0; for (const j of s.journal) { if (j.type === 'win') n++; else break; } return n; })();
     const digitFreqSample = s.journal.slice(0, 50).filter((j) => j.exitDigit != null && j.exitDigit >= 0 && j.exitDigit <= 9);
     const digitFreqCounts = Array.from({length:10}, (_, d) => digitFreqSample.filter((j) => j.exitDigit === d).length);
     const digitFreqMax = Math.max(1, ...digitFreqCounts);
     const digitFreqTotal = digitFreqSample.length;
     const rightHtml = `
-      <div style="text-align:center;padding:12px" class="glass-panel-glow">
-        <div style="font-size:10px;letter-spacing:3px">NET PROFIT</div>
-        <div class="stat-5xl ${s.totalProfit >= 0 ? 'neon-text-win' : 'neon-text-loss'}" style="font-size:2.5rem">${s.totalProfit >= 0 ? '+' : ''}${s.totalProfit.toFixed(2)}</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;font-size:12px">
-          <div class="glass-monitor" style="padding:8px"><div class="neon-text-win font-mono-data">${s.totalWins}</div>WINS</div>
-          <div class="glass-monitor" style="padding:8px"><div class="neon-text-loss font-mono-data">${s.totalLoss}</div>LOSSES</div>
-          <div class="glass-monitor" style="padding:8px"><div class="font-mono-data">${wr}%</div>WIN RATE</div>
+      <div class="jnl-header-card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          <div style="position:relative;width:8px;height:8px"><div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--win));animation:jnl-pulse 1.5s infinite"></div></div>
+          <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:3px;color:hsl(var(--win))">TRADE JOURNAL</span>
+          <span style="margin-left:auto;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${s.journal.length} trades</span>
         </div>
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+          <div style="position:relative;width:86px;height:86px;flex-shrink:0">
+            <svg width="86" height="86" viewBox="0 0 86 86">
+              <defs><linearGradient id="differ-wr-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="${wrColor}"/><stop offset="100%" stop-color="hsl(var(--secondary))"/>
+              </linearGradient></defs>
+              <circle cx="43" cy="43" r="36" fill="none" stroke="hsl(var(--border)/0.25)" stroke-width="7"/>
+              <circle cx="43" cy="43" r="36" fill="none" stroke="url(#differ-wr-grad)" stroke-width="7" stroke-linecap="round"
+                stroke-dasharray="${wrArc}" stroke-dashoffset="${wrOffset}"
+                style="transform:rotate(-90deg);transform-origin:43px 43px;filter:drop-shadow(0 0 5px ${wrColor}60);transition:stroke-dashoffset .8s"/>
+              <text x="43" y="39" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="16" font-weight="900" fill="${wrColor}">${wr.toFixed(0)}</text>
+              <text x="43" y="52" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="8" fill="hsl(var(--muted-foreground))">WIN %</text>
+            </svg>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:7px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">WINS</span>
+              <span style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:hsl(var(--win))">${s.totalWins}</span>
+            </div>
+            <div style="height:3px;background:hsl(var(--border)/0.3);border-radius:2px;overflow:hidden"><div style="height:100%;width:${total?((s.totalWins/total)*100).toFixed(0):0}%;background:hsl(var(--win))"></div></div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">LOSSES</span>
+              <span style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:hsl(var(--loss))">${s.totalLoss}</span>
+            </div>
+            <div style="height:3px;background:hsl(var(--border)/0.3);border-radius:2px;overflow:hidden"><div style="height:100%;width:${total?((s.totalLoss/total)*100).toFixed(0):0}%;background:hsl(var(--loss))"></div></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+          <div class="jnl-stat-box" style="background:${s.totalProfit>=0?'hsl(var(--win)/0.08)':'hsl(var(--loss)/0.08)'};border:1px solid ${s.totalProfit>=0?'hsl(var(--win)/0.25)':'hsl(var(--loss)/0.25)'}">
+            <div class="jnl-stat-val" style="font-size:16px;color:${s.totalProfit>=0?'hsl(var(--win))':'hsl(var(--loss))'}">${s.totalProfit>=0?'+':''}${s.totalProfit.toFixed(2)}</div>
+            <div class="jnl-stat-label">NET P&amp;L</div>
+          </div>
+          <div class="jnl-stat-box" style="background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.2)">
+            <div class="jnl-stat-val" style="font-size:18px;color:hsl(var(--accent))">${recentStreak}</div>
+            <div class="jnl-stat-label">STREAK</div>
+          </div>
+          <div class="jnl-stat-box" style="background:hsl(var(--secondary)/0.06);border:1px solid hsl(var(--secondary)/0.2)">
+            <div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--secondary))">${s.coldDigit ?? '—'}</div>
+            <div class="jnl-stat-label">DIFFER DIGIT</div>
+          </div>
+        </div>
+        ${s.journal.length ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid hsl(var(--border)/0.3)">
+          <div style="font-size:8px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));margin-bottom:6px;letter-spacing:1px">RECENT 10</div>
+          <div class="jnl-dot-row">
+            ${s.journal.slice(0,10).map(j=>`<div class="jnl-dot ${j.type==='win'?'w':'l'}" title="${j.type==='win'?'+':''}${(j.profit||0).toFixed(2)}"></div>`).join('')}
+            ${Array.from({length:Math.max(0,10-Math.min(10,s.journal.length))},()=>`<div class="jnl-dot e"></div>`).join('')}
+          </div>
+        </div>` : ''}
         ${digitFreqTotal ? `
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid hsl(var(--border)/0.3);text-align:left">
           <div style="font-size:8px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px;margin-bottom:6px">EXIT DIGIT FREQUENCY · LAST ${digitFreqTotal}</div>
@@ -14057,10 +14271,12 @@ window.NexusStrategies=exports;
   function updateStatusBar(s) {
     const bar = el('differ-statusbar');
     if (!bar) return;
-    const txt = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s — Re-analyzing...` : s.isRunning ? `⚡ FIRING BATCH...` : s.isArmed ? `🔋 ARMED — Silence: ${s.silenceCount}/${s.activeTrigger || s.silenceTrigger}${s.triggerShuffle ? ' 🔀' : ''}` : s.isAuthenticated ? '✓ READY — Press ENGAGE' : 'OFFLINE — Add API Token in Settings';
+    const txt = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s — Re-analyzing…` : s.isRunning ? `⚡ FIRING BATCH…` : s.isArmed ? `🔋 ARMED — Silence: ${s.silenceCount}/${s.activeTrigger || s.silenceTrigger}${s.triggerShuffle ? ' 🔀' : ''}` : s.isAuthenticated ? '✓ READY — Press ENGAGE' : 'OFFLINE — Add API Token in Settings';
     bar.textContent = txt;
-    bar.className = 'glass-monitor ' + (s.isCooldown ? 'neon-text-accent' : s.isRunning ? 'neon-text-win' : s.isArmed ? 'neon-text-primary' : '');
-    bar.style.cssText = 'text-align:center;padding:10px;font-family:monospace;font-size:13px;border-top:1px solid hsl(var(--border)/0.5)';
+    const barColor = s.isCooldown ? 'hsl(var(--accent))' : s.isRunning ? 'hsl(var(--win))' : s.isArmed ? 'hsl(var(--primary))' : s.isAuthenticated ? 'hsl(var(--muted-foreground))' : 'hsl(var(--loss))';
+    const barBorder = s.isCooldown ? 'hsl(var(--accent)/0.4)' : s.isRunning ? 'hsl(var(--win)/0.4)' : s.isArmed ? 'hsl(var(--primary)/0.4)' : 'hsl(var(--border)/0.4)';
+    bar.style.color = barColor;
+    bar.style.borderColor = barBorder;
 
     const tick = el('differ-live-tick');
     if (tick) {
@@ -14087,8 +14303,8 @@ window.NexusStrategies=exports;
 
     const engage = el('differ-engage');
     if (engage) {
-      engage.className = 'btn-engage ' + (s.isCooldown ? 'cooldown' : s.isRunning ? 'firing' : s.isArmed ? 'armed' : '');
-      engage.textContent = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING...' : s.isArmed ? '🔋 BOLT ARMED' : 'ENGAGE ATOMIC BOLT';
+      engage.className = 'cp-engage-btn ' + ((s.isCooldown || s.isRunning || s.isArmed) ? 'active' : '');
+      engage.textContent = s.isCooldown ? `⏳ COOLDOWN ${s.cooldownRemaining}s` : s.isRunning ? '⚡ FIRING…' : s.isArmed ? '🔋 STOP · BOLT ARMED' : '▶ ENGAGE ATOMIC BOLT';
     }
     const abort = el('differ-abort');
     if (abort) abort.style.display = s.isArmed || s.isRunning ? 'block' : 'none';
