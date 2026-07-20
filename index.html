@@ -15298,6 +15298,7 @@ window.NexusStrategies=exports;
       </div>`;
       })() : ''}
     </div>`}
+    `;
     el(`${rootId}-strategy`).onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
     el(`${rootId}-alt-toggle`).onclick = () => {
       const next = !c.altEntryEnabled;
