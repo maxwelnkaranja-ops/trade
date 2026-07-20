@@ -10559,6 +10559,73 @@ window.NexusTrading = exports;
     return { cold: sorted[0]?.digit ?? 1, third: sorted[1]?.digit ?? null, top3: sorted.slice(0, 3).map((f) => f.digit) };
   }
 
+  // ── ALTERNATIVE DIGIT-SELECTION METHODS ────────────────────────────────
+  // All four take the same shape of input (freqP from computeFrequency, or
+  // raw history) and return { cold, third, top3 } so they're drop-in
+  // replacements for getColdestDigits above — the SILENT COUNT trigger
+  // (waiting N ticks with no appearance before firing) still runs exactly
+  // as before regardless of which method picked the target digit.
+
+  // GAP: ignores overall frequency entirely — picks whichever digit has
+  // simply gone the longest since it last appeared (coldStreak), even if
+  // it isn't the rarest digit overall. Reacts to what's happening RIGHT
+  // NOW rather than the whole window's history.
+  function getColdestByGap(freqP) {
+    const nonZero = freqP.filter((f) => f.digit !== 0);
+    const sorted = [...nonZero].sort((a, b) => b.coldStreak - a.coldStreak);
+    return { cold: sorted[0]?.digit ?? 1, third: sorted[1]?.digit ?? null, top3: sorted.slice(0, 3).map((f) => f.digit) };
+  }
+
+  // Z-SCORE: raw count method treats "2 out of 20 ticks" and "2 out of
+  // 200 ticks" as equally cold, even though the second is a far more
+  // significant deviation from the expected 10%. This scores each digit
+  // by how many standard deviations its observed rate sits below the
+  // 10% uniform expectation, given the actual sample size — a
+  // statistically sturdier read once enough ticks have accumulated.
+  function getColdestByZScore(freqP, n) {
+    const nonZero = freqP.filter((f) => f.digit !== 0);
+    const se = Math.sqrt((0.1 * 0.9) / Math.max(1, n));
+    const withZ = nonZero.map((f) => ({ ...f, z: ((f.count / Math.max(1, n)) - 0.1) / se }));
+    const sorted = [...withZ].sort((a, b) => a.z - b.z); // most negative = most significantly cold
+    return { cold: sorted[0]?.digit ?? 1, third: sorted[1]?.digit ?? null, top3: sorted.slice(0, 3).map((f) => f.digit) };
+  }
+
+  // CONSENSUS: computes the count-method coldest digit on a SHORT recent
+  // window and again on the FULL window, and only commits to a pick when
+  // both agree (or, failing that, share a digit in their top-3). If
+  // there's no agreement at all it returns cold:null — the engine just
+  // keeps waiting rather than picking a digit the two timeframes disagree
+  // on, same "don't force it" idea as the Higher/Lower MTF gate.
+  const CONSENSUS_SHORT_WINDOW = 30;
+  function getColdestByConsensus(history, tickIndex) {
+    if (history.length < CONSENSUS_SHORT_WINDOW) return { cold: null, third: null, top3: [], consensus: false };
+    const shortHist = history.slice(-CONSENSUS_SHORT_WINDOW);
+    const shortFreq = computeFrequency(shortHist, tickIndex);
+    const longFreq = computeFrequency(history, tickIndex);
+    const shortPick = getColdestDigits(shortFreq);
+    const longPick = getColdestDigits(longFreq);
+    if (shortPick.cold === longPick.cold) {
+      return { cold: longPick.cold, third: longPick.third, top3: longPick.top3, consensus: true };
+    }
+    const overlap = shortPick.top3.filter((d) => longPick.top3.includes(d));
+    if (overlap.length) {
+      return { cold: overlap[0], third: longPick.third, top3: longPick.top3, consensus: 'partial' };
+    }
+    return { cold: null, third: null, top3: [], consensus: false };
+  }
+
+  // Single entry point every call site uses — swapping methods only ever
+  // means changing state.coldPickMethod, never touching the call sites.
+  function pickColdDigit(method, freqP, history, tickIndex) {
+    switch (method) {
+      case 'gap': return getColdestByGap(freqP);
+      case 'zscore': return getColdestByZScore(freqP, history.length);
+      case 'consensus': return getColdestByConsensus(history, tickIndex);
+      case 'silent':
+      default: return getColdestDigits(freqP);
+    }
+  }
+
   function determineLuckyNumber(coldStreakHistory) {
     if (coldStreakHistory.length < 3) return 12;
     let best = 12, bestScore = 0;
@@ -10638,6 +10705,10 @@ window.NexusTrading = exports;
         coldDigit: null, thirdColdDigit: null, currentTick: null, silenceCount: 0,
         luckyNumber: 12, recommendedMarket: primaryMarket, analysisConfidence: 0,
         coldStreakHistory: [],
+        // coldPickMethod: which of the 4 methods above chooses the target
+        // digit. 'silent' (raw lowest count — the original method) stays
+        // the default so existing configs behave exactly as before.
+        coldPickMethod: ['silent', 'gap', 'zscore', 'consensus'].includes(saved.coldPickMethod) ? saved.coldPickMethod : 'silent',
         stake: Math.max(0.35, parseNum(saved.stake, 1)),
         stakeVary: parseBool(saved.stakeVary, false),
         stakeMin: Math.max(0.35, parseNum(saved.stakeMin, 1)),
@@ -10696,6 +10767,7 @@ window.NexusTrading = exports;
           speed: s.speed,
           silenceTrigger: s.silenceTrigger,
           triggerShuffle: s.triggerShuffle,
+          coldPickMethod: s.coldPickMethod,
           autoMode: s.autoMode,
           takeProfit: s.takeProfit,
           stopLoss: s.stopLoss,
@@ -10759,6 +10831,7 @@ window.NexusTrading = exports;
         case 'SET_BATCH': s.batchSize = action.value; s.autoBatchSize = action.value; break;
         case 'SET_SPEED': s.speed = action.value; break;
         case 'SET_TRIGGER': s.silenceTrigger = action.value; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : action.value; break;
+        case 'SET_COLD_METHOD': s.coldPickMethod = action.value; break;
         case 'TOGGLE_TRIGGER_SHUFFLE': s.triggerShuffle = !s.triggerShuffle; s.activeTrigger = (s.triggerShuffle && Math.random() < 0.5) ? s.luckyNumber : s.silenceTrigger; break;
         // Reset the silence streak to 0 on every ARM so the bot never fires
         // off ticks that accumulated *before* Engage was pressed — it always
@@ -10829,7 +10902,7 @@ window.NexusTrading = exports;
       if (s.historyP.length < 15) return;
       const freqP = computeFrequency(s.historyP, this.tickIndex);
       const freqG = computeFrequency(s.historyG, this.tickIndex);
-      const { cold, third } = getColdestDigits(freqP);
+      const { cold, third } = pickColdDigit(s.coldPickMethod, freqP, s.historyP, this.tickIndex);
       s.coldDigit = cold; s.thirdColdDigit = third;
       s.freqP = freqP; s.freqG = freqG;
       s.luckyNumber = determineLuckyNumber(s.coldStreakHistory);
@@ -10925,7 +10998,7 @@ window.NexusTrading = exports;
           const cs = this.state;
           if (cs.autoMode) {
             const freqP = computeFrequency(cs.historyP, this.tickIndex);
-            const { cold, third } = getColdestDigits(freqP);
+            const { cold, third } = pickColdDigit(cs.coldPickMethod, freqP, cs.historyP, this.tickIndex);
             this.dispatch({ type: 'SET_COLD', cold, third });
             this.dispatch({ type: 'SET_LUCKY', value: determineLuckyNumber(cs.coldStreakHistory) });
             // Re-arm for the next session (TP/SL is enforced globally from
@@ -12094,6 +12167,13 @@ window.NexusStrategies=exports;
         // stops a noisy near-tie (e.g. callScore 6 / putScore 5, which
         // clears a strength gate but is barely a real signal) from firing.
         confirmTicks: 2, minConfidence: 0,
+        // requireMTF: opt-in Multi-Timeframe Confirmation gate. When on, a
+        // trade only fires if the fast (35-tick) and slow (full-buffer)
+        // reads from RiseFallAnalyzer.analyzeMTF both independently agree
+        // on direction — on top of, not instead of, minSignal/minConfidence/
+        // confirmTicks. Off by default so existing configs behave exactly
+        // as before until the operator turns it on.
+        requireMTF: false,
         // First-Tick Handling — same 'normal' / 'sacrifice' (Test Stake) /
         // 'skip' modes the other bots have; the engine's startChainExecution
         // already implements this generically (mode-agnostic), Higher/Lower
@@ -12149,6 +12229,12 @@ window.NexusStrategies=exports;
         if (this.fixedTradeMode) merged.tradeMode = this.fixedTradeMode;
         if (this.fixedDirection) merged.direction = this.fixedDirection;
         if (this.fixedMarket) merged.selectedMarket = this.fixedMarket;
+        // Even/Odd is back to a single mean-reversion + streak-trigger
+        // engine only — the named-strategy picker and the Reversal
+        // Trigger (Alt Entry) engine are removed for this mode. Forcing
+        // these here (rather than just hiding the UI) also resets any
+        // config a person saved while those features still existed.
+        if (this.mode === 'evenodd') { merged.currentStrategy = 1; merged.altEntryEnabled = false; }
         return merged;
       } catch (e) { return defaults; }
     }
@@ -12170,6 +12256,7 @@ window.NexusStrategies=exports;
         currentStrategyName: this.getStrategy(this.config.currentStrategy).shortName,
         fixedTradeMode: this.fixedTradeMode, botLabel: this.botLabel, _cdMax: this._cdMax || 25,
         previousMarket: this.previousMarket || null,
+        mtf: this.mtf || null,
       };
     }
 
@@ -12180,6 +12267,10 @@ window.NexusStrategies=exports;
 
     setConfig(partial) {
       this.config = { ...this.config, ...partial };
+      // Belt-and-braces: Even/Odd has no strategy picker or Reversal
+      // Trigger engine anymore, so nothing (including a stray old
+      // localStorage value) can push it back into either.
+      if (this.mode === 'evenodd') { this.config.currentStrategy = 1; this.config.altEntryEnabled = false; }
       // Keep the market scanner's barrier (and therefore its Over-3-aware
       // scoring) in sync the instant the operator clicks a new barrier —
       // otherwise "Top Markets" would keep scanning for the OLD barrier
@@ -12341,6 +12432,10 @@ window.NexusStrategies=exports;
           if (this.priceHistory.length > 120) this.priceHistory.shift();
           result = window.RiseFallAnalyzer.analyze(this.priceHistory, market);
           this.analysis = result;
+          // Multi-timeframe confirmation read — always computed (cheap, and
+          // the UI shows it even when the gate is off) but only enforced as
+          // an entry condition below when config.requireMTF is on.
+          this.mtf = window.RiseFallAnalyzer.analyzeMTF(this.priceHistory, market);
         } else if (this.isMatchMode) {
           result = window.MatchesAnalyzer.analyze(history, tickPeriod, this.config);
           this.analysis = result;
@@ -12419,9 +12514,18 @@ window.NexusStrategies=exports;
           if (this.config.direction === 'higher') dir = 'CALL';
           else if (this.config.direction === 'lower') dir = 'PUT';
           const meetsConfidence = !this.config.minConfidence || (result.confidence != null && result.confidence >= this.config.minConfidence);
+          // Multi-Timeframe Confirmation gate (opt-in via config.requireMTF):
+          // fast (35-tick) and slow (full-buffer) reads must independently
+          // agree with each other AND with the direction about to be traded.
+          // In a forced direction (higher/lower only), the MTF read still
+          // has to be aligned and pointed the same way as the forced side —
+          // otherwise a forced-direction bot could fire straight into a
+          // fast/slow disagreement the auto-direction bot would have skipped.
+          const meetsMTF = !this.config.requireMTF
+            || (this.mtf && this.mtf.aligned && this.mtf.direction === dir);
           const meetsSignal = this.config.direction !== 'auto'
-            ? result.ready
-            : (result.ready && dir && result.strength >= this.config.minSignal && meetsConfidence);
+            ? (result.ready && meetsMTF)
+            : (result.ready && dir && result.strength >= this.config.minSignal && meetsConfidence && meetsMTF);
           // Confirmation gate: a signal has to hold (same direction, still
           // above minSignal/minConfidence) for `confirmTicks` consecutive
           // ticks before firing — configurable per bot instance instead of
@@ -12446,7 +12550,8 @@ window.NexusStrategies=exports;
           }
           if (meetsSignal && dir && this._rfConfirmCount >= neededConfirmTicks) {
             this._riseFallDirection = dir;
-            this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 HIGHER' : '📉 LOWER'} signal ${result.strength}% (confirmed 2 ticks) — ${(result.reasons && result.reasons[0]) || ''}`);
+            const mtfTag = this.config.requireMTF && this.mtf ? ` — ${this.mtf.reason}` : '';
+            this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 HIGHER' : '📉 LOWER'} signal ${result.strength}% (confirmed ${neededConfirmTicks} ticks)${mtfTag} — ${(result.reasons && result.reasons[0]) || ''}`);
             this.startChainExecution();
             this._rfConfirmCount = 0;
           }
@@ -13891,6 +13996,9 @@ window.NexusStrategies=exports;
     clearStats() { this.state.stats = { win: 0, loss: 0, profit: 0 }; this.logs = []; this.journal = []; this.emit(); }
 
     selectStrategy(strategyId) {
+      // Even/Odd no longer supports strategy switching — mean-reversion +
+      // streak trigger (strategy 1) is the only entry logic for this mode.
+      if (this.mode === 'evenodd') return;
       this.isStrategyTransitioning = true;
       const strategy = this.getStrategy(strategyId);
       this.addLog('engine', 'STRATEGY', `Switching to ${strategy.name}`);
@@ -14219,7 +14327,8 @@ window.NexusStrategies=exports;
       </div>
       ${s.coldDigit!==null?`<div style="font-size:11px;padding:6px 14px;border-radius:999px;background:hsl(var(--primary)/0.1);border:1px solid hsl(var(--primary)/0.3);color:hsl(var(--primary));display:inline-block;margin-bottom:6px;font-weight:800">
         Watching ≠<span style="font-size:14px;font-weight:900">${s.coldDigit}</span>${s.thirdColdDigit!==null?` + <span style="color:hsl(var(--accent))">${s.thirdColdDigit}</span>`:''}
-      </div>`:''}
+      </div>`:(s.coldPickMethod==='consensus'?`<div style="font-size:9.5px;color:hsl(var(--muted-foreground))">Consensus method — short and full windows disagree, waiting…</div>`:'')}
+      <div style="font-size:8px;letter-spacing:1px;color:hsl(var(--muted-foreground)/0.7);margin-top:2px">METHOD: ${({silent:'SILENT COUNT',gap:'LONGEST GAP',zscore:'Z-SCORE',consensus:'CONSENSUS'})[s.coldPickMethod||'silent']}</div>
     </div>
 
     <!-- Lucky + samples -->
@@ -14284,6 +14393,21 @@ window.NexusStrategies=exports;
           <div style="display:flex;justify-content:space-between;font-size:8px;color:hsl(var(--muted-foreground))"><span>50ms (Fast)</span><span>1000ms (Slow)</span></div>
         </div>
         <div class="cp-input-group">
+          <span class="cp-input-label">Digit Selection Method</span>
+          <select class="cp-input" id="differ-cold-method">
+            <option value="silent" ${(s.coldPickMethod||'silent')==='silent'?'selected':''}>Silent Count — rarest by raw frequency (default)</option>
+            <option value="gap" ${s.coldPickMethod==='gap'?'selected':''}>Longest Gap — hasn't appeared in the most ticks</option>
+            <option value="zscore" ${s.coldPickMethod==='zscore'?'selected':''}>Statistical Deviation (Z-score) — most significant vs sample size</option>
+            <option value="consensus" ${s.coldPickMethod==='consensus'?'selected':''}>Multi-Window Consensus — short + full window must agree</option>
+          </select>
+          <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">${
+            s.coldPickMethod==='gap' ? 'Picks whichever digit has simply gone longest without appearing, regardless of overall frequency.' :
+            s.coldPickMethod==='zscore' ? 'Weighs how far below the expected 10% a digit sits relative to sample size, not just the lowest raw count.' :
+            s.coldPickMethod==='consensus' ? 'Only commits to a digit when a 30-tick window and the full window both agree — may show "—" more often while it waits for agreement.' :
+            'Picks whichever digit has appeared least often over the full tick window (original method).'
+          }</span>
+        </div>
+        <div class="cp-input-group">
           <span class="cp-input-label">Silence Trigger · Lucky: ${s.luckyNumber}</span>
           <input class="cp-input" type="number" id="differ-trigger" value="${s.silenceTrigger}" min="5" max="30">
           <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Number of ticks the target digit must be silent before firing</span>
@@ -14337,6 +14461,8 @@ window.NexusStrategies=exports;
     el('differ-speed').oninput = (e) => { const sl = el('differ-speed-label'); if (sl) { const v = parseInt(e.target.value); sl.textContent = (v <= 100 ? 'SUPERSONIC' : v <= 300 ? 'FAST' : v <= 600 ? 'NORMAL' : 'SLOW') + ` (${v}ms)`; } };
     el('differ-abortonloss').onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' });
     el('differ-auto').onclick = () => { eng.dispatch({ type: 'TOGGLE_AUTO' }); renderCenterConfig(eng.state); };
+    const coldMethodEl = el('differ-cold-method');
+    if (coldMethodEl) coldMethodEl.onchange = (e) => { eng.dispatch({ type: 'SET_COLD_METHOD', value: e.target.value }); renderCenterConfig(eng.state); };
     // Commits every field currently shown in the panel to the engine (which
     // persists to localStorage on each SET_* dispatch). Used ONLY by the
     // global navbar "SAVE SETTINGS" button now — Differ no longer has its
@@ -14990,7 +15116,30 @@ window.NexusStrategies=exports;
       </div>` : ''}
     </div>
 
-    <!-- ── STRATEGY SELECTOR ──────────────────────────────── -->
+    <!-- ── STRATEGY SELECTOR (Over/Under/Higher-Lower only — Even/Odd
+         is back to a single mean-reversion + streak-trigger engine) ── -->
+    ${engine.mode === 'evenodd' ? `
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Entry Logic</div>
+      <div style="font-size:11px;font-weight:800;color:hsl(var(--foreground));margin-bottom:6px">Mean Reversion — Streak Trigger</div>
+      <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.6;padding:8px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid hsl(var(--primary)/0.4)">
+        Waits for a streak of one parity (${engine.fixedTradeMode === 'even' ? 'odd' : 'even'} digits) at least Min Streak long, gated by Min Signal, then trades the opposite parity — betting the streak reverts to the mean.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px">
+        <div style="padding:8px;background:hsl(var(--bg)/0.8);border-radius:8px;text-align:center;border:1px solid hsl(var(--primary)/0.2)">
+          <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:900;color:hsl(var(--primary))">${c.targetRuns}</div>
+          <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">RUNS</div>
+        </div>
+        <div style="padding:8px;background:hsl(var(--bg)/0.8);border-radius:8px;text-align:center;border:1px solid hsl(var(--secondary)/0.2)">
+          <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:900;color:hsl(var(--secondary))">${c.minSignal}%</div>
+          <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">SIGNAL</div>
+        </div>
+        <div style="padding:8px;background:hsl(var(--bg)/0.8);border-radius:8px;text-align:center;border:1px solid hsl(var(--accent)/0.2)">
+          <div style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:900;color:hsl(var(--accent))">${c.minStreak||1}</div>
+          <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">STREAK</div>
+        </div>
+      </div>
+    </div>` : `
     <div class="ahub-card" style="margin-bottom:10px">
       <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Strategy</div>
       <select class="titan-input" id="${rootId}-strategy" style="margin-bottom:10px;font-size:11px;font-weight:700">
@@ -15013,7 +15162,7 @@ window.NexusStrategies=exports;
           <div style="font-size:8px;color:hsl(var(--muted-foreground));letter-spacing:1px">STREAK</div>
         </div>
       </div>
-    </div>
+    </div>`}
 
     <!-- ── TOP MARKETS LIVE SCAN ──────────────────────────── -->
     <div class="ahub-card">
@@ -15062,7 +15211,8 @@ window.NexusStrategies=exports;
       </div>`:''}
     </div>
 
-    <!-- ── ALT ENTRY ENGINE (REVERSAL TRIGGER) ──────────────────── -->
+    <!-- ── ALT ENTRY ENGINE (REVERSAL TRIGGER) — removed for Even/Odd ── -->
+    ${engine.mode === 'evenodd' ? '' : `
     <div class="ahub-card" style="padding:22px;margin-top:12px;position:relative;overflow:hidden;border:1px solid ${c.altEntryEnabled ? 'hsl(var(--win)/0.5)' : 'hsl(var(--border)/0.3)'};background:${c.altEntryEnabled ? 'linear-gradient(180deg,hsl(var(--win)/0.09),hsl(var(--bg)/0.6))' : 'hsl(var(--bg)/0.4)'}">
       ${c.altEntryEnabled ? `<div style="position:absolute;inset:0;pointer-events:none;overflow:hidden"><div style="position:absolute;top:0;bottom:0;width:40%;background:linear-gradient(90deg,transparent,hsl(var(--win)/0.10),transparent);animation:alt-scan 2.4s linear infinite"></div></div>` : ''}
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;position:relative">
@@ -15147,8 +15297,7 @@ window.NexusStrategies=exports;
         </div>
       </div>`;
       })() : ''}
-    </div>`;
-
+    </div>`}
     el(`${rootId}-strategy`).onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
     el(`${rootId}-alt-toggle`).onclick = () => {
       const next = !c.altEntryEnabled;
@@ -18040,7 +18189,54 @@ window.NexusStrategies=exports;
     };
   }
 
-  window.RiseFallAnalyzer = { analyze };
+  // ── MULTI-TIMEFRAME CONFIRMATION GATE ──────────────────────────────────
+  // Runs the SAME indicator engine above on two genuinely different windows
+  // of the price series instead of just one:
+  //   - FAST  : the most recent SHORT_WINDOW ticks. EMA/RSI/BB all reseed
+  //     from the start of whatever slice they're given, so a shorter slice
+  //     is not just "less data" — it's a more reactive, shorter-memory read
+  //     (faster EMA convergence, tighter Bollinger mean).
+  //   - SLOW  : the full buffer the caller has been accumulating (up to
+  //     120 ticks), which is what analyze() has always used — the
+  //     slower-moving, more-settled read.
+  // A trade only clears this gate when BOTH windows independently agree on
+  // direction. This doesn't invent a new edge — it's a noise filter: single-
+  // timeframe reads can flip on a couple of stray ticks, but a fast and a
+  // slow read agreeing at the same moment is a meaningfully cleaner signal
+  // than either one alone. Fully OPT-IN via config.requireMTF — off by
+  // default so it never changes existing behavior unless enabled.
+  const SHORT_WINDOW = 35;
+
+  function analyzeMTF(prices, symbol) {
+    const empty = {
+      ready: false, aligned: false, direction: null, mtfStrength: 0,
+      fast: null, slow: null, reason: 'Warming up — collecting price history…',
+    };
+    if (!prices || prices.length < SHORT_WINDOW) return empty;
+
+    const slow = analyze(prices, symbol);
+    const fast = analyze(prices.slice(-SHORT_WINDOW), symbol);
+
+    if (!slow.ready || !fast.ready) return { ...empty, fast, slow };
+
+    const direction = (fast.direction && fast.direction === slow.direction) ? fast.direction : null;
+    const aligned = direction != null;
+    // Recent (fast) window weighted slightly higher — it's closer to "right
+    // now" — but slow still counts for nearly half so a fast blip alone
+    // can't swing the combined read on its own.
+    const mtfStrength = Math.round(fast.strength * 0.55 + slow.strength * 0.45);
+
+    let reason;
+    if (!aligned) {
+      reason = `MTF split — fast:${fast.direction || 'NEUTRAL'} (${fast.strength}%) vs slow:${slow.direction || 'NEUTRAL'} (${slow.strength}%)`;
+    } else {
+      reason = `MTF aligned — fast+slow both ${direction === 'CALL' ? 'HIGHER' : 'LOWER'} (${mtfStrength}%)`;
+    }
+
+    return { ready: true, aligned, direction, mtfStrength, fast, slow, reason };
+  }
+
+  window.RiseFallAnalyzer = { analyze, analyzeMTF };
 })();
 </script>
 
@@ -18733,6 +18929,33 @@ window.NexusStrategies=exports;
       ${a.ready && a.reasons && a.reasons.length ? `<div style="margin-top:10px;font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:8px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid ${dirColor}66">${a.reasons.slice(0,2).join(' · ')}</div>` : ''}
     </div>
 
+    <!-- MULTI-TIMEFRAME CONFIRMATION -->
+    ${(() => {
+      const m = snap.mtf;
+      if (!c.requireMTF && !m) return '';
+      const mColor = !m || !m.ready ? 'hsl(var(--muted-foreground))' : m.aligned ? '#00e676' : '#ffd740';
+      const mLabel = !m || !m.ready ? 'WARMING UP' : m.aligned ? (m.direction === 'CALL' ? 'ALIGNED — HIGHER' : 'ALIGNED — LOWER') : 'SPLIT — NOT ALIGNED';
+      return `
+    <div class="ahub-card" style="margin-bottom:10px;${c.requireMTF ? `border-left:2px solid ${mColor}66` : 'opacity:0.55'}">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:${mColor};box-shadow:0 0 8px ${mColor}"></span>Multi-Timeframe Gate ${c.requireMTF ? '(ACTIVE)' : '(off)'}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-family:'Outfit',sans-serif;font-weight:800;font-size:12px;color:${mColor}">${mLabel}</span>
+        ${m && m.ready ? `<span style="font-family:'DM Mono',monospace;font-size:11px;color:${mColor}">${m.mtfStrength}%</span>` : ''}
+      </div>
+      ${m && m.fast && m.slow ? `
+      <div style="display:flex;gap:6px;font-family:'DM Mono',monospace;font-size:9.5px">
+        <div style="flex:1;text-align:center;padding:5px;border-radius:6px;background:hsl(var(--bg)/0.6)">
+          <div style="color:hsl(var(--muted-foreground));font-size:8px;letter-spacing:0.5px">FAST (35t)</div>
+          <div style="color:${m.fast.direction==='CALL'?'#00e676':m.fast.direction==='PUT'?'#ff5252':'hsl(var(--muted-foreground))'}">${m.fast.direction === 'CALL' ? 'HIGHER' : m.fast.direction === 'PUT' ? 'LOWER' : '—'} ${m.fast.strength}%</div>
+        </div>
+        <div style="flex:1;text-align:center;padding:5px;border-radius:6px;background:hsl(var(--bg)/0.6)">
+          <div style="color:hsl(var(--muted-foreground));font-size:8px;letter-spacing:0.5px">SLOW (full)</div>
+          <div style="color:${m.slow.direction==='CALL'?'#00e676':m.slow.direction==='PUT'?'#ff5252':'hsl(var(--muted-foreground))'}">${m.slow.direction === 'CALL' ? 'HIGHER' : m.slow.direction === 'PUT' ? 'LOWER' : '—'} ${m.slow.strength}%</div>
+        </div>
+      </div>` : `<div style="font-size:9px;color:hsl(var(--muted-foreground))">${m ? m.reason : 'Collecting price history…'}</div>`}
+    </div>`;
+    })()}
+
     <!-- LIVE PRICE CHART -->
     <div class="ahub-card rf-chart-card" style="margin-bottom:10px">
       <div class="ahub-label"><span class="ahub-label-dot" style="background:${dirColor};box-shadow:0 0 8px ${dirColor}"></span>Live Price Action</div>
@@ -18872,6 +19095,13 @@ window.NexusStrategies=exports;
         <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:6px 9px;margin-bottom:2px">
           Confirm Ticks = how many consecutive ticks the signal must hold before it fires (higher = fewer, cleaner trades). Min Confidence = how lopsided callScore vs putScore must be, on top of Min Signal — a second filter for how clean the read is, not just how strong.
         </div>
+        <div class="cp-toggle-row" style="margin-top:8px">
+          <div class="cp-section-label" style="margin:0">Multi-Timeframe Confirmation</div>
+          <button class="titan-toggle ${c.requireMTF?'on':''}" id="${rootId}-mtf-toggle"></button>
+        </div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:6px 9px 2px">
+          When ON, a fast (35-tick) and a slow (full-buffer) read of the same indicators must independently agree on direction before this counts as a signal at all — on top of Min Signal / Min Confidence / Confirm Ticks, not instead of them. Fewer trades, filters out reads where the short-term and settled picture disagree.
+        </div>
         <div class="cp-section-label" style="margin-top:10px">First-Tick Handling</div>
         <div class="cp-input-row">
           <div class="cp-input-group" style="flex:1.4">
@@ -18977,6 +19207,8 @@ window.NexusStrategies=exports;
       if (confirmTicksEl) confirmTicksEl.onchange = (e) => { engine.setConfig({ confirmTicks: Math.min(6, Math.max(1, parseInt(e.target.value) || 2)) }); };
       const minConfEl = el(`${rootId}-minconf`, host);
       if (minConfEl) minConfEl.onchange = (e) => { engine.setConfig({ minConfidence: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
+      const mtfToggleEl = el(`${rootId}-mtf-toggle`, host);
+      if (mtfToggleEl) mtfToggleEl.onclick = () => { engine.setConfig({ requireMTF: !engine.config.requireMTF }); renderCenter(engine, rootId, engine.getSnapshot()); };
       const ftModeEl = el(`${rootId}-firsttick-mode`, host);
       if (ftModeEl) {
         ftModeEl.onchange = (e) => {
