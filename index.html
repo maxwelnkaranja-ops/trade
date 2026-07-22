@@ -90,6 +90,11 @@
           <span class="hub-tab-label">Differ</span>
           <span class="dot live"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="hotrepeat" data-label="Hot Repeat" title="Hot Repeat Differ — X&#8594;X trigger only">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h4"/><path d="M16 12h4"/><circle cx="10" cy="12" r="2.4"/><circle cx="14" cy="12" r="2.4"/></svg></span>
+          <span class="hub-tab-label">Hot Repeat</span>
+          <span class="dot live"></span>
+        </button>
         <button type="button" class="hub-tab" data-app="even" data-label="Even Omega" title="Even Omega Engine">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="7" height="11" rx="1.5"/><rect x="13" y="3" width="7" height="17" rx="1.5"/></svg></span>
           <span class="hub-tab-label">Even</span>
@@ -115,6 +120,11 @@
           <span class="hub-tab-label">Higher/Lower</span>
           <span class="dot live"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="meanrev" data-label="Rise &amp; Fall MR" title="Rise &amp; Fall (Mean Reversion) — ADX/Bollinger/RSI/Stochastic/ATR Higher-Lower offset-barrier bot">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12c3-6 6-6 9 0s6 6 9 0"/></svg></span>
+          <span class="hub-tab-label">Rise &amp; Fall MR</span>
+          <span class="dot live"></span>
+        </button>
         <button type="button" class="hub-tab" data-app="matches" data-label="Matches" title="Matches — digit prediction bot">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.5" fill="currentColor"/></svg></span>
           <span class="hub-tab-label">Matches</span>
@@ -123,6 +133,27 @@
         <button type="button" class="hub-tab" data-app="accumulator" data-label="Accumulator" title="Accumulator — calm-market ACCU bot">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l3-8 4 16 3-8h5"/></svg></span>
           <span class="hub-tab-label">Accumulator</span>
+          <span class="dot live"></span>
+        </button>
+        <div class="hub-nav-label">Mean Reversion</div>
+        <button type="button" class="hub-tab" data-app="risemr" data-label="Rise MR" title="Rise (Mean Reversion) — HIGHER-only ADX/Bollinger/RSI/Stochastic/ATR offset-barrier bot, split from Rise &amp; Fall MR">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l7-10 5 6 4-9"/><path d="M14 5h6v6"/></svg></span>
+          <span class="hub-tab-label">Rise MR</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="fallmr" data-label="Fall MR" title="Fall (Mean Reversion) — LOWER-only ADX/Bollinger/RSI/Stochastic/ATR offset-barrier bot, split from Rise &amp; Fall MR">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l7 10 5-6 4 9"/><path d="M14 19h6v-6"/></svg></span>
+          <span class="hub-tab-label">Fall MR</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="evenmr" data-label="Even MR" title="Even (Mean Reversion) — macro dominance + micro cluster + exhaustion/confirmation bot, separate from Even Omega above">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="7" height="11" rx="1.5"/><rect x="13" y="3" width="7" height="17" rx="1.5"/><path d="M2 2l20 20" stroke-width="1.4" opacity="0.55"/></svg></span>
+          <span class="hub-tab-label">Even MR</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="oddmr" data-label="Odd MR" title="Odd (Mean Reversion) — macro dominance + micro cluster + exhaustion/confirmation bot, separate from Odd Omega above">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="7" height="17" rx="1.5"/><rect x="13" y="9" width="7" height="11" rx="1.5"/><path d="M2 2l20 20" stroke-width="1.4" opacity="0.55"/></svg></span>
+          <span class="hub-tab-label">Odd MR</span>
           <span class="dot live"></span>
         </button>
         <div class="hub-nav-label">Account</div>
@@ -162,6 +193,9 @@
     <section id="panel-differ" class="app-panel" aria-label="Differ terminal">
       <div id="differ-root" class="app-root"></div>
     </section>
+    <section id="panel-hotrepeat" class="app-panel" aria-label="Hot Repeat terminal">
+      <div id="hotrepeat-root" class="app-root"></div>
+    </section>
 
     <section id="panel-even" class="app-panel" aria-label="Even dashboard">
       <div id="even-root" class="app-root"></div>
@@ -182,12 +216,29 @@
     <section id="panel-risefall" class="app-panel" aria-label="Higher/Lower dashboard">
       <div id="risefall-root" class="app-root"></div>
     </section>
+    <section id="panel-meanrev" class="app-panel" aria-label="Rise &amp; Fall Mean Reversion dashboard">
+      <div id="meanrev-root" class="app-root"></div>
+    </section>
     <section id="panel-matches" class="app-panel" aria-label="Matches dashboard">
       <div id="matches-root" class="app-root"></div>
     </section>
 
     <section id="panel-accumulator" class="app-panel" aria-label="Accumulator dashboard">
       <div id="accumulator-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-risemr" class="app-panel" aria-label="Rise Mean Reversion dashboard">
+      <div id="risemr-root" class="app-root"></div>
+    </section>
+    <section id="panel-fallmr" class="app-panel" aria-label="Fall Mean Reversion dashboard">
+      <div id="fallmr-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-evenmr" class="app-panel" aria-label="Even Mean Reversion dashboard">
+      <div id="evenmr-root" class="app-root"></div>
+    </section>
+    <section id="panel-oddmr" class="app-panel" aria-label="Odd Mean Reversion dashboard">
+      <div id="oddmr-root" class="app-root"></div>
     </section>
     </div>
 
@@ -10614,6 +10665,17 @@ window.NexusTrading = exports;
     return { cold: null, third: null, top3: [], consensus: false };
   }
 
+  // ECHO: not a "coldness" method at all — ignores frequency and gaps
+  // entirely. Targets whichever digit just landed on the most recent tick,
+  // on the theory that an immediate repeat (X→X) is the lower-probability
+  // outcome. Requires at least one tick of history; returns cold:null
+  // until then so the engine just waits rather than firing on nothing.
+  function getEchoDigit(history) {
+    if (!history.length) return { cold: null, third: null, top3: [] };
+    const last = history[history.length - 1];
+    return { cold: last, third: null, top3: [last] };
+  }
+
   // Single entry point every call site uses — swapping methods only ever
   // means changing state.coldPickMethod, never touching the call sites.
   function pickColdDigit(method, freqP, history, tickIndex) {
@@ -10621,6 +10683,7 @@ window.NexusTrading = exports;
       case 'gap': return getColdestByGap(freqP);
       case 'zscore': return getColdestByZScore(freqP, history.length);
       case 'consensus': return getColdestByConsensus(history, tickIndex);
+      case 'echo': return getEchoDigit(history);
       case 'silent':
       default: return getColdestDigits(freqP);
     }
@@ -10705,10 +10768,11 @@ window.NexusTrading = exports;
         coldDigit: null, thirdColdDigit: null, currentTick: null, silenceCount: 0,
         luckyNumber: 12, recommendedMarket: primaryMarket, analysisConfidence: 0,
         coldStreakHistory: [],
-        // coldPickMethod: which of the 4 methods above chooses the target
-        // digit. 'silent' (raw lowest count — the original method) stays
-        // the default so existing configs behave exactly as before.
-        coldPickMethod: ['silent', 'gap', 'zscore', 'consensus'].includes(saved.coldPickMethod) ? saved.coldPickMethod : 'silent',
+        // coldPickMethod: which method chooses the target digit. Fresh
+        // installs (no saved config yet) now default to 'echo' — the
+        // Last-Digit Echo strategy — per the switch to Alternative B.
+        // Existing saved configs keep whatever method they already had.
+        coldPickMethod: ['silent', 'gap', 'zscore', 'consensus', 'echo'].includes(saved.coldPickMethod) ? saved.coldPickMethod : 'echo',
         stake: Math.max(0.35, parseNum(saved.stake, 1)),
         stakeVary: parseBool(saved.stakeVary, false),
         stakeMin: Math.max(0.35, parseNum(saved.stakeMin, 1)),
@@ -10899,22 +10963,38 @@ window.NexusTrading = exports;
 
     runAnalysis() {
       const s = this.state;
-      if (s.historyP.length < 15) return;
+      // Echo doesn't need a warm-up window — it only ever looks at the one
+      // digit that just landed — so it can start picking a target on tick 1
+      // instead of waiting for the 15-tick sample the frequency/gap/z-score
+      // methods need to mean anything.
+      if (s.coldPickMethod !== 'echo' && s.historyP.length < 15) return;
       const freqP = computeFrequency(s.historyP, this.tickIndex);
       const freqG = computeFrequency(s.historyG, this.tickIndex);
       const { cold, third } = pickColdDigit(s.coldPickMethod, freqP, s.historyP, this.tickIndex);
       s.coldDigit = cold; s.thirdColdDigit = third;
       s.freqP = freqP; s.freqG = freqG;
       s.luckyNumber = determineLuckyNumber(s.coldStreakHistory);
-      const nonZero = freqP.filter((f) => f.digit !== 0);
-      const spread = Math.max(...nonZero.map((f) => f.count)) - Math.min(...nonZero.map((f) => f.count));
-      s.analysisConfidence = Math.min(100, Math.round((spread / Math.max(s.historyP.length / 10, 1)) * 100));
+      if (s.historyP.length >= 1) {
+        const nonZero = freqP.filter((f) => f.digit !== 0);
+        const spread = Math.max(...nonZero.map((f) => f.count)) - Math.min(...nonZero.map((f) => f.count));
+        s.analysisConfidence = Math.min(100, Math.round((spread / Math.max(s.historyP.length / 10, 1)) * 100));
+      }
       s.recommendedMarket = s.primaryMarket;
     }
 
     checkEntry() {
       const s = this.state;
       if (!s.isArmed || s.isRunning || s.isCooldown) return;
+      // Echo mode: no silence streak to wait on — the moment we're armed
+      // and a digit exists to echo off of, fire the batch on it. The
+      // batch-size/speed/cooldown machinery below is unchanged, so this
+      // is still a single super-speed burst followed by the normal
+      // 4-5 min cooldown, just targeting "last digit seen" instead of a
+      // frequency-derived cold digit.
+      if (s.coldPickMethod === 'echo') {
+        if (s.coldDigit !== null) this.executeBurst();
+        return;
+      }
       if (s.coldDigit !== null && s.silenceCount >= (s.activeTrigger || s.silenceTrigger)) {
         this.executeBurst();
       }
@@ -12045,6 +12125,19 @@ window.NexusStrategies=exports;
     // true only for the Higher/Lower (Rise/Fall) bot — bets CALL/PUT on price
     // direction instead of digit parity/over-under, using its own analyzer.
     get isPriceMode() { return this.mode === 'risefall'; }
+    // true only for the Rise & Fall (Mean Reversion) bot — also bets
+    // CALL/PUT on price direction like isPriceMode, but WITH an offset
+    // barrier (genuine Higher/Lower contract) sized dynamically off ATR,
+    // using its own ADX/Bollinger/RSI/Stochastic/ATR 3-stage pipeline
+    // analyzer (MeanReversionAnalyzer) instead of RiseFallAnalyzer.
+    get isMeanRevMode() { return this.mode === 'meanrev'; }
+    // true only for the new bottom-of-list Even/Odd (Mean Reversion) bots —
+    // still bets DIGITEVEN/DIGITODD like the classic Even/Odd bots above,
+    // but through the macro/micro/exhaustion+confirmation pipeline
+    // (EvenOddReversionAnalyzer) instead of the classic fixed-streak logic,
+    // kept as an entirely separate bot so it never touches or gets
+    // confused with the original Even/Odd bots' behavior.
+    get isEvenOddMRMode() { return this.mode === 'evenoddmr'; }
     // true only for the Matches bot — bets DIGITMATCH on one predicted
     // digit (0-9) instead of parity/over-under/direction, using its own
     // frequency-based analyzer (MatchesAnalyzer).
@@ -12145,6 +12238,41 @@ window.NexusStrategies=exports;
         //               the entry condition on its own.
         firstTickMode: 'normal', firstTickStake: 0.35,
       };
+      // Even/Odd (Mean Reversion) — a completely separate, statistically
+      // sound rebuild of the classic "wait for a streak of 4, bet the
+      // opposite" idea. Each tick is independent (P(Odd)=50%), so a fixed
+      // streak count alone proves nothing — this version demands THREE
+      // independent confirmations before it ever fires:
+      //   1. MACRO FILTER   — the target side (Odd for the Odd MR bot, Even
+      //      for the Even MR bot) must already be genuinely dominant over
+      //      the last macroLookback ticks (default 200) by at least
+      //      macroThreshold% (default 54%) — a real, slow-forming skew,
+      //      not a guess about the very next tick.
+      //   2. MICRO DEVIATION — the OPPOSITE side must have clustered to
+      //      microThreshold% (default 70%, i.e. ≥14/20) or more over the
+      //      last microLookback ticks (default 20) — a genuine 2+ standard
+      //      deviation anomaly from the 50/50 baseline, not ordinary noise.
+      //   3. EXHAUSTION + CONFIRMATION — only once an opposite-side streak
+      //      of at least minStreak (default 3) has just been BROKEN by one
+      //      actual target-side tick landing does this bot fire — proving
+      //      the reversion is already underway instead of predicting when
+      //      it will start.
+      // A cold-digit suppression filter (coldLookback/coldRecentWindow/
+      // coldRecentCount) also blocks entries when the least-frequent
+      // opposite-side digit is suddenly clustering — a sign of a genuine
+      // distribution shift extending the streak, not real exhaustion.
+      // See window.EvenOddReversionAnalyzer for the full pipeline.
+      const evenoddmrDefaults = {
+        stake: 1, targetRuns: 1, minSignal: 0,
+        martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 3,
+        autoPilot: true, autoRefresh: true, soundEnabled: true,
+        takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
+        tradeMode: this.fixedTradeMode || 'odd',
+        macroLookback: 200, macroThreshold: 54,
+        microLookback: 20, microThreshold: 70,
+        minStreak: 3,
+        coldLookback: 50, coldRecentWindow: 10, coldRecentCount: 2,
+      };
       const overDefaults = { ...evenDefaults, autoPilot: false, autoRefresh: false, tradeMode: undefined };
       // Under gets its own default barrier picks (Under 7 / recovery Under 6)
       // instead of reusing Over's 3/4 defaults.
@@ -12179,6 +12307,30 @@ window.NexusStrategies=exports;
         // already implements this generically (mode-agnostic), Higher/Lower
         // was just missing these two config defaults and its UI control.
         firstTickMode: 'normal', firstTickStake: 0.35,
+      };
+      // Rise & Fall (Mean Reversion): genuine Higher/Lower — CALL/PUT WITH
+      // a dynamic Offset Barrier — driven by the ADX/Bollinger/RSI/
+      // Stochastic/ATR 3-stage pipeline (MeanReversionAnalyzer) instead of
+      // RiseFallAnalyzer. candleSize is how many raw ticks the engine
+      // buckets into one OHLC candle for the indicator stack to run on.
+      // adxThreshold/bbStdDev/rsiOverbought/rsiOversold/stochOverbought/
+      // stochOversold/atrMultiplier are the exact tunables the strategy
+      // sheet calls out (ADX<22 ranging filter, BB 20/2.5 StdDev envelope,
+      // RSI(7) 75/25 + Stochastic(5,3,3) 80/20 momentum-exhaustion gates,
+      // barrier offset = atrMultiplier × ATR(14)).
+      const meanrevDefaults = {
+        stake: 1, targetRuns: 1, minSignal: 50, duration: 10,
+        martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 3,
+        autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
+        soundEnabled: true, autoRefresh: true, direction: 'auto',
+        // Stage 3 (candlestick rejection) is itself the confirmation gate,
+        // so confirmTicks defaults low (1) — it's still available to
+        // demand the signal hold across more than one live tick if wanted.
+        confirmTicks: 1, minConfidence: 0, requireMTF: false,
+        firstTickMode: 'normal', firstTickStake: 0.35,
+        candleSize: 5, adxThreshold: 22, bbStdDev: 2.5,
+        rsiOverbought: 75, rsiOversold: 25, stochOverbought: 80, stochOversold: 20,
+        atrMultiplier: 0.5,
       };
       // Matches (DIGITMATCH): bets one predicted digit (0-9) each tick.
       // preset selects which heuristic picks the digit: 'auto' (chase the
@@ -12222,7 +12374,7 @@ window.NexusStrategies=exports;
         takeProfit: 50, stopLoss: 20, martingaleEnabled: false,
         autoPilot: true, soundEnabled: true, autoRefresh: true,
       };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isAccumulatorMode ? accumulatorDefaults : evenDefaults;
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isAccumulatorMode ? accumulatorDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -12334,7 +12486,8 @@ window.NexusStrategies=exports;
       if (this.tickUnsub) this.tickUnsub();
       this.executionGuard = false;
       this.addLog('engine', 'RADAR', `Locked on ${market}`);
-      if (this.isPriceMode || this.isAccumulatorMode) this.priceHistory = []; // fresh price series for the new market
+      if (this.isPriceMode || this.isAccumulatorMode || this.isMeanRevMode) this.priceHistory = []; // fresh price series for the new market
+      if (this.isMeanRevMode) { this.candles = []; this._mrCandleBuf = []; } // fresh candle series for the new market
       if (this.isAccumulatorMode) this.calmStreak = 0; // fresh calm-streak counter for the new market
       this.tickUnsub = this.socket.subscribe(market, (data) => {
         this.lastTickTime = Date.now();
@@ -12376,6 +12529,16 @@ window.NexusStrategies=exports;
             if (isOddMode ? this.T.isEven(fullHistory[i]) : this.T.isOdd(fullHistory[i])) streak++;
             else break;
           }
+        } else if (this.isEvenOddMRMode) {
+          // Display-only: current trailing opposite-side streak (including
+          // the latest tick). The analyzer below independently re-derives
+          // the PRE-confirmation streak it actually gates on, since that
+          // has to exclude whatever just landed on this very tick.
+          const isOddMode = this.config.tradeMode === 'odd';
+          for (let i = fullHistory.length - 1; i >= 0; i--) {
+            if (isOddMode ? this.T.isEven(fullHistory[i]) : this.T.isOdd(fullHistory[i])) streak++;
+            else break;
+          }
         } else if (this.isUnderMode) {
           for (let i = fullHistory.length - 1; i >= 0; i--) {
             if (fullHistory[i] >= this.config.overBarrier) streak++;
@@ -12391,7 +12554,7 @@ window.NexusStrategies=exports;
               else break;
             }
           }
-        } else if (!this.isPriceMode && !this.isMatchMode) {
+        } else if (!this.isPriceMode && !this.isMatchMode && !this.isMeanRevMode && !this.isEvenOddMRMode) {
           for (let i = fullHistory.length - 1; i >= 0; i--) {
             if (fullHistory[i] <= this.config.overBarrier) streak++;
             else break;
@@ -12436,8 +12599,36 @@ window.NexusStrategies=exports;
           // the UI shows it even when the gate is off) but only enforced as
           // an entry condition below when config.requireMTF is on.
           this.mtf = window.RiseFallAnalyzer.analyzeMTF(this.priceHistory, market);
+        } else if (this.isMeanRevMode) {
+          // Own rolling tick buffer (for the price chart) AND a rolling
+          // OHLC candle buffer (for the ADX/Bollinger/RSI/Stochastic/ATR
+          // pipeline, which needs real candles, not raw ticks). Ticks are
+          // grouped into fixed-size buckets (config.candleSize, default 5)
+          // — a fresh candle closes, and the analyzer re-runs, once every
+          // `candleSize` ticks rather than on every single tick.
+          if (!this.priceHistory) this.priceHistory = [];
+          this.priceHistory.push(data.quote);
+          if (this.priceHistory.length > 300) this.priceHistory.shift();
+          if (!this.candles) this.candles = [];
+          if (!this._mrCandleBuf) this._mrCandleBuf = [];
+          this._mrCandleBuf.push(data.quote);
+          const candleSize = Math.max(2, parseInt(this.config.candleSize, 10) || 5);
+          if (this._mrCandleBuf.length >= candleSize) {
+            const group = this._mrCandleBuf;
+            this.candles.push({ open: group[0], close: group[group.length - 1], high: Math.max(...group), low: Math.min(...group) });
+            if (this.candles.length > 150) this.candles.shift();
+            this._mrCandleBuf = [];
+          }
+          result = window.MeanReversionAnalyzer.analyze(this.candles, data.quote, this.config);
+          this.analysis = result;
         } else if (this.isMatchMode) {
           result = window.MatchesAnalyzer.analyze(history, tickPeriod, this.config);
+          this.analysis = result;
+        } else if (this.isEvenOddMRMode) {
+          // Runs on the shared digit history (capped at 200 ticks by the
+          // socket already — exactly the macro window this strategy wants)
+          // rather than any bot-local buffer.
+          result = window.EvenOddReversionAnalyzer.analyze(fullHistory, this.config);
           this.analysis = result;
         } else if (isOver3) {
           result = this.T.analyzeOver3Condition(history, tickPeriod, this.config.minStreak, this.config.minSignal);
@@ -12558,6 +12749,44 @@ window.NexusStrategies=exports;
           this.emit();
           return;
         }
+        if (this.isMeanRevMode) {
+          // Direction: the 3-stage pipeline (ADX regime → BB/RSI/Stochastic
+          // overextension → candlestick rejection) already decides ready+
+          // direction inside the analyzer itself — touching stage 3 is the
+          // real confirmation gate, not an extra condition bolted on here.
+          let dir = result.direction;
+          if (this.config.direction === 'higher') dir = 'CALL';
+          else if (this.config.direction === 'lower') dir = 'PUT';
+          const meetsConfidence = !this.config.minConfidence || (result.confidence != null && result.confidence >= this.config.minConfidence);
+          const meetsSignal = this.config.direction !== 'auto'
+            ? (result.ready && meetsConfidence)
+            : (result.ready && dir && result.strength >= this.config.minSignal && meetsConfidence);
+          const neededConfirmTicks = this.config.confirmTicks || 1;
+          if (meetsSignal && dir) {
+            if (this._mrConfirmDir === dir) {
+              this._mrConfirmCount = (this._mrConfirmCount || 1) + 1;
+            } else {
+              this._mrConfirmDir = dir;
+              this._mrConfirmCount = 1;
+            }
+          } else {
+            this._mrConfirmDir = null;
+            this._mrConfirmCount = 0;
+          }
+          if (meetsSignal && dir && this._mrConfirmCount >= neededConfirmTicks) {
+            this._riseFallDirection = dir;
+            // Dynamic barrier: 0.5×ATR(14) by default, sized to CURRENT
+            // volatility instead of a fixed +/-0.50 offset. Fall back to a
+            // small non-zero offset if ATR isn't available for some reason
+            // so the trade never accidentally fires with a zero barrier.
+            this._mrBarrierOffset = result.barrierOffset != null && result.barrierOffset > 0 ? result.barrierOffset : 0.1;
+            this.addLog('win', 'SIGNAL', `${dir === 'CALL' ? '📈 HIGHER' : '📉 LOWER'} mean-reversion signal ${result.strength}% — barrier ±${this._mrBarrierOffset.toFixed(5)} (0.5×ATR) — ${(result.reasons && result.reasons[result.reasons.length - 1]) || ''}`);
+            this.startChainExecution();
+            this._mrConfirmCount = 0;
+          }
+          this.emit();
+          return;
+        }
         if (this.isMatchMode) {
           const trig = result.triggerDigit;
           const meetsSignal = result.ready && (trig != null ? data.digit === trig : result.strength >= this.config.minSignal);
@@ -12587,6 +12816,22 @@ window.NexusStrategies=exports;
             this.addLog('win', 'SIGNAL', trig != null
               ? `Trigger digit ${data.digit} printed → betting digit ${result.targetDigit} — ${(result.reasons && result.reasons[0]) || ''}`
               : `Digit ${result.targetDigit} match signal ${result.strength}% (confirmed) — ${(result.reasons && result.reasons[0]) || ''}`);
+            this.startChainExecution();
+          }
+          this.emit();
+          return;
+        }
+        if (this.isEvenOddMRMode) {
+          // All three gates (macro dominance, micro cluster, exhaustion +
+          // confirmation) plus the cold-digit suppression filter are
+          // already fully resolved inside the analyzer — result.ready is
+          // true on EXACTLY the tick where the opposite-side streak just
+          // broke via a confirming target-side digit. Firing right here
+          // IS "the very next tick": the contract itself trades 1 tick
+          // forward from this purchase, exactly like the spec calls for.
+          const meetsSignal = result && result.ready && (!this.config.minSignal || result.strength >= this.config.minSignal);
+          if (meetsSignal) {
+            this.addLog('win', 'SIGNAL', `${result.contractType === 'DIGITODD' ? '🔵 ODD' : '🟣 EVEN'} reversion confirmed (${result.strength}%) — ${(result.reasons && result.reasons[result.reasons.length - 1]) || ''}`);
             this.startChainExecution();
           }
           this.emit();
@@ -13068,6 +13313,25 @@ window.NexusStrategies=exports;
         // now favoured, so there's no flip-on-recovery logic here.
         contractType = this._riseFallDirection || 'CALL';
         barrierValue = 0;
+      } else if (this.isMeanRevMode) {
+        // Genuine Higher/Lower: CALL/PUT WITH a relative Offset Barrier
+        // (the "+0.50 for LOWER, -0.50 for HIGHER" from the strategy
+        // sheet), except the offset is dynamic — 0.5×ATR(14), computed by
+        // the analyzer and cached on the signal that fired this trade.
+        // LOWER (PUT): barrier ABOVE entry (+offset) — high payout, price
+        // reverting DOWN through it is the safety cushion.
+        // HIGHER (CALL): barrier BELOW entry (-offset) — mirror image.
+        contractType = this._riseFallDirection || 'CALL';
+        const mrOffset = (this._mrBarrierOffset != null && this._mrBarrierOffset > 0 ? this._mrBarrierOffset : 0.1).toFixed(5);
+        barrierValue = contractType === 'PUT' ? `+${mrOffset}` : `-${mrOffset}`;
+      } else if (this.isEvenOddMRMode) {
+        // Simple, direct mapping — no strategy-flip/recovery-side logic at
+        // all, on purpose. The whole point of this bot is that macro +
+        // micro + exhaustion/confirmation already decided the direction;
+        // recovery just re-bets the same target side with the martingale
+        // stake, exactly like the classic Even/Odd bots do.
+        contractType = this.config.tradeMode === 'odd' ? 'DIGITODD' : 'DIGITEVEN';
+        barrierValue = 0;
       } else if (this.isMatchMode) {
         // Matches: bet DIGITMATCH on whichever digit the analyzer most
         // recently flagged. On recovery, Smart Toggle re-reads the live
@@ -13180,7 +13444,7 @@ window.NexusStrategies=exports;
       const accountCurrency = window.HubStore.getState().currency || 'USD';
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
-        currency: accountCurrency, duration: this.isPriceMode ? (cfg.duration || 5) : this.isMatchMode ? (cfg.numTicks || 2) : 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
+        currency: accountCurrency, duration: (this.isPriceMode || this.isMeanRevMode) ? (cfg.duration || 5) : this.isMatchMode ? (cfg.numTicks || 2) : 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
       };
       if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER') || contractType.includes('MATCH')) params.barrier = barrierValue;
       this.sound.playExecute();
@@ -13519,7 +13783,7 @@ window.NexusStrategies=exports;
       // Digit-based modes only (Even/Odd/Over/Under/Matches) — Higher/Lower
       // and Accumulator trade on price direction / a leveraged position, not
       // a single settled digit, so the "next 3 digits" readout doesn't apply.
-      if (!this.isPriceMode && !this.isAccumulatorMode) {
+      if (!this.isPriceMode && !this.isAccumulatorMode && !this.isMeanRevMode) {
         this._pendingDigitCaptures.push({ id: journalEntry.id, digits: [] });
       }
       window.HubStore.notifyTelegram(`${win ? '✅' : '❌'} ${this.botLabel}: ${win ? 'WIN' : 'LOSS'} (${profit >= 0 ? '+' : ''}${profit.toFixed(2)})`);
@@ -13578,7 +13842,7 @@ window.NexusStrategies=exports;
         // of their own anymore — they always defer to whatever is set in
         // the Dashboard's master gate, read live so changes made
         // mid-session apply immediately.
-        const isRiseFall = this.mode === 'risefall' || this.mode === 'accumulator';
+        const isRiseFall = this.mode === 'risefall' || this.mode === 'accumulator' || this.mode === 'meanrev';
         const usesDashboardGate = isRiseFall || this.isMatchMode;
         const gate = usesDashboardGate && window.getMasterGateValues ? window.getMasterGateValues() : null;
         const tp = gate ? gate.tp : cfg.takeProfit;
@@ -13666,7 +13930,7 @@ window.NexusStrategies=exports;
       if (!this.state.active || this.state.isCooldown) return;
       this.executionGuard = true;
       const health = this.socket.getHealth(this.config.selectedMarket);
-      if (health && health.longTerm === 'POOR' && !this.isPriceMode) { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
+      if (health && health.longTerm === 'POOR' && !this.isPriceMode && !this.isMeanRevMode) { this.executionGuard = false; this.addLog('engine', 'HOLD', 'Market health POOR'); return; }
 
       // ── FIRST-TICK HANDLING: 'skip' mode ─────────────────────────────
       // Only applies to a fresh (non-recovery) entry, and only once per
@@ -14307,8 +14571,23 @@ window.NexusStrategies=exports;
       }).join('')}
     </div>
 
-    <!-- Silent counter -->
+    <!-- Silent counter / Echo status -->
     <div class="dahub-card" style="text-align:center">
+      ${s.coldPickMethod==='echo' ? `
+      <div class="dahub-label" style="justify-content:center"><span class="dahub-dot" style="${s.coldDigit!==null?'background:hsl(var(--win));box-shadow:0 0 16px hsl(var(--win));animation:dahub-pulse .8s infinite':'background:hsl(var(--accent));box-shadow:0 0 8px hsl(var(--accent))'}"></span>Echo Target</div>
+      <div style="position:relative;width:120px;height:120px;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;animation:dahub-float 3s ease-in-out infinite">
+        <svg width="120" height="120" viewBox="0 0 120 120" style="position:absolute;inset:0">
+          <circle cx="60" cy="60" r="50" fill="none" stroke="hsl(var(--border)/0.3)" stroke-width="8"/>
+          <circle cx="60" cy="60" r="50" fill="none" stroke="${s.coldDigit!==null?'hsl(var(--win))':'hsl(var(--accent))'}" stroke-width="8" stroke-linecap="round"
+            stroke-dasharray="${2*Math.PI*50}" stroke-dashoffset="0"
+            style="filter:drop-shadow(0 0 8px ${s.coldDigit!==null?'hsl(var(--win)/0.8)':'hsl(var(--accent)/0.6)'})"/>
+        </svg>
+        <div style="position:relative;font-family:'Outfit',sans-serif;font-size:34px;font-weight:900;color:${s.coldDigit!==null?'#00e676':'hsl(var(--foreground))'}">${s.coldDigit!==null?s.coldDigit:'—'}</div>
+      </div>
+      <div style="font-size:11px;padding:6px 14px;border-radius:999px;background:hsl(var(--primary)/0.1);border:1px solid hsl(var(--primary)/0.3);color:hsl(var(--primary));display:inline-block;margin-bottom:6px;font-weight:800">
+        ${s.coldDigit!==null?`Last digit ${s.coldDigit} → firing DIFFER ${s.coldDigit} next arm`:'Waiting for first tick…'}
+      </div>
+      ` : `
       <div class="dahub-label" style="justify-content:center"><span class="dahub-dot" style="${s.silenceCount>=_liveTrigger?'background:hsl(var(--win));box-shadow:0 0 16px hsl(var(--win));animation:dahub-pulse .8s infinite':'background:hsl(var(--accent));box-shadow:0 0 8px hsl(var(--accent))'}"></span>Silent Count${s.triggerShuffle?' 🔀':''}</div>
       <div style="position:relative;width:120px;height:120px;margin:0 auto 10px;animation:dahub-float 3s ease-in-out infinite">
         <svg width="120" height="120" viewBox="0 0 120 120">
@@ -14328,7 +14607,8 @@ window.NexusStrategies=exports;
       ${s.coldDigit!==null?`<div style="font-size:11px;padding:6px 14px;border-radius:999px;background:hsl(var(--primary)/0.1);border:1px solid hsl(var(--primary)/0.3);color:hsl(var(--primary));display:inline-block;margin-bottom:6px;font-weight:800">
         Watching ≠<span style="font-size:14px;font-weight:900">${s.coldDigit}</span>${s.thirdColdDigit!==null?` + <span style="color:hsl(var(--accent))">${s.thirdColdDigit}</span>`:''}
       </div>`:(s.coldPickMethod==='consensus'?`<div style="font-size:9.5px;color:hsl(var(--muted-foreground))">Consensus method — short and full windows disagree, waiting…</div>`:'')}
-      <div style="font-size:8px;letter-spacing:1px;color:hsl(var(--muted-foreground)/0.7);margin-top:2px">METHOD: ${({silent:'SILENT COUNT',gap:'LONGEST GAP',zscore:'Z-SCORE',consensus:'CONSENSUS'})[s.coldPickMethod||'silent']}</div>
+      `}
+      <div style="font-size:8px;letter-spacing:1px;color:hsl(var(--muted-foreground)/0.7);margin-top:2px">METHOD: ${({silent:'SILENT COUNT',gap:'LONGEST GAP',zscore:'Z-SCORE',consensus:'CONSENSUS',echo:'LAST-DIGIT ECHO'})[s.coldPickMethod||'echo']}</div>
     </div>
 
     <!-- Lucky + samples -->
@@ -14395,7 +14675,8 @@ window.NexusStrategies=exports;
         <div class="cp-input-group">
           <span class="cp-input-label">Digit Selection Method</span>
           <select class="cp-input" id="differ-cold-method">
-            <option value="silent" ${(s.coldPickMethod||'silent')==='silent'?'selected':''}>Silent Count — rarest by raw frequency (default)</option>
+            <option value="echo" ${(s.coldPickMethod||'echo')==='echo'?'selected':''}>Last-Digit Echo — bet against whatever just landed (current strategy)</option>
+            <option value="silent" ${s.coldPickMethod==='silent'?'selected':''}>Silent Count — rarest by raw frequency</option>
             <option value="gap" ${s.coldPickMethod==='gap'?'selected':''}>Longest Gap — hasn't appeared in the most ticks</option>
             <option value="zscore" ${s.coldPickMethod==='zscore'?'selected':''}>Statistical Deviation (Z-score) — most significant vs sample size</option>
             <option value="consensus" ${s.coldPickMethod==='consensus'?'selected':''}>Multi-Window Consensus — short + full window must agree</option>
@@ -14404,15 +14685,19 @@ window.NexusStrategies=exports;
             s.coldPickMethod==='gap' ? 'Picks whichever digit has simply gone longest without appearing, regardless of overall frequency.' :
             s.coldPickMethod==='zscore' ? 'Weighs how far below the expected 10% a digit sits relative to sample size, not just the lowest raw count.' :
             s.coldPickMethod==='consensus' ? 'Only commits to a digit when a 30-tick window and the full window both agree — may show "—" more often while it waits for agreement.' :
-            'Picks whichever digit has appeared least often over the full tick window (original method).'
+            s.coldPickMethod==='silent' ? 'Picks whichever digit has appeared least often over the full tick window.' :
+            'Targets whatever digit just landed on the most recent tick and fires immediately on arm — no silence wait, no frequency window needed.'
           }</span>
         </div>
-        <div class="cp-input-group">
+        ${s.coldPickMethod==='echo' ? `
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin:2px 0 10px;padding:8px 9px;background:hsl(var(--bg)/0.6);border-radius:8px;border-left:2px solid hsl(var(--primary)/0.4)">💡 Echo mode ignores Silence Trigger / Trigger Shuffle below — it always fires the instant you press Engage (using Burst Speed above). Cooldown between bursts is unchanged.</div>
+        ` : ''}
+        <div class="cp-input-group" style="${s.coldPickMethod==='echo'?'opacity:0.4;pointer-events:none':''}">
           <span class="cp-input-label">Silence Trigger · Lucky: ${s.luckyNumber}</span>
           <input class="cp-input" type="number" id="differ-trigger" value="${s.silenceTrigger}" min="5" max="30">
           <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Number of ticks the target digit must be silent before firing</span>
         </div>
-        <div class="cp-toggle-row" style="margin-top:8px">
+        <div class="cp-toggle-row" style="margin-top:8px;${s.coldPickMethod==='echo'?'opacity:0.4;pointer-events:none':''}">
           <div style="display:flex;align-items:center;gap:10px">
             <button class="titan-toggle ${s.triggerShuffle?'on':''}" id="differ-trigger-shuffle" onclick="event.stopPropagation()"></button>
             <div>
@@ -15299,8 +15584,10 @@ window.NexusStrategies=exports;
       })() : ''}
     </div>`}
     `;
-    el(`${rootId}-strategy`).onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
-    el(`${rootId}-alt-toggle`).onclick = () => {
+    const strategySelect = el(`${rootId}-strategy`);
+    if (strategySelect) strategySelect.onchange = (e) => engine.selectStrategy(parseInt(e.target.value));
+    const altToggleBtn = el(`${rootId}-alt-toggle`);
+    if (altToggleBtn) altToggleBtn.onclick = () => {
       const next = !c.altEntryEnabled;
       engine.setConfig({ altEntryEnabled: next });
       engine.saveConfig();
@@ -16733,6 +17020,11 @@ window.NexusStrategies=exports;
     nexus: { label: 'Over Bot', dot: 'hsl(var(--accent))' },
     under: { label: 'Under Bot', dot: 'hsl(var(--loss))' },
     risefall: { label: 'Higher/Lower Bot', dot: 'hsl(var(--win))' },
+    meanrev: { label: 'Rise & Fall MR Bot', dot: 'hsl(var(--win))' },
+    risemr: { label: 'Rise MR Bot', dot: 'hsl(var(--win))' },
+    fallmr: { label: 'Fall MR Bot', dot: 'hsl(var(--loss))' },
+    evenmr: { label: 'Even MR Bot', dot: 'hsl(var(--win))' },
+    oddmr: { label: 'Odd MR Bot', dot: 'hsl(var(--win))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
     accumulator: { label: 'Accumulator Bot', dot: 'hsl(var(--accent))' },
   };
@@ -17532,7 +17824,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator'];
+    const botIds = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -18241,6 +18533,367 @@ window.NexusStrategies=exports;
 })();
 </script>
 
+</script>
+
+<script>
+(function (global) {
+  'use strict';
+  // ── Rise & Fall (Mean Reversion) — Higher/Lower offset-barrier analyzer ──
+  // Unlike the barrier-less "Higher/Lower" (RiseFallAnalyzer) bot above,
+  // which trades plain duration-in-ticks CALL/PUT with no barrier, this bot
+  // trades genuine Higher/Lower contracts: CALL/PUT WITH an Offset Barrier
+  // (e.g. +0.50 for LOWER, -0.50 for HIGHER). Mean reversion is a natural
+  // fit for an offset barrier — enter when price is severely overextended
+  // and bet it snaps back toward its mean before the contract expires.
+  //
+  // Full indicator stack (per the strategy sheet this bot implements):
+  //   1. Market Regime   — ADX(14): filters OUT trending markets. ADX below
+  //      the threshold (default 22) confirms a ranging market where mean
+  //      reversion actually works; ADX at/above it means skip.
+  //   2. Envelope         — Bollinger Bands (20, 2.5 StdDev): measures how
+  //      far price has statistically stretched from its 20-period mean.
+  //   3. Momentum Exhaustion — RSI(7) + Stochastic(5,3,3): confirms the
+  //      move has run out of steam at the extreme (overbought/oversold).
+  //   4. Dynamic Barrier  — ATR(14): sizes the Offset Barrier to CURRENT
+  //      volatility (barrier = 0.5 × ATR by default) instead of a fixed
+  //      +/-0.50 that would be too tight in fast markets and too loose in
+  //      quiet ones.
+  //
+  // 3-Tier validation pipeline (see analyze() below):
+  //   Stage 1 — MACRO FILTER: ADX < threshold → ranging market approved,
+  //             otherwise the market is skipped outright.
+  //   Stage 2 — DIRECTION & DEVIATION: candle high pierces the upper band
+  //             with RSI/Stochastic overbought (→ setup a LOWER/PUT), or
+  //             candle low pierces the lower band with RSI/Stochastic
+  //             oversold (→ setup a HIGHER/CALL).
+  //   Stage 3 — CANDLESTICK REJECTION TRIGGER: only actually fires once a
+  //             rejection wick (pin bar), an opposite-colour engulfing
+  //             candle, or a Stochastic %K/%D cross OUT of the extreme
+  //             confirms the reversal — touching the band alone is never
+  //             enough to trade.
+  //
+  // Candles are built by the engine from raw ticks (grouped into fixed-size
+  // buckets — see TitanEngine's isMeanRevMode tick handler) since the
+  // underlying tick feed has no native OHLC candles of its own.
+
+  function sma(arr, period) {
+    if (arr.length < period) return null;
+    const slice = arr.slice(-period);
+    return slice.reduce((a, b) => a + b, 0) / period;
+  }
+  function stdDev(arr, period, mean) {
+    const slice = arr.slice(-period);
+    const variance = slice.reduce((a, b) => a + (b - mean) * (b - mean), 0) / period;
+    return Math.sqrt(variance);
+  }
+  function computeRSI(closes, period) {
+    if (closes.length < period + 1) return null;
+    const slice = closes.slice(-(period + 1));
+    let gains = 0, losses = 0;
+    for (let i = 1; i < slice.length; i++) {
+      const diff = slice[i] - slice[i - 1];
+      if (diff >= 0) gains += diff; else losses -= diff;
+    }
+    const avgGain = gains / period, avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - 100 / (1 + rs);
+  }
+  // Wilder-smoothed ATR(period) off a True Range series.
+  function computeATR(candles, period) {
+    const tr = [];
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i], p = candles[i - 1];
+      tr.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    }
+    if (tr.length < period) return null;
+    let atr = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < tr.length; i++) atr = (atr * (period - 1) + tr[i]) / period;
+    return atr;
+  }
+  // Wilder ADX(period): +DI/-DI smoothed from +DM/-DM/TR, ADX = smoothed DX.
+  function computeADX(candles, period) {
+    if (candles.length < period * 2 + 1) return null;
+    const plusDM = [], minusDM = [], tr = [];
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i], p = candles[i - 1];
+      const upMove = c.high - p.high, downMove = p.low - c.low;
+      plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+      minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+      tr.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    }
+    if (tr.length < period * 2) return null;
+    let smTR = tr.slice(0, period).reduce((a, b) => a + b, 0);
+    let smPlus = plusDM.slice(0, period).reduce((a, b) => a + b, 0);
+    let smMinus = minusDM.slice(0, period).reduce((a, b) => a + b, 0);
+    const dxSeries = [];
+    for (let i = period; i < tr.length; i++) {
+      smTR = smTR - (smTR / period) + tr[i];
+      smPlus = smPlus - (smPlus / period) + plusDM[i];
+      smMinus = smMinus - (smMinus / period) + minusDM[i];
+      const plusDI = smTR ? (smPlus / smTR) * 100 : 0;
+      const minusDI = smTR ? (smMinus / smTR) * 100 : 0;
+      const sum = plusDI + minusDI;
+      dxSeries.push(sum ? (Math.abs(plusDI - minusDI) / sum) * 100 : 0);
+    }
+    if (dxSeries.length < period) return null;
+    let adx = dxSeries.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < dxSeries.length; i++) adx = (adx * (period - 1) + dxSeries[i]) / period;
+    return adx;
+  }
+  // Stochastic %K(kPeriod) smoothed by dPeriod → slow %K, %D = SMA(dPeriod)
+  // of slow %K. Returns the latest AND previous {k,d} points so the caller
+  // can detect a cross (the "momentum hook" in Stage 3).
+  function computeStochastic(candles, kPeriod, dPeriod) {
+    if (candles.length < kPeriod + dPeriod * 2) return null;
+    const rawK = [];
+    for (let i = kPeriod - 1; i < candles.length; i++) {
+      const windowSlice = candles.slice(i - kPeriod + 1, i + 1);
+      const hh = Math.max(...windowSlice.map((c) => c.high));
+      const ll = Math.min(...windowSlice.map((c) => c.low));
+      const close = candles[i].close;
+      rawK.push(hh === ll ? 50 : ((close - ll) / (hh - ll)) * 100);
+    }
+    if (rawK.length < dPeriod * 2) return null;
+    const slowK = [];
+    for (let i = dPeriod - 1; i < rawK.length; i++) slowK.push(sma(rawK.slice(0, i + 1), dPeriod));
+    if (slowK.length < dPeriod + 1) return null;
+    const dSeries = [];
+    for (let i = dPeriod - 1; i < slowK.length; i++) dSeries.push(sma(slowK.slice(0, i + 1), dPeriod));
+    if (!dSeries.length) return null;
+    const k = slowK[slowK.length - 1], d = dSeries[dSeries.length - 1];
+    const kPrev = slowK.length >= 2 ? slowK[slowK.length - 2] : k;
+    const dPrev = dSeries.length >= 2 ? dSeries[dSeries.length - 2] : d;
+    return { k, d, kPrev, dPrev };
+  }
+
+  function analyze(candles, livePrice, cfg) {
+    cfg = cfg || {};
+    // 40 candles gives ADX(14)'s double-smoothing, BB(20), and Stoch(5,3,3)
+    // enough warm-up room to all be simultaneously ready.
+    const MIN_CANDLES = 40;
+    const price = livePrice != null ? livePrice : (candles && candles.length ? candles[candles.length - 1].close : null);
+    const base = {
+      ready: false, direction: null, confidence: 0, strength: 0, callScore: 0, putScore: 0,
+      price, adx: null, bbUpper: null, bbLower: null, rsi: null, stochK: null, stochD: null, atr: null, barrierOffset: null,
+    };
+    if (!candles || candles.length < MIN_CANDLES) {
+      return { ...base, reasons: [`Warming up — building candles (${candles ? candles.length : 0}/${MIN_CANDLES})…`] };
+    }
+    const closes = candles.map((c) => c.close);
+    const last = candles[candles.length - 1];
+    const prev = candles[candles.length - 2];
+
+    const mean20 = sma(closes, 20);
+    const sd20 = mean20 != null ? stdDev(closes, 20, mean20) : null;
+    const bbMult = cfg.bbStdDev || 2.5;
+    const bbUpper = mean20 != null && sd20 != null ? mean20 + bbMult * sd20 : null;
+    const bbLower = mean20 != null && sd20 != null ? mean20 - bbMult * sd20 : null;
+    const rsi = computeRSI(closes, 7);
+    const stoch = computeStochastic(candles, 5, 3);
+    const atr = computeATR(candles, 14);
+    const adx = computeADX(candles, 14);
+
+    const adxThreshold = cfg.adxThreshold || 22;
+    const rsiOB = cfg.rsiOverbought || 75, rsiOS = cfg.rsiOversold || 25;
+    const stochOB = cfg.stochOverbought || 80, stochOS = cfg.stochOversold || 20;
+    const atrMult = cfg.atrMultiplier || 0.5;
+    const barrierOffset = atr != null ? atr * atrMult : null;
+    const withIndicators = { adx, bbUpper, bbLower, rsi, stochK: stoch ? stoch.k : null, stochD: stoch ? stoch.d : null, atr, barrierOffset };
+
+    // ── STAGE 1: Macro market regime filter ───────────────────────────
+    if (adx == null) return { ...base, ...withIndicators, reasons: ['Warming up — ADX not ready yet…'] };
+    if (adx >= adxThreshold) {
+      return { ...base, ...withIndicators, reasons: [`Stage 1 — ADX ${adx.toFixed(1)} ≥ ${adxThreshold}: market trending, mean reversion skipped`] };
+    }
+    const reasons = [`Stage 1 — ADX ${adx.toFixed(1)} < ${adxThreshold}: ranging market approved`];
+
+    if (bbUpper == null || bbLower == null || rsi == null || !stoch) {
+      return { ...base, ...withIndicators, reasons: [...reasons, 'Warming up — Bollinger/RSI/Stochastic not ready yet…'] };
+    }
+
+    // ── STAGE 2: Directional overextension check ──────────────────────
+    const lowerSetup = last.high >= bbUpper && rsi >= rsiOB && stoch.k >= stochOB;   // → LOWER (PUT)
+    const higherSetup = last.low <= bbLower && rsi <= rsiOS && stoch.k <= stochOS;   // → HIGHER (CALL)
+    if (!lowerSetup && !higherSetup) {
+      return { ...base, ...withIndicators, putScore: 0, callScore: 0, reasons: [...reasons, 'Stage 2 — no band/RSI/Stochastic overextension yet'] };
+    }
+
+    const range = Math.max(1e-9, last.high - last.low);
+    const upperWickRatio = (last.high - Math.max(last.open, last.close)) / range;
+    const lowerWickRatio = (Math.min(last.open, last.close) - last.low) / range;
+    const bearishEngulf = !!prev && last.close < prev.open && last.open > prev.close && last.close < last.open && prev.close > prev.open;
+    const bullishEngulf = !!prev && last.close > prev.open && last.open < prev.close && last.close > last.open && prev.close < prev.open;
+    const stochHookDown = stoch.kPrev >= stochOB && stoch.k < stoch.d && stoch.kPrev >= stoch.dPrev;
+    const stochHookUp = stoch.kPrev <= stochOS && stoch.k > stoch.d && stoch.kPrev <= stoch.dPrev;
+
+    // ── STAGE 3: Candlestick rejection trigger ─────────────────────────
+    if (lowerSetup) {
+      reasons.push(`Stage 2 — high pierced upper BB, RSI ${rsi.toFixed(0)} & %K ${stoch.k.toFixed(0)} overbought → set up LOWER`);
+      const rejectionWick = last.close < bbUpper && upperWickRatio >= 0.35;
+      if (rejectionWick || bearishEngulf || stochHookDown) {
+        let putScore = 4;
+        if (rejectionWick) { putScore += 2; reasons.push(`Stage 3 — rejection wick closed back inside the band (${(upperWickRatio * 100).toFixed(0)}% upper wick)`); }
+        if (bearishEngulf) { putScore += 2; reasons.push('Stage 3 — bearish engulfing rejection candle'); }
+        if (stochHookDown) { putScore += 2; reasons.push('Stage 3 — %K crossed below %D out of overbought'); }
+        const strength = Math.round((Math.min(10, putScore) / 10) * 100);
+        return { ready: true, direction: 'PUT', confidence: strength, strength, callScore: 0, putScore, reasons, price, ...withIndicators };
+      }
+      return { ...base, ...withIndicators, putScore: 3, reasons: [...reasons, 'Stage 3 — waiting for a rejection candle to confirm before firing LOWER'] };
+    }
+
+    reasons.push(`Stage 2 — low pierced lower BB, RSI ${rsi.toFixed(0)} & %K ${stoch.k.toFixed(0)} oversold → set up HIGHER`);
+    const rejectionWick = last.close > bbLower && lowerWickRatio >= 0.35;
+    if (rejectionWick || bullishEngulf || stochHookUp) {
+      let callScore = 4;
+      if (rejectionWick) { callScore += 2; reasons.push(`Stage 3 — rejection wick closed back inside the band (${(lowerWickRatio * 100).toFixed(0)}% lower wick)`); }
+      if (bullishEngulf) { callScore += 2; reasons.push('Stage 3 — bullish engulfing rejection candle'); }
+      if (stochHookUp) { callScore += 2; reasons.push('Stage 3 — %K crossed above %D out of oversold'); }
+      const strength = Math.round((Math.min(10, callScore) / 10) * 100);
+      return { ready: true, direction: 'CALL', confidence: strength, strength, callScore, putScore: 0, reasons, price, ...withIndicators };
+    }
+    return { ...base, ...withIndicators, callScore: 3, reasons: [...reasons, 'Stage 3 — waiting for a rejection candle to confirm before firing HIGHER'] };
+  }
+
+  global.MeanReversionAnalyzer = { analyze };
+})(window);
+</script>
+
+<script>
+(function (global) {
+  'use strict';
+  // ── Even/Odd (Mean Reversion) analyzer — a completely separate, more
+  // statistically-grounded rebuild of the classic "streak of 4, bet the
+  // opposite" idea used by the Even/Odd bots further up the sidebar.
+  // Ticks on synthetic digit indices are independent (P(Odd)=50% every
+  // single tick), so a fixed streak count alone proves nothing about what
+  // happens next — entering right at a streak of 4 often just means
+  // stepping into the middle of an active micro-trend. This pipeline
+  // instead demands three independent confirmations before it ever fires:
+  //
+  //   Stage 1 — MACRO FILTER: the target side (Odd for the Odd MR bot,
+  //             Even for the Even MR bot) must already be genuinely
+  //             dominant over the last macroLookback ticks (default 200)
+  //             by at least macroThreshold% (default 54%) — a real,
+  //             slow-forming skew, not a guess about the very next tick.
+  //   Stage 2 — MICRO DEVIATION: the OPPOSITE side must have clustered to
+  //             microThreshold% (default 70%, i.e. ≥14 of the last 20) or
+  //             more over the last microLookback ticks — a genuine 2+
+  //             standard-deviation anomaly from the 50/50 baseline, not
+  //             ordinary noise a streak of 4 alone could easily be.
+  //   Stage 3 — EXHAUSTION + CONFIRMATION: only once an opposite-side
+  //             streak of at least minStreak (default 3) has just been
+  //             BROKEN by one actual target-side tick landing does this
+  //             fire — proving the reversion is already under way instead
+  //             of predicting when it will start. The trade itself then
+  //             settles on the very next tick (a normal 1-tick DIGITODD/
+  //             DIGITEVEN contract), exactly matching "fire on the very
+  //             next tick" from the strategy sheet.
+  //
+  // A cold-digit clustering SUPPRESSION filter also runs once Stage 2
+  // passes: among the opposite-side digits (0,2,4,6,8 if targeting Odd;
+  // 1,3,5,7,9 if targeting Even), it finds whichever one has appeared
+  // least over a longer lookback, then blocks the entry if that specific
+  // "cold" digit has just clustered (≥2 times by default) in a short
+  // recent window — a sign of a genuine distribution shift extending the
+  // streak, not real exhaustion.
+
+  function analyze(history, cfg) {
+    cfg = cfg || {};
+    const target = cfg.tradeMode === 'even' ? 'even' : 'odd';
+    const isTarget = (d) => (target === 'odd' ? d % 2 === 1 : d % 2 === 0);
+    const contractType = target === 'odd' ? 'DIGITODD' : 'DIGITEVEN';
+
+    const macroLookback = cfg.macroLookback || 200;
+    const macroThreshold = cfg.macroThreshold || 54;
+    const microLookback = cfg.microLookback || 20;
+    const microThreshold = cfg.microThreshold || 70;
+    const minStreak = cfg.minStreak || 3;
+    const coldLookback = cfg.coldLookback || 50;
+    const coldRecentWindow = cfg.coldRecentWindow || 10;
+    const coldRecentCount = cfg.coldRecentCount || 2;
+
+    // Need a reasonable amount of history before any ratio can be trusted
+    // at all — capped at macroLookback since there's no point demanding
+    // more ticks than the macro window itself even looks at.
+    const MIN_HISTORY = Math.min(60, macroLookback);
+    const base = {
+      ready: false, direction: null, contractType, strength: 0, confidence: 0,
+      macroRatio: null, microRatio: null, oppositeStreak: 0, coldDigit: null, suppressed: false,
+    };
+    if (!history || history.length < MIN_HISTORY) {
+      return { ...base, reasons: [`Warming up — building digit history (${history ? history.length : 0}/${MIN_HISTORY})…`] };
+    }
+
+    const macroWindow = history.slice(-macroLookback);
+    const macroRatio = (macroWindow.filter(isTarget).length / macroWindow.length) * 100;
+
+    const microWindow = history.slice(-microLookback);
+    const microRatio = (microWindow.filter((d) => !isTarget(d)).length / microWindow.length) * 100;
+
+    // Trailing opposite-side streak EXCLUDING the very latest tick — that
+    // latest tick is the potential CONFIRMATION tick, and must land on the
+    // target side to actually count as a confirmation at all.
+    let oppositeStreak = 0;
+    for (let i = history.length - 2; i >= 0; i--) {
+      if (!isTarget(history[i])) oppositeStreak++;
+      else break;
+    }
+    const latestDigit = history[history.length - 1];
+    const currentIsTarget = isTarget(latestDigit);
+
+    const oppositeDigits = target === 'odd' ? [0, 2, 4, 6, 8] : [1, 3, 5, 7, 9];
+    const coldWindow = history.slice(-coldLookback);
+    let coldDigit = oppositeDigits[0], coldCount = Infinity;
+    oppositeDigits.forEach((d) => {
+      const cnt = coldWindow.filter((x) => x === d).length;
+      if (cnt < coldCount) { coldCount = cnt; coldDigit = d; }
+    });
+    const recentColdWindow = history.slice(-coldRecentWindow);
+    const coldRecentHits = recentColdWindow.filter((x) => x === coldDigit).length;
+    const suppressed = coldRecentHits >= coldRecentCount;
+
+    const withStats = { macroRatio, microRatio, oppositeStreak, coldDigit, suppressed };
+    const reasons = [];
+
+    // ── STAGE 1: Macro filter ────────────────────────────────────────
+    if (macroRatio < macroThreshold) {
+      return { ...base, ...withStats, reasons: [`Stage 1 — ${target.toUpperCase()} macro dominance ${macroRatio.toFixed(1)}% < ${macroThreshold}% over the last ${macroWindow.length} ticks: not dominant yet`] };
+    }
+    reasons.push(`Stage 1 — ${target.toUpperCase()} macro dominance ${macroRatio.toFixed(1)}% ≥ ${macroThreshold}% over the last ${macroWindow.length} ticks: approved`);
+
+    // ── STAGE 2: Micro deviation ─────────────────────────────────────
+    if (microRatio < microThreshold) {
+      return { ...base, ...withStats, reasons: [...reasons, `Stage 2 — opposite-side density ${microRatio.toFixed(0)}% < ${microThreshold}% over the last ${microWindow.length} ticks: waiting for a genuine cluster`] };
+    }
+    reasons.push(`Stage 2 — opposite-side density ${microRatio.toFixed(0)}% ≥ ${microThreshold}% over the last ${microWindow.length} ticks: statistical anomaly confirmed`);
+
+    // Cold-digit suppression only matters once Stage 2 has already fired —
+    // a cold digit clustering right as the streak looks "exhausted" is a
+    // warning sign of a real distribution shift, not a coincidence.
+    if (suppressed) {
+      return { ...base, ...withStats, reasons: [...reasons, `Suppressed — cold digit ${coldDigit} hit ${coldRecentHits}× in the last ${coldRecentWindow} ticks (distribution-shift risk, streak may extend)`] };
+    }
+
+    // ── STAGE 3: Exhaustion + confirmation ─────────────────────────────
+    if (oppositeStreak < minStreak) {
+      return { ...base, ...withStats, reasons: [...reasons, `Stage 3 — opposite streak only ${oppositeStreak}/${minStreak}: not exhausted yet`] };
+    }
+    if (!currentIsTarget) {
+      return { ...base, ...withStats, reasons: [...reasons, `Stage 3 — streak of ${oppositeStreak} exhausted, waiting for a confirming ${target.toUpperCase()} tick to actually land`] };
+    }
+
+    // Confirmed: the opposite streak just broke via a genuine target-side
+    // tick landing. Fire — the contract itself settles on the next tick.
+    reasons.push(`Stage 3 — ${oppositeStreak}-streak broke on a confirming ${target.toUpperCase()} tick (${latestDigit}): resumption confirmed`);
+    let score = 4; // Stage 1 + Stage 2 base
+    score += Math.min(3, Math.max(0, oppositeStreak - minStreak) + 2); // longer confirmed exhaustion = a bit more conviction, capped
+    const strength = Math.round((Math.min(10, score) / 10) * 100);
+    return { ready: true, direction: target.toUpperCase(), contractType, strength, confidence: strength, ...withStats, reasons };
+  }
+
+  global.EvenOddReversionAnalyzer = { analyze };
+})(window);
 </script>
 
 <script>
@@ -18970,6 +19623,20 @@ window.NexusStrategies=exports;
         <span style="color:hsl(var(--muted-foreground))">${snap.config.selectedMarket||'—'}</span>
         <span style="font-weight:700">${fmtNum(a.price,4)}</span>
       </div>
+      ${engine.isMeanRevMode ? `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px">
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.adx!=null&&a.adx<(c.adxThreshold??22)?'#00e676':'#ff5252'}">${fmtNum(a.adx,1)}</div><div class="rf-ind-label">ADX(14)</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.rsi>((c.rsiOverbought??75))?'#ff5252':a.rsi<((c.rsiOversold??25))?'#00e676':'hsl(var(--foreground))'}">${fmtNum(a.rsi,0)}</div><div class="rf-ind-label">RSI(7)</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.stochK>((c.stochOverbought??80))?'#ff5252':a.stochK<((c.stochOversold??20))?'#00e676':'hsl(var(--foreground))'}">${fmtNum(a.stochK,0)}</div><div class="rf-ind-label">%K(5,3,3)</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--secondary))">${fmtNum(a.stochD,0)}</div><div class="rf-ind-label">%D(5,3,3)</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--primary))">${fmtNum(a.bbUpper,3)}</div><div class="rf-ind-label">BB UPPER</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--primary)/0.7)">${fmtNum(a.bbLower,3)}</div><div class="rf-ind-label">BB LOWER</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--accent))">${fmtNum(a.atr,4)}</div><div class="rf-ind-label">ATR(14)</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--accent))">${a.barrierOffset!=null?'±'+a.barrierOffset.toFixed(4):'—'}</div><div class="rf-ind-label">BARRIER OFFSET</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="font-size:10px;color:${a.ready?'#00e676':'hsl(var(--muted-foreground))'}">${a.ready?'CONFIRMED':'WATCHING'}</div><div class="rf-ind-label">STAGE 3</div></div>
+      </div>
+      <div style="margin-top:2px;font-size:8.5px;color:hsl(var(--muted-foreground));text-align:center">ADX below threshold = ranging (mean reversion approved) · Barrier Offset = ATR Multiplier × ATR(14)</div>
+      ` : `
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px">
         <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.rsi>70?'#ff5252':a.rsi<30?'#00e676':'hsl(var(--foreground))'}">${fmtNum(a.rsi,0)}</div><div class="rf-ind-label">RSI(14)</div></div>
         <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--secondary))">${fmtNum(a.bbPos,2)}</div><div class="rf-ind-label">BB POS</div></div>
@@ -18982,6 +19649,7 @@ window.NexusStrategies=exports;
         <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.accuracy==null?'hsl(var(--muted-foreground))':a.accuracy>=60?'#00e676':a.accuracy>=45?'#ffd740':'#ff5252'}">${a.accuracy!=null?a.accuracy+'%':'—'}</div><div class="rf-ind-label">ACCURACY</div></div>
       </div>
       ${a.accuracy!=null ? `<div style="margin-top:2px;font-size:8.5px;color:hsl(var(--muted-foreground));text-align:center">Rolling hit-rate of this analyzer's own recent HIGHER/LOWER calls, checked 8 ticks later</div>` : ''}
+      `}
     </div>
 
     ${renderTopMarketsBlock(engine, c, scannerState, marketHealth)}`;
@@ -19160,6 +19828,30 @@ window.NexusStrategies=exports;
         </div>
       </div>
 
+      ${engine.isMeanRevMode ? `
+      <div class="cp-card">
+        <div class="cp-section-label">Mean Reversion Parameters</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:2px 9px 8px">
+          Stage 1 (ADX regime), Stage 2 (Bollinger + RSI + Stochastic overextension) and the dynamic Offset Barrier (Barrier = ATR Multiplier × ATR(14)) — tune to taste.
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">ADX Threshold (&lt; = ranging)</span><input class="cp-input" type="number" min="5" max="50" step="1" id="${rootId}-mr-adx" value="${c.adxThreshold ?? 22}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Bollinger StdDev</span><input class="cp-input" type="number" min="1" max="4" step="0.1" id="${rootId}-mr-bbdev" value="${c.bbStdDev ?? 2.5}"></div>
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">RSI(7) Overbought</span><input class="cp-input" type="number" min="50" max="99" step="1" id="${rootId}-mr-rsiob" value="${c.rsiOverbought ?? 75}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">RSI(7) Oversold</span><input class="cp-input" type="number" min="1" max="50" step="1" id="${rootId}-mr-rsios" value="${c.rsiOversold ?? 25}"></div>
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Stoch(5,3,3) Overbought</span><input class="cp-input" type="number" min="50" max="99" step="1" id="${rootId}-mr-stochob" value="${c.stochOverbought ?? 80}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Stoch(5,3,3) Oversold</span><input class="cp-input" type="number" min="1" max="50" step="1" id="${rootId}-mr-stochos" value="${c.stochOversold ?? 20}"></div>
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">ATR Multiplier (barrier offset)</span><input class="cp-input" type="number" min="0.1" max="3" step="0.1" id="${rootId}-mr-atrmult" value="${c.atrMultiplier ?? 0.5}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Ticks per Candle</span><input class="cp-input" type="number" min="2" max="30" step="1" id="${rootId}-mr-candlesize" value="${c.candleSize ?? 5}"></div>
+        </div>
+      </div>` : ''}
+
       <div class="cp-card">
         <div class="cp-section-label" style="display:flex;align-items:center;justify-content:space-between">
           <span>Session Limits</span>
@@ -19232,6 +19924,22 @@ window.NexusStrategies=exports;
       if (multEl) multEl.onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       const stopStepEl = el(`${rootId}-stop-step`, host);
       if (stopStepEl) stopStepEl.onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
+      const mrAdxEl = el(`${rootId}-mr-adx`, host);
+      if (mrAdxEl) mrAdxEl.onchange = (e) => { engine.setConfig({ adxThreshold: Math.min(50, Math.max(5, parseInt(e.target.value) || 22)) }); };
+      const mrBbDevEl = el(`${rootId}-mr-bbdev`, host);
+      if (mrBbDevEl) mrBbDevEl.onchange = (e) => { engine.setConfig({ bbStdDev: Math.min(4, Math.max(1, parseFloat(e.target.value) || 2.5)) }); };
+      const mrRsiObEl = el(`${rootId}-mr-rsiob`, host);
+      if (mrRsiObEl) mrRsiObEl.onchange = (e) => { engine.setConfig({ rsiOverbought: Math.min(99, Math.max(50, parseInt(e.target.value) || 75)) }); };
+      const mrRsiOsEl = el(`${rootId}-mr-rsios`, host);
+      if (mrRsiOsEl) mrRsiOsEl.onchange = (e) => { engine.setConfig({ rsiOversold: Math.min(50, Math.max(1, parseInt(e.target.value) || 25)) }); };
+      const mrStochObEl = el(`${rootId}-mr-stochob`, host);
+      if (mrStochObEl) mrStochObEl.onchange = (e) => { engine.setConfig({ stochOverbought: Math.min(99, Math.max(50, parseInt(e.target.value) || 80)) }); };
+      const mrStochOsEl = el(`${rootId}-mr-stochos`, host);
+      if (mrStochOsEl) mrStochOsEl.onchange = (e) => { engine.setConfig({ stochOversold: Math.min(50, Math.max(1, parseInt(e.target.value) || 20)) }); };
+      const mrAtrMultEl = el(`${rootId}-mr-atrmult`, host);
+      if (mrAtrMultEl) mrAtrMultEl.onchange = (e) => { engine.setConfig({ atrMultiplier: Math.min(3, Math.max(0.1, parseFloat(e.target.value) || 0.5)) }); };
+      const mrCandleSizeEl = el(`${rootId}-mr-candlesize`, host);
+      if (mrCandleSizeEl) mrCandleSizeEl.onchange = (e) => { engine.setConfig({ candleSize: Math.min(30, Math.max(2, parseInt(e.target.value) || 5)) }); };
       const gotoDashBtn = el(`${rootId}-goto-dash`, host);
       if (gotoDashBtn) gotoDashBtn.onclick = () => { if (window.UnifiedHub) window.UnifiedHub.switchApp('dashboard'); };
       // Keep the master-gate readouts live even while this panel sits open
@@ -19972,10 +20680,1095 @@ window.NexusStrategies=exports;
 </script>
 
 <script>
+// ── EVEN/ODD (MEAN REVERSION) UI ────────────────────────────────────────
+// Deliberately its own separate module, at the bottom of the file/sidebar
+// with the classic Even/Odd bots — so this bot never shares any rendering
+// code, state, or config keys with the original Even/Odd bots above it.
+(function (global) {
+  'use strict';
+  const shells = {};
+  function el(id, parent) { return (parent || document).querySelector(id.startsWith('#') ? id : '#' + id); }
+  const shHtml = global.setHtmlIfChanged || function (node, html) { if (!node || node.__lastHtml === html) return false; node.innerHTML = html; node.__lastHtml = html; return true; };
+  function fmtNum(n, d) { return (n == null || isNaN(n)) ? '—' : n.toFixed(d != null ? d : 2); }
+
+  function buildShell(rootId, label) {
+    const root = document.getElementById(rootId);
+    if (!root || shells[rootId]) return root;
+    shells[rootId] = true;
+    root.innerHTML = `
+      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0;position:relative">
+        <div>
+          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700">${label}</h1>
+          <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">MACRO DOMINANCE · MICRO CLUSTER · EXHAUSTION + CONFIRMATION · COLD-DIGIT SUPPRESSION</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="glass-panel" id="${rootId}-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
+        <div id="${rootId}-conn-dot" style="width:10px;height:10px;border-radius:50%;background:hsl(var(--loss))"></div>
+      </header>
+      <div class="titan-grid">
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-left"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-center"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-right"></div></div>
+      </div>`;
+    return root;
+  }
+
+  // ── LEFT: Analysis Hub ────────────────────────────────────────────────
+  function renderLeft(engine, rootId, snap) {
+    const host = el(`${rootId}-left`);
+    const a = snap.analysis || {};
+    const { scannerState, marketHealth, config: c } = snap;
+    const target = (c.tradeMode === 'even') ? 'EVEN' : 'ODD';
+    const strength = a.strength || 0;
+    const dirColor = target === 'ODD' ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
+    const circumference = 2 * Math.PI * 44;
+    const ringOffset = circumference - (strength / 100) * circumference;
+    const macroThreshold = c.macroThreshold ?? 54, microThreshold = c.microThreshold ?? 70, minStreak = c.minStreak ?? 3;
+    const macroOk = a.macroRatio != null && a.macroRatio >= macroThreshold;
+    const microOk = a.microRatio != null && a.microRatio >= microThreshold;
+    const streakOk = (a.oppositeStreak || 0) >= minStreak;
+
+    const html = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid hsl(var(--border)/0.3)">
+      <div style="position:relative;width:10px;height:10px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--primary));animation:ahub-pulse 1.5s infinite"></div>
+        <div style="position:absolute;inset:-4px;border-radius:50%;background:hsl(var(--primary)/0.2);animation:ahub-ping 1.5s infinite"></div>
+      </div>
+      <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:3px;color:hsl(var(--primary));text-transform:uppercase">Analysis Hub</span>
+      <div style="flex:1"></div>
+      <span style="font-family:'DM Mono',monospace;font-size:9px;color:hsl(var(--muted-foreground));animation:ahub-pulse 2s infinite">● LIVE</span>
+    </div>
+
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:${dirColor};box-shadow:0 0 8px ${dirColor}"></span>Target Contract</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="position:relative;width:110px;height:110px;flex-shrink:0;animation:ahub-float 3s ease-in-out infinite">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <defs><linearGradient id="eomr-grad-${rootId}" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="${dirColor}"/><stop offset="100%" stop-color="hsl(var(--secondary))"/>
+            </linearGradient></defs>
+            <circle cx="55" cy="55" r="44" fill="none" stroke="hsl(var(--border)/0.3)" stroke-width="8"/>
+            <circle cx="55" cy="55" r="44" fill="none" stroke="${dirColor}" stroke-width="8" stroke-opacity="0.12" stroke-dasharray="${circumference}"/>
+            <circle cx="55" cy="55" r="44" fill="none" stroke="url(#eomr-grad-${rootId})" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="${circumference}" stroke-dashoffset="${ringOffset}"
+              style="transform:rotate(-90deg);transform-origin:55px 55px;filter:drop-shadow(0 0 6px ${dirColor});transition:stroke-dashoffset .8s cubic-bezier(0.34,1.2,0.64,1)"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <div style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:900;color:${dirColor};text-shadow:0 0 14px ${dirColor}80;line-height:1">${target}</div>
+            <div style="font-size:7px;letter-spacing:1px;color:hsl(var(--muted-foreground));margin-top:2px">${strength}% CONVICTION</div>
+          </div>
+        </div>
+        <div style="flex:1">
+          <div class="font-display" style="text-align:center;font-size:11px;font-weight:800;letter-spacing:1px;color:${a.ready?'hsl(var(--win))':'hsl(var(--muted-foreground))'};margin-bottom:8px;text-transform:uppercase">${a.ready ? '✅ CONFIRMED — FIRING' : a.suppressed ? '⛔ SUPPRESSED' : '⏳ WATCHING'}</div>
+          <div style="font-size:9px;color:hsl(var(--muted-foreground));text-align:center;line-height:1.5">${(a.reasons && a.reasons[a.reasons.length - 1]) || 'Warming up…'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>3-Stage Pipeline</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px">
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${macroOk?'#00e676':'#ff5252'}">${fmtNum(a.macroRatio,1)}%</div><div class="rf-ind-label">MACRO (≥${macroThreshold}%)</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${microOk?'#00e676':'#ff5252'}">${fmtNum(a.microRatio,0)}%</div><div class="rf-ind-label">MICRO (≥${microThreshold}%)</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${streakOk?'#00e676':'#ff5252'}">${a.oppositeStreak ?? 0}/${minStreak}</div><div class="rf-ind-label">EXHAUSTION</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--accent))">${a.coldDigit != null ? a.coldDigit : '—'}</div><div class="rf-ind-label">COLD DIGIT</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="color:${a.suppressed?'#ff5252':'#00e676'}">${a.suppressed ? 'YES' : 'NO'}</div><div class="rf-ind-label">SUPPRESSED</div></div>
+        <div class="rf-ind-card"><div class="rf-ind-val" style="font-size:10px;color:${a.ready?'#00e676':'hsl(var(--muted-foreground))'}">${a.ready ? 'DONE' : 'WAIT'}</div><div class="rf-ind-label">CONFIRM TICK</div></div>
+      </div>
+      <div style="margin-top:2px;font-size:8.5px;color:hsl(var(--muted-foreground));text-align:center">Macro = ${target} share over last ${c.macroLookback ?? 200} ticks · Micro = opposite-side cluster over last ${c.microLookback ?? 20} ticks</div>
+    </div>
+
+    <div class="ahub-card">
+      <div class="ahub-label" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:6px"><span class="ahub-label-dot" style="background:hsl(var(--win));box-shadow:0 0 8px hsl(var(--win))"></span>Top Markets</div>
+        <span style="font-size:8px;color:hsl(var(--win));animation:ahub-pulse 1.5s infinite">⬤ LIVE SCAN</span>
+      </div>
+      ${(scannerState && scannerState.topThree || []).map((m, idx) => {
+        const isSel = m.symbol === c.selectedMarket;
+        const is1s = (m.symbol||'').startsWith('1HZ');
+        const health = (m.health && m.health.longTerm) || m.longTerm || '—';
+        const rankColors = ['hsl(var(--win))','hsl(var(--primary))','hsl(var(--secondary))'];
+        const rc = rankColors[idx] || 'hsl(var(--muted-foreground))';
+        const hc = health==='HEALTHY'?'hsl(var(--win))':health==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))';
+        const medals = ['🥇','🥈','🥉'];
+        return `<button class="ahub-mkt-card ${isSel?'sel':''}" data-mkt="${m.symbol}" style="--rank-color:${rc};--rank-glow:${rc}66;--rank-bg:${rc}14">
+          <div style="display:flex;align-items:center;gap:9px">
+            <div class="ahub-mkt-rank">${idx<3?medals[idx]:'#'+(idx+1)}</div>
+            <div style="flex:1;min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span style="font-size:11.5px;font-weight:800;color:hsl(var(--foreground))">${m.name}</span>
+              ${is1s?`<span style="font-size:7px;padding:1px 5px;border-radius:999px;background:hsl(var(--primary)/0.15);color:hsl(var(--primary));font-weight:800">1S</span>`:''}
+              ${isSel?`<span style="font-size:7.5px;font-weight:900;color:hsl(var(--primary));animation:ahub-pulse 1.5s infinite;flex-shrink:0">● ACTIVE</span>`:''}
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-family:'Outfit',sans-serif;font-size:17px;font-weight:900;color:${rc};text-shadow:0 0 10px ${rc}40;line-height:1">${m.score}%</div>
+              <div style="font-size:6.5px;color:hsl(var(--muted-foreground)/0.8);letter-spacing:1px;margin-top:2px">SCORE</div>
+            </div>
+          </div>
+          <div class="ahub-mkt-gauge"><div class="ahub-mkt-gauge-fill" style="width:${m.score}%;background:linear-gradient(90deg,${rc}99,${rc});box-shadow:0 0 8px ${rc}80"></div></div>
+          <span class="ahub-mkt-chip" style="background:${hc}15;color:${hc};border:1px solid ${hc}40">${health==='HEALTHY'?'✓':health==='MODERATE'?'●':'⚠'} ${health}</span>
+        </button>`;
+      }).join('') || `<div style="text-align:center;padding:22px 16px;color:hsl(var(--muted-foreground));font-size:10px">
+        <div style="width:26px;height:26px;margin:0 auto 8px;border-radius:50%;border:2px solid hsl(var(--border)/0.4);border-top-color:hsl(var(--primary));animation:settings-spin 0.9s linear infinite"></div>
+        <span style="animation:ahub-pulse 1.5s infinite;display:inline-block">Scanning markets…</span>
+      </div>`}
+      ${marketHealth ? `<div style="margin-top:6px;padding:8px 10px;background:hsl(var(--bg)/0.6);border-radius:8px;border:1px solid hsl(var(--border)/0.3);display:flex;align-items:center;gap:8px">
+        <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Active:</span>
+        <b style="font-size:8.5px;color:${marketHealth.longTerm==='HEALTHY'?'hsl(var(--win))':marketHealth.longTerm==='MODERATE'?'hsl(var(--accent))':'hsl(var(--loss))'}">${marketHealth.longTerm}</b>
+        <span style="margin-left:auto;font-size:8.5px;color:hsl(var(--muted-foreground))">Ranked independently of this bot's own macro/micro/exhaustion signal</span>
+      </div>` : ''}
+    </div>`;
+    if (shHtml(host, html)) {
+      host.querySelectorAll('[data-mkt]').forEach((b) => b.onclick = () => {
+        engine.changeMarket(b.dataset.mkt);
+        renderLeft(engine, rootId, engine.getSnapshot());
+      });
+    }
+  }
+
+  // ── CENTER: Control Panel ─────────────────────────────────────────────
+  function renderCenter(engine, rootId, snap) {
+    const host = el(`${rootId}-center`);
+    const c = snap.config, s = snap.state;
+    const running = !!s.active;
+    const cpRuns = s.currentRuns || 0;
+    const targetRuns = c.targetRuns || 1;
+    const runsPct = Math.min(100, (cpRuns / Math.max(1, targetRuns)) * 100);
+    const target = (c.tradeMode === 'even') ? 'EVEN' : 'ODD';
+    const dirColor = target === 'ODD' ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
+    const html = `
+      <button id="${rootId}-toggle" class="cp-engage-btn ${running?'active':''}">${running ? '⏹ STOP ENGINE' : '▶ ENGAGE ENGINE'}</button>
+      ${s.isCooldown ? `<div class="rf-cd-bar-wrap">
+        <div class="rf-cd-bar-label"><span>⏳ Cooldown — rotating market…</span><span>${snap.cooldownTime || 0}s</span></div>
+        <div class="rf-cd-bar-track"><div class="rf-cd-bar-fill" style="width:${Math.max(0,Math.min(100,((snap.cooldownTime||0)/30)*100))}%"></div></div>
+      </div>` : ''}
+
+      ${s.openTrade ? (() => {
+        const ot = s.openTrade;
+        const pct = Math.min(100, (ot.ticksElapsed / Math.max(1, ot.durationTicks)) * 100);
+        const oColor = dirColor;
+        return `<div class="cp-card" style="margin-top:10px;border:1.5px solid ${oColor}55;background:${oColor}0d">
+          <div class="cp-section-label" style="display:flex;align-items:center;justify-content:space-between">
+            <span>🔴 OPEN POSITION</span>
+            <span style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${ot.market || ''}</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 6px">
+            <span style="font-family:'Outfit',sans-serif;font-weight:800;font-size:13px;color:${oColor}">${target === 'ODD' ? '🔵 ODD' : '🟣 EVEN'}</span>
+            <span style="font-family:'DM Mono',monospace;font-size:11px;color:hsl(var(--muted-foreground))">Stake $${(ot.stake||0).toFixed(2)}</span>
+          </div>
+          <div class="cp-progress-bar" style="height:7px;margin-bottom:6px">
+            <div class="cp-progress-fill" style="width:${pct}%;background:${oColor};box-shadow:0 0 6px ${oColor}99"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--muted-foreground))">
+            <span>Tick ${ot.ticksElapsed} / ${ot.durationTicks}</span>
+            ${ot.currentSpot != null ? `<span>Last digit: ${String(ot.currentSpot).slice(-1)}</span>` : ''}
+          </div>
+        </div>`;
+      })() : ''}
+
+      <div style="display:flex;gap:8px;margin:12px 0 2px">
+        <div class="cp-stat-pill">
+          <div class="cp-stat-pill-val" style="color:hsl(var(--secondary))" id="${rootId}-runs">${cpRuns}</div>
+          <div class="cp-stat-pill-label">RUNS / ${targetRuns}</div>
+          <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${runsPct}%;background:hsl(var(--secondary));box-shadow:0 0 6px hsl(var(--secondary)/0.5)"></div></div>
+        </div>
+        <div class="cp-stat-pill">
+          <div class="cp-stat-pill-val" style="color:${dirColor};font-size:14px">${target}</div>
+          <div class="cp-stat-pill-label">TARGET</div>
+        </div>
+        <div class="cp-stat-pill">
+          <div class="cp-stat-pill-val" style="color:hsl(var(--accent))">${s.martingaleStep || 0}</div>
+          <div class="cp-stat-pill-label">MG STEP</div>
+        </div>
+      </div>
+
+      <div class="cp-card" style="margin-top:10px">
+        <div class="cp-section-label">Trade Settings</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Stake</span><input class="cp-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Target Runs</span><input class="cp-input" type="number" min="1" id="${rootId}-runs-in" value="${targetRuns}"></div>
+        </div>
+        <div class="cp-input-group">
+          <span class="cp-input-label">Direction</span>
+          <div class="cp-input" style="display:flex;align-items:center;gap:6px;color:${dirColor};font-weight:800;letter-spacing:0.5px">
+            🔒 ${target} ONLY — this is a separate bot per side, just like the classic Even/Odd bots
+          </div>
+        </div>
+      </div>
+
+      <div class="cp-card">
+        <div class="cp-section-label">Macro / Micro / Exhaustion Parameters</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:2px 9px 8px">
+          Stage 1 (macro dominance), Stage 2 (opposite-side micro cluster) and Stage 3 (exhaustion streak + confirmation tick) — tune to taste.
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Macro Lookback (ticks)</span><input class="cp-input" type="number" min="30" max="200" step="1" id="${rootId}-eomr-macrolb" value="${c.macroLookback ?? 200}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Macro Threshold %</span><input class="cp-input" type="number" min="50" max="70" step="0.5" id="${rootId}-eomr-macroth" value="${c.macroThreshold ?? 54}"></div>
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Micro Lookback (ticks)</span><input class="cp-input" type="number" min="5" max="50" step="1" id="${rootId}-eomr-microlb" value="${c.microLookback ?? 20}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Micro Threshold %</span><input class="cp-input" type="number" min="50" max="95" step="1" id="${rootId}-eomr-microth" value="${c.microThreshold ?? 70}"></div>
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Min Exhaustion Streak</span><input class="cp-input" type="number" min="2" max="8" step="1" id="${rootId}-eomr-minstreak" value="${c.minStreak ?? 3}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Min Signal % (0=off)</span><input class="cp-input" type="number" min="0" max="100" step="1" id="${rootId}-signal" value="${c.minSignal ?? 0}"></div>
+        </div>
+      </div>
+
+      <div class="cp-card">
+        <div class="cp-section-label">Cold-Digit Suppression Filter</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:2px 9px 8px">
+          Blocks entries when the least-frequent opposite-side digit suddenly clusters — a sign of a real distribution shift extending the streak, not genuine exhaustion.
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Cold Lookback (ticks)</span><input class="cp-input" type="number" min="20" max="150" step="1" id="${rootId}-eomr-coldlb" value="${c.coldLookback ?? 50}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Recent Window (ticks)</span><input class="cp-input" type="number" min="3" max="30" step="1" id="${rootId}-eomr-coldrecent" value="${c.coldRecentWindow ?? 10}"></div>
+        </div>
+        <div class="cp-input-group">
+          <span class="cp-input-label">Suppress if cold digit hits ≥ N times in that window</span>
+          <input class="cp-input" type="number" min="2" max="10" step="1" id="${rootId}-eomr-coldcount" value="${c.coldRecentCount ?? 2}">
+        </div>
+      </div>
+
+      <div class="cp-card">
+        <div class="cp-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
+          <div class="cp-section-label" style="margin:0">Martingale</div>
+          <button class="titan-toggle ${c.martingaleEnabled?'on':''}" id="${rootId}-mg-toggle"></button>
+        </div>
+        <div style="${c.martingaleEnabled?'':'display:none'}">
+          <div class="cp-input-row">
+            <div class="cp-input-group"><span class="cp-input-label">Multiplier</span><input class="cp-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier}"></div>
+            <div class="cp-input-group"><span class="cp-input-label">Stop after N losses</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-stop-step" value="${c.martingaleStopStep}"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cp-card">
+        <div class="cp-toggle-row" style="margin-bottom:8px">
+          <div class="cp-section-label" style="margin:0">Auto Pilot</div>
+          <button class="titan-toggle ${c.autoPilot?'on':''}" id="${rootId}-auto"></button>
+        </div>
+        <div class="cp-toggle-row" style="margin-bottom:0">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:hsl(var(--foreground))">🔄 Auto Market Switch</div>
+            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:2px">Rotates to the top-ranked market after a cooldown</div>
+          </div>
+          <button class="titan-toggle ${c.autoRefresh?'on':''}" id="${rootId}-autorefresh"></button>
+        </div>
+      </div>
+
+      <div class="cp-card">
+        <div class="cp-section-label">Session Limits</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Take Profit ($)</span><input class="cp-input" type="number" step="0.5" min="0" id="${rootId}-tp" value="${c.takeProfit}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Stop Loss ($)</span><input class="cp-input" type="number" step="0.5" min="0" id="${rootId}-sl" value="${c.stopLoss}"></div>
+        </div>
+        <div style="margin-top:10px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
+          Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
+        </div>
+      </div>`;
+    if (shHtml(host, html)) {
+      el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
+      el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
+      const signalEl = el(`${rootId}-signal`, host);
+      if (signalEl) signalEl.onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
+      const macroLbEl = el(`${rootId}-eomr-macrolb`, host);
+      if (macroLbEl) macroLbEl.onchange = (e) => { engine.setConfig({ macroLookback: Math.min(200, Math.max(30, parseInt(e.target.value) || 200)) }); };
+      const macroThEl = el(`${rootId}-eomr-macroth`, host);
+      if (macroThEl) macroThEl.onchange = (e) => { engine.setConfig({ macroThreshold: Math.min(70, Math.max(50, parseFloat(e.target.value) || 54)) }); };
+      const microLbEl = el(`${rootId}-eomr-microlb`, host);
+      if (microLbEl) microLbEl.onchange = (e) => { engine.setConfig({ microLookback: Math.min(50, Math.max(5, parseInt(e.target.value) || 20)) }); };
+      const microThEl = el(`${rootId}-eomr-microth`, host);
+      if (microThEl) microThEl.onchange = (e) => { engine.setConfig({ microThreshold: Math.min(95, Math.max(50, parseFloat(e.target.value) || 70)) }); };
+      const minStreakEl = el(`${rootId}-eomr-minstreak`, host);
+      if (minStreakEl) minStreakEl.onchange = (e) => { engine.setConfig({ minStreak: Math.min(8, Math.max(2, parseInt(e.target.value) || 3)) }); };
+      const coldLbEl = el(`${rootId}-eomr-coldlb`, host);
+      if (coldLbEl) coldLbEl.onchange = (e) => { engine.setConfig({ coldLookback: Math.min(150, Math.max(20, parseInt(e.target.value) || 50)) }); };
+      const coldRecentEl = el(`${rootId}-eomr-coldrecent`, host);
+      if (coldRecentEl) coldRecentEl.onchange = (e) => { engine.setConfig({ coldRecentWindow: Math.min(30, Math.max(3, parseInt(e.target.value) || 10)) }); };
+      const coldCountEl = el(`${rootId}-eomr-coldcount`, host);
+      if (coldCountEl) coldCountEl.onchange = (e) => { engine.setConfig({ coldRecentCount: Math.min(10, Math.max(2, parseInt(e.target.value) || 2)) }); };
+      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
+      el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
+      el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
+      el(`${rootId}-auto`, host).onclick = () => { engine.setConfig({ autoPilot: !c.autoPilot }); renderCenter(engine, rootId, engine.getSnapshot()); };
+      el(`${rootId}-autorefresh`, host).onclick = () => { engine.setConfig({ autoRefresh: !c.autoRefresh }); renderCenter(engine, rootId, engine.getSnapshot()); };
+      const tpEl = el(`${rootId}-tp`, host);
+      if (tpEl) tpEl.onchange = (e) => { engine.setConfig({ takeProfit: Math.max(0, parseFloat(e.target.value) || 0) }); };
+      const slEl = el(`${rootId}-sl`, host);
+      if (slEl) slEl.onchange = (e) => { engine.setConfig({ stopLoss: Math.max(0, parseFloat(e.target.value) || 0) }); };
+    }
+  }
+
+  // ── RIGHT: Journal ────────────────────────────────────────────────────
+  function renderRight(engine, rootId, snap) {
+    const host = el(`${rootId}-right`);
+    const s = snap.state, logs = snap.logs || [];
+    const total = s.stats.win + s.stats.loss;
+    const wrPct = total ? (s.stats.win/total)*100 : 0;
+    const wrArc = 2*Math.PI*36;
+    const wrOffset = wrArc - (wrPct/100)*wrArc;
+    const wrColor = wrPct>=65?'#00e676':wrPct>=45?'#ffd740':'#ff5252';
+    const journal = engine.journal || [];
+    const totalPayout = journal.filter(j=>j.type==='win').reduce((sum,j)=>sum+(j.profit||0),0);
+    const recentStreak = (() => { let n=0; for (const j of journal) { if (j.type==='win') n++; else break; } return n; })();
+
+    const html = `
+      <div class="jnl-header-card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          <div style="position:relative;width:8px;height:8px"><div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--win));animation:jnl-pulse 1.5s infinite"></div></div>
+          <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:3px;color:hsl(var(--win))">TRADE JOURNAL</span>
+          <span style="margin-left:auto;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${journal.length} trades</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+          <div style="position:relative;width:86px;height:86px;flex-shrink:0">
+            <svg width="86" height="86" viewBox="0 0 86 86">
+              <defs><linearGradient id="eomr-wr-grad-${rootId}" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="${wrColor}"/><stop offset="100%" stop-color="hsl(var(--secondary))"/>
+              </linearGradient></defs>
+              <circle cx="43" cy="43" r="36" fill="none" stroke="hsl(var(--border)/0.25)" stroke-width="7"/>
+              <circle cx="43" cy="43" r="36" fill="none" stroke="url(#eomr-wr-grad-${rootId})" stroke-width="7" stroke-linecap="round"
+                stroke-dasharray="${wrArc}" stroke-dashoffset="${wrOffset}"
+                style="transform:rotate(-90deg);transform-origin:43px 43px;filter:drop-shadow(0 0 5px ${wrColor}60);transition:stroke-dashoffset .8s"/>
+              <text x="43" y="39" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="16" font-weight="900" fill="${wrColor}">${wrPct.toFixed(0)}</text>
+              <text x="43" y="52" text-anchor="middle" font-family="'Outfit',sans-serif" font-size="8" fill="hsl(var(--muted-foreground))">WIN %</text>
+            </svg>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:7px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">WINS</span>
+              <span style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:hsl(var(--win))">${s.stats.win}</span>
+            </div>
+            <div style="height:3px;background:hsl(var(--border)/0.3);border-radius:2px;overflow:hidden"><div style="height:100%;width:${total?((s.stats.win/total)*100).toFixed(0):0}%;background:hsl(var(--win))"></div></div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:10px;color:hsl(var(--muted-foreground));font-family:'DM Mono',monospace">LOSSES</span>
+              <span style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:hsl(var(--loss))">${s.stats.loss}</span>
+            </div>
+            <div style="height:3px;background:hsl(var(--border)/0.3);border-radius:2px;overflow:hidden"><div style="height:100%;width:${total?((s.stats.loss/total)*100).toFixed(0):0}%;background:hsl(var(--loss))"></div></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+          <div class="jnl-stat-box" style="background:${s.stats.profit>=0?'hsl(var(--win)/0.08)':'hsl(var(--loss)/0.08)'};border:1px solid ${s.stats.profit>=0?'hsl(var(--win)/0.25)':'hsl(var(--loss)/0.25)'}">
+            <div class="jnl-stat-val" style="font-size:16px;color:${s.stats.profit>=0?'hsl(var(--win))':'hsl(var(--loss))'}">${s.stats.profit>=0?'+':''}${s.stats.profit.toFixed(2)}</div>
+            <div class="jnl-stat-label">NET P&amp;L</div>
+          </div>
+          <div class="jnl-stat-box" style="background:hsl(var(--win)/0.06);border:1px solid hsl(var(--win)/0.2)">
+            <div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--win))">+${totalPayout.toFixed(2)}</div>
+            <div class="jnl-stat-label">PAYOUT</div>
+          </div>
+          <div class="jnl-stat-box" style="background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.2)">
+            <div class="jnl-stat-val" style="font-size:18px;color:hsl(var(--accent))">${recentStreak}</div>
+            <div class="jnl-stat-label">STREAK</div>
+          </div>
+        </div>
+        ${journal.length ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid hsl(var(--border)/0.3)">
+          <div style="font-size:8px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));margin-bottom:6px;letter-spacing:1px">RECENT 10</div>
+          <div class="jnl-dot-row">
+            ${journal.slice(0,10).map(j=>`<div class="jnl-dot ${j.type==='win'?'w':'l'}" title="${j.type==='win'?'+':''}${(j.profit||0).toFixed(2)}"></div>`).join('')}
+            ${Array.from({length:Math.max(0,10-Math.min(10,journal.length))},()=>`<div class="jnl-dot e"></div>`).join('')}
+          </div>
+        </div>` : ''}
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding-right:2px">
+        ${journal.length === 0 ? `
+        <div style="text-align:center;padding:40px 20px;color:hsl(var(--muted-foreground))">
+          <div style="font-size:28px;margin-bottom:10px;opacity:0.3">📋</div>
+          <div style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:2px">NO TRADES RECORDED</div>
+          <div style="font-size:9px;margin-top:6px;opacity:0.6">Engage the engine to start</div>
+        </div>` :
+        journal.slice(0,60).map(j => {
+          const isWin = j.type === 'win';
+          const ctRaw = j.contractType || '';
+          const isOdd = ctRaw === 'DIGITODD';
+          const ctColor = isOdd ? 'hsl(var(--primary))' : 'hsl(var(--secondary))';
+          const ctLabel = isOdd ? '🔵 ODD' : '🟣 EVEN';
+          return `<div class="jnl-entry ${isWin?'win':'loss'}">
+            <div class="jnl-top-row">
+              <span class="jnl-badge ${isWin?'win':'loss'}">${isWin?'✓':'✕'}</span>
+              <span class="jnl-ct-pill" style="background:${ctColor}15;color:${ctColor};border:1.5px solid ${ctColor}44">${ctLabel}</span>
+              ${j.inRecovery ? `<span class="jnl-rec-tag">${j.recoveryMode||'REC'}</span>` : ''}
+              <span style="margin-left:auto;font-size:9px;font-family:'DM Mono',monospace;font-weight:800;color:${isWin?'hsl(var(--win))':'hsl(var(--loss))'}">${(j.profit>=0?'+':'')}$${Math.abs(j.profit).toFixed(2)}</span>
+            </div>
+            <div class="jnl-digit-row" style="display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:10px;color:hsl(var(--muted-foreground))">
+              <span>${j.market||''}</span><span style="flex:1"></span>
+              ${j.exitDigit != null ? `<span style="font-weight:800;color:${isWin?'hsl(var(--win))':'hsl(var(--loss))'}">landed ${j.exitDigit}</span>` : ''}
+            </div>
+            ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.35);letter-spacing:0.5px;margin-top:1px;text-align:right">next ${j.followingDigits.join(' ')}</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div class="ahub-card" style="margin-top:10px">
+        <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Engine Log</div>
+        <div style="font-size:10px;font-family:'DM Mono',monospace;max-height:180px;overflow-y:auto">
+          ${logs.slice(0,20).map(l => `<div style="padding:2px 0;color:${l.type==='win'?'hsl(var(--win))':l.type==='loss'?'hsl(var(--loss))':'hsl(var(--muted-foreground))'}">${l.title}: ${l.message}</div>`).join('') || '<div style="color:hsl(var(--muted-foreground))">No activity yet</div>'}
+        </div>
+      </div>`;
+    shHtml(host, html);
+  }
+
+  function render(engine, rootId, label) {
+    const root = buildShell(rootId, label || 'EVEN/ODD (MEAN REVERSION)');
+    if (!root) return;
+    const snap = engine.getSnapshot();
+    renderLeft(engine, rootId, snap);
+    renderCenter(engine, rootId, snap);
+    renderRight(engine, rootId, snap);
+    const dot = el(`${rootId}-conn-dot`, root);
+    if (dot) {
+      const live = !!snap.state.connected;
+      dot.style.background = live ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+      dot.style.boxShadow = live ? '0 0 10px hsl(var(--win)/0.9)' : '0 0 8px hsl(var(--loss)/0.7)';
+      dot.style.transition = 'background .3s ease, box-shadow .3s ease';
+      dot.style.animation = live ? 'cooldown-pulse 1.6s ease-in-out infinite' : 'none';
+    }
+  }
+
+  global.EvenOddReversionUI = { render, renderLive: render };
+})(window);
+</script>
+
+<script>
+// ── HOT REPEAT ENGINE ──────────────────────────────────────────────────
+// Single-strategy sibling to the Differ Terminal (BenzEngine). Only trigger:
+// digit X lands twice in a row (X -> X) -> fire DIGITDIFF[X] on the very
+// next tick. No cold-digit analysis, no burst batching, no market scanner.
 (function () {
   'use strict';
 
-  const BOT_IDS = ['differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator'];
+  function hrGetPublicWsUrl() {
+    const id = (window.HubStore && window.HubStore.getState().wsAppId) ||
+      (function () { try { return localStorage.getItem('hub_ws_app_id') || ''; } catch (_) { return ''; } })() || '1089';
+    return 'wss://ws.derivws.com/websockets/v3?app_id=' + id;
+  }
+  const HR_MARKETS = [
+    { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
+    { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
+    { value: '1HZ50V', label: '⚡ Volatility 50 (1s)' }, { value: 'R_50', label: 'Volatility 50' },
+    { value: '1HZ75V', label: '⚡ Volatility 75 (1s)' }, { value: 'R_75', label: 'Volatility 75' },
+    { value: '1HZ100V', label: '⚡ Volatility 100 (1s)' }, { value: 'R_100', label: 'Volatility 100' },
+  ];
+  const hrAudio = {
+    trigger() { try { window.Sounds.soundEngine.playConnect(); } catch (e) {} },
+    fire()     { try { window.Sounds.soundEngine.playFire(); } catch (e) {} },
+    win()      { try { window.Sounds.soundEngine.playWin(); } catch (e) {} },
+    loss()     { try { window.Sounds.soundEngine.playLoss(); } catch (e) {} },
+    abort()    { try { window.Sounds.soundEngine.playAbort(); } catch (e) {} },
+  };
+
+  class HotRepeatEngine {
+    constructor() {
+      this.onUpdate = null;
+      this.socketP = null; this.socketT = null;
+      this.reconnectTimer = null; this.tickIndex = 0; this.abortFlag = false;
+      this.ownContractIds = new Set();
+      this._eligibleFromTick = 0;
+      this._toFire = null;
+      this.state = this.loadInitialState();
+      ['armSystem', 'disarmSystem', 'abortTrades', 'authenticate', 'connectAnalysis'].forEach((m) => { this[m] = this[m].bind(this); });
+      this.connectAnalysis();
+      if (window.HubStore.getState().apiToken) setTimeout(() => this.authenticate(), 500);
+      window.addEventListener('hub:token-changed', () => this.authenticate());
+      window.addEventListener('hub:account-type-changed', () => this.authenticate());
+    }
+
+    loadSavedConfig() {
+      try {
+        const raw = localStorage.getItem('hotrepeat_config');
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (e) { return {}; }
+    }
+
+    loadInitialState() {
+      const saved = this.loadSavedConfig();
+      const num = (v, f) => { const n = parseFloat(v); return Number.isFinite(n) ? n : f; };
+      const int = (v, f) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : f; };
+      const bool = (v, f) => (typeof v === 'boolean' ? v : f);
+      return {
+        isAuthenticated: false, balanceUSD: 0,
+        primaryMarket: typeof saved.primaryMarket === 'string' && saved.primaryMarket ? saved.primaryMarket : '1HZ10V',
+        history: [], currentTick: null,
+        armToFireOnNextTick: false, fireBarrier: null,
+        stake: Math.max(0.35, num(saved.stake, 1)),
+        cooldownTicks: Math.max(0, int(saved.cooldownTicks, 5)),
+        clusterCap: Math.max(1, int(saved.clusterCap, 5)),
+        filtersActive: bool(saved.filtersActive, true),
+        isArmed: false, isRunning: false, isCooldown: false, cooldownRemaining: 0,
+        autoMode: bool(saved.autoMode, true),
+        takeProfit: Math.max(0, num(saved.takeProfit, 20)), stopLoss: Math.max(0, num(saved.stopLoss, 15)),
+        abortOnLoss: bool(saved.abortOnLoss, false),
+        journal: [], totalWins: 0, totalLoss: 0, totalProfit: 0,
+        notifications: [], connectionStatus: 'disconnected', plHistory: [],
+      };
+    }
+
+    saveConfig() {
+      try {
+        const s = this.state;
+        localStorage.setItem('hotrepeat_config', JSON.stringify({
+          primaryMarket: s.primaryMarket, stake: s.stake, cooldownTicks: s.cooldownTicks,
+          clusterCap: s.clusterCap, filtersActive: s.filtersActive, autoMode: s.autoMode,
+          takeProfit: s.takeProfit, stopLoss: s.stopLoss, abortOnLoss: s.abortOnLoss,
+        }));
+      } catch (e) {}
+    }
+
+    emit() { if (this.onUpdate) this.onUpdate(this.state); }
+
+    dispatch(action) {
+      const s = this.state;
+      switch (action.type) {
+        case 'AUTHENTICATED': s.isAuthenticated = true; s.balanceUSD = action.balance; s.connectionStatus = 'connected'; break;
+        case 'DISCONNECT': s.isAuthenticated = false; s.balanceUSD = 0; s.connectionStatus = 'disconnected'; break;
+        case 'SET_CONNECTION_STATUS': s.connectionStatus = action.status; break;
+        case 'SET_MARKET':
+          s.primaryMarket = action.market; s.history = []; s.armToFireOnNextTick = false; s.fireBarrier = null;
+          this._eligibleFromTick = 0;
+          break;
+        case 'TICK': {
+          const digit = action.digit;
+          this.tickIndex++;
+          s.currentTick = digit;
+          if (s.armToFireOnNextTick) {
+            this._toFire = s.fireBarrier;
+            s.armToFireOnNextTick = false; s.fireBarrier = null;
+          }
+          s.history = [...s.history, digit].slice(-150);
+          if (s.isArmed && !s.armToFireOnNextTick) {
+            const n = s.history.length;
+            if (n >= 2 && s.history[n - 1] === s.history[n - 2] && this.tickIndex >= this._eligibleFromTick) {
+              let ok = true;
+              if (s.filtersActive) {
+                const win = s.history.slice(-30);
+                const occ = win.filter((d) => d === digit).length;
+                if (occ > s.clusterCap) ok = false;
+              }
+              if (ok) {
+                s.armToFireOnNextTick = true; s.fireBarrier = digit;
+                this._eligibleFromTick = this.tickIndex + 1 + s.cooldownTicks;
+              }
+            }
+          }
+          s.isCooldown = this.tickIndex < this._eligibleFromTick && !s.armToFireOnNextTick;
+          s.cooldownRemaining = Math.max(0, this._eligibleFromTick - this.tickIndex);
+          break;
+        }
+        case 'SET_STAKE': s.stake = action.value; break;
+        case 'SET_COOLDOWN_TICKS': s.cooldownTicks = action.value; break;
+        case 'SET_CLUSTER_CAP': s.clusterCap = action.value; break;
+        case 'TOGGLE_FILTERS': s.filtersActive = !s.filtersActive; break;
+        case 'ARM': s.isArmed = true; s.armToFireOnNextTick = false; this._eligibleFromTick = this.tickIndex; break;
+        case 'DISARM': s.isArmed = false; s.isRunning = false; s.armToFireOnNextTick = false; break;
+        case 'FIRING': s.isRunning = true; break;
+        case 'FIRE_COMPLETE': s.isRunning = false; break;
+        case 'TOGGLE_AUTO': s.autoMode = !s.autoMode; break;
+        case 'SET_TP': s.takeProfit = action.value; break;
+        case 'SET_SL': s.stopLoss = action.value; break;
+        case 'TOGGLE_ABORT_ON_LOSS': s.abortOnLoss = !s.abortOnLoss; break;
+        case 'ADD_JOURNAL': {
+          const entry = action.entry;
+          const isWin = entry.type === 'win';
+          s.totalProfit += entry.profit;
+          s.journal = [entry, ...s.journal].slice(0, 500);
+          s.totalWins += isWin ? 1 : 0; s.totalLoss += isWin ? 0 : 1;
+          s.plHistory = [...s.plHistory, { time: entry.time, profit: entry.profit, cumulative: s.totalProfit }].slice(-200);
+          break;
+        }
+        case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; break;
+        case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
+        case 'NOTIFY': {
+          const id = Date.now().toString() + Math.random().toString(36).slice(2, 6);
+          const time = new Date().toLocaleTimeString();
+          s.notifications = [...s.notifications, { id, message: action.message, type: action.ntype, time }].slice(-50);
+          break;
+        }
+        default: break;
+      }
+      this.checkEntry();
+      this.emit();
+    }
+
+    checkEntry() {
+      if (this._toFire !== null) {
+        const barrier = this._toFire;
+        this._toFire = null;
+        this.fireContract(barrier);
+      }
+    }
+
+    fireContract(barrier) {
+      const s = this.state;
+      if (!s.isAuthenticated) { this.dispatch({ type: 'NOTIFY', message: 'Repeat seen but no account linked — add a token in Settings', ntype: 'loss' }); return; }
+      if (!window.HubStore.isBotEnabled('hotrepeat')) { this.dispatch({ type: 'NOTIFY', message: 'Hot Repeat bot is disabled — enable it from the Dashboard first', ntype: 'loss' }); return; }
+      this.dispatch({ type: 'FIRING' });
+      hrAudio.trigger();
+      const stake = s.stake;
+      try {
+        this.socketT && this.socketT.send(JSON.stringify({
+          buy: '1', price: stake,
+          parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
+        }));
+        hrAudio.fire();
+        const msg = `⚡ REPEAT ${barrier}→${barrier} — firing DIFFER ≠${barrier}`;
+        this.dispatch({ type: 'NOTIFY', message: msg, ntype: 'info' });
+        window.HubStore.notifyTelegram(`🔥 ${msg}`);
+      } catch (e) {}
+      this.dispatch({ type: 'FIRE_COMPLETE' });
+    }
+
+    connectAnalysis() {
+      try { if (this.socketP) { this.socketP.onclose = null; this.socketP.close(); } } catch (e) {}
+      this.tickIndex = 0; this._eligibleFromTick = 0;
+      if (this.analysisReconnectAttempts == null) this.analysisReconnectAttempts = 0;
+      const ws = new WebSocket(hrGetPublicWsUrl());
+      ws.onopen = () => {
+        this.analysisReconnectAttempts = 0;
+        try { ws.send(JSON.stringify({ ticks: this.state.primaryMarket, subscribe: 1 })); } catch (e) {}
+      };
+      ws.onmessage = (m) => {
+        try {
+          const d = JSON.parse(m.data);
+          if (d.tick) { const digit = parseInt(d.tick.quote.toString().slice(-1)); this.dispatch({ type: 'TICK', digit }); }
+        } catch (e) {}
+      };
+      ws.onclose = () => {
+        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+        this.analysisReconnectAttempts = (this.analysisReconnectAttempts || 0) + 1;
+        const delay = Math.min(3000 * Math.pow(1.6, this.analysisReconnectAttempts - 1), 30000);
+        this.reconnectTimer = setTimeout(() => this.connectAnalysis(), delay);
+      };
+      this.socketP = ws;
+    }
+
+    authenticate() {
+      const token = window.HubStore.getState().apiToken;
+      if (!token) return;
+      this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
+      try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) {}
+      const _self = this;
+      (async () => {
+        const hub = window.HubStore.getState();
+        const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
+        const headers = { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
+        let accountId = hub.accountId;
+        if (!accountId) {
+          try {
+            const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
+            if (!r.ok) throw new Error(`Accounts ${r.status}`);
+            const d = await r.json();
+            const accounts = d.data || [];
+            const preferred = hub.accountType === 'real' ? accounts.find((a) => !a.is_virtual) || accounts[0] : accounts.find((a) => a.is_virtual) || accounts[0];
+            if (!preferred) throw new Error('No accounts found');
+            accountId = preferred.account_id;
+          } catch (e) { _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' }); return; }
+        }
+        let wsUrl;
+        try {
+          const r = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, { method: 'POST', headers });
+          if (!r.ok) throw new Error(`OTP ${r.status}`);
+          const d = await r.json();
+          wsUrl = d.data?.url;
+          if (!wsUrl) throw new Error('No WS URL in OTP response');
+        } catch (e) { _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' }); return; }
+
+        const ws = new WebSocket(wsUrl);
+        _self.socketT = ws;
+        ws.onerror = () => { _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' }); };
+        ws.onopen = () => {
+          _self._authDelay = 8000;
+          const bal = window.HubStore.getState().balanceUSD || 0;
+          _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
+          _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
+          try { ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) {}
+        };
+        ws.onmessage = (m) => {
+          try {
+            const d = JSON.parse(m.data);
+            if (d.msg_type === 'balance' && d.balance) { const bal = parseFloat(d.balance.balance); if (!isNaN(bal)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: bal }); }
+            if (d.msg_type === 'proposal_open_contract') {
+              const c = d.proposal_open_contract;
+              if (c && c.is_sold) {
+                const balAfter = parseFloat(c.balance_after);
+                if (!isNaN(balAfter)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: balAfter });
+                if (!c.contract_id || !_self.ownContractIds.has(c.contract_id)) { if (c.contract_id) { /* not ours */ } }
+                if (!c.contract_id || !_self.ownContractIds.has(c.contract_id)) return;
+                _self.ownContractIds.delete(c.contract_id);
+                const isWin = c.status === 'won';
+                const profit = parseFloat(c.profit) || 0;
+                function _lc(v) { const s = v?.toString().trim(); return (s && s.length && /\d/.test(s.slice(-1))) ? s.slice(-1) : null; }
+                const _dExitRaw = _lc(c.exit_tick_display_value) ?? _lc(c.exit_tick) ?? _lc(c.sell_spot_display_value) ?? _lc(c.sell_spot) ?? _lc(c.current_spot_display_value) ?? _lc(c.current_spot) ?? (_self.state.currentTick != null ? String(_self.state.currentTick) : null);
+                const _dEntryRaw = _lc(c.entry_tick_display_value) ?? _lc(c.entry_tick);
+                const exitDigitParsed = (_dExitRaw !== null && _dExitRaw !== '') ? parseInt(_dExitRaw) : null;
+                const entryDigitFinal = (_dEntryRaw !== null && _dEntryRaw !== '') ? parseInt(_dEntryRaw) : (_self.state.currentTick != null ? _self.state.currentTick : null);
+                _self.dispatch({
+                  type: 'ADD_JOURNAL',
+                  entry: {
+                    id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
+                    time: new Date().toLocaleTimeString(), ts: Date.now(), type: isWin ? 'win' : 'loss', botId: 'hotrepeat',
+                    barrier: c.barrier !== undefined && c.barrier !== null && c.barrier !== '' ? parseInt(c.barrier) : 0,
+                    exitDigit: exitDigitParsed, profit, entryDigit: entryDigitFinal,
+                    market: c.underlying || _self.state.primaryMarket, stake: parseFloat(c.buy_price) || _self.state.stake,
+                    payout: isWin ? (parseFloat(c.buy_price) || _self.state.stake) + Math.abs(profit) : (parseFloat(c.buy_price) || _self.state.stake),
+                  },
+                });
+                const tradeMsg = `${isWin ? '✓ WIN' : '✗ LOSS'} | ≠${c.barrier} E:${exitDigitParsed ?? '—'} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}`;
+                _self.dispatch({ type: 'NOTIFY', message: tradeMsg, ntype: isWin ? 'win' : 'loss' });
+                const cs = _self.state;
+                window.HubStore.notifyTelegram(`${isWin ? '✅' : '❌'} ${tradeMsg}\n💰 Balance: ${(isNaN(balAfter) ? cs.balanceUSD : balAfter).toFixed(2)} | Net P/L: ${cs.totalProfit.toFixed(2)}`);
+                if (isWin) hrAudio.win();
+                else {
+                  hrAudio.loss();
+                  if (_self.state.abortOnLoss && _self.state.isArmed) { _self.abortFlag = true; hrAudio.abort(); _self.dispatch({ type: 'DISARM' }); _self.dispatch({ type: 'NOTIFY', message: '⛔ Disarmed — loss + Abort-on-loss active', ntype: 'loss' }); }
+                }
+                // TP/SL: enforced globally by the Dashboard's master P&L gate,
+                // same as Differ — not duplicated here.
+              }
+            }
+            if (d.msg_type === 'buy') {
+              if (d.error) _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+              else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
+            }
+          } catch (e) {}
+        };
+        ws.onclose = () => {
+          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+          if (window.HubStore.getState().apiToken) { _self._authDelay = Math.min((_self._authDelay || 8000) * 1.5, 60000); setTimeout(() => _self.authenticate(), _self._authDelay); }
+        };
+      })();
+    }
+
+    armSystem() {
+      const s = this.state;
+      if (!window.HubStore.isBotEnabled('hotrepeat')) { this.dispatch({ type: 'NOTIFY', message: 'Hot Repeat bot is disabled — enable it from the Dashboard first', ntype: 'loss' }); return; }
+      if (!s.isAuthenticated) { this.dispatch({ type: 'NOTIFY', message: 'Add your API token in Settings first', ntype: 'loss' }); return; }
+      this.dispatch({ type: 'ARM' });
+      this.dispatch({ type: 'NOTIFY', message: `⚡ ARMED — watching for X→X on ${s.primaryMarket}`, ntype: 'info' });
+    }
+
+    disarmSystem() {
+      this.dispatch({ type: 'DISARM' });
+      this.abortFlag = true;
+    }
+
+    abortTrades() {
+      this.abortFlag = true; hrAudio.abort();
+      this.dispatch({ type: 'DISARM' });
+      this.dispatch({ type: 'NOTIFY', message: '⛔ MANUAL ABORT — Disarmed', ntype: 'loss' });
+    }
+  }
+
+  window.HotRepeatEngine = HotRepeatEngine;
+  window.HotRepeatConstants = { MARKETS: HR_MARKETS };
+})();
+</script>
+
+<script>
+// ── HOT REPEAT UI ──────────────────────────────────────────────────────
+// Visually matches the Differ Terminal (same cp-card / benz-grid / glass
+// theme via the shared global CSS + a self-contained copy of the local
+// cp-* styles), but with its own signature "repeat gate" centerpiece.
+(function (global) {
+  'use strict';
+  const MARKETS = global.HotRepeatConstants.MARKETS;
+  function el(id, parent) { return (parent || document).querySelector(id.startsWith('#') ? id : '#' + id); }
+  let shellBuilt = false;
+
+  const SELF_STYLE = (rootId) => `
+    <style>
+      @keyframes hr-in   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes hr-glow { 0%,100%{box-shadow:0 0 16px hsl(var(--primary)/0.12)} 50%{box-shadow:0 0 32px hsl(var(--primary)/0.28)} }
+      #${rootId} .cp-card {
+        background: linear-gradient(150deg,hsl(var(--card)/0.92),hsl(var(--bg-soft)/0.7));
+        border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 14px; margin-bottom: 10px;
+        position: relative; overflow: hidden; backdrop-filter: blur(10px);
+        box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
+        transition: border-color .2s, box-shadow .2s;
+      }
+      #${rootId} .cp-card:hover { border-color: hsl(var(--border-bright)/0.6); }
+      #${rootId} .cp-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:1px;
+        background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.35) 40%, hsl(var(--secondary)/0.25) 65%, transparent);
+      }
+      #${rootId} .cp-section-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8.5px; font-weight: 800;
+        letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--muted-foreground)/0.6);
+        margin-bottom: 10px; display: flex; align-items: center; gap: 7px;
+      }
+      #${rootId} .cp-section-label::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, hsl(var(--primary)/0.2), transparent); }
+      #${rootId} .cp-input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+      #${rootId} .cp-input-group { display: flex; flex-direction: column; gap: 4px; }
+      #${rootId} .cp-input-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8px; font-weight: 700;
+        letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--primary)/0.75);
+      }
+      #${rootId} .cp-input {
+        background: hsl(var(--bg)/0.75) !important; border: 1px solid hsl(var(--border)/0.5) !important;
+        border-radius: 10px !important; color: hsl(var(--foreground)) !important;
+        font-family: 'DM Mono', monospace !important; font-size: 12px !important; font-weight: 500 !important;
+        padding: 8px 10px !important; width:100%; outline: none !important; backdrop-filter: blur(6px) !important;
+      }
+      #${rootId} .cp-input:focus { border-color: hsl(var(--primary)/0.55) !important; }
+      #${rootId} select.cp-input option { background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; }
+      #${rootId} .cp-toggle-row {
+        display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; margin-bottom: 8px;
+        background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px;
+        transition: background .16s, border-color .16s;
+      }
+      #${rootId} .cp-toggle-row:hover { background: hsl(var(--card)/0.5); border-color: hsl(var(--border)/0.5); }
+      #${rootId} .cp-engage-btn {
+        width: 100%; padding: 14px 18px; margin-top: 4px; font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 11px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+        border: 1px solid hsl(var(--primary)/0.3);
+        background: linear-gradient(135deg, hsl(var(--primary)/0.08), hsl(var(--primary-2, var(--primary))/0.04));
+        color: hsl(var(--primary)); border-radius: 14px; cursor: pointer;
+        box-shadow: 0 0 0 1px hsl(var(--primary)/0.08); transition: all .22s cubic-bezier(.34,1.56,.64,1);
+        position:relative; overflow:hidden;
+      }
+      #${rootId} .cp-engage-btn:hover { border-color: hsl(var(--primary)/0.55); transform: translateY(-2px); }
+      #${rootId} .cp-engage-btn.active {
+        background: linear-gradient(135deg, hsl(var(--loss)/0.12), hsl(var(--loss)/0.05));
+        border-color: hsl(var(--loss)/0.4); color: hsl(var(--loss));
+        box-shadow: 0 4px 20px hsl(var(--loss)/0.15); animation: hr-glow 3s ease-in-out infinite;
+      }
+      #${rootId} .cp-engage-btn::before {
+        content:''; position:absolute; top:0; bottom:0; width:35%; left:0;
+        background: linear-gradient(90deg, transparent, hsl(255 100% 100%/0.16), transparent);
+        animation: rf-sheen 2.8s ease-in-out infinite;
+      }
+      #${rootId} .cp-engage-btn:active { transform: scale(.97); }
+      #${rootId} .rf-ind-card {
+        background: hsl(var(--bg)/0.8); border: 1px solid hsl(var(--border)/0.3); border-radius: 10px;
+        padding: 8px; text-align: center; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+      }
+      #${rootId} .rf-ind-val { font-family:'Outfit',sans-serif; font-size:15px; font-weight:900; }
+      #${rootId} .rf-ind-label { font-size:7.5px; font-family:'DM Mono',monospace; letter-spacing:1px; color:hsl(var(--muted-foreground)); margin-top:2px; }
+      #${rootId} .rf-ind-card:hover { transform: translateY(-2px); border-color: hsl(var(--primary)/0.4); box-shadow: 0 4px 14px hsl(0 0% 0%/0.25); }
+      #${rootId} h1.font-display { animation: rf-title-glow 3.2s ease-in-out infinite; }
+      #${rootId} .jnl-entry:first-of-type { animation: rf-entry-flash 1.4s ease-out; }
+      #${rootId} .hr-gate { display:flex; align-items:center; justify-content:center; gap:8px; padding:20px 8px 6px; }
+      #${rootId} .hr-tile {
+        width:56px; height:68px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+        font-family:'Outfit',sans-serif; font-weight:900; font-size:26px; color: hsl(var(--muted-foreground));
+        background: hsl(var(--bg)/0.8); border: 1px solid hsl(var(--border)/0.4); transition: all .25s ease;
+      }
+      #${rootId} .hr-tile.filled { color: hsl(var(--foreground)); border-color: hsl(var(--border-bright)/0.6); }
+      #${rootId} .hr-tile.match { color: hsl(var(--primary)); border-color: hsl(var(--primary)/0.6); box-shadow: 0 0 18px hsl(var(--primary)/0.3); }
+      #${rootId} .hr-tile.fire { color: hsl(var(--bg)); background: hsl(var(--primary)); border-color: hsl(var(--primary)); box-shadow: 0 0 22px hsl(var(--primary)/0.55); }
+      #${rootId} .hr-tile.win { color: hsl(var(--bg)); background: hsl(var(--win)); border-color: hsl(var(--win)); }
+      #${rootId} .hr-tile.loss { color: hsl(var(--bg)); background: hsl(var(--loss)); border-color: hsl(var(--loss)); }
+      #${rootId} .hr-link { width:18px; height:2px; background: hsl(var(--border)/0.5); }
+      #${rootId} .hr-link.hot { background: hsl(var(--primary)/0.6); }
+      #${rootId} .hr-caption { text-align:center; font-family:'DM Mono',monospace; font-size:10.5px; color:hsl(var(--muted-foreground)); margin-top:12px; letter-spacing:.5px; }
+      #${rootId} .hr-caption b { color: hsl(var(--primary)); }
+      #${rootId} .hr-tape { display:flex; gap:5px; overflow-x:auto; padding:10px 12px; margin-top:14px; background:hsl(var(--bg)/0.5); border:1px solid hsl(var(--border)/0.35); border-radius:12px; scrollbar-width:none; }
+      #${rootId} .hr-tape::-webkit-scrollbar{ display:none; }
+      #${rootId} .hr-tape .d { flex:0 0 auto; width:24px; height:28px; display:flex; align-items:center; justify-content:center; font-family:'DM Mono',monospace; font-size:12px; color:hsl(var(--muted-foreground)); border-radius:6px; }
+      #${rootId} .hr-tape .d.hot { color: hsl(var(--primary)); background: hsl(var(--primary)/0.1); }
+      #${rootId} .hr-note { font-family:'DM Mono',monospace; font-size:9.5px; line-height:1.6; color:hsl(var(--muted-foreground)); padding:10px 12px; margin-top:10px; background:hsl(var(--bg)/0.4); border:1px solid hsl(var(--border)/0.3); border-radius:12px; }
+      #${rootId} .hr-note b { color: hsl(var(--primary)); }
+    </style>`;
+
+  function buildShell(root) {
+    if (shellBuilt) return;
+    root.innerHTML = `
+      ${SELF_STYLE('hotrepeat-root')}
+      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0;position:relative">
+        <div>
+          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700">HOT REPEAT BOT</h1>
+          <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">X&#8594;X REPEAT TRIGGER · SINGLE STRATEGY · FULL AUTOMATION</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="glass-panel" id="hotrepeat-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
+        <div id="hotrepeat-conn-dot" style="width:10px;height:10px;border-radius:50%"></div>
+        <div class="rf-header-glow"></div>
+      </header>
+      <div class="benz-grid">
+        <div class="benz-col"><div class="benz-scroll" id="hotrepeat-left"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="hotrepeat-center"></div></div>
+        <div class="benz-col">
+          <div style="display:flex;gap:4px;padding:8px;border-bottom:1px solid hsl(var(--border)/0.4)">
+            <div style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;text-align:center;border-radius:10px;border:1px solid hsl(var(--primary)/0.35);background:hsl(var(--primary)/0.1);color:hsl(var(--primary))">JOURNAL</div>
+          </div>
+          <div class="benz-scroll" id="hotrepeat-right"></div>
+        </div>
+      </div>
+      <div id="hotrepeat-statusbar" style="text-align:center;padding:10px 16px;margin:8px 14px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;border-radius:12px;background:hsl(var(--bg)/0.6);border:1px solid hsl(var(--border)/0.4);flex-shrink:0;transition:border-color .2s,background .2s"></div>`;
+    shellBuilt = true;
+  }
+
+  function marketOptions(selected) {
+    return MARKETS.map((m) => `<option value="${m.value}" ${m.value === selected ? 'selected' : ''}>${m.label}</option>`).join('');
+  }
+
+  function renderLeft(s) {
+    return `
+      <div class="cp-card" style="animation:hr-in .3s ease both">
+        <div class="cp-section-label">MARKET &amp; TRIGGER</div>
+        <div class="cp-input-group" style="margin-bottom:8px">
+          <span class="cp-input-label">Symbol</span>
+          <select class="cp-input" id="hotrepeat-market">${marketOptions(s.primaryMarket)}</select>
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Stake ($)</span><input class="cp-input" type="number" step="0.01" id="hotrepeat-stake" value="${s.stake}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Cooldown (ticks)</span><input class="cp-input" type="number" id="hotrepeat-cooldown" value="${s.cooldownTicks}" min="0"></div>
+        </div>
+        <div class="cp-toggle-row">
+          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Anti-cluster filter</span>
+          <button class="titan-toggle ${s.filtersActive ? 'on' : ''}" id="hotrepeat-filters" onclick="event.stopPropagation()"></button>
+        </div>
+        <div class="cp-input-group" style="margin-bottom:4px;${s.filtersActive ? '' : 'opacity:.4'}">
+          <span class="cp-input-label">Cluster cap (per 30 ticks)</span>
+          <input class="cp-input" type="number" id="hotrepeat-cluster" value="${s.clusterCap}" min="1" ${s.filtersActive ? '' : 'disabled'}>
+        </div>
+      </div>
+      <div class="cp-card">
+        <div class="cp-section-label">RISK</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Take Profit</span><input class="cp-input" type="number" id="hotrepeat-tp" value="${s.takeProfit}" min="0"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Stop Loss</span><input class="cp-input" type="number" id="hotrepeat-sl" value="${s.stopLoss}" min="0"></div>
+        </div>
+        <div class="cp-toggle-row" style="margin-bottom:0">
+          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Disarm after a loss</span>
+          <button class="titan-toggle ${s.abortOnLoss ? 'on' : ''}" id="hotrepeat-abortonloss" onclick="event.stopPropagation()"></button>
+        </div>
+      </div>
+      <button class="cp-engage-btn ${s.isArmed || s.isRunning ? 'active' : ''}" id="hotrepeat-engage">
+        ${s.isArmed || s.isRunning ? '⛔ DISARM' : '⚡ ENGAGE'}
+      </button>
+      <div class="hr-note"><b>On the math:</b> a repeat doesn't change the next digit's odds — each tick is an independent ~10% draw, so DIGITDIFF on X wins ~90% of the time whether or not X just repeated. This trigger changes when it fires, not its per-trade win chance.</div>`;
+  }
+
+  function renderCenter(s) {
+    const hist = s.history;
+    const n = hist.length;
+    const a = n >= 2 ? hist[n - 2] : null;
+    const b = n >= 1 ? hist[n - 1] : null;
+    const isMatch = a !== null && b !== null && a === b;
+    const t1c = a === null ? '' : 'filled';
+    const t2c = (b === null ? '' : 'filled') + (isMatch ? ' match' : '');
+    let t3 = '?', t3c = '';
+    let caption;
+    if (s.armToFireOnNextTick) { t3 = '⚡'; t3c = 'match'; caption = `Repeat on <b>${s.fireBarrier}</b> confirmed — firing on the next tick.`; }
+    else if (isMatch) { caption = `Repeat on <b>${b}</b> seen — checking filters…`; }
+    else { caption = s.isArmed ? 'Armed — watching the stream for X&#8594;X.' : 'Idle — watching the stream for X&#8594;X.'; }
+    const tape = hist.slice(-30).map((d, i, arr) => {
+      const hot = i > 0 && arr[i] === arr[i - 1];
+      return `<div class="d ${hot ? 'hot' : ''}">${d}</div>`;
+    }).join('');
+    const wr = (s.totalWins + s.totalLoss) ? ((s.totalWins / (s.totalWins + s.totalLoss)) * 100).toFixed(1) + '%' : '—';
+    return `
+      <div class="cp-card">
+        <div class="cp-section-label">REPEAT GATE</div>
+        <div class="hr-gate">
+          <div class="hr-tile ${t1c}">${a === null ? '–' : a}</div>
+          <div class="hr-link"></div>
+          <div class="hr-tile ${t2c}">${b === null ? '–' : b}</div>
+          <div class="hr-link ${isMatch ? 'hot' : ''}"></div>
+          <div class="hr-tile ${t3c}">${t3}</div>
+        </div>
+        <div class="hr-caption">${caption}</div>
+        <div class="hr-tape">${tape || '<div class="d">–</div>'}</div>
+      </div>
+      <div class="cp-card">
+        <div class="cp-section-label">SESSION STATS</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+          <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--foreground))">${s.totalWins + s.totalLoss}</div><div class="rf-ind-label">TRADES</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--primary))">${wr}</div><div class="rf-ind-label">WIN RATE</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val" style="color:${s.totalProfit >= 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${s.totalProfit >= 0 ? '+' : ''}${s.totalProfit.toFixed(2)}</div><div class="rf-ind-label">NET P/L</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--accent))">${s.isCooldown ? s.cooldownRemaining + 't' : '—'}</div><div class="rf-ind-label">COOLDOWN</div></div>
+        </div>
+      </div>`;
+  }
+
+  function renderRight(s) {
+    if (!s.journal.length) return `<div style="padding:24px 14px;text-align:center;font-family:'DM Mono',monospace;font-size:11px;color:hsl(var(--muted-foreground))">No trades yet this session.</div>`;
+    return s.journal.slice(0, 80).map((j) => {
+      const isWin = j.type === 'win';
+      const plStr = (j.profit >= 0 ? '+' : '') + '$' + j.profit.toFixed(2);
+      const winColor = isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+      return `<div class="jnl-entry" style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid hsl(var(--border)/0.25)">
+        <span style="font-size:12px;font-weight:900;padding:3px 9px;border-radius:8px;background:hsl(var(--primary)/0.15);color:hsl(var(--primary));border:1px solid hsl(var(--primary)/0.5);font-family:'Outfit',sans-serif">≠${j.barrier}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;color:hsl(var(--foreground))">${j.time}</div>
+          <div style="font-size:9px;color:hsl(var(--muted-foreground))">Entry ${j.entryDigit ?? '—'} → Exit ${j.exitDigit ?? '—'}</div>
+        </div>
+        <span style="font-size:11px;font-weight:800;color:${winColor}">${plStr}</span>
+      </div>`;
+    }).join('');
+  }
+
+  function render(s) {
+    const root = document.getElementById('hotrepeat-root');
+    if (!root) return;
+    buildShell(root);
+    if (global.setHtmlIfChanged) {
+      global.setHtmlIfChanged(el('hotrepeat-left', root), renderLeft(s));
+      global.setHtmlIfChanged(el('hotrepeat-center', root), renderCenter(s));
+      global.setHtmlIfChanged(el('hotrepeat-right', root), renderRight(s));
+    } else {
+      el('hotrepeat-left', root).innerHTML = renderLeft(s);
+      el('hotrepeat-center', root).innerHTML = renderCenter(s);
+      el('hotrepeat-right', root).innerHTML = renderRight(s);
+    }
+    const balEl = el('hotrepeat-balance', root);
+    if (balEl) {
+      balEl.style.display = s.isAuthenticated ? 'block' : 'none';
+      balEl.textContent = `$${s.balanceUSD.toFixed(2)}`;
+    }
+    const dot = el('hotrepeat-conn-dot', root);
+    if (dot) dot.style.background = s.connectionStatus === 'connected' ? 'hsl(var(--win))' : s.connectionStatus === 'connecting' ? 'hsl(var(--accent))' : 'hsl(var(--loss))';
+    const statusbar = el('hotrepeat-statusbar', root);
+    if (statusbar) {
+      const last = s.notifications[s.notifications.length - 1];
+      statusbar.textContent = last ? last.message : (s.isArmed ? 'ARMED — watching the stream' : 'IDLE');
+    }
+    bindEvents(root);
+  }
+
+  function bindEvents(root) {
+    const eng = window._hotRepeatEngineRef;
+    if (!eng) return;
+    const marketSel = el('hotrepeat-market', root);
+    if (marketSel && !marketSel._bound) { marketSel._bound = true; marketSel.onchange = () => eng.dispatch({ type: 'SET_MARKET', market: marketSel.value }); }
+    const stakeInp = el('hotrepeat-stake', root);
+    if (stakeInp && !stakeInp._bound) { stakeInp._bound = true; stakeInp.onchange = () => eng.dispatch({ type: 'SET_STAKE', value: Math.max(0.35, parseFloat(stakeInp.value) || 1) }); }
+    const cdInp = el('hotrepeat-cooldown', root);
+    if (cdInp && !cdInp._bound) { cdInp._bound = true; cdInp.onchange = () => eng.dispatch({ type: 'SET_COOLDOWN_TICKS', value: Math.max(0, parseInt(cdInp.value, 10) || 0) }); }
+    const clInp = el('hotrepeat-cluster', root);
+    if (clInp && !clInp._bound) { clInp._bound = true; clInp.onchange = () => eng.dispatch({ type: 'SET_CLUSTER_CAP', value: Math.max(1, parseInt(clInp.value, 10) || 1) }); }
+    const filtBtn = el('hotrepeat-filters', root);
+    if (filtBtn && !filtBtn._bound) { filtBtn._bound = true; filtBtn.onclick = () => eng.dispatch({ type: 'TOGGLE_FILTERS' }); }
+    const tpInp = el('hotrepeat-tp', root);
+    if (tpInp && !tpInp._bound) { tpInp._bound = true; tpInp.onchange = () => eng.dispatch({ type: 'SET_TP', value: Math.max(0, parseFloat(tpInp.value) || 0) }); }
+    const slInp = el('hotrepeat-sl', root);
+    if (slInp && !slInp._bound) { slInp._bound = true; slInp.onchange = () => eng.dispatch({ type: 'SET_SL', value: Math.max(0, parseFloat(slInp.value) || 0) }); }
+    const abortBtn = el('hotrepeat-abortonloss', root);
+    if (abortBtn && !abortBtn._bound) { abortBtn._bound = true; abortBtn.onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' }); }
+    const engageBtn = el('hotrepeat-engage', root);
+    if (engageBtn && !engageBtn._bound) {
+      engageBtn._bound = true;
+      engageBtn.onclick = () => {
+        const s = eng.state;
+        if (s.isArmed || s.isRunning) { eng.disarmSystem(); } else { eng.armSystem(); }
+      };
+    }
+  }
+
+  function renderFull(s) { shellBuilt = false; render(s); }
+  function commitPendingSettings() { const eng = window._hotRepeatEngineRef; if (eng) eng.saveConfig(); }
+
+  global.HotRepeatUI = { render, renderFull, commitPendingSettings, _initialized: false };
+})(window);
+</script>
+
+<script>
+(function () {
+  'use strict';
+
+  const BOT_IDS = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'risefall', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -19987,13 +21780,13 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'differ', 'even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator'];
+  const VALID_APPS = ['dashboard', 'differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'risefall', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { differ: null, even: null, odd: null, nexus: null, under: null, risefall: null };
-  const titanBuilt = { even: false, odd: false, nexus: false, under: false, risefall: false };
+  const engines = { differ: null, hotrepeat: null, even: null, odd: null, nexus: null, under: null, risefall: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null };
+  const titanBuilt = { even: false, odd: false, nexus: false, under: false, risefall: false, meanrev: false, risemr: false, fallmr: false, evenmr: false, oddmr: false };
 
   function queueDashboardRender() {
     if (dashRenderQueued) return;
@@ -20022,6 +21815,21 @@ window.NexusStrategies=exports;
     return eng;
   }
 
+  function ensureHotRepeatEngine() {
+    if (engines.hotrepeat) return engines.hotrepeat;
+    if (!window.HotRepeatEngine) { console.warn('[Hub] HotRepeatEngine not loaded yet'); return null; }
+    let eng;
+    try { eng = new window.HotRepeatEngine(); } catch(e) { console.error('[Hub] HotRepeatEngine init failed:', e); return null; }
+    eng.onUpdate = function (s) {
+      if (window.HotRepeatUI) window.HotRepeatUI.render(s);
+      if (activeApp === 'dashboard') queueDashboardRender();
+    };
+    engines.hotrepeat = eng;
+    window._hotRepeatEngineRef = eng;
+    if (eng.emit) eng.emit();
+    return eng;
+  }
+
   function ensureTitanEngine(id) {
     if (engines[id]) return engines[id];
     if (!window.TitanEngine) { console.warn('[Hub] TitanEngine not loaded yet'); return null; }
@@ -20029,20 +21837,30 @@ window.NexusStrategies=exports;
     const isUnder = id === 'under';
     const isOU = isOver || isUnder;
     const isRiseFall = id === 'risefall';
+    // Rise MR and Fall MR are the same 'meanrev' mode/pipeline as Rise & Fall
+    // MR — they share its socket, scanner, and UI module — but each is
+    // built below with fixedDirection locked to one side (see opts), so
+    // they only ever fire HIGHER or only ever fire LOWER respectively.
+    const isMeanRev = id === 'meanrev' || id === 'risemr' || id === 'fallmr';
     const isMatches = id === 'matches';
     const isAccumulator = id === 'accumulator';
+    const isEvenOddMR = id === 'evenmr' || id === 'oddmr';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
-    const safeSocket = (isOU || isRiseFall || isAccumulator ? window.NexusSocket : window.EvenSocket)
+    const safeSocket = (isOU || isRiseFall || isMeanRev || isAccumulator ? window.NexusSocket : window.EvenSocket)
       || { globalSocket: null };
     // Higher/Lower gets its OWN scanner (RiseFallScanner) that ranks markets
     // by price-trend/RSI/Bollinger confluence via RiseFallAnalyzer — the same
     // indicator stack the trade signal itself uses. It used to silently
     // borrow the Over-bot's scanner (digit > 3 skew), which is meaningless
     // for a price-direction (CALL/PUT) bot and left "best market" completely
-    // disconnected from what the signal engine actually believed.
+    // disconnected from what the signal engine actually believed. Rise &
+    // Fall MR reuses the same scanner — it's still ranking markets by
+    // price-trend/RSI/Bollinger confluence, a reasonable proxy for "which
+    // market is worth watching" even though the MR bot's OWN trade signal
+    // runs on MeanReversionAnalyzer, not RiseFallAnalyzer.
     const scannerFallback = { MarketScanner: class { constructor(cb){this._cb=cb;} setTickPeriod(){} async start(){} getBestMarket(){return null;} getGoldenMarkets(){return [];} getAllMarkets(){return [];} } };
-    const safeScanner = isRiseFall || isAccumulator
+    const safeScanner = isRiseFall || isMeanRev || isAccumulator
       ? (window.RiseFallScanner || scannerFallback)
       : isMatches
       ? (window.MatchesScanner || scannerFallback)
@@ -20070,6 +21888,27 @@ window.NexusStrategies=exports;
           trading: window.EvenTrading, socket: safeSocket, scanner: safeScanner,
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         }
+      : isMeanRev
+      ? {
+          // Rise & Fall (Mean Reversion) trades a genuine Higher/Lower
+          // contract — CALL/PUT WITH a dynamic ATR-sized Offset Barrier —
+          // via its own ADX/Bollinger/RSI/Stochastic/ATR 3-stage pipeline
+          // (mode: 'meanrev' inside TitanEngine). Shares Higher/Lower's
+          // market socket/scanner (both just need live tick + health data).
+          id, mode: 'meanrev', fixedTradeMode: null,
+          botLabel: id === 'risemr' ? 'Rise MR Bot' : id === 'fallmr' ? 'Fall MR Bot' : 'Rise & Fall MR Bot',
+          // Rise MR is locked HIGHER-only, Fall MR is locked LOWER-only —
+          // this flows into config.direction at build time (see
+          // buildConfig's `if (this.fixedDirection) merged.direction = ...`),
+          // which is what Stage 2/3 of MeanReversionAnalyzer's gate actually
+          // reads, and the Settings UI shows a locked 🔒 indicator instead
+          // of the Auto/Higher/Lower dropdown so it can never be changed
+          // back to Auto for these two.
+          fixedDirection: id === 'risemr' ? 'higher' : id === 'fallmr' ? 'lower' : null,
+          fixedMarket: null,
+          trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
+          strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
+        }
       : isRiseFall
       ? {
           // Higher/Lower shares the Over/Under market socket/scanner (both
@@ -20093,6 +21932,24 @@ window.NexusStrategies=exports;
           trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
           strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         }
+      : isEvenOddMR
+      ? {
+          // Even/Odd (Mean Reversion) — a completely separate bot from the
+          // classic Even/Odd bots above, sharing only the same digit
+          // socket/scanner/trading modules (same market family, same
+          // DIGITEVEN/DIGITODD contracts). Its own mode ('evenoddmr')
+          // routes through EvenOddReversionAnalyzer's macro/micro/
+          // exhaustion+confirmation pipeline instead of the classic
+          // fixed-streak logic, and its own UI module
+          // (EvenOddReversionUI) so nothing here ever touches or gets
+          // confused with the original Even/Odd bots' code or state.
+          id, mode: 'evenoddmr', fixedTradeMode: id === 'evenmr' ? 'even' : 'odd',
+          botLabel: id === 'evenmr' ? 'Even MR Bot' : 'Odd MR Bot',
+          trading: window.EvenTrading,
+          socket: safeSocket,
+          scanner: safeScanner,
+          strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
+        }
       : {
           id, mode: 'evenodd', fixedTradeMode: id, botLabel: id === 'even' ? 'Even Bot' : 'Odd Bot',
           trading: window.EvenTrading,
@@ -20105,9 +21962,10 @@ window.NexusStrategies=exports;
     eng.onUpdate = function () {
       const rootId = id + '-root';
       if (activeApp === id && titanBuilt[id]) {
-        if ((isRiseFall || isAccumulator) && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
+        if ((isRiseFall || isMeanRev || isAccumulator) && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
         else if (isMatches && window.MatchesUI) window.MatchesUI.renderLive(eng, rootId, opts.botLabel);
-        else if (!isRiseFall && !isMatches && !isAccumulator && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
+        else if (isEvenOddMR && window.EvenOddReversionUI) window.EvenOddReversionUI.renderLive(eng, rootId, opts.botLabel);
+        else if (!isRiseFall && !isMeanRev && !isMatches && !isAccumulator && !isEvenOddMR && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
       }
       if (activeApp === 'dashboard') queueDashboardRender();
     };
@@ -20123,15 +21981,31 @@ window.NexusStrategies=exports;
       if (window.BenzUI) window.BenzUI.renderFull(eng.state);
       return;
     }
+    if (id === 'hotrepeat') {
+      const eng = ensureHotRepeatEngine();
+      if (!eng) return;
+      if (window.HotRepeatUI) window.HotRepeatUI.renderFull(eng.state);
+      return;
+    }
     const eng = ensureTitanEngine(id);
     if (!eng) return;
-    if (id === 'risefall' || id === 'accumulator') {
-      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', id === 'accumulator' ? 'ACCUMULATOR BOT' : 'HIGHER/LOWER BOT');
+    if (id === 'risefall' || id === 'meanrev' || id === 'accumulator' || id === 'risemr' || id === 'fallmr') {
+      const mrTitle = id === 'accumulator' ? 'ACCUMULATOR BOT'
+        : id === 'meanrev' ? 'RISE & FALL MEAN REVERSION BOT'
+        : id === 'risemr' ? 'RISE MEAN REVERSION BOT (HIGHER ONLY)'
+        : id === 'fallmr' ? 'FALL MEAN REVERSION BOT (LOWER ONLY)'
+        : 'HIGHER/LOWER BOT';
+      if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', mrTitle);
       titanBuilt[id] = true;
       return;
     }
     if (id === 'matches') {
       if (window.MatchesUI) window.MatchesUI.render(eng, id + '-root', 'MATCHES BOT');
+      titanBuilt[id] = true;
+      return;
+    }
+    if (id === 'evenmr' || id === 'oddmr') {
+      if (window.EvenOddReversionUI) window.EvenOddReversionUI.render(eng, id + '-root', id === 'evenmr' ? 'EVEN (MEAN REVERSION)' : 'ODD (MEAN REVERSION)');
       titanBuilt[id] = true;
       return;
     }
@@ -20506,10 +22380,11 @@ window.NexusStrategies=exports;
       if (id === 'differ') {
         eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp });
         eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl });
-      } else if (id !== 'risefall') {
-        // Higher/Lower is excluded on purpose: it reads the
-        // master gate live (window.getMasterGateValues) rather than a
-        // locally-set takeProfit/stopLoss, so there is nothing to push here.
+      } else if (id !== 'risefall' && id !== 'meanrev' && id !== 'risemr' && id !== 'fallmr') {
+        // Higher/Lower and all three Rise/Fall MR bots are excluded on
+        // purpose: they read the master gate live
+        // (window.getMasterGateValues) rather than a locally-set
+        // takeProfit/stopLoss, so there is nothing to push here.
         eng.setConfig && eng.setConfig({ takeProfit: tp, stopLoss: sl });
       }
     });
@@ -20523,16 +22398,17 @@ window.NexusStrategies=exports;
       const engagedCount = BOT_IDS.filter((id) => {
         const eng = engines[id];
         if (!eng) return false;
-        return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+        return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
       }).length;
       const turnOn = engagedCount < BOT_IDS.length;
       if (turnOn) applyMasterTpSlToAllEngines();
       BOT_IDS.forEach((id) => {
         const eng = ensureTitanOrDifferForControl(id);
         if (!eng) return;
-        if (id === 'differ') {
+        if (id === 'differ' || id === 'hotrepeat') {
+          const ui = id === 'differ' ? window.BenzUI : window.HotRepeatUI;
           if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) {
-            if (window.BenzUI && !window.BenzUI._initialized) { try { window.BenzUI.renderFull(eng.state); window.BenzUI._initialized = true; } catch(_) {} }
+            if (ui && !ui._initialized) { try { ui.renderFull(eng.state); ui._initialized = true; } catch(_) {} }
             if (!eng.state.isAuthenticated && window.HubStore && window.HubStore.getState().apiToken) {
               eng.authenticate();
               setTimeout(() => { try { eng.armSystem(); } catch(_) {} queueDashboardRender(); }, 3000);
@@ -20583,7 +22459,7 @@ window.NexusStrategies=exports;
           const nowEngaged = BOT_IDS.filter((id) => {
             const eng = engines[id];
             if (!eng) return false;
-            return id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+            return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
           }).length;
           if (nowEngaged > 0) {
             masterBtn.textContent = '⛔ TERMINATE ALL';
@@ -20637,7 +22513,7 @@ window.NexusStrategies=exports;
         savedAny = true;
       }
     } catch (e) { console.error('[Hub] Differ save error:', e); }
-    ['even', 'odd', 'nexus', 'under', 'risefall', 'matches', 'accumulator'].forEach((id) => {
+    ['even', 'odd', 'nexus', 'under', 'risefall', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
         try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
