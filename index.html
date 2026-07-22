@@ -22495,7 +22495,9 @@ window.NexusStrategies=exports;
   }
 
   function ensureTitanOrDifferForControl(id) {
-    return id === 'differ' ? ensureDifferEngine() : ensureTitanEngine(id);
+    if (id === 'differ') return ensureDifferEngine();
+    if (id === 'hotrepeat') return ensureHotRepeatEngine();
+    return ensureTitanEngine(id);
   }
 
   // ── GLOBAL "SAVE SETTINGS" BUTTON ───────────────────────────────────────
