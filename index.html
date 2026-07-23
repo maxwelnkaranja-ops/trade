@@ -12324,6 +12324,7 @@ window.NexusStrategies=exports;
         microLookback: 20, microThreshold: 70,
         minStreak: 3,
         coldLookback: 50, coldRecentWindow: 10, coldRecentCount: 2,
+        idleRotateMinutes: 3,
       };
       const overDefaults = { ...evenDefaults, autoPilot: false, autoRefresh: false, tradeMode: undefined };
       // Under gets its own default barrier picks (Under 7 / recovery Under 6)
@@ -12885,6 +12886,36 @@ window.NexusStrategies=exports;
           if (meetsSignal) {
             this.addLog('win', 'SIGNAL', `${result.contractType === 'DIGITODD' ? '🔵 ODD' : '🟣 EVEN'} reversion confirmed (${result.strength}%) — ${(result.reasons && result.reasons[result.reasons.length - 1]) || ''}`);
             this.startChainExecution();
+          } else if (this.config.autoRefresh && this.state.active && !this.state.isLocked && !this.state.isCooldown) {
+            // ── IDLE-TIME MARKET ROTATION ──────────────────────────────
+            // The generic "rotate after 4 completed sessions" autoRefresh
+            // throttle (see completeSession) is meaningless here: this
+            // bot's three-stage gate is intentionally strict (by design —
+            // real macro dominance + a genuine micro anomaly + a proven
+            // exhaustion break, not a guess), so it can sit on a single
+            // quiet market for a very long time without ever completing
+            // even ONE session to trigger that throttle. Rotate off an
+            // idle market on its own clock instead, so the bot is always
+            // hunting across markets for the setup rather than camping
+            // one — this changes WHERE it looks, never HOW STRICT the
+            // signal itself is.
+            if (!this._eomrLastRotateAt) this._eomrLastRotateAt = Date.now();
+            const idleRotateMs = Math.max(1, this.config.idleRotateMinutes || 3) * 60000;
+            if (Date.now() - this._eomrLastRotateAt >= idleRotateMs) {
+              const scannerBest = this.scanner && this.scanner.getBestMarket && this.scanner.getBestMarket();
+              let candidate = scannerBest && scannerBest.symbol && scannerBest.symbol !== market ? scannerBest.symbol : null;
+              if (!candidate && window.BenzPickNextMarket && this.scanner) {
+                const next = window.BenzPickNextMarket(this.scanner, market);
+                if (next && next.symbol && next.symbol !== market) candidate = next.symbol;
+              }
+              if (candidate) {
+                this.addLog('engine', 'IDLE-ROTATE', `⏱ No signal on ${market} in ${Math.round(idleRotateMs / 60000)}m — rotating to ${candidate}`);
+                this.changeMarket(candidate);
+                return; // changeMarket() re-subscribes fresh; this tick's work is done
+              }
+              // No alternative market available yet (scanner still warming up) — just reset the clock and keep watching.
+              this._eomrLastRotateAt = Date.now();
+            }
           }
           this.emit();
           return;
@@ -14262,6 +14293,7 @@ window.NexusStrategies=exports;
       this._skipArmed = false; this._isSacrificeTrade = false;
       if (newActive) {
         this.sound.playEngineStart();
+        if (this.isEvenOddMRMode) this._eomrLastRotateAt = Date.now();
         this.state = {
           ...this.state,
           active: true,
@@ -14306,6 +14338,7 @@ window.NexusStrategies=exports;
       // longer apply; clear them (but leave the cooldown timer alone if
       // this switch was itself what the cooldown ordered).
       this.altReversal = null; this.altDominance = null; this._altLastDomCheck = 0;
+      if (this.isEvenOddMRMode) this._eomrLastRotateAt = Date.now();
       this.startAnalysisHold(); this.subscribeToMarket(market);
     }
 
@@ -20776,11 +20809,114 @@ window.NexusStrategies=exports;
   const shHtml = global.setHtmlIfChanged || function (node, html) { if (!node || node.__lastHtml === html) return false; node.innerHTML = html; node.__lastHtml = html; return true; };
   function fmtNum(n, d) { return (n == null || isNaN(n)) ? '—' : n.toFixed(d != null ? d : 2); }
 
+  // Self-contained copies of the control-panel classes that (elsewhere) only
+  // get injected once some OTHER bot's tab has rendered — duplicated here so
+  // this panel looks right even if it's the very first tab a session opens.
+  // (.ahub-*, .jnl-entry, .jnl-header-card, .titan-toggle, .benz-* are all
+  // already static/global, so they don't need to be repeated.)
+  const SELF_STYLE = (rootId) => `
+    <style>
+      @keyframes cp-in   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes cp-glow { 0%,100%{box-shadow:0 0 16px hsl(var(--primary)/0.12)} 50%{box-shadow:0 0 32px hsl(var(--primary)/0.28)} }
+      #${rootId} .cp-card {
+        background: linear-gradient(150deg,hsl(var(--card)/0.92),hsl(var(--bg-soft)/0.7));
+        border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 14px; margin-bottom: 10px;
+        position: relative; overflow: hidden; backdrop-filter: blur(10px);
+        box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
+        transition: border-color .2s, box-shadow .2s;
+      }
+      #${rootId} .cp-card:hover { border-color: hsl(var(--border-bright)/0.6); }
+      #${rootId} .cp-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:1px;
+        background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.35) 40%, hsl(var(--secondary)/0.25) 65%, transparent);
+      }
+      #${rootId} .cp-section-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8.5px; font-weight: 800;
+        letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--muted-foreground)/0.6);
+        margin-bottom: 10px; display: flex; align-items: center; gap: 7px;
+      }
+      #${rootId} .cp-section-label::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, hsl(var(--primary)/0.2), transparent); }
+      #${rootId} .cp-input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+      #${rootId} .cp-input-group { display: flex; flex-direction: column; gap: 4px; }
+      #${rootId} .cp-input-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8px; font-weight: 700;
+        letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--primary)/0.75);
+      }
+      #${rootId} .cp-input {
+        background: hsl(var(--bg)/0.75) !important; border: 1px solid hsl(var(--border)/0.5) !important;
+        border-radius: 10px !important; color: hsl(var(--foreground)) !important;
+        font-family: 'DM Mono', monospace !important; font-size: 12px !important; font-weight: 500 !important;
+        padding: 8px 10px !important; width:100%; outline: none !important; backdrop-filter: blur(6px) !important;
+      }
+      #${rootId} .cp-input:focus { border-color: hsl(var(--primary)/0.55) !important; }
+      #${rootId} select.cp-input option { background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; }
+      #${rootId} .cp-toggle-row {
+        display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; margin-bottom: 8px;
+        background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px;
+        transition: background .16s, border-color .16s;
+      }
+      #${rootId} .cp-toggle-row:hover { background: hsl(var(--card)/0.5); border-color: hsl(var(--border)/0.5); }
+      #${rootId} .cp-engage-btn {
+        width: 100%; padding: 14px 18px; margin-top: 4px; font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 11px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+        border: 1px solid hsl(var(--primary)/0.3); position:relative; overflow:hidden;
+        background: linear-gradient(135deg, hsl(var(--primary)/0.08), hsl(var(--primary-2, var(--primary))/0.04));
+        color: hsl(var(--primary)); border-radius: 14px; cursor: pointer;
+        box-shadow: 0 0 0 1px hsl(var(--primary)/0.08); transition: all .22s cubic-bezier(.34,1.56,.64,1);
+      }
+      #${rootId} .cp-engage-btn:hover { border-color: hsl(var(--primary)/0.55); transform: translateY(-2px); }
+      #${rootId} .cp-engage-btn:active { transform: scale(.97); }
+      #${rootId} .cp-engage-btn.active {
+        background: linear-gradient(135deg, hsl(var(--loss)/0.12), hsl(var(--loss)/0.05));
+        border-color: hsl(var(--loss)/0.4); color: hsl(var(--loss));
+        box-shadow: 0 4px 20px hsl(var(--loss)/0.15); animation: cp-glow 3s ease-in-out infinite;
+      }
+      @keyframes eomr-sheen { 0% { transform: translateX(-120%) skewX(-15deg); } 100% { transform: translateX(220%) skewX(-15deg); } }
+      #${rootId} .cp-engage-btn::before {
+        content:''; position:absolute; top:0; bottom:0; width:35%; left:0;
+        background: linear-gradient(90deg, transparent, hsl(255 100% 100%/0.16), transparent);
+        animation: eomr-sheen 2.8s ease-in-out infinite;
+      }
+      #${rootId} .rf-ind-card {
+        background: hsl(var(--bg)/0.8); border: 1px solid hsl(var(--border)/0.3); border-radius: 10px;
+        padding: 8px; text-align: center; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+      }
+      #${rootId} .rf-ind-val { font-family:'Outfit',sans-serif; font-size:15px; font-weight:900; }
+      #${rootId} .rf-ind-label { font-size:7.5px; font-family:'DM Mono',monospace; letter-spacing:1px; color:hsl(var(--muted-foreground)); margin-top:2px; }
+      #${rootId} .rf-ind-card:hover { transform: translateY(-2px); border-color: hsl(var(--primary)/0.4); box-shadow: 0 4px 14px hsl(0 0% 0%/0.25); }
+
+      /* ── Header ambient glow sweep ────────────────────────────────── */
+      @keyframes eomr-header-sweep { 0% { background-position: 0% 50% } 100% { background-position: 200% 50% } }
+      #${rootId} .rf-header-glow {
+        background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.5), hsl(var(--secondary)/0.4), transparent);
+        background-size: 200% 100%; animation: eomr-header-sweep 5s linear infinite;
+        height: 2px; width: 100%; position:absolute; bottom:0; left:0;
+      }
+      @keyframes eomr-title-glow { 0%,100% { text-shadow: 0 0 10px hsl(var(--primary)/0.4) } 50% { text-shadow: 0 0 22px hsl(var(--primary)/0.75), 0 0 6px hsl(var(--secondary)/0.5) } }
+      #${rootId} h1.font-display { animation: eomr-title-glow 3.2s ease-in-out infinite; }
+
+      /* ── Signal ring container float already defined via ahub-float ── */
+      #${rootId} .cp-card, #${rootId} .ahub-card { will-change: transform, opacity; }
+
+      /* ── Cooldown progress bar ─────────────────────────────────────── */
+      @keyframes eomr-stripe-move { 0% { background-position: 0 0; } 100% { background-position: 28px 0; } }
+      #${rootId} .rf-cd-bar-wrap { margin:10px 0 4px; }
+      #${rootId} .rf-cd-bar-label { display:flex; justify-content:space-between; font-family:'DM Mono',monospace; font-size:9.5px; color:hsl(var(--accent)); margin-bottom:5px; letter-spacing:.5px; }
+      #${rootId} .rf-cd-bar-track { height:6px; border-radius:4px; background:hsl(var(--bg)/0.7); border:1px solid hsl(var(--border)/0.4); overflow:hidden; }
+      #${rootId} .rf-cd-bar-fill {
+        height:100%; border-radius:4px; transition: width 1s linear;
+        background: repeating-linear-gradient(45deg, hsl(var(--accent)), hsl(var(--accent)) 6px, hsl(var(--accent)/0.55) 6px, hsl(var(--accent)/0.55) 12px);
+        background-size: 28px 28px; animation: eomr-stripe-move 1s linear infinite;
+        box-shadow: 0 0 8px hsl(var(--accent)/0.6);
+      }
+    </style>`;
+
   function buildShell(rootId, label) {
     const root = document.getElementById(rootId);
     if (!root || shells[rootId]) return root;
     shells[rootId] = true;
     root.innerHTML = `
+      ${SELF_STYLE(rootId)}
       <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0;position:relative">
         <div>
           <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700">${label}</h1>
@@ -20789,6 +20925,7 @@ window.NexusStrategies=exports;
         <div style="flex:1"></div>
         <div class="glass-panel" id="${rootId}-balance" style="padding:7px 14px;font-size:12px;display:none"></div>
         <div id="${rootId}-conn-dot" style="width:10px;height:10px;border-radius:50%;background:hsl(var(--loss))"></div>
+        <div class="rf-header-glow"></div>
       </header>
       <div class="titan-grid">
         <div class="benz-col"><div class="benz-scroll" id="${rootId}-left"></div></div>
@@ -21032,16 +21169,21 @@ window.NexusStrategies=exports;
           <div class="cp-section-label" style="margin:0">Auto Pilot</div>
           <button class="titan-toggle ${c.autoPilot?'on':''}" id="${rootId}-auto"></button>
         </div>
-        <div class="cp-toggle-row" style="margin-bottom:0">
+        <div class="cp-toggle-row" style="margin-bottom:${c.autoRefresh ? '8px' : '0'}">
           <div>
             <div style="font-size:10px;font-weight:700;color:hsl(var(--foreground))">🔄 Auto Market Switch</div>
-            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:2px">Rotates to the top-ranked market after a cooldown</div>
+            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:2px">Rotates on an idle timer AND after a completed session — the entry gate is strict by design, so this hunts across markets instead of camping one quiet market waiting for a signal.</div>
           </div>
           <button class="titan-toggle ${c.autoRefresh?'on':''}" id="${rootId}-autorefresh"></button>
+        </div>
+        <div class="cp-input-group" style="${c.autoRefresh ? '' : 'display:none'}">
+          <span class="cp-input-label">Rotate after N idle minutes (no signal)</span>
+          <input class="cp-input" type="number" min="1" max="30" step="1" id="${rootId}-eomr-idlerotate" value="${c.idleRotateMinutes ?? 3}">
         </div>
       </div>
 
       <div class="cp-card">
+
         <div class="cp-section-label">Session Limits</div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Take Profit ($)</span><input class="cp-input" type="number" step="0.5" min="0" id="${rootId}-tp" value="${c.takeProfit}"></div>
