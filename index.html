@@ -259,7 +259,7 @@
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">WS App ID <span style="font-size:10px;opacity:0.6;">(Analysis / Digits)</span></label>
-            <p class="settings-hint">Your <strong>numeric</strong> App ID for <code>ws.derivws.com</code> public sockets — used for live digit/tick analysis only, not trading. Register at <strong>api.deriv.com</strong> → Applications. Default is <code>1089</code> (Deriv test ID).</p>
+            <p class="settings-hint">No longer required — Deriv's public analysis feed (<code>wss://api.derivws.com/trading/v1/options/ws/public</code>) doesn't take an App ID. This field is kept for backward compatibility only and has no effect on live digits.</p>
             <div class="settings-row">
               <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
               <button type="button" class="btn-primary font-display" id="settings-wsappid-save">Save</button>
@@ -8336,7 +8336,7 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -10024,7 +10024,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
 
   class GlobalSocketManager {
     constructor() {
@@ -10566,7 +10566,7 @@ window.NexusTrading = exports;
 (function () {
   'use strict';
 
-  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
+  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -12015,7 +12015,7 @@ window.NexusStrategies=exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
   const ANALYSIS_HOLD = 20;
 
   // Generalized TP/SL popup — kind: 'tp' (win/green) or 'sl' (loss/red).
@@ -21140,7 +21140,7 @@ window.NexusStrategies=exports;
   function hrGetPublicWsUrl() {
     const id = (window.HubStore && window.HubStore.getState().wsAppId) ||
       (function () { try { return localStorage.getItem('hub_ws_app_id') || ''; } catch (_) { return ''; } })() || '1089';
-    return 'wss://ws.derivws.com/websockets/v3?app_id=' + id;
+    return 'wss://api.derivws.com/trading/v1/options/ws/public';
   }
   const HR_MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
