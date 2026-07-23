@@ -21423,6 +21423,13 @@ window.NexusStrategies=exports;
         cooldownTicks: Math.max(0, int(saved.cooldownTicks, 5)),
         clusterCap: Math.max(1, int(saved.clusterCap, 5)),
         filtersActive: bool(saved.filtersActive, true),
+        // How many identical digits in a row must land before the bot fires
+        // (X→X is a 2-streak). Kept adjustable, default stays 2.
+        minStreak: Math.min(9, Math.max(2, int(saved.minStreak, 2))),
+        // Number of contracts fired per trigger, and the delay (ms) between
+        // each one in that burst — mirrors the Differ bot's Batch/Speed.
+        batchSize: Math.max(1, int(saved.batchSize, 1)),
+        speed: Math.min(1000, Math.max(50, int(saved.speed, 100))),
         isArmed: false, isRunning: false, isCooldown: false, cooldownRemaining: 0,
         autoMode: bool(saved.autoMode, true),
         takeProfit: Math.max(0, num(saved.takeProfit, 20)), stopLoss: Math.max(0, num(saved.stopLoss, 15)),
@@ -21439,6 +21446,7 @@ window.NexusStrategies=exports;
           primaryMarket: s.primaryMarket, stake: s.stake, cooldownTicks: s.cooldownTicks,
           clusterCap: s.clusterCap, filtersActive: s.filtersActive, autoMode: s.autoMode,
           takeProfit: s.takeProfit, stopLoss: s.stopLoss, abortOnLoss: s.abortOnLoss,
+          minStreak: s.minStreak, batchSize: s.batchSize, speed: s.speed,
         }));
       } catch (e) {}
     }
@@ -21466,7 +21474,12 @@ window.NexusStrategies=exports;
           s.history = [...s.history, digit].slice(-150);
           if (s.isArmed && !s.armToFireOnNextTick) {
             const n = s.history.length;
-            if (n >= 2 && s.history[n - 1] === s.history[n - 2] && this.tickIndex >= this._eligibleFromTick) {
+            const k = Math.max(2, s.minStreak);
+            let streakOk = n >= k;
+            if (streakOk) {
+              for (let i = 1; i < k; i++) { if (s.history[n - 1 - i] !== digit) { streakOk = false; break; } }
+            }
+            if (streakOk && this.tickIndex >= this._eligibleFromTick) {
               let ok = true;
               if (s.filtersActive) {
                 const win = s.history.slice(-30);
@@ -21487,6 +21500,9 @@ window.NexusStrategies=exports;
         case 'SET_COOLDOWN_TICKS': s.cooldownTicks = action.value; break;
         case 'SET_CLUSTER_CAP': s.clusterCap = action.value; break;
         case 'TOGGLE_FILTERS': s.filtersActive = !s.filtersActive; break;
+        case 'SET_MIN_STREAK': s.minStreak = action.value; break;
+        case 'SET_BATCH': s.batchSize = action.value; break;
+        case 'SET_SPEED': s.speed = action.value; break;
         case 'ARM': s.isArmed = true; s.armToFireOnNextTick = false; this._eligibleFromTick = this.tickIndex; break;
         case 'DISARM': s.isArmed = false; s.isRunning = false; s.armToFireOnNextTick = false; break;
         case 'FIRING': s.isRunning = true; break;
@@ -21526,23 +21542,38 @@ window.NexusStrategies=exports;
       }
     }
 
-    fireContract(barrier) {
+    async fireContract(barrier) {
       const s = this.state;
       if (!s.isAuthenticated) { this.dispatch({ type: 'NOTIFY', message: 'Repeat seen but no account linked — add a token in Settings', ntype: 'loss' }); return; }
       if (!window.HubStore.isBotEnabled('hotrepeat')) { this.dispatch({ type: 'NOTIFY', message: 'Hot Repeat bot is disabled — enable it from the Dashboard first', ntype: 'loss' }); return; }
       this.dispatch({ type: 'FIRING' });
+      this.abortFlag = false;
       hrAudio.trigger();
       const stake = s.stake;
-      try {
+      const batch = Math.max(1, s.batchSize);
+      const speed = s.speed;
+      const sendOne = () => {
         this.socketT && this.socketT.send(JSON.stringify({
           buy: '1', price: stake,
           parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
         }));
+      };
+      let firedCount = 0;
+      if (speed <= 100) {
+        for (let i = 0; i < batch; i++) { try { sendOne(); firedCount++; } catch (e) {} }
         hrAudio.fire();
-        const msg = `⚡ REPEAT ${barrier}→${barrier} — firing DIFFER ≠${barrier}`;
+      } else {
+        for (let i = 0; i < batch; i++) {
+          if (this.abortFlag) break;
+          try { sendOne(); firedCount++; hrAudio.fire(); } catch (e) {}
+          if (i < batch - 1) await new Promise((r) => setTimeout(r, speed));
+        }
+      }
+      if (firedCount > 0) {
+        const msg = `⚡ REPEAT ${barrier}→${barrier} — firing ${firedCount}× DIFFER ≠${barrier}`;
         this.dispatch({ type: 'NOTIFY', message: msg, ntype: 'info' });
         window.HubStore.notifyTelegram(`🔥 ${msg}`);
-      } catch (e) {}
+      }
       this.dispatch({ type: 'FIRE_COMPLETE' });
     }
 
@@ -21842,6 +21873,11 @@ window.NexusStrategies=exports;
           <div class="cp-input-group"><span class="cp-input-label">Stake ($)</span><input class="cp-input" type="number" step="0.01" id="hotrepeat-stake" value="${s.stake}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Cooldown (ticks)</span><input class="cp-input" type="number" id="hotrepeat-cooldown" value="${s.cooldownTicks}" min="0"></div>
         </div>
+        <div class="cp-input-group" style="margin-bottom:8px">
+          <span class="cp-input-label">Min Streak (X repeated N times)</span>
+          <input class="cp-input" type="number" id="hotrepeat-minstreak" value="${s.minStreak}" min="2" max="9">
+          <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">Default 2 = fires on X&#8594;X. Raise it to wait for a longer run (e.g. 3 = X&#8594;X&#8594;X) before firing.</span>
+        </div>
         <div class="cp-toggle-row">
           <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Anti-cluster filter</span>
           <button class="titan-toggle ${s.filtersActive ? 'on' : ''}" id="hotrepeat-filters" onclick="event.stopPropagation()"></button>
@@ -21849,6 +21885,18 @@ window.NexusStrategies=exports;
         <div class="cp-input-group" style="margin-bottom:4px;${s.filtersActive ? '' : 'opacity:.4'}">
           <span class="cp-input-label">Cluster cap (per 30 ticks)</span>
           <input class="cp-input" type="number" id="hotrepeat-cluster" value="${s.clusterCap}" min="1" ${s.filtersActive ? '' : 'disabled'}>
+        </div>
+      </div>
+      <div class="cp-card">
+        <div class="cp-section-label">EXECUTION</div>
+        <div class="cp-input-group" style="margin-bottom:10px">
+          <span class="cp-input-label">Runs per trigger</span>
+          <input class="cp-input" type="number" id="hotrepeat-runs" value="${s.batchSize}" min="1">
+        </div>
+        <div class="cp-input-group">
+          <span class="cp-input-label" id="hotrepeat-speed-label">Run Speed · ${s.speed <= 100 ? 'SUPERSONIC' : s.speed <= 300 ? 'FAST' : s.speed <= 600 ? 'NORMAL' : 'SLOW'} (${s.speed}ms)</span>
+          <input type="range" id="hotrepeat-speed" min="50" max="1000" step="50" value="${s.speed}">
+          <div style="display:flex;justify-content:space-between;font-size:8px;color:hsl(var(--muted-foreground))"><span>50ms (Fast)</span><span>1000ms (Slow)</span></div>
         </div>
       </div>
       <div class="cp-card">
@@ -21871,18 +21919,25 @@ window.NexusStrategies=exports;
   function renderCenter(s) {
     const hist = s.history;
     const n = hist.length;
-    const a = n >= 2 ? hist[n - 2] : null;
-    const b = n >= 1 ? hist[n - 1] : null;
-    const isMatch = a !== null && b !== null && a === b;
-    const t1c = a === null ? '' : 'filled';
-    const t2c = (b === null ? '' : 'filled') + (isMatch ? ' match' : '');
+    const k = Math.max(2, s.minStreak || 2);
+    const lastDigit = n ? hist[n - 1] : null;
+    // isMatch: the last k digits are all present and identical.
+    let isMatch = n >= k;
+    if (isMatch) { for (let i = 1; i < k; i++) { if (hist[n - 1 - i] !== lastDigit) { isMatch = false; break; } } }
+    const streakTiles = Array.from({ length: k }, (_, i) => {
+      const idx = n - k + i;
+      const val = idx >= 0 ? hist[idx] : null;
+      const cls = (val === null ? '' : 'filled') + (isMatch ? ' match' : '');
+      return `<div class="hr-tile ${cls}">${val === null ? '–' : val}</div>`;
+    }).join('<div class="hr-link"></div>');
     let t3 = '?', t3c = '';
     let caption;
-    if (s.armToFireOnNextTick) { t3 = '⚡'; t3c = 'match'; caption = `Repeat on <b>${s.fireBarrier}</b> confirmed — firing on the next tick.`; }
-    else if (isMatch) { caption = `Repeat on <b>${b}</b> seen — checking filters…`; }
-    else { caption = s.isArmed ? 'Armed — watching the stream for X&#8594;X.' : 'Idle — watching the stream for X&#8594;X.'; }
+    if (s.armToFireOnNextTick) { t3 = '⚡'; t3c = 'match'; caption = `Repeat on <b>${s.fireBarrier}</b> confirmed (${k}-streak) — firing on the next tick.`; }
+    else if (isMatch) { caption = `${k}-streak on <b>${lastDigit}</b> seen — checking filters…`; }
+    else { caption = s.isArmed ? `Armed — watching the stream for a ${k}-digit repeat.` : `Idle — watching the stream for a ${k}-digit repeat.`; }
     const tape = hist.slice(-30).map((d, i, arr) => {
-      const hot = i > 0 && arr[i] === arr[i - 1];
+      let hot = i >= k - 1;
+      if (hot) { for (let j = 1; j < k; j++) { if (arr[i - j] !== arr[i]) { hot = false; break; } } }
       return `<div class="d ${hot ? 'hot' : ''}">${d}</div>`;
     }).join('');
     const wr = (s.totalWins + s.totalLoss) ? ((s.totalWins / (s.totalWins + s.totalLoss)) * 100).toFixed(1) + '%' : '—';
@@ -21890,9 +21945,7 @@ window.NexusStrategies=exports;
       <div class="cp-card">
         <div class="cp-section-label">REPEAT GATE</div>
         <div class="hr-gate">
-          <div class="hr-tile ${t1c}">${a === null ? '–' : a}</div>
-          <div class="hr-link"></div>
-          <div class="hr-tile ${t2c}">${b === null ? '–' : b}</div>
+          ${streakTiles}
           <div class="hr-link ${isMatch ? 'hot' : ''}"></div>
           <div class="hr-tile ${t3c}">${t3}</div>
         </div>
@@ -21983,6 +22036,20 @@ window.NexusStrategies=exports;
     if (cdInp && !cdInp._bound) { cdInp._bound = true; cdInp.onchange = () => eng.dispatch({ type: 'SET_COOLDOWN_TICKS', value: Math.max(0, parseInt(cdInp.value, 10) || 0) }); }
     const clInp = el('hotrepeat-cluster', root);
     if (clInp && !clInp._bound) { clInp._bound = true; clInp.onchange = () => eng.dispatch({ type: 'SET_CLUSTER_CAP', value: Math.max(1, parseInt(clInp.value, 10) || 1) }); }
+    const msInp = el('hotrepeat-minstreak', root);
+    if (msInp && !msInp._bound) { msInp._bound = true; msInp.onchange = () => eng.dispatch({ type: 'SET_MIN_STREAK', value: Math.min(9, Math.max(2, parseInt(msInp.value, 10) || 2)) }); }
+    const runsInp = el('hotrepeat-runs', root);
+    if (runsInp && !runsInp._bound) { runsInp._bound = true; runsInp.onchange = () => eng.dispatch({ type: 'SET_BATCH', value: Math.max(1, parseInt(runsInp.value, 10) || 1) }); }
+    const speedInp = el('hotrepeat-speed', root);
+    if (speedInp && !speedInp._bound) {
+      speedInp._bound = true;
+      speedInp.oninput = (e) => {
+        const v = parseInt(e.target.value, 10);
+        const lbl = el('hotrepeat-speed-label', root);
+        if (lbl) lbl.textContent = `Run Speed · ${v <= 100 ? 'SUPERSONIC' : v <= 300 ? 'FAST' : v <= 600 ? 'NORMAL' : 'SLOW'} (${v}ms)`;
+      };
+      speedInp.onchange = (e) => eng.dispatch({ type: 'SET_SPEED', value: Math.min(1000, Math.max(50, parseInt(e.target.value, 10) || 100)) });
+    }
     const filtBtn = el('hotrepeat-filters', root);
     if (filtBtn && !filtBtn._bound) { filtBtn._bound = true; filtBtn.onclick = () => eng.dispatch({ type: 'TOGGLE_FILTERS' }); }
     const tpInp = el('hotrepeat-tp', root);
