@@ -14192,12 +14192,13 @@ window.NexusStrategies=exports;
             } else if (data.proposal && data.proposal.id) {
               _titan.addLog('engine', 'PROPOSAL', `Proposal #${data.proposal.id} accepted — ask=${data.proposal.ask_price}`);
               _titan._pendingProposal = null;
-              // This is a streaming proposal (subscribe:1 was required by
-              // the API) — we only need the first quote, so forget the
-              // subscription now instead of leaving it running.
-              try { _titan.tradingSocket.send(JSON.stringify({ forget: data.proposal.id })); } catch (_) {}
               try {
                 _titan.tradingSocket.send(JSON.stringify({ buy: data.proposal.id, price: data.proposal.ask_price }));
+                // Forget the streaming proposal only AFTER buy has consumed
+                // it — forgetting first invalidates the proposal id
+                // server-side, which made every buy fail with
+                // "Unknown contract proposal" (InvalidContractProposal).
+                try { _titan.tradingSocket.send(JSON.stringify({ forget: data.proposal.id })); } catch (_) {}
               } catch (e) {
                 _titan.addLog('error', 'TRADE', 'Failed to send buy for confirmed proposal — releasing lock.');
                 _titan.pendingTrade = null;
@@ -14236,6 +14237,13 @@ window.NexusStrategies=exports;
               const cid = data.buy.contract_id.toString();
               _titan.addLog('engine', 'CONFIRMED', `Contract #${cid} accepted @ ${data.buy.buy_price}`);
               if (_titan.state.openTrade) _titan.state.openTrade = { ..._titan.state.openTrade, contractId: cid };
+              // The 45s stuck-watchdog only guards the proposal→buy handshake;
+              // once buy is confirmed we're just waiting on the position to
+              // settle (which for an open Accumulator position can legitimately
+              // take far longer than 45s). Clear it here or it fires on a
+              // perfectly healthy open position and wipes openTrade/isLocked
+              // out from under it.
+              if (_titan.stuckWatchdog) { clearTimeout(_titan.stuckWatchdog); _titan.stuckWatchdog = null; }
               // Check if we already got the result (early result race condition)
               if (_titan._earlyResults && _titan._earlyResults.has(cid)) {
                 const earlyResult = _titan._earlyResults.get(cid);
