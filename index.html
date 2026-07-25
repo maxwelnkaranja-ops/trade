@@ -13233,7 +13233,11 @@ window.NexusStrategies=exports;
       const takeProfit = Math.max(0.1, parseFloat((cfg.stake * (cfg.positionTakeProfitRatio || 2)).toFixed(2)));
       const reqId = (this._accReqIdSeq = (this._accReqIdSeq || 0) + 1);
       const proposalParams = {
-        proposal: 1, subscribe: 0, req_id: reqId,
+        // subscribe MUST be 1 here — the API rejects subscribe:0 with
+        // "Not in enum list: 1" (the only allowed value for this account/
+        // app_id is 1, i.e. a streaming proposal). We still only act on the
+        // first update below and then `forget` the stream immediately.
+        proposal: 1, subscribe: 1, req_id: reqId,
         amount: cfg.stake, basis: 'stake', contract_type: contractType,
         // Deriv's proposal API renamed `symbol` -> `underlying_symbol`
         // (see developers.deriv.com/comparison/proposal) — every other
@@ -14188,6 +14192,10 @@ window.NexusStrategies=exports;
             } else if (data.proposal && data.proposal.id) {
               _titan.addLog('engine', 'PROPOSAL', `Proposal #${data.proposal.id} accepted — ask=${data.proposal.ask_price}`);
               _titan._pendingProposal = null;
+              // This is a streaming proposal (subscribe:1 was required by
+              // the API) — we only need the first quote, so forget the
+              // subscription now instead of leaving it running.
+              try { _titan.tradingSocket.send(JSON.stringify({ forget: data.proposal.id })); } catch (_) {}
               try {
                 _titan.tradingSocket.send(JSON.stringify({ buy: data.proposal.id, price: data.proposal.ask_price }));
               } catch (e) {
