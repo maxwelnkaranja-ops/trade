@@ -13235,7 +13235,14 @@ window.NexusStrategies=exports;
       const proposalParams = {
         proposal: 1, subscribe: 0, req_id: reqId,
         amount: cfg.stake, basis: 'stake', contract_type: contractType,
-        currency: accountCurrency, symbol: cfg.selectedMarket, growth_rate: growthRate,
+        // Deriv's proposal API renamed `symbol` -> `underlying_symbol`
+        // (see developers.deriv.com/comparison/proposal) — every other
+        // trade path here (DIGITDIFF, digit/price contracts) already uses
+        // underlying_symbol, but this one still sent the old `symbol`
+        // field, which the API now rejects outright with
+        // "Properties not allowed: symbol" — so the Accumulator never got
+        // past the proposal step and no trade was ever placed.
+        currency: accountCurrency, underlying_symbol: cfg.selectedMarket, growth_rate: growthRate,
         limit_order: { take_profit: takeProfit },
       };
       this._pendingProposal = { reqId, contractType };
@@ -22035,7 +22042,34 @@ window.NexusStrategies=exports;
   }
 
   function renderFull(s) { shellBuilt = false; render(s); }
-  function commitPendingSettings() { const eng = window._hotRepeatEngineRef; if (eng) eng.saveConfig(); }
+  // Commits every field currently shown in the panel to the engine before
+  // saving — mirrors Differ's differCommitAllFields(). Without this, a
+  // value typed into a number field but never blurred (e.g. the user types
+  // a new stake then immediately clicks the navbar's global "SAVE SETTINGS"
+  // button without tabbing/clicking away first) never reaches eng.state,
+  // so saveConfig() persists the OLD value and the edit appears lost on
+  // refresh — this was happening for every Hot Repeat field.
+  function hotRepeatCommitAllFields() {
+    const eng = window._hotRepeatEngineRef;
+    if (!eng) return;
+    const stakeEl = el('hotrepeat-stake');
+    const cdEl    = el('hotrepeat-cooldown');
+    const clEl    = el('hotrepeat-cluster');
+    const msEl    = el('hotrepeat-minstreak');
+    const runsEl  = el('hotrepeat-runs');
+    const speedEl = el('hotrepeat-speed');
+    const tpEl    = el('hotrepeat-tp');
+    const slEl    = el('hotrepeat-sl');
+    if (stakeEl) { const v = parseFloat(stakeEl.value); if (!isNaN(v)) eng.dispatch({ type: 'SET_STAKE', value: Math.max(0.35, v) }); }
+    if (cdEl)    { const v = parseInt(cdEl.value, 10);  if (!isNaN(v)) eng.dispatch({ type: 'SET_COOLDOWN_TICKS', value: Math.max(0, v) }); }
+    if (clEl)    { const v = parseInt(clEl.value, 10);  if (!isNaN(v)) eng.dispatch({ type: 'SET_CLUSTER_CAP', value: Math.max(1, v) }); }
+    if (msEl)    { const v = parseInt(msEl.value, 10);  if (!isNaN(v)) eng.dispatch({ type: 'SET_MIN_STREAK', value: Math.min(9, Math.max(2, v)) }); }
+    if (runsEl)  { const v = parseInt(runsEl.value, 10); if (!isNaN(v)) eng.dispatch({ type: 'SET_BATCH', value: Math.max(1, v) }); }
+    if (speedEl) { const v = parseInt(speedEl.value, 10); if (!isNaN(v)) eng.dispatch({ type: 'SET_SPEED', value: Math.min(1000, Math.max(50, v)) }); }
+    if (tpEl)    { const v = parseFloat(tpEl.value); if (!isNaN(v)) eng.dispatch({ type: 'SET_TP', value: Math.max(0, v) }); }
+    if (slEl)    { const v = parseFloat(slEl.value); if (!isNaN(v)) eng.dispatch({ type: 'SET_SL', value: Math.max(0, v) }); }
+  }
+  function commitPendingSettings() { hotRepeatCommitAllFields(); const eng = window._hotRepeatEngineRef; if (eng) eng.saveConfig(); }
 
   global.HotRepeatUI = { render, renderFull, commitPendingSettings, _initialized: false };
 })(window);
@@ -22237,6 +22271,12 @@ window.NexusStrategies=exports;
   }
 
   function initBotTab(id) {
+    if (id === 'differ') {
+      const eng = ensureDifferEngine();
+      if (!eng) return;
+      if (window.BenzUI) window.BenzUI.renderFull(eng.state);
+      return;
+    }
     if (id === 'hotrepeat') {
       const eng = ensureHotRepeatEngine();
       if (!eng) return;
@@ -22245,11 +22285,12 @@ window.NexusStrategies=exports;
     }
     const eng = ensureTitanEngine(id);
     if (!eng) return;
-    if (id === 'meanrev' || id === 'accumulator' || id === 'risemr' || id === 'fallmr') {
+    if (id === 'risefall' || id === 'meanrev' || id === 'accumulator' || id === 'risemr' || id === 'fallmr') {
       const mrTitle = id === 'accumulator' ? 'ACCUMULATOR BOT'
         : id === 'meanrev' ? 'RISE & FALL MEAN REVERSION BOT'
         : id === 'risemr' ? 'RISE MEAN REVERSION BOT (HIGHER ONLY)'
-        : 'FALL MEAN REVERSION BOT (LOWER ONLY)';
+        : id === 'fallmr' ? 'FALL MEAN REVERSION BOT (LOWER ONLY)'
+        : 'HIGHER/LOWER BOT';
       if (window.RiseFallUI) window.RiseFallUI.render(eng, id + '-root', mrTitle);
       titanBuilt[id] = true;
       return;
@@ -22264,7 +22305,7 @@ window.NexusStrategies=exports;
       titanBuilt[id] = true;
       return;
     }
-    const label = id === 'under' ? 'UNDER PROFIT FINDER' : 'NEXUS PROFIT FINDER';
+    const label = id === 'even' ? 'EVEN OMEGA' : id === 'odd' ? 'ODD OMEGA' : id === 'under' ? 'UNDER PROFIT FINDER' : 'NEXUS PROFIT FINDER';
     if (window.TitanUI) window.TitanUI.render(eng, id + '-root', label);
     titanBuilt[id] = true;
   }
@@ -22632,7 +22673,7 @@ window.NexusStrategies=exports;
     BOT_IDS.forEach((id) => {
       const eng = engines[id];
       if (!eng) return;
-      if (id === 'differ') {
+      if (id === 'hotrepeat') {
         eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp });
         eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl });
       } else if (id !== 'risefall' && id !== 'meanrev' && id !== 'risemr' && id !== 'fallmr') {
@@ -22666,7 +22707,26 @@ window.NexusStrategies=exports;
             if (ui && !ui._initialized) { try { ui.renderFull(eng.state); ui._initialized = true; } catch(_) {} }
             if (!eng.state.isAuthenticated && window.HubStore && window.HubStore.getState().apiToken) {
               eng.authenticate();
-              setTimeout(() => { try { eng.armSystem(); } catch(_) {} queueDashboardRender(); }, 3000);
+              // Poll for authentication instead of a blind fixed delay — a
+              // real auth round-trip (2 REST calls + a WS handshake) can
+              // easily take longer than 3s, in which case the old fixed
+              // setTimeout fired armSystem() too early, armSystem() saw
+              // isAuthenticated still false, bailed out with a "no token"
+              // notice, and Engage silently did nothing from the user's
+              // point of view. Poll every 400ms for up to 12s instead.
+              let waited = 0;
+              const waitForAuth = setInterval(() => {
+                waited += 400;
+                if (eng.state.isAuthenticated) {
+                  clearInterval(waitForAuth);
+                  try { eng.armSystem(); } catch(_) {}
+                  queueDashboardRender();
+                } else if (waited >= 12000) {
+                  clearInterval(waitForAuth);
+                  try { eng.armSystem(); } catch(_) {} // will surface its own "add a token" notice if still unauthenticated
+                  queueDashboardRender();
+                }
+              }, 400);
             } else {
               eng.armSystem();
             }
@@ -22764,11 +22824,11 @@ window.NexusStrategies=exports;
   function saveAllSettings() {
     let savedAny = false;
     try {
-      if (window.BenzUI && typeof window.BenzUI.commitPendingSettings === 'function') {
-        window.BenzUI.commitPendingSettings();
+      if (window.HotRepeatUI && typeof window.HotRepeatUI.commitPendingSettings === 'function') {
+        window.HotRepeatUI.commitPendingSettings();
         savedAny = true;
       }
-    } catch (e) { console.error('[Hub] Differ save error:', e); }
+    } catch (e) { console.error('[Hub] Hot Repeat save error:', e); }
     ['nexus', 'under', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
@@ -22820,6 +22880,7 @@ window.NexusStrategies=exports;
     // risefall/meanrev/matches/accumulator/risemr/fallmr/evenmr/oddmr had no
     // engine instance (and so no stats/journal) until their tab was opened
     // at least once — including them here fixes that.
+    try { ensureHotRepeatEngine(); } catch(e) { console.error('[Hub] ensureHotRepeatEngine error:', e); }
     try {
       ['nexus', 'under', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr']
         .forEach((id) => { try { ensureTitanEngine(id); } catch (e) { console.error(`[Hub] ensureTitanEngine(${id}) error:`, e); } });
