@@ -13408,7 +13408,12 @@ window.NexusStrategies=exports;
         // reverting DOWN through it is the safety cushion.
         // HIGHER (CALL): barrier BELOW entry (-offset) — mirror image.
         contractType = this._riseFallDirection || 'CALL';
-        const mrOffset = (this._mrBarrierOffset != null && this._mrBarrierOffset > 0 ? this._mrBarrierOffset : 0.1).toFixed(5);
+        // Deriv rejects barriers with more than 2 decimal places
+        // (BarrierValidationError) — every market this bot trades (V10-V100,
+        // 1s and standard) quotes at 2 decimals, but this was sending the
+        // raw 0.5×ATR offset at 5 decimal places (e.g. "-0.14821"), so
+        // every single trade got rejected before it could even fire.
+        const mrOffset = Math.max(0.01, this._mrBarrierOffset != null && this._mrBarrierOffset > 0 ? this._mrBarrierOffset : 0.1).toFixed(2);
         barrierValue = contractType === 'PUT' ? `+${mrOffset}` : `-${mrOffset}`;
       } else if (this.isEvenOddMRMode) {
         // Simple, direct mapping — no strategy-flip/recovery-side logic at
