@@ -12117,6 +12117,13 @@ window.NexusStrategies=exports;
       this.modeSwitchCooldown = 0; this.isStrategyTransitioning = false;
 
       this.tradingSocket = null; this.tickUnsub = null; this.scanner = null;
+      // Per-symbol barrier decimal precision (pip size), keyed by underlying_symbol.
+      // Populated from active_symbols on connect — Deriv's synthetic indices do NOT
+      // all quote at the same precision (e.g. R_25/1HZ25V use 3 decimals while
+      // 1HZ100V uses 2), so a barrier's decimal places must match the SYMBOL's
+      // pip size, not a hardcoded value. See executeBoltPurchase's mean-rev
+      // barrier formatting, which reads this map.
+      this._symbolPipDecimals = {};
       this.ownContractIds = new Set();
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
@@ -12360,7 +12367,9 @@ window.NexusStrategies=exports;
       // RSI(7) 75/25 + Stochastic(5,3,3) 80/20 momentum-exhaustion gates,
       // barrier offset = atrMultiplier × ATR(14)).
       const meanrevDefaults = {
-        stake: 1, targetRuns: 1, minSignal: 50, duration: 10,
+        // duration here is SECONDS, not ticks — see the note at the buy
+        // request below for why.
+        stake: 1, targetRuns: 1, minSignal: 50, duration: 15,
         martingaleEnabled: true, martingaleMultiplier: 1.8, martingaleStopStep: 3,
         autoPilot: true, takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         soundEnabled: true, autoRefresh: true, direction: 'auto',
@@ -13408,12 +13417,22 @@ window.NexusStrategies=exports;
         // reverting DOWN through it is the safety cushion.
         // HIGHER (CALL): barrier BELOW entry (-offset) — mirror image.
         contractType = this._riseFallDirection || 'CALL';
-        // Deriv rejects barriers with more than 2 decimal places
-        // (BarrierValidationError) — every market this bot trades (V10-V100,
-        // 1s and standard) quotes at 2 decimals, but this was sending the
-        // raw 0.5×ATR offset at 5 decimal places (e.g. "-0.14821"), so
-        // every single trade got rejected before it could even fire.
-        const mrOffset = Math.max(0.01, this._mrBarrierOffset != null && this._mrBarrierOffset > 0 ? this._mrBarrierOffset : 0.1).toFixed(2);
+        // Deriv rejects a barrier whose decimal places don't match the
+        // underlying's own pip size (BarrierValidationError) — this used to
+        // hardcode 2 decimals assuming "every market this bot trades quotes
+        // at 2 decimals", which is false: e.g. R_25/1HZ25V quote at 3
+        // decimals (pip 0.001), not 2. Sending "-0.15" on a 3-decimal
+        // symbol (or any raw 5-decimal ATR offset like "-0.14821") comes
+        // back "Invalid barrier" every time, regardless of the barrier's
+        // actual value — which is exactly the loop seen in the logs.
+        // Fix: look up the REAL decimal precision for the selected market
+        // (cached from active_symbols on connect) and round to that,
+        // falling back to 2dp only if we haven't received it yet.
+        const barrierDecimals = (this._symbolPipDecimals && this._symbolPipDecimals[cfg.selectedMarket] != null)
+          ? this._symbolPipDecimals[cfg.selectedMarket] : 2;
+        const rawOffset = this._mrBarrierOffset != null && this._mrBarrierOffset > 0 ? this._mrBarrierOffset : 0.1;
+        const minOffset = 1 / Math.pow(10, barrierDecimals); // smallest non-zero step at this precision
+        const mrOffset = Math.max(minOffset, rawOffset).toFixed(barrierDecimals);
         barrierValue = contractType === 'PUT' ? `+${mrOffset}` : `-${mrOffset}`;
       } else if (this.isEvenOddMRMode) {
         // Simple, direct mapping — no strategy-flip/recovery-side logic at
@@ -13535,7 +13554,17 @@ window.NexusStrategies=exports;
       const accountCurrency = window.HubStore.getState().currency || 'USD';
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
-        currency: accountCurrency, duration: (this.isPriceMode || this.isMeanRevMode) ? (cfg.duration || 5) : this.isMatchMode ? (cfg.numTicks || 2) : 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket,
+        currency: accountCurrency,
+        // Deriv only offers Higher/Lower (a CALL/PUT WITH a barrier) on a
+        // seconds-or-longer duration — tick-duration CALL/PUT contracts are
+        // Rise/Fall (no barrier) only. Since Mean Reversion always sends a
+        // barrier, sending duration_unit:'t' for it made every single buy
+        // come back "Invalid barrier" regardless of the barrier's value.
+        // Plain Higher/Lower (isPriceMode, barrier always 0 → true Rise/Fall)
+        // and Matches both stay on ticks, which they do support.
+        duration: this.isMeanRevMode ? (cfg.duration || 15) : this.isPriceMode ? (cfg.duration || 5) : this.isMatchMode ? (cfg.numTicks || 2) : 1,
+        duration_unit: this.isMeanRevMode ? 's' : 't',
+        underlying_symbol: cfg.selectedMarket,
       };
       if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER') || contractType.includes('MATCH')) params.barrier = barrierValue;
       this.sound.playExecute();
@@ -14131,6 +14160,11 @@ window.NexusStrategies=exports;
           _titan.addLog('win', 'AUTH', 'Ready to trade');
           try { _titan.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
           try { _titan.tradingSocket.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); } catch (e) { /* */ }
+          // Fetch each symbol's real pip size so mean-rev's offset barrier can be
+          // formatted at the correct decimal precision per market (see the
+          // "Invalid barrier" fix note in executeBoltPurchase — hardcoding 2
+          // decimals broke on any symbol that doesn't actually quote at 2dp).
+          try { _titan.tradingSocket.send(JSON.stringify({ active_symbols: 'brief', product_type: 'basic' })); } catch (e) { /* */ }
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
           // If the engine was mid-chain when socket reconnected (isLocked+active, no pending),
           // retry the bolt now that the socket is ready — otherwise the chain silently stalls.
@@ -14162,6 +14196,16 @@ window.NexusStrategies=exports;
             return;
           }
           if (data.msg_type === 'balance') _titan.state.balance = data.balance.balance;
+          // Cache each symbol's decimal precision from its pip size (e.g. pip
+          // 0.001 → 3 decimals). Used to format offset barriers (mean-rev)
+          // correctly per market instead of assuming every symbol is 2dp.
+          if (data.msg_type === 'active_symbols' && Array.isArray(data.active_symbols)) {
+            data.active_symbols.forEach((s) => {
+              if (!s || !s.symbol || typeof s.pip !== 'number' || s.pip <= 0) return;
+              const decimals = Math.max(0, Math.round(-Math.log10(s.pip)));
+              _titan._symbolPipDecimals[s.symbol] = decimals;
+            });
+          }
           // Log every server reply that isn't a ping/balance/heartbeat so trade
           // failures always appear in the engine log, not just swallowed silently.
           if (data.msg_type && data.msg_type !== 'balance' && data.msg_type !== 'ping') {
@@ -19870,6 +19914,8 @@ window.NexusStrategies=exports;
           <div class="cp-input-group"><span class="cp-input-label">Stake</span><input class="cp-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}"></div>
           ${engine.isAccumulatorMode
             ? `<div class="cp-input-group"><span class="cp-input-label">Growth Rate (%)</span><input class="cp-input" type="number" min="1" max="5" step="1" id="${rootId}-growthrate" value="${c.growthRate || 2}"></div>`
+            : engine.isMeanRevMode
+            ? `<div class="cp-input-group"><span class="cp-input-label">Duration (seconds)</span><input class="cp-input" type="number" min="15" max="300" id="${rootId}-duration" value="${c.duration ?? 15}"></div>`
             : `<div class="cp-input-group"><span class="cp-input-label">Duration (ticks)</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-duration" value="${c.duration}"></div>`}
         </div>
         <div class="cp-input-row">
@@ -20021,7 +20067,7 @@ window.NexusStrategies=exports;
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
       el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
       const durationEl = el(`${rootId}-duration`, host);
-      if (durationEl) durationEl.onchange = (e) => { engine.setConfig({ duration: Math.max(1, parseInt(e.target.value) || 5) }); };
+      if (durationEl) durationEl.onchange = (e) => { engine.setConfig({ duration: Math.max(engine.isMeanRevMode ? 15 : 1, parseInt(e.target.value) || (engine.isMeanRevMode ? 15 : 5)) }); };
       const growthRateEl = el(`${rootId}-growthrate`, host);
       if (growthRateEl) growthRateEl.onchange = (e) => { engine.setConfig({ growthRate: Math.min(5, Math.max(1, parseInt(e.target.value) || 2)) }); };
       const posTpRatioEl = el(`${rootId}-postpratio`, host);
