@@ -12304,9 +12304,13 @@ window.NexusStrategies=exports;
         autoPilot: true, autoRefresh: true, soundEnabled: true,
         takeProfit: 15, stopLoss: 20, tickPeriod: 50, selectedMarket: '1HZ100V',
         tradeMode: this.fixedTradeMode || 'odd',
-        macroLookback: 200, macroThreshold: 54,
-        microLookback: 20, microThreshold: 70,
-        minStreak: 3,
+        // Difficulty 7/10 default (matching the Rise/Fall MR family) — the
+        // in-panel Difficulty dropdown can move this to any of 1-10, and
+        // Macro Lookback / Micro Lookback / cold-digit filter stay
+        // independent knobs (not part of the difficulty ladder).
+        macroLookback: 200, macroThreshold: 53,
+        microLookback: 20, microThreshold: 65,
+        minStreak: 3, eoMrDifficulty: 7,
         coldLookback: 50, coldRecentWindow: 10, coldRecentCount: 2,
         idleRotateMinutes: 3,
       };
@@ -12365,9 +12369,13 @@ window.NexusStrategies=exports;
         // demand the signal hold across more than one live tick if wanted.
         confirmTicks: 1, minConfidence: 0, requireMTF: false,
         firstTickMode: 'normal', firstTickStake: 0.35,
-        candleSize: 5, adxThreshold: 22, bbStdDev: 2.5,
-        rsiOverbought: 75, rsiOversold: 25, stochOverbought: 80, stochOversold: 20,
-        atrMultiplier: 0.5,
+        // Difficulty 7/10 (of 1=loosest..10=strictest) — set as the default
+        // per operator request; the in-panel Difficulty dropdown can move
+        // this to any of the 10 levels, and each field below still stays
+        // individually editable afterward.
+        candleSize: 5, adxThreshold: 26, bbStdDev: 2.2,
+        rsiOverbought: 70, rsiOversold: 30, stochOverbought: 73, stochOversold: 27,
+        atrMultiplier: 0.5, mrDifficulty: 7,
       };
       // Matches (DIGITMATCH): bets one predicted digit (0-9) each tick.
       // preset selects which heuristic picks the digit: 'auto' (chase the
@@ -20045,6 +20053,33 @@ window.NexusStrategies=exports;
       if (multEl) multEl.onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       const stopStepEl = el(`${rootId}-stop-step`, host);
       if (stopStepEl) stopStepEl.onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
+      const MR_DIFFICULTY_TABLE = {
+        1:  { adxThreshold: 35,   bbStdDev: 1.5, rsiOverbought: 60, rsiOversold: 40, stochOverbought: 60, stochOversold: 40 },
+        2:  { adxThreshold: 33.6, bbStdDev: 1.6, rsiOverbought: 62, rsiOversold: 38, stochOverbought: 62, stochOversold: 38 },
+        3:  { adxThreshold: 32,   bbStdDev: 1.7, rsiOverbought: 63, rsiOversold: 37, stochOverbought: 64, stochOversold: 36 },
+        4:  { adxThreshold: 31,   bbStdDev: 1.8, rsiOverbought: 65, rsiOversold: 35, stochOverbought: 67, stochOversold: 33 },
+        5:  { adxThreshold: 29,   bbStdDev: 1.9, rsiOverbought: 67, rsiOversold: 33, stochOverbought: 69, stochOversold: 31 },
+        6:  { adxThreshold: 28,   bbStdDev: 2.1, rsiOverbought: 68, rsiOversold: 32, stochOverbought: 71, stochOversold: 29 },
+        7:  { adxThreshold: 26,   bbStdDev: 2.2, rsiOverbought: 70, rsiOversold: 30, stochOverbought: 73, stochOversold: 27 },
+        8:  { adxThreshold: 25,   bbStdDev: 2.3, rsiOverbought: 72, rsiOversold: 28, stochOverbought: 76, stochOversold: 24 },
+        9:  { adxThreshold: 23,   bbStdDev: 2.4, rsiOverbought: 73, rsiOversold: 27, stochOverbought: 78, stochOversold: 22 },
+        10: { adxThreshold: 22,   bbStdDev: 2.5, rsiOverbought: 75, rsiOversold: 25, stochOverbought: 80, stochOversold: 20 },
+      };
+      const mrDifficultyEl = el(`${rootId}-mr-difficulty`, host);
+      if (mrDifficultyEl) mrDifficultyEl.onchange = (e) => {
+        const level = parseInt(e.target.value, 10);
+        if (!level || !MR_DIFFICULTY_TABLE[level]) return;
+        const preset = MR_DIFFICULTY_TABLE[level];
+        engine.setConfig({ ...preset, mrDifficulty: level });
+        // Reflect the new values into the individual fields immediately —
+        // they stay live/editable afterward if you want to nudge just one.
+        if (mrAdxEl) mrAdxEl.value = preset.adxThreshold;
+        if (mrBbDevEl) mrBbDevEl.value = preset.bbStdDev;
+        if (mrRsiObEl) mrRsiObEl.value = preset.rsiOverbought;
+        if (mrRsiOsEl) mrRsiOsEl.value = preset.rsiOversold;
+        if (mrStochObEl) mrStochObEl.value = preset.stochOverbought;
+        if (mrStochOsEl) mrStochOsEl.value = preset.stochOversold;
+      };
       const mrAdxEl = el(`${rootId}-mr-adx`, host);
       if (mrAdxEl) mrAdxEl.onchange = (e) => { engine.setConfig({ adxThreshold: Math.min(50, Math.max(5, parseInt(e.target.value) || 22)) }); };
       const mrBbDevEl = el(`${rootId}-mr-bbdev`, host);
@@ -21154,6 +21189,20 @@ window.NexusStrategies=exports;
           Stage 1 (macro dominance), Stage 2 (opposite-side micro cluster) and Stage 3 (exhaustion streak + confirmation tick) — tune to taste.
         </div>
         <div class="cp-input-row">
+          <div class="cp-input-group">
+            <span class="cp-input-label">Difficulty (1 loose → 10 strict)</span>
+            <select class="cp-input" id="${rootId}-eomr-difficulty">
+              <option value="">— pick a level (or set fields below by hand) —</option>
+              ${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" ${Number(c.eoMrDifficulty) === n ? 'selected' : ''}>${n}${n === 7 ? ' (default)' : ''}</option>`).join('')}
+            </select>
+          </div>
+          <div class="cp-input-group" style="justify-content:flex-end">
+            <span class="cp-input-label" style="font-size:8px;color:hsl(var(--muted-foreground));line-height:1.4">
+              Sets Macro/Micro Threshold and Min Exhaustion Streak together. Fields below still update live and stay editable afterward.
+            </span>
+          </div>
+        </div>
+        <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Macro Lookback (ticks)</span><input class="cp-input" type="number" min="30" max="200" step="1" id="${rootId}-eomr-macrolb" value="${c.macroLookback ?? 200}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Macro Threshold %</span><input class="cp-input" type="number" min="50" max="70" step="0.5" id="${rootId}-eomr-macroth" value="${c.macroThreshold ?? 54}"></div>
         </div>
@@ -21240,6 +21289,28 @@ window.NexusStrategies=exports;
       if (microThEl) microThEl.onchange = (e) => { engine.setConfig({ microThreshold: Math.min(95, Math.max(50, parseFloat(e.target.value) || 70)) }); };
       const minStreakEl = el(`${rootId}-eomr-minstreak`, host);
       if (minStreakEl) minStreakEl.onchange = (e) => { engine.setConfig({ minStreak: Math.min(8, Math.max(2, parseInt(e.target.value) || 3)) }); };
+      const EOMR_DIFFICULTY_TABLE = {
+        1:  { macroThreshold: 51,   microThreshold: 55, minStreak: 2 },
+        2:  { macroThreshold: 51.3, microThreshold: 57, minStreak: 2 },
+        3:  { macroThreshold: 51.7, microThreshold: 58, minStreak: 2 },
+        4:  { macroThreshold: 52,   microThreshold: 60, minStreak: 3 },
+        5:  { macroThreshold: 52.3, microThreshold: 62, minStreak: 3 },
+        6:  { macroThreshold: 52.7, microThreshold: 63, minStreak: 3 },
+        7:  { macroThreshold: 53,   microThreshold: 65, minStreak: 3 },
+        8:  { macroThreshold: 53.3, microThreshold: 67, minStreak: 3 },
+        9:  { macroThreshold: 53.7, microThreshold: 68, minStreak: 3 },
+        10: { macroThreshold: 54,   microThreshold: 70, minStreak: 3 },
+      };
+      const eoMrDifficultyEl = el(`${rootId}-eomr-difficulty`, host);
+      if (eoMrDifficultyEl) eoMrDifficultyEl.onchange = (e) => {
+        const level = parseInt(e.target.value, 10);
+        if (!level || !EOMR_DIFFICULTY_TABLE[level]) return;
+        const preset = EOMR_DIFFICULTY_TABLE[level];
+        engine.setConfig({ ...preset, eoMrDifficulty: level });
+        if (macroThEl) macroThEl.value = preset.macroThreshold;
+        if (microThEl) microThEl.value = preset.microThreshold;
+        if (minStreakEl) minStreakEl.value = preset.minStreak;
+      };
       const coldLbEl = el(`${rootId}-eomr-coldlb`, host);
       if (coldLbEl) coldLbEl.onchange = (e) => { engine.setConfig({ coldLookback: Math.min(150, Math.max(20, parseInt(e.target.value) || 50)) }); };
       const coldRecentEl = el(`${rootId}-eomr-coldrecent`, host);
