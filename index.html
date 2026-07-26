@@ -13581,7 +13581,28 @@ window.NexusStrategies=exports;
         ticksElapsed: 0, entrySpot: this.liveQuote ?? null, firedAt: Date.now(),
       };
       // Deriv WS API requires buy value as string '1' for direct inline-parameter purchases
-      this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: st.currentStake, parameters: params }));
+      if (this.isPriceMode) {
+        // Rise/Fall now uses the same proposal-first handshake that fixed the
+        // Accumulator bot: send `proposal`, wait for the server to hand back
+        // a proposal id + ask_price, then `buy` off of THAT — instead of the
+        // `buy:'1', parameters:{...}` inline shortcut every other mode here
+        // still uses. The inline shortcut sends the full contract spec
+        // (amount/contract_type/duration/underlying_symbol/etc.) as a single
+        // untyped `parameters` blob, which is exactly the shape that broke
+        // Accumulator with "Properties not allowed: symbol" — Deriv validates
+        // that blob more strictly than a real `proposal` request and any
+        // small schema drift (stray/renamed field) makes the WHOLE buy
+        // bounce with a generic error, not just the offending field. Routing
+        // through `proposal` first gets a real, server-validated contract
+        // spec back (with its own id + live ask_price) before committing to
+        // a `buy`, so a schema mismatch fails loud at the proposal step
+        // instead of silently rejecting the purchase.
+        const reqId = (this._reqIdSeq = (this._reqIdSeq || 0) + 1);
+        this._pendingProposal = { reqId, contractType };
+        this.tradingSocket.send(JSON.stringify({ proposal: 1, subscribe: 1, req_id: reqId, ...params }));
+      } else {
+        this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: st.currentStake, parameters: params }));
+      }
       // Stuck-trade watchdog: if neither a buy error nor a contract result
       // arrives within 20s (dropped message, server hiccup, dead socket),
       // unstick the engine instead of leaving executionGuard true forever —
@@ -14164,7 +14185,7 @@ window.NexusStrategies=exports;
           // formatted at the correct decimal precision per market (see the
           // "Invalid barrier" fix note in executeBoltPurchase — hardcoding 2
           // decimals broke on any symbol that doesn't actually quote at 2dp).
-          try { _titan.tradingSocket.send(JSON.stringify({ active_symbols: 'brief', product_type: 'basic' })); } catch (e) { /* */ }
+          try { _titan.tradingSocket.send(JSON.stringify({ active_symbols: 'brief' })); } catch (e) { /* */ }
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
           // If the engine was mid-chain when socket reconnected (isLocked+active, no pending),
           // retry the bolt now that the socket is ready — otherwise the chain silently stalls.
