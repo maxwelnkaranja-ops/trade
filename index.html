@@ -12124,6 +12124,16 @@ window.NexusStrategies=exports;
       // pip size, not a hardcoded value. See executeBoltPurchase's mean-rev
       // barrier formatting, which reads this map.
       this._symbolPipDecimals = {};
+      // Per-symbol, per-barrier-category duration limits (min/max), keyed by
+      // underlying_symbol. Populated from contracts_for whenever a symbol is
+      // selected/rotated onto. Deriv enforces a MINIMUM contract duration
+      // per symbol+contract category that varies (e.g. Higher/Lower on one
+      // synthetic index might refuse anything under 1 minute while another
+      // allows 15s) — hardcoding a duration and hoping it's valid is what
+      // produced "Trading is not offered for this duration" (InvalidtoBuy).
+      // { [symbol]: { atm: {minSeconds,maxSeconds,minTicks,maxTicks},
+      //               nonAtm: {minSeconds,maxSeconds,minTicks,maxTicks} } }
+      this._contractDurationLimits = {};
       this.ownContractIds = new Set();
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
@@ -12536,10 +12546,31 @@ window.NexusStrategies=exports;
       }, 1000);
     }
 
+    // Asks Deriv what durations this symbol actually allows for CALL/PUT
+    // (both plain Rise/Fall "euro_atm" and barrier'd Higher/Lower
+    // "euro_non_atm"), and caches the min/max so trade-building can clamp
+    // to a valid duration instead of guessing. Safe to call repeatedly —
+    // it's a light lookup request, not a subscription.
+    requestContractsFor(symbol) {
+      if (!symbol || !this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) return;
+      try { this.tradingSocket.send(JSON.stringify({ contracts_for: symbol, currency: window.HubStore.getState().currency || 'USD' })); } catch (e) { /* */ }
+    }
+
+    // Reads the cached min/max duration for a symbol+category (see
+    // _contractDurationLimits above). category is 'atm' (plain Rise/Fall,
+    // no barrier) or 'nonAtm' (Higher/Lower, has a barrier).
+    getDurationLimits(symbol, category) {
+      const bySymbol = this._contractDurationLimits[symbol];
+      return (bySymbol && bySymbol[category]) || null;
+    }
+
     subscribeToMarket(market) {
       if (this.tickUnsub) this.tickUnsub();
       this.executionGuard = false;
       this.addLog('engine', 'RADAR', `Locked on ${market}`);
+      // Re-fetch duration limits whenever the bot rotates onto a new market
+      // — a market that was fine at 15s might not be, and vice versa.
+      if ((this.isMeanRevMode || this.isPriceMode) && this.requestContractsFor) this.requestContractsFor(market);
       if (this.isPriceMode || this.isAccumulatorMode || this.isMeanRevMode) this.priceHistory = []; // fresh price series for the new market
       if (this.isMeanRevMode) { this.candles = []; this._mrCandleBuf = []; } // fresh candle series for the new market
       if (this.isAccumulatorMode) this.calmStreak = 0; // fresh calm-streak counter for the new market
@@ -13552,6 +13583,26 @@ window.NexusStrategies=exports;
       this._lastTradedContractType = contractType;
       this.lastTradeTime = Date.now();
       const accountCurrency = window.HubStore.getState().currency || 'USD';
+      // Clamp duration to what Deriv actually allows for this symbol +
+      // barrier category (see requestContractsFor/_contractDurationLimits).
+      // Without this, a duration that's valid on one market (or was valid
+      // when this default was picked) but not another comes back "Trading
+      // is not offered for this duration" — every trade rejected, forever,
+      // with no automatic recovery, since the config never adjusts itself.
+      // Falls back to the original hardcoded defaults if we haven't heard
+      // back from contracts_for yet for this symbol.
+      let mrDuration = cfg.duration || 15;
+      const mrLimits = this.getDurationLimits(cfg.selectedMarket, 'nonAtm');
+      if (mrLimits) {
+        if (mrLimits.minSeconds != null && mrDuration < mrLimits.minSeconds) mrDuration = mrLimits.minSeconds;
+        if (mrLimits.maxSeconds != null && mrDuration > mrLimits.maxSeconds) mrDuration = mrLimits.maxSeconds;
+      }
+      let rfDuration = cfg.duration || 5;
+      const rfLimits = this.getDurationLimits(cfg.selectedMarket, 'atm');
+      if (rfLimits) {
+        if (rfLimits.minTicks != null && rfDuration < rfLimits.minTicks) rfDuration = rfLimits.minTicks;
+        if (rfLimits.maxTicks != null && rfDuration > rfLimits.maxTicks) rfDuration = rfLimits.maxTicks;
+      }
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
         currency: accountCurrency,
@@ -13562,7 +13613,7 @@ window.NexusStrategies=exports;
         // come back "Invalid barrier" regardless of the barrier's value.
         // Plain Higher/Lower (isPriceMode, barrier always 0 → true Rise/Fall)
         // and Matches both stay on ticks, which they do support.
-        duration: this.isMeanRevMode ? (cfg.duration || 15) : this.isPriceMode ? (cfg.duration || 5) : this.isMatchMode ? (cfg.numTicks || 2) : 1,
+        duration: this.isMeanRevMode ? mrDuration : this.isPriceMode ? rfDuration : this.isMatchMode ? (cfg.numTicks || 2) : 1,
         duration_unit: this.isMeanRevMode ? 's' : 't',
         underlying_symbol: cfg.selectedMarket,
       };
@@ -14186,6 +14237,11 @@ window.NexusStrategies=exports;
           // "Invalid barrier" fix note in executeBoltPurchase — hardcoding 2
           // decimals broke on any symbol that doesn't actually quote at 2dp).
           try { _titan.tradingSocket.send(JSON.stringify({ active_symbols: 'brief' })); } catch (e) { /* */ }
+          // Fetch this market's real min/max contract duration so mean-rev
+          // and rise/fall don't guess a duration Deriv will reject with
+          // "Trading is not offered for this duration" (see
+          // requestContractsFor / getDurationLimits).
+          if (_titan.requestContractsFor) _titan.requestContractsFor(_titan.config.selectedMarket);
           _titan.addLog('system', 'NETWORK', 'Trading pipe established');
           // If the engine was mid-chain when socket reconnected (isLocked+active, no pending),
           // retry the bolt now that the socket is ready — otherwise the chain silently stalls.
@@ -14226,6 +14282,42 @@ window.NexusStrategies=exports;
               const decimals = Math.max(0, Math.round(-Math.log10(s.pip)));
               _titan._symbolPipDecimals[s.symbol] = decimals;
             });
+          }
+          // contracts_for reply: cache each barrier category's real min/max
+          // duration for this symbol so mean-rev (seconds) and rise/fall
+          // (ticks) can clamp to something Deriv will actually accept.
+          if (data.msg_type === 'contracts_for' && data.contracts_for && Array.isArray(data.contracts_for.available)) {
+            const symbol = data.echo_req && data.echo_req.contracts_for;
+            if (symbol) {
+              // duration strings look like "15s", "1m", "1h", "1d", or "5t" (ticks)
+              const parseDur = (str) => {
+                const m = /^(\d+)([tsmhd])$/.exec(String(str || ''));
+                if (!m) return null;
+                const n = parseInt(m[1], 10);
+                const unit = m[2];
+                if (unit === 't') return { ticks: n };
+                const mult = { s: 1, m: 60, h: 3600, d: 86400 };
+                return { seconds: n * mult[unit] };
+              };
+              const limits = { atm: {}, nonAtm: {} };
+              data.contracts_for.available.forEach((c) => {
+                if (!c || (c.contract_type !== 'CALL' && c.contract_type !== 'PUT')) return;
+                const bucket = c.barrier_category === 'euro_non_atm' ? 'nonAtm'
+                  : c.barrier_category === 'euro_atm' ? 'atm' : null;
+                if (!bucket) return;
+                const min = parseDur(c.min_contract_duration);
+                const max = parseDur(c.max_contract_duration);
+                if (min) {
+                  if (min.seconds != null) limits[bucket].minSeconds = limits[bucket].minSeconds != null ? Math.min(limits[bucket].minSeconds, min.seconds) : min.seconds;
+                  if (min.ticks != null) limits[bucket].minTicks = limits[bucket].minTicks != null ? Math.min(limits[bucket].minTicks, min.ticks) : min.ticks;
+                }
+                if (max) {
+                  if (max.seconds != null) limits[bucket].maxSeconds = limits[bucket].maxSeconds != null ? Math.max(limits[bucket].maxSeconds, max.seconds) : max.seconds;
+                  if (max.ticks != null) limits[bucket].maxTicks = limits[bucket].maxTicks != null ? Math.max(limits[bucket].maxTicks, max.ticks) : max.ticks;
+                }
+              });
+              _titan._contractDurationLimits[symbol] = limits;
+            }
           }
           // Log every server reply that isn't a ping/balance/heartbeat so trade
           // failures always appear in the engine log, not just swallowed silently.
