@@ -14322,7 +14322,20 @@ window.NexusStrategies=exports;
           // Log every server reply that isn't a ping/balance/heartbeat so trade
           // failures always appear in the engine log, not just swallowed silently.
           if (data.msg_type && data.msg_type !== 'balance' && data.msg_type !== 'ping') {
-            _titan.addLog('engine', 'WS-MSG', `msg_type=${data.msg_type} ${data.error ? '❌ ERROR: ' + data.error.message : ''}`);
+            // Surface which contract a proposal_open_contract error belongs to —
+            // this stream isn't something we request per-trade (it's one
+            // always-on subscription for the whole account), so an error on
+            // it with no id attached is untraceable to "was this my bot?" or
+            // a stale/foreign open position on the account. Error replies on
+            // a subscription often omit the main payload, so also check
+            // echo_req (some error responses echo back the contract_id that
+            // was being processed) before giving up and just dumping
+            // whatever the server sent to console for manual inspection.
+            const cid = (data.proposal_open_contract && data.proposal_open_contract.contract_id)
+              || (data.echo_req && data.echo_req.contract_id);
+            const cidTag = cid ? ` [contract #${cid}]` : '';
+            _titan.addLog('engine', 'WS-MSG', `msg_type=${data.msg_type}${cidTag} ${data.error ? '❌ ERROR: ' + data.error.message : ''}`);
+            if (data.error && data.msg_type === 'proposal_open_contract') console.error('[proposal_open_contract error] full payload:', data);
           }
 
           if (data.msg_type === 'proposal_open_contract') {
