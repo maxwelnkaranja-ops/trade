@@ -12553,7 +12553,7 @@ window.NexusStrategies=exports;
     // it's a light lookup request, not a subscription.
     requestContractsFor(symbol) {
       if (!symbol || !this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) return;
-      try { this.tradingSocket.send(JSON.stringify({ contracts_for: symbol, currency: window.HubStore.getState().currency || 'USD' })); } catch (e) { /* */ }
+      try { this.tradingSocket.send(JSON.stringify({ contracts_for: symbol })); } catch (e) { /* */ }
     }
 
     // Reads the cached min/max duration for a symbol+category (see
