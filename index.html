@@ -18482,6 +18482,17 @@ window.NexusStrategies=exports;
         totalProfit += stats.profit; totalWin += stats.win; totalLoss += stats.loss;
         journal.forEach((j) => {
           allEntries.push(j);
+          // First-Tick Handling's "sacrifice" test-stake trades are
+          // intentionally excluded from state.stats (see
+          // handleContractResult's _isSacrificeTrade branch — "a probe, not
+          // a counted run") but were still being logged into the journal
+          // and folded into wonUSD/lostUSD here, which made the "Net P&L"/
+          // Win Rate cards (built from stats) silently disagree with the
+          // $won/$lost figure and the equity curve (both built from these
+          // journal entries) by however much the probe trades won or lost.
+          // Keep them visible in the journal (see the TEST chip in the
+          // entry renderer below) but out of every money total.
+          if (j.isTest) return;
           if (j.profit >= 0) wonUSD += j.profit; else lostUSD += Math.abs(j.profit);
         });
       } catch (e) {
@@ -18583,8 +18594,12 @@ window.NexusStrategies=exports;
     allEntries.length = 0;
     dedupedEntries.forEach(e => allEntries.push(e));
 
-    // Merge live trades into persistent 24h equity store (survives reload & CLEAR STATS)
-    const curve = EquityStore.merge(allEntries);
+    // Merge live trades into persistent 24h equity store (survives reload &
+    // CLEAR STATS) — excludes isTest (sacrifice/probe) entries, same as
+    // wonUSD/lostUSD above, so the curve's ending value always matches the
+    // Net P&L stat card instead of silently including probe-trade P&L that
+    // card doesn't count.
+    const curve = EquityStore.merge(allEntries.filter((e) => !e.isTest));
 
     const equityWrap = el('dash-equity-wrap', root);
     renderEquityChart(equityWrap, curve);
@@ -18740,10 +18755,11 @@ window.NexusStrategies=exports;
       const botOn = global.HubStore.isBotEnabled(id);
       let cdSecs = 0;
       if (engine) {
-        if (id === 'differ' || id === 'hotrepeat') cdSecs = (engine.state && engine.state.cooldownRemaining) || 0;
+        if (id === 'hotrepeat' && engine.state && engine.state.isSessionCooldown) cdSecs = engine.state.sessionCooldownRemaining || 0;
+        else if (id === 'differ' || id === 'hotrepeat') cdSecs = (engine.state && engine.state.cooldownRemaining) || 0;
         else cdSecs = engine.cooldownTime || 0;
       }
-      const isCd = cdSecs > 0 || !!(engine && engine.state && engine.state.isCooldown);
+      const isCd = cdSecs > 0 || !!(engine && engine.state && (engine.state.isCooldown || engine.state.isSessionCooldown));
       const statusTag = !botOn ? 'DISABLED' : flow.engaged ? 'ENGAGED' : 'STANDBY';
       const statusClass = !botOn ? '' : isCd ? ' is-cd' : flow.engaged ? ' is-on' : '';
       const resultLabel = flow.result === 'win' ? 'WIN' : flow.result === 'loss' ? 'LOSS' : flow.result === 'recovery' ? 'RECOVERY' : '—';
@@ -18751,7 +18767,7 @@ window.NexusStrategies=exports;
       const b = perBot[id];
       const plStr = (b.profit >= 0 ? '+' : '') + '$' + b.profit.toFixed(2);
       const plClass = b.profit >= 0 ? 'text-success' : 'text-destructive';
-      const cdMax = (engine && engine._cdMax) || 25;
+      const cdMax = (id === 'hotrepeat' && engine && engine.state && engine.state.isSessionCooldown) ? 240 : (engine && engine._cdMax) || 25;
       return { id, isCd, cdSecs, cdMax, statusTag, statusClass, resultLabel, resultGlow, flow, botOn, plStr, plClass };
     });
 
@@ -18859,6 +18875,12 @@ window.NexusStrategies=exports;
         barrierChip = `<span style="font-size:12px;font-weight:900;padding:3px 10px;border-radius:8px;background:hsl(var(--accent)/0.15);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.5);font-family:'Outfit',sans-serif;box-shadow:0 0 8px hsl(var(--accent)/0.35),inset 0 1px 0 hsl(255 100% 100%/0.07);letter-spacing:0.5px">B:${j.barrier}</span>`;
       }
       const recoveryChip = j.recoveryMode ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--accent)/0.08);color:hsl(var(--accent)/0.8);border:1px solid hsl(var(--accent)/0.25);font-family:'DM Mono',monospace">${j.recoveryMode}</span>` : '';
+      // First-Tick Handling "sacrifice" probe trades — logged for
+      // visibility but intentionally excluded from every money total (see
+      // the isTest filter above and handleContractResult's
+      // _isSacrificeTrade branch). Tag them so it's obvious why this
+      // entry's P&L doesn't move the Net P&L / equity curve.
+      const testChip = j.isTest ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--muted-foreground)/0.1);color:hsl(var(--muted-foreground)/0.8);border:1px solid hsl(var(--muted-foreground)/0.25);font-family:'DM Mono',monospace" title="Probe trade — not counted in Net P&amp;L, Win Rate, or the equity curve">TEST</span>` : '';
       return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}"
         data-nav-jnl="${j.botId || ''}"
         style="padding:8px 12px;min-height:0;gap:10px;cursor:${j.botId && !j.isHistory ? 'pointer' : 'default'};
@@ -18888,6 +18910,7 @@ window.NexusStrategies=exports;
                            : 'color:hsl(var(--loss)/0.5);'}">
               ${isWin ? '▲ WIN' : '▼ LOSS'}</span>
             ${recoveryChip}
+            ${testChip}
           </div>
           ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;color:hsl(var(--muted-foreground)/0.3);font-family:'DM Mono',monospace;letter-spacing:0.5px;margin-top:1px">next ${j.followingDigits.join(' ')}</div>` : ''}
         </div>
@@ -18904,7 +18927,7 @@ window.NexusStrategies=exports;
         </div>
         <div style="flex-shrink:0;text-align:right">
           <div style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:900;letter-spacing:-0.5px;
-                      ${isWin ? 'color:hsl(var(--win));text-shadow:0 0 8px hsl(var(--win)/0.5);' : 'color:hsl(var(--loss)/0.6);'}">${plStr}</div>
+                      ${j.isTest ? 'color:hsl(var(--muted-foreground)/0.5);' : isWin ? 'color:hsl(var(--win));text-shadow:0 0 8px hsl(var(--win)/0.5);' : 'color:hsl(var(--loss)/0.6);'}">${plStr}</div>
         </div>
       </div>`;
     }).join('') : '<div class="exec-empty">No trades yet — connect your account in Settings</div>';
@@ -22545,6 +22568,12 @@ window.NexusStrategies=exports;
         batchSize: Math.max(1, int(saved.batchSize, 1)),
         speed: Math.min(1000, Math.max(50, int(saved.speed, 100))),
         isArmed: false, isRunning: false, isCooldown: false, cooldownRemaining: 0,
+        // Session cooldown — separate from cooldownRemaining above (which is
+        // the short inter-fire tick gap). This is a real 2-4 minute pause
+        // after each fire, same idea as Differ's post-burst cooldown: give
+        // the market genuine rest before the bot can trigger again instead
+        // of re-arming and immediately re-firing on the very next repeat.
+        isSessionCooldown: false, sessionCooldownRemaining: 0,
         autoMode: bool(saved.autoMode, true),
         takeProfit: Math.max(0, num(saved.takeProfit, 20)), stopLoss: Math.max(0, num(saved.stopLoss, 15)),
         abortOnLoss: bool(saved.abortOnLoss, false),
@@ -22586,7 +22615,7 @@ window.NexusStrategies=exports;
             s.armToFireOnNextTick = false; s.fireBarrier = null;
           }
           s.history = [...s.history, digit].slice(-150);
-          if (s.isArmed && !s.armToFireOnNextTick) {
+          if (s.isArmed && !s.armToFireOnNextTick && !s.isSessionCooldown) {
             const n = s.history.length;
             const k = Math.max(2, s.minStreak);
             let streakOk = n >= k;
@@ -22612,6 +22641,9 @@ window.NexusStrategies=exports;
         }
         case 'SET_STAKE': s.stake = action.value; break;
         case 'SET_COOLDOWN_TICKS': s.cooldownTicks = action.value; break;
+        case 'SESSION_COOLDOWN_START': s.isSessionCooldown = true; s.sessionCooldownRemaining = action.duration; break;
+        case 'SESSION_COOLDOWN_TICK': s.sessionCooldownRemaining = action.remaining; break;
+        case 'SESSION_COOLDOWN_END': s.isSessionCooldown = false; s.sessionCooldownRemaining = 0; break;
         case 'SET_CLUSTER_CAP': s.clusterCap = action.value; break;
         case 'TOGGLE_FILTERS': s.filtersActive = !s.filtersActive; break;
         case 'SET_MIN_STREAK': s.minStreak = action.value; break;
@@ -22689,6 +22721,33 @@ window.NexusStrategies=exports;
         window.HubStore.notifyTelegram(`🔥 ${msg}`);
       }
       this.dispatch({ type: 'FIRE_COMPLETE' });
+      if (firedCount > 0) this.startSessionCooldown();
+    }
+
+    // A real 2-4 minute pause after every fire — mirrors Differ's
+    // startCooldown() (see BenzEngine.startCooldown, same randomized-range
+    // idea). cooldownTicks already gates re-firing for a handful of ticks,
+    // but that's sub-second on a fast market; this is a genuine session
+    // rest so the bot doesn't camp the exact same repeat pattern back to
+    // back for minutes on end. Randomized (not a fixed 3-minute mark) so
+    // it isn't a predictable, gameable interval either.
+    startSessionCooldown() {
+      const duration = 120 + Math.floor(Math.random() * 121); // 120-240s inclusive (2-4 min)
+      this.dispatch({ type: 'SESSION_COOLDOWN_START', duration });
+      this.dispatch({ type: 'NOTIFY', message: `⏳ Session cooldown — resting ${Math.floor(duration / 60)}m ${duration % 60}s before watching for the next repeat.`, ntype: 'info' });
+      if (this.sessionCooldownTimer) clearInterval(this.sessionCooldownTimer);
+      let remaining = duration;
+      this.sessionCooldownTimer = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+          clearInterval(this.sessionCooldownTimer);
+          this.sessionCooldownTimer = null;
+          this.dispatch({ type: 'SESSION_COOLDOWN_END' });
+          if (this.state.isArmed) this.dispatch({ type: 'NOTIFY', message: '▶ Cooldown over — watching the stream again.', ntype: 'info' });
+        } else {
+          this.dispatch({ type: 'SESSION_COOLDOWN_TICK', remaining });
+        }
+      }, 1000);
     }
 
     connectAnalysis() {
@@ -22816,6 +22875,7 @@ window.NexusStrategies=exports;
       const s = this.state;
       if (!window.HubStore.isBotEnabled('hotrepeat')) { this.dispatch({ type: 'NOTIFY', message: 'Hot Repeat bot is disabled — enable it from the Dashboard first', ntype: 'loss' }); return; }
       if (!s.isAuthenticated) { this.dispatch({ type: 'NOTIFY', message: 'Add your API token in Settings first', ntype: 'loss' }); return; }
+      if (s.isSessionCooldown) { this.dispatch({ type: 'NOTIFY', message: `Still cooling down — ${Math.floor(s.sessionCooldownRemaining / 60)}m ${s.sessionCooldownRemaining % 60}s left.`, ntype: 'info' }); return; }
       this.dispatch({ type: 'ARM' });
       this.dispatch({ type: 'NOTIFY', message: `⚡ ARMED — watching for X→X on ${s.primaryMarket}`, ntype: 'info' });
     }
@@ -22823,6 +22883,8 @@ window.NexusStrategies=exports;
     disarmSystem() {
       this.dispatch({ type: 'DISARM' });
       this.abortFlag = true;
+      if (this.sessionCooldownTimer) { clearInterval(this.sessionCooldownTimer); this.sessionCooldownTimer = null; }
+      this.dispatch({ type: 'SESSION_COOLDOWN_END' });
     }
 
     abortTrades() {
@@ -23026,8 +23088,8 @@ window.NexusStrategies=exports;
           <button class="titan-toggle ${s.abortOnLoss ? 'on' : ''}" id="hotrepeat-abortonloss" onclick="event.stopPropagation()"></button>
         </div>
       </div>
-      <button class="cp-engage-btn ${s.isArmed || s.isRunning ? 'active' : ''}" id="hotrepeat-engage">
-        ${s.isArmed || s.isRunning ? '⛔ DISARM' : '⚡ ENGAGE'}
+      <button class="cp-engage-btn ${s.isArmed || s.isRunning ? 'active' : ''}" id="hotrepeat-engage" ${s.isSessionCooldown ? 'disabled' : ''}>
+        ${s.isSessionCooldown ? `⏳ COOLDOWN ${Math.floor(s.sessionCooldownRemaining / 60)}m ${s.sessionCooldownRemaining % 60}s` : s.isArmed || s.isRunning ? '⛔ DISARM' : '⚡ ENGAGE'}
       </button>
       <div class="hr-note"><b>On the math:</b> a repeat doesn't change the next digit's odds — each tick is an independent ~10% draw, so DIGITDIFF on X wins ~90% of the time whether or not X just repeated. This trigger changes when it fires, not its per-trade win chance.</div>`;
   }
@@ -23074,7 +23136,7 @@ window.NexusStrategies=exports;
           <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--foreground))">${s.totalWins + s.totalLoss}</div><div class="rf-ind-label">TRADES</div></div>
           <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--primary))">${wr}</div><div class="rf-ind-label">WIN RATE</div></div>
           <div class="rf-ind-card"><div class="rf-ind-val" style="color:${s.totalProfit >= 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${s.totalProfit >= 0 ? '+' : ''}${s.totalProfit.toFixed(2)}</div><div class="rf-ind-label">NET P/L</div></div>
-          <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--accent))">${s.isCooldown ? s.cooldownRemaining + 't' : '—'}</div><div class="rf-ind-label">COOLDOWN</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--accent))">${s.isSessionCooldown ? `${Math.floor(s.sessionCooldownRemaining / 60)}:${(s.sessionCooldownRemaining % 60).toString().padStart(2, '0')}` : s.isCooldown ? s.cooldownRemaining + 't' : '—'}</div><div class="rf-ind-label">${s.isSessionCooldown ? 'SESSION COOLDOWN' : 'COOLDOWN'}</div></div>
         </div>
       </div>`;
   }
