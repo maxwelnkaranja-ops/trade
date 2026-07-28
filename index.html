@@ -12176,6 +12176,16 @@ window.NexusStrategies=exports;
       // real min/max for a symbol, so a rejected duration doesn't repeat
       // forever with no recovery.
       this._mrDurationFallback = {};
+      // Per-symbol timestamp of the moment the fallback ladder above got
+      // fully exhausted (every rung up to 600s rejected) with no real
+      // limits ever arriving from contracts_for. Without this, the bot
+      // just keeps re-firing the identical doomed 600s buy on every single
+      // signal forever — see executeBoltPurchase's guard and the
+      // InvalidtoBuy handler that sets this.
+      this._mrDurationBlacklist = {};
+      // Per-symbol "already logged the pause" flag so the blacklist skip
+      // logs once per cooldown window instead of once per signal.
+      this._mrDurationBlacklistLogged = {};
       this.ownContractIds = new Set();
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
@@ -12632,6 +12642,29 @@ window.NexusStrategies=exports;
     getDurationLimits(symbol, category) {
       const bySymbol = this._contractDurationLimits[symbol];
       return (bySymbol && bySymbol[category]) || null;
+    }
+
+    // Shared by both the `proposal` and `buy` error handlers (Mean-Rev now
+    // goes through proposal-first — see executeBoltPurchase — but a
+    // duration rejection can in principle surface at either step). Climbs
+    // the fallback ladder (15s…600s) so the NEXT signal tries a longer
+    // duration instead of repeating the identical rejected one — and once
+    // the ladder is exhausted with no real limits ever reported by
+    // contracts_for, blacklists the symbol for a few minutes instead of
+    // hammering it forever (see executeBoltPurchase's blacklist guard).
+    handleMrDurationRejection(errorCode, errorMessage) {
+      if (!this.isMeanRevMode || errorCode !== 'InvalidtoBuy' || !/duration/i.test(errorMessage || '')) return;
+      const symbol = this.config.selectedMarket;
+      const ladder = [15, 30, 60, 120, 300, 600];
+      const cur = (this._mrDurationFallback[symbol] || 0);
+      const next = Math.min(cur + 1, ladder.length - 1);
+      if (next > cur) {
+        this._mrDurationFallback[symbol] = next;
+        this.addLog('engine', 'DURATION', `⏱ ${symbol} rejected that duration — stepping up to ${ladder[next]}s for the next signal.`);
+      } else {
+        if (!this._mrDurationBlacklist) this._mrDurationBlacklist = {};
+        this._mrDurationBlacklist[symbol] = Date.now();
+      }
     }
 
     // ── Hedger ──────────────────────────────────────────────────────
@@ -13609,6 +13642,35 @@ window.NexusStrategies=exports;
         if (token) this.connect(token);
         return;
       }
+      // Mean-rev duration circuit breaker: if every rung of the fallback
+      // ladder (15s…600s) has already been rejected for this symbol and
+      // contracts_for never reported real limits, don't re-fire the same
+      // doomed buy on every new signal — that just burns API calls and
+      // spams the log with duplicate "stepping up to 600s" lines forever.
+      // Pause entries on this symbol for a few minutes, then give it one
+      // more clean try (re-asking contracts_for first) in case Deriv's
+      // offering changed.
+      if (this.isMeanRevMode) {
+        const symbol = cfg.selectedMarket;
+        const blacklistedAt = this._mrDurationBlacklist && this._mrDurationBlacklist[symbol];
+        if (blacklistedAt) {
+          if (Date.now() - blacklistedAt < 5 * 60 * 1000) {
+            if (!this._mrDurationBlacklistLogged[symbol]) {
+              this._mrDurationBlacklistLogged[symbol] = true;
+              this.addLog('engine', 'DURATION', `⏸ ${symbol} rejected every fallback duration up to 600s — pausing entries here for 5 min instead of repeating the same doomed buy. Try a different market, or wait for auto-recheck.`);
+            }
+            this.executionGuard = false;
+            this.state = { ...this.state, isLocked: false, openTrade: null };
+            return;
+          }
+          // Cooldown's up — clear the slate and ask Deriv again instead of
+          // resuming the stale ladder that got this symbol blacklisted.
+          delete this._mrDurationBlacklist[symbol];
+          delete this._mrDurationFallback[symbol];
+          delete this._mrDurationBlacklistLogged[symbol];
+          this.requestContractsFor(symbol);
+        }
+      }
       let contractType, barrierValue = 0;
       if (this.mode === 'evenodd') {
         const isOddMode = cfg.tradeMode === 'odd';
@@ -13891,22 +13953,27 @@ window.NexusStrategies=exports;
         ticksElapsed: 0, entrySpot: this.liveQuote ?? null, firedAt: Date.now(),
       };
       // Deriv WS API requires buy value as string '1' for direct inline-parameter purchases
-      if (this.isPriceMode) {
-        // Rise/Fall now uses the same proposal-first handshake that fixed the
-        // Accumulator bot: send `proposal`, wait for the server to hand back
-        // a proposal id + ask_price, then `buy` off of THAT — instead of the
+      if (this.isPriceMode || this.isMeanRevMode) {
+        // Rise/Fall and Mean-Reversion Higher/Lower both use the same
+        // proposal-first handshake that fixed the Accumulator bot: send
+        // `proposal`, wait for the server to hand back a proposal id +
+        // ask_price, then `buy` off of THAT — instead of the
         // `buy:'1', parameters:{...}` inline shortcut every other mode here
         // still uses. The inline shortcut sends the full contract spec
         // (amount/contract_type/duration/underlying_symbol/etc.) as a single
-        // untyped `parameters` blob, which is exactly the shape that broke
-        // Accumulator with "Properties not allowed: symbol" — Deriv validates
-        // that blob more strictly than a real `proposal` request and any
-        // small schema drift (stray/renamed field) makes the WHOLE buy
-        // bounce with a generic error, not just the offending field. Routing
-        // through `proposal` first gets a real, server-validated contract
-        // spec back (with its own id + live ask_price) before committing to
-        // a `buy`, so a schema mismatch fails loud at the proposal step
-        // instead of silently rejecting the purchase.
+        // untyped `parameters` blob, which Deriv validates more strictly
+        // than a real `proposal` request — any small schema drift (or a
+        // duration this symbol doesn't actually support) makes the WHOLE
+        // buy bounce with a generic error and no recovery path. Mean-Rev
+        // was left on the old inline path when Rise/Fall was migrated,
+        // which is exactly why it kept hammering the same rejected
+        // duration forever ("Trading is not offered for this duration")
+        // with no way to surface a cleaner error or retry sanely — routing
+        // it through `proposal` first gets a real, server-validated
+        // contract spec back before committing to a `buy`, so a bad
+        // duration fails loud at the proposal step (same InvalidtoBuy
+        // handling as the buy path — see the proposal error branch below)
+        // instead of the buy step.
         const reqId = (this._reqIdSeq = (this._reqIdSeq || 0) + 1);
         this._pendingProposal = { reqId, contractType };
         this.tradingSocket.send(JSON.stringify({ proposal: 1, subscribe: 1, req_id: reqId, ...params }));
@@ -14580,6 +14647,8 @@ window.NexusStrategies=exports;
               // only ever a stand-in for not having this data yet, so drop
               // any escalation and let the real min/max clamp do its job.
               if (_titan._mrDurationFallback) delete _titan._mrDurationFallback[symbol];
+              if (_titan._mrDurationBlacklist) delete _titan._mrDurationBlacklist[symbol];
+              if (_titan._mrDurationBlacklistLogged) delete _titan._mrDurationBlacklistLogged[symbol];
             }
           }
           // Log every server reply that isn't a ping/balance/heartbeat so trade
@@ -14650,6 +14719,14 @@ window.NexusStrategies=exports;
                 else if (data.error.fields) extra = ' — fields: ' + JSON.stringify(data.error.fields);
               } catch (_) {}
               _titan.addLog('error', 'TRADE', `Proposal rejected: ${data.error.message} (code: ${data.error.code})${extra}`);
+              // Mean-Rev's duration ceiling/floor varies by symbol and we
+              // may not have heard back from contracts_for with real
+              // limits yet — if that's exactly what just failed, climb
+              // the fallback ladder (see executeBoltPurchase/
+              // handleMrDurationRejection) so the NEXT signal tries a
+              // longer duration instead of the identical rejected one,
+              // forever.
+              _titan.handleMrDurationRejection(data.error.code, data.error.message);
               _titan.pendingTrade = null;
               _titan._pendingProposal = null;
               _titan.executionGuard = false;
@@ -14697,20 +14774,11 @@ window.NexusStrategies=exports;
                 } catch (_) {}
                 _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})${extra}`);
                 if (extra) console.error('[Trade] Full buy error:', data.error); else console.error('[Trade] Full buy error (no details field):', data.error);
-                // Higher/Lower's duration ceiling/floor varies by symbol and
-                // we may not have heard back from contracts_for with real
-                // limits yet — if that's exactly what just failed, climb the
-                // fallback ladder (see executeBoltPurchase) so the NEXT
-                // signal tries a longer duration instead of the identical
-                // rejected one, forever.
-                if (_titan.isMeanRevMode && data.error.code === 'InvalidtoBuy' && /duration/i.test(data.error.message || '')) {
-                  const symbol = _titan.config.selectedMarket;
-                  const ladder = [15, 30, 60, 120, 300, 600];
-                  const cur = (_titan._mrDurationFallback[symbol] || 0);
-                  const next = Math.min(cur + 1, ladder.length - 1);
-                  _titan._mrDurationFallback[symbol] = next;
-                  _titan.addLog('engine', 'DURATION', `⏱ ${symbol} rejected that duration — stepping up to ${ladder[next]}s for the next signal.`);
-                }
+                // Mean-Rev now goes through proposal-first (see
+                // executeBoltPurchase), so a duration rejection normally
+                // surfaces at the proposal step, not here — but handle it
+                // here too in case it ever slips through to a raw buy.
+                _titan.handleMrDurationRejection(data.error.code, data.error.message);
               }
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
@@ -14756,6 +14824,18 @@ window.NexusStrategies=exports;
 
     toggleEngine() {
       if (this.state.isCooldown) return;
+      // Hedger tracks its own session (runsDone, netTotal, currentStake,
+      // ARMED/IDLE badge) on hedgeState, separate from the generic
+      // state.active this method otherwise flips. Routing through here
+      // without delegating would leave hedgeState.active stale — the
+      // engine would actually be trading (the tick-handler's firing gate
+      // reads state.active) while the Hedger panel kept showing "IDLE"
+      // forever. Delegate so master Engage-All/Terminate-All stays in
+      // sync with the panel exactly like the dedicated hg toggle button.
+      if (this.isHedgerMode) {
+        if (this.hedgeState.active) this.stopHedger(); else this.startHedger();
+        return;
+      }
       const newActive = !this.state.active;
       if (newActive && !window.HubStore.isBotEnabled(this.id)) {
         this.addLog('error', 'ENGINE', `${this.botLabel} is disabled — enable it from the Dashboard first`);
@@ -17590,6 +17670,7 @@ window.NexusStrategies=exports;
     oddmr: { label: 'Odd MR Bot', dot: 'hsl(var(--win))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
     accumulator: { label: 'Accumulator Bot', dot: 'hsl(var(--accent))' },
+    hedger: { label: 'Hedger Bot', dot: 'hsl(340 82% 62%)' },
   };
 
   function getBotJournal(engine, botId) {
@@ -18387,7 +18468,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
+    const botIds = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'hedger'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -23141,7 +23222,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
+  const BOT_IDS = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'hedger'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -23158,7 +23239,7 @@ window.NexusStrategies=exports;
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { hotrepeat: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null };
+  const engines = { hotrepeat: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, hedger: null };
   const titanBuilt = { nexus: false, under: false, meanrev: false, risemr: false, fallmr: false, evenmr: false, oddmr: false };
 
   function queueDashboardRender() {
