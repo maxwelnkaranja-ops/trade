@@ -23549,7 +23549,7 @@ window.NexusStrategies=exports;
       const eng = engines[id];
       if (!eng) return;
       const s = eng.state;
-      if (id === 'differ') {
+      if (id === 'differ' || id === 'hotrepeat') {
         total += (s.totalProfit || 0);
       } else {
         total += (s.stats && typeof s.stats.profit === 'number' ? s.stats.profit : 0);
