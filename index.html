@@ -136,6 +136,11 @@
           <span class="hub-tab-label">Odd MR</span>
           <span class="dot live"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="hedger" data-label="Hedger" title="Hedger — fires a DIGITOVER + DIGITUNDER pair simultaneously every run. Not an arbitrage: barriers leave a gap where both legs can lose at once.">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l10 10M17 7L7 17"/><circle cx="12" cy="12" r="9"/></svg></span>
+          <span class="hub-tab-label">Hedger</span>
+          <span class="dot live"></span>
+        </button>
         <div class="hub-nav-label">Account</div>
         <div class="hub-balance-pill glass-pill font-mono" id="hub-balance-pill" style="display:none;width:100%;box-sizing:border-box;justify-content:center"></div>
       </nav>
@@ -205,6 +210,9 @@
     </section>
     <section id="panel-oddmr" class="app-panel" aria-label="Odd Mean Reversion dashboard">
       <div id="oddmr-root" class="app-root"></div>
+    </section>
+    <section id="panel-hedger" class="app-panel" aria-label="Hedger dashboard">
+      <div id="hedger-root" class="app-root"></div>
     </section>
     </div>
 
@@ -10040,6 +10048,33 @@ function analyzeMarketDominance(history, tickPeriod, zoneDigits, isWinDigit, dom
   return { score, dominant: score >= threshold, samples: data.length, threshold };
 }
 
+// Hedger's entry trigger. A DIGITOVER(overBarrier) + DIGITUNDER(underBarrier)
+// pair loses on BOTH legs whenever the last digit falls in the shared "dead
+// zone" [underBarrier..overBarrier] (e.g. Over 5 / Under 4 -> dead zone {4,5}).
+// This does not create an edge — Deriv's payout odds already price in the
+// house edge on each leg regardless of when you fire — but firing right
+// after a run of dead-zone digits is firing blind into whatever just
+// produced that run. Waiting for `minGapStreak` consecutive ticks OUTSIDE
+// the dead zone before arming is a modest timing filter, not a guarantee.
+function analyzeHedgeGap(history, overBarrier, underBarrier, minGapStreak) {
+  const need = Math.max(1, minGapStreak || 3);
+  const data = history || [];
+  if (data.length < need + 1) {
+    return { ready: false, strength: 0, streak: 0, needed: need, reason: `Building tick history… (${data.length}/${need + 1})` };
+  }
+  const inDeadZone = (d) => d >= underBarrier && d <= overBarrier;
+  let streak = 0;
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (!inDeadZone(data[i])) streak++; else break;
+  }
+  const ready = streak >= need;
+  const strength = Math.min(100, Math.round((streak / need) * 100));
+  const reason = ready
+    ? `${streak} consecutive ticks clear of the ${underBarrier}-${overBarrier} dead zone — armed`
+    : `${streak}/${need} ticks clear of the ${underBarrier}-${overBarrier} dead zone`;
+  return { ready, strength, streak, needed: need, reason };
+}
+
 exports.MARKETS = MARKETS;
 exports.analyzeDigits = analyzeDigits;
 exports.analyzeOver3Condition = analyzeOver3Condition;
@@ -10055,6 +10090,7 @@ exports.calculateNextStake = calculateNextStake;
 exports.createLogEntry = createLogEntry;
 exports.analyzeReversalTrigger = analyzeReversalTrigger;
 exports.analyzeMarketDominance = analyzeMarketDominance;
+exports.analyzeHedgeGap = analyzeHedgeGap;
 window.NexusTrading = exports;
 })();
 
@@ -12134,6 +12170,12 @@ window.NexusStrategies=exports;
       // { [symbol]: { atm: {minSeconds,maxSeconds,minTicks,maxTicks},
       //               nonAtm: {minSeconds,maxSeconds,minTicks,maxTicks} } }
       this._contractDurationLimits = {};
+      // Per-symbol escalation index into the duration fallback ladder (see
+      // executeBoltPurchase's mrDuration/rfDuration and the InvalidtoBuy
+      // handler below) — only used when contracts_for hasn't told us the
+      // real min/max for a symbol, so a rejected duration doesn't repeat
+      // forever with no recovery.
+      this._mrDurationFallback = {};
       this.ownContractIds = new Set();
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
@@ -12145,6 +12187,15 @@ window.NexusStrategies=exports;
       // _isSacrificeTrade: the trade currently in flight is a 'sacrifice'
       // test trade whose result must be excluded from Runs/stats.
       this._skipArmed = false; this._isSacrificeTrade = false;
+      // Hedger mode state — kept entirely separate from pendingTrade/
+      // openTrade/executionGuard (the single-trade pipeline every other
+      // mode uses) since a hedge run has TWO concurrent open contracts.
+      // _hedgeContractIds maps a live contract_id -> 'over'|'under' so
+      // proposal_open_contract settlement routes here instead of the
+      // generic handleContractResult path. See fireHedgePair.
+      this.hedgeState = { active: false, runsDone: 0, pair: null, history: [], netTotal: 0, lossStreak: 0, currentStake: null };
+      this._hedgeContractIds = new Map();
+      this._hedgePendingReqIds = {};
       this.lastTickTime = Date.now(); this.lastTradeTime = Date.now();
       this.latestLiveAnalysis = null; this.connectRef = null;
 
@@ -12201,6 +12252,7 @@ window.NexusStrategies=exports;
     // set per-trade in dollars), or knocks out. Entries are gated on a
     // calm-market streak rather than a directional signal.
     get isAccumulatorMode() { return this.mode === 'accumulator'; }
+    get isHedgerMode() { return this.mode === 'hedger'; }
 
     // Extra args passed into the shared Trading module's analyzeDigits /
     // checkEntryConditions / MarketScanner so each bot instance scores and
@@ -12443,7 +12495,19 @@ window.NexusStrategies=exports;
         takeProfit: 50, stopLoss: 20, martingaleEnabled: false,
         autoPilot: true, soundEnabled: true, autoRefresh: true,
       };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isAccumulatorMode ? accumulatorDefaults : evenDefaults;
+      // Hedger — fires a DIGITOVER + DIGITUNDER pair simultaneously every
+      // run. NOT an arbitrage: the two barriers leave a gap (e.g. Over 5 /
+      // Under 4 leaves digits 4 and 5 where BOTH legs lose at once) and
+      // Deriv's payout odds already price in the house edge on each leg,
+      // so this cannot guarantee profit — it's a risk-shaping tool, not a
+      // sure thing. See fireHedgePair/handleHedgeLegResult.
+      const hedgerDefaults = {
+        overBarrier: 5, underBarrier: 4, stake: 1, targetRuns: 10,
+        cooldownSeconds: 2, tickPeriod: 50, selectedMarket: '1HZ100V',
+        minGapStreak: 3, minSignal: 60,
+        martingaleEnabled: false, martingaleMultiplier: 2, martingaleStopStep: 3,
+      };
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isAccumulatorMode ? accumulatorDefaults : this.isHedgerMode ? hedgerDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -12478,6 +12542,7 @@ window.NexusStrategies=exports;
         fixedTradeMode: this.fixedTradeMode, botLabel: this.botLabel, _cdMax: this._cdMax || 25,
         previousMarket: this.previousMarket || null,
         mtf: this.mtf || null,
+        hedgeState: this.hedgeState || null,
       };
     }
 
@@ -12567,6 +12632,156 @@ window.NexusStrategies=exports;
     getDurationLimits(symbol, category) {
       const bySymbol = this._contractDurationLimits[symbol];
       return (bySymbol && bySymbol[category]) || null;
+    }
+
+    // ── Hedger ──────────────────────────────────────────────────────
+    // Fires a DIGITOVER (barrier = overBarrier) and a DIGITUNDER
+    // (barrier = underBarrier) contract together on the same market, once
+    // analyzeHedgeGap's dead-zone-clear streak is ready (same "arm on a
+    // tick-handler gate, fire once ready" shape every other digit bot
+    // here uses — see the isHedgerMode branch in subscribeToMarket).
+    // This is NOT an arbitrage — digits strictly between the two barriers
+    // (or equal to either) make BOTH legs lose at once, and Deriv's
+    // payout odds already have the house edge baked in on each leg, so
+    // there's no combination of barriers/timing that guarantees profit.
+    // It's a risk-shaping tool: frequent small net wins, occasional
+    // double loss.
+    startHedger() {
+      if (!this.isHedgerMode) return;
+      this.hedgeState = { active: true, runsDone: 0, pair: null, history: [], netTotal: 0, lossStreak: 0, currentStake: this.config.stake };
+      this.state = { ...this.state, active: true, isLocked: false, isCooldown: false };
+      this.addLog('system', 'HEDGE', `▶ Hedger armed — OVER ${this.config.overBarrier} / UNDER ${this.config.underBarrier}, target ${this.config.targetRuns} pairs. Waiting for dead-zone-clear signal…`);
+      this.emit();
+    }
+
+    stopHedger() {
+      this.hedgeState.active = false;
+      this.state = { ...this.state, active: false };
+      this.addLog('system', 'HEDGE', '⏹ Hedger stopped.');
+      this.emit();
+    }
+
+    fireHedgePair() {
+      if (!this.isHedgerMode) return;
+      if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
+        this.addLog('error', 'HEDGE', 'Not connected — cannot fire hedge pair.');
+        return;
+      }
+      const cfg = this.config;
+      const stake = this.hedgeState.currentStake ?? cfg.stake;
+      const currency = window.HubStore.getState().currency || 'USD';
+      const reqOver = (this._reqIdSeq = (this._reqIdSeq || 0) + 1);
+      const reqUnder = (this._reqIdSeq = (this._reqIdSeq || 0) + 1);
+      this._hedgePendingReqIds[reqOver] = 'over';
+      this._hedgePendingReqIds[reqUnder] = 'under';
+      this.hedgeState.pair = {
+        over: { contractId: null, stake, barrier: cfg.overBarrier, status: 'buying', profit: null, win: false },
+        under: { contractId: null, stake, barrier: cfg.underBarrier, status: 'buying', profit: null, win: false },
+      };
+      this.state = { ...this.state, isLocked: true };
+      this.addLog('engine', 'HEDGE', `🔀 Firing pair — OVER ${cfg.overBarrier} @ ${stake.toFixed(2)} / UNDER ${cfg.underBarrier} @ ${stake.toFixed(2)}`);
+      const buildParams = (contractType, barrier) => ({
+        amount: stake, basis: 'stake', contract_type: contractType, currency,
+        duration: 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket, barrier,
+      });
+      try {
+        this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: stake, req_id: reqOver, parameters: buildParams('DIGITOVER', cfg.overBarrier) }));
+        this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: stake, req_id: reqUnder, parameters: buildParams('DIGITUNDER', cfg.underBarrier) }));
+      } catch (e) {
+        this.addLog('error', 'HEDGE', 'Failed to send hedge pair — releasing lock.');
+        this.state = { ...this.state, isLocked: false };
+        this.hedgeState.pair = null;
+      }
+      this.emit();
+    }
+
+    // Routes a buy confirmation/rejection for one leg of the current pair.
+    // Called from the tradingSocket.onmessage 'buy' branch instead of the
+    // generic pendingTrade/openTrade path — hedger never touches those.
+    handleHedgeBuyAck(leg, data) {
+      const pair = this.hedgeState.pair;
+      if (!pair || !pair[leg]) return;
+      if (data.error) {
+        this.addLog('error', 'HEDGE', `${leg.toUpperCase()} leg rejected: ${data.error.message} (code: ${data.error.code})`);
+        pair[leg].status = 'failed'; pair[leg].profit = 0; pair[leg].win = false;
+        this._settleHedgeIfDone();
+        return;
+      }
+      const cid = data.buy.contract_id.toString();
+      pair[leg].contractId = cid;
+      pair[leg].status = 'open';
+      this._hedgeContractIds.set(cid, leg);
+      this.addLog('engine', 'HEDGE', `${leg.toUpperCase()} leg confirmed — contract #${cid} @ ${data.buy.buy_price}`);
+      this.emit();
+    }
+
+    // Called from the proposal_open_contract is_sold branch when the
+    // settling contract_id belongs to a live hedge leg.
+    handleHedgeLegResult(contract) {
+      const cid = contract.contract_id.toString();
+      const leg = this._hedgeContractIds.get(cid);
+      this._hedgeContractIds.delete(cid);
+      const pair = this.hedgeState.pair;
+      if (!leg || !pair || !pair[leg]) return;
+      const profit = parseFloat(contract.profit) || 0;
+      pair[leg].status = 'settled'; pair[leg].profit = profit; pair[leg].win = profit > 0;
+      this.addLog(profit > 0 ? 'win' : 'loss', 'HEDGE', `${leg.toUpperCase()} leg ${profit > 0 ? 'WON' : 'LOST'} — ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}`);
+      this._settleHedgeIfDone();
+    }
+
+    _settleHedgeIfDone() {
+      const pair = this.hedgeState.pair;
+      if (!pair) return;
+      const overDone = pair.over.status === 'settled' || pair.over.status === 'failed';
+      const underDone = pair.under.status === 'settled' || pair.under.status === 'failed';
+      if (!overDone || !underDone) { this.emit(); return; }
+      const netProfit = (pair.over.profit || 0) + (pair.under.profit || 0);
+      const outcome = netProfit > 0 ? 'win' : netProfit < 0 ? 'loss' : 'breakeven';
+      const cfg = this.config;
+      this.hedgeState.history = [{
+        time: Date.now(), overBarrier: pair.over.barrier, underBarrier: pair.under.barrier,
+        stake: pair.over.stake, overWin: pair.over.win, underWin: pair.under.win, netProfit, outcome,
+      }, ...this.hedgeState.history].slice(0, 200);
+      this.hedgeState.runsDone += 1;
+      this.hedgeState.netTotal = (this.hedgeState.netTotal || 0) + netProfit;
+      this.addLog(outcome === 'win' ? 'win' : outcome === 'loss' ? 'loss' : 'engine', 'HEDGE',
+        `PAIR RESULT: ${outcome.toUpperCase()} — net ${netProfit >= 0 ? '+' : ''}${netProfit.toFixed(2)} (over ${pair.over.win ? 'WIN' : 'LOSS'} / under ${pair.under.win ? 'WIN' : 'LOSS'})`);
+      // Martingale only escalates on the double-loss outcome (the one case
+      // with zero payout on either leg) — any win resets it.
+      let haltForMartingale = false;
+      if (cfg.martingaleEnabled) {
+        if (!pair.over.win && !pair.under.win) {
+          this.hedgeState.lossStreak = (this.hedgeState.lossStreak || 0) + 1;
+          if (this.hedgeState.lossStreak <= cfg.martingaleStopStep) {
+            this.hedgeState.currentStake = Math.round(((this.hedgeState.currentStake ?? cfg.stake) * cfg.martingaleMultiplier) * 100) / 100;
+          } else {
+            this.addLog('error', 'HEDGE', `Martingale stopped after ${cfg.martingaleStopStep} straight double-losses — resetting stake and halting.`);
+            this.hedgeState.currentStake = cfg.stake; this.hedgeState.lossStreak = 0;
+            haltForMartingale = true;
+          }
+        } else {
+          this.hedgeState.lossStreak = 0; this.hedgeState.currentStake = cfg.stake;
+        }
+      }
+      this.hedgeState.pair = null;
+      if (haltForMartingale || this.hedgeState.runsDone >= (cfg.targetRuns || 1)) {
+        this.hedgeState.active = false;
+        this.state = { ...this.state, isLocked: false, active: false };
+        this.addLog('system', 'HEDGE', haltForMartingale ? '⏹ Hedger stopped (martingale limit).' : '✅ Target runs reached — engine stopped.');
+        this.emit();
+        return;
+      }
+      // Back to scouting: release the lock but hold a short cooldown
+      // (reuses the same state.isCooldown gate every other bot's tick
+      // handler already respects) before the analyzer is allowed to arm
+      // the next pair, so runs don't chain instantly back-to-back.
+      this.state = { ...this.state, isLocked: false, isCooldown: true };
+      this.emit();
+      setTimeout(() => {
+        if (!this.hedgeState.active) return;
+        this.state = { ...this.state, isCooldown: false };
+        this.emit();
+      }, Math.max(0, cfg.cooldownSeconds ?? 2) * 1000);
     }
 
     subscribeToMarket(market) {
@@ -12720,6 +12935,11 @@ window.NexusStrategies=exports;
           // rather than any bot-local buffer.
           result = window.EvenOddReversionAnalyzer.analyze(fullHistory, this.config);
           this.analysis = result;
+        } else if (this.isHedgerMode) {
+          // See analyzeHedgeGap — arms once the dead zone between the two
+          // barriers has gone quiet for minGapStreak ticks in a row.
+          result = this.T.analyzeHedgeGap(fullHistory, this.config.overBarrier, this.config.underBarrier, this.config.minGapStreak);
+          this.analysis = result;
         } else if (isOver3) {
           result = this.T.analyzeOver3Condition(history, tickPeriod, this.config.minStreak, this.config.minSignal);
           // Over 3 fires off fast streak+digit gates, not a slow drifting
@@ -12783,6 +13003,26 @@ window.NexusStrategies=exports;
             this.addLog('win', 'SIGNAL', `📉 Calm signal — ${this.analysis.calmStreak}/${this.analysis.calmStreakRequired} quiet ticks (last move ${(this.analysis.pctMove ?? 0).toFixed(3)}%)`);
             this.calmStreak = 0;
             this.executeAccumulatorPurchase();
+          }
+          this.emit();
+          return;
+        }
+        if (this.isHedgerMode) {
+          // Both legs fire together (fireHedgePair), so there's no
+          // direction to confirm — the only gate is analyzeHedgeGap's
+          // dead-zone-clear streak computed in the analysis block above.
+          // A pair in flight is already covered by state.isLocked in the
+          // shared gate at the top of this handler.
+          if (this.hedgeState.runsDone >= (this.config.targetRuns || 1)) {
+            this.hedgeState.active = false;
+            this.state = { ...this.state, active: false };
+            this.addLog('system', 'HEDGE', '✅ Target runs reached — engine stopped.');
+            this.emit();
+            return;
+          }
+          if (this.analysis && this.analysis.ready) {
+            this.addLog('win', 'SIGNAL', `🔀 Dead-zone-clear signal ${this.analysis.strength}% — ${this.analysis.reason}`);
+            this.fireHedgePair();
           }
           this.emit();
           return;
@@ -13601,6 +13841,20 @@ window.NexusStrategies=exports;
       if (mrLimits) {
         if (mrLimits.minSeconds != null && mrDuration < mrLimits.minSeconds) mrDuration = mrLimits.minSeconds;
         if (mrLimits.maxSeconds != null && mrDuration > mrLimits.maxSeconds) mrDuration = mrLimits.maxSeconds;
+      } else {
+        // Haven't heard back from contracts_for yet for this symbol (or it
+        // came back with no euro_non_atm entries) — the clamp above can't
+        // help, and repeating the same hardcoded duration just rejects
+        // forever with zero recovery (see the InvalidtoBuy handler below,
+        // which climbs this same ladder on every rejection). Once a
+        // rejection has actually happened for this symbol, step up through
+        // durations Deriv commonly accepts for Higher/Lower instead of
+        // resending the one we already know fails.
+        const fallbackIdx = (this._mrDurationFallback && this._mrDurationFallback[cfg.selectedMarket]) || 0;
+        if (fallbackIdx > 0) {
+          const ladder = [15, 30, 60, 120, 300, 600];
+          mrDuration = ladder[Math.min(fallbackIdx, ladder.length - 1)];
+        }
       }
       let rfDuration = cfg.duration || 5;
       const rfLimits = this.getDurationLimits(cfg.selectedMarket, 'atm');
@@ -14322,6 +14576,10 @@ window.NexusStrategies=exports;
                 }
               });
               _titan._contractDurationLimits[symbol] = limits;
+              // Real limits just arrived — the ladder fallback above was
+              // only ever a stand-in for not having this data yet, so drop
+              // any escalation and let the real min/max clamp do its job.
+              if (_titan._mrDurationFallback) delete _titan._mrDurationFallback[symbol];
             }
           }
           // Log every server reply that isn't a ping/balance/heartbeat so trade
@@ -14345,7 +14603,9 @@ window.NexusStrategies=exports;
 
           if (data.msg_type === 'proposal_open_contract') {
             const _c = data.proposal_open_contract;
-            if (_c && _c.is_sold && _c.contract_id) {
+            if (_c && _c.is_sold && _c.contract_id && _titan._hedgeContractIds && _titan._hedgeContractIds.has(_c.contract_id.toString())) {
+              _titan.handleHedgeLegResult(_c);
+            } else if (_c && _c.is_sold && _c.contract_id) {
               if (_titan.ownContractIds.has(_c.contract_id)) {
                 // Normal path: buy was already confirmed, process immediately
                 _titan.ownContractIds.delete(_c.contract_id);
@@ -14416,7 +14676,11 @@ window.NexusStrategies=exports;
           }
 
           if (data.msg_type === 'buy') {
-            if (data.error) {
+            const _hedgeLeg = data.req_id && _titan._hedgePendingReqIds && _titan._hedgePendingReqIds[data.req_id];
+            if (_hedgeLeg) {
+              delete _titan._hedgePendingReqIds[data.req_id];
+              _titan.handleHedgeBuyAck(_hedgeLeg, data);
+            } else if (data.error) {
               {
                 // Deriv's top-level error.message for InputValidationFailed is
                 // always the same generic string ("Input validation failed:
@@ -14433,6 +14697,20 @@ window.NexusStrategies=exports;
                 } catch (_) {}
                 _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})${extra}`);
                 if (extra) console.error('[Trade] Full buy error:', data.error); else console.error('[Trade] Full buy error (no details field):', data.error);
+                // Higher/Lower's duration ceiling/floor varies by symbol and
+                // we may not have heard back from contracts_for with real
+                // limits yet — if that's exactly what just failed, climb the
+                // fallback ladder (see executeBoltPurchase) so the NEXT
+                // signal tries a longer duration instead of the identical
+                // rejected one, forever.
+                if (_titan.isMeanRevMode && data.error.code === 'InvalidtoBuy' && /duration/i.test(data.error.message || '')) {
+                  const symbol = _titan.config.selectedMarket;
+                  const ladder = [15, 30, 60, 120, 300, 600];
+                  const cur = (_titan._mrDurationFallback[symbol] || 0);
+                  const next = Math.min(cur + 1, ladder.length - 1);
+                  _titan._mrDurationFallback[symbol] = next;
+                  _titan.addLog('engine', 'DURATION', `⏱ ${symbol} rejected that duration — stepping up to ${ladder[next]}s for the next signal.`);
+                }
               }
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
@@ -21680,6 +21958,222 @@ window.NexusStrategies=exports;
 </script>
 
 <script>
+// ── HEDGER UI ────────────────────────────────────────────────────────────
+// Fires a DIGITOVER + DIGITUNDER pair every run (see TitanEngine.
+// fireHedgePair/hedgeState). This is a risk-shaping tool, not an
+// arbitrage — see the barrier-gap note in the settings card below.
+(function (global) {
+  'use strict';
+  function el(id, parent) { return (parent || document).querySelector(id.startsWith('#') ? id : '#' + id); }
+  const shHtml = global.setHtmlIfChanged || function (node, html) { if (!node || node.__lastHtml === html) return false; node.innerHTML = html; node.__lastHtml = html; return true; };
+  const shells = {};
+  const MARKETS = (global.NexusTrading && global.NexusTrading.MARKETS) || [{ symbol: '1HZ100V', name: 'V100 (1S)' }];
+
+  function buildShell(rootId, label) {
+    const root = document.getElementById(rootId);
+    if (!root || shells[rootId]) return root;
+    shells[rootId] = true;
+    root.innerHTML = `
+      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0;position:relative">
+        <div>
+          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700">${label}</h1>
+          <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">DIGITOVER + DIGITUNDER DUAL-LEG · RISK-SHAPING, NOT ARBITRAGE</div>
+        </div>
+        <div style="flex:1"></div>
+        <div id="${rootId}-conn-dot" style="width:10px;height:10px;border-radius:50%;background:hsl(var(--loss))"></div>
+      </header>
+      <div class="titan-grid">
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-left"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-center"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="${rootId}-right"></div></div>
+      </div>`;
+    return root;
+  }
+
+  // ── LEFT: live pair status ─────────────────────────────────────────────
+  function renderLeft(engine, rootId, snap) {
+    const host = el(`${rootId}-left`);
+    const hs = snap.hedgeState || {};
+    const pair = hs.pair;
+    const legBadge = (leg) => {
+      if (!pair) return `<span style="color:hsl(var(--muted-foreground))">—</span>`;
+      const l = pair[leg];
+      if (!l) return `<span style="color:hsl(var(--muted-foreground))">—</span>`;
+      const color = l.status === 'settled' ? (l.win ? 'hsl(var(--win))' : 'hsl(var(--loss))')
+        : l.status === 'failed' ? 'hsl(var(--loss))' : 'hsl(var(--accent))';
+      const text = l.status === 'buying' ? 'BUYING…' : l.status === 'open' ? `OPEN #${l.contractId}` : l.status === 'settled' ? (l.win ? 'WON' : 'LOST') : 'FAILED';
+      return `<span style="color:${color};font-weight:800">${text}</span>`;
+    };
+    const html = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid hsl(var(--border)/0.3)">
+      <div style="position:relative;width:10px;height:10px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--primary));animation:ahub-pulse 1.5s infinite"></div>
+      </div>
+      <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:3px;color:hsl(var(--primary));text-transform:uppercase">Hedge Status</span>
+      <div style="flex:1"></div>
+      <span style="font-family:'DM Mono',monospace;font-size:9px;color:${hs.active ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${hs.active ? '● ARMED' : '○ IDLE'}</span>
+    </div>
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label">Current Pair</div>
+      <div style="display:flex;justify-content:space-between;padding:6px 0;font-family:'DM Mono',monospace;font-size:11px;border-bottom:1px solid hsl(var(--border)/0.2)">
+        <span>OVER ${pair ? pair.over.barrier : (snap.config.overBarrier ?? 5)}</span>${legBadge('over')}
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:6px 0;font-family:'DM Mono',monospace;font-size:11px">
+        <span>UNDER ${pair ? pair.under.barrier : (snap.config.underBarrier ?? 4)}</span>${legBadge('under')}
+      </div>
+    </div>
+    <div class="ahub-card" style="margin-bottom:10px">
+      <div class="ahub-label">Session</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:'DM Mono',monospace;font-size:11px">
+        <div>Runs<div style="font-size:16px;font-weight:900;color:hsl(var(--foreground))">${hs.runsDone || 0} / ${snap.config.targetRuns ?? 10}</div></div>
+        <div>Net P&amp;L<div style="font-size:16px;font-weight:900;color:${(hs.netTotal||0)>=0?'hsl(var(--win))':'hsl(var(--loss))'}">${(hs.netTotal||0)>=0?'+':''}${(hs.netTotal||0).toFixed(2)}</div></div>
+        <div>Next Stake<div style="font-size:14px;font-weight:800">${(hs.currentStake ?? snap.config.stake ?? 1).toFixed(2)}</div></div>
+        <div>Loss Streak<div style="font-size:14px;font-weight:800;color:${(hs.lossStreak||0)>0?'hsl(var(--loss))':'hsl(var(--foreground))'}">${hs.lossStreak || 0}</div></div>
+      </div>
+    </div>
+    <div class="ahub-card" style="font-size:9.5px;line-height:1.5;color:hsl(var(--muted-foreground))">
+      ⚠ Not an arbitrage. Digits between the two barriers (or equal to either) make BOTH legs lose at once, and Deriv's payout odds already price in a house edge on each leg — no barrier choice guarantees profit.
+    </div>`;
+    shHtml(host, html);
+  }
+
+  // ── CENTER: settings ─────────────────────────────────────────────────
+  function renderCenter(engine, rootId, snap) {
+    const host = el(`${rootId}-center`);
+    const c = snap.config;
+    const hs = snap.hedgeState || {};
+    const marketOptions = MARKETS.map(m => `<option value="${m.symbol}" ${c.selectedMarket===m.symbol?'selected':''}>${m.name}</option>`).join('');
+    const barrierOptions = (sel) => Array.from({length:10},(_,d)=>`<option value="${d}" ${sel===d?'selected':''}>${d}</option>`).join('');
+    const html = `
+      <div class="cp-card">
+        <div class="cp-section-label" style="margin:0 0 8px">Market</div>
+        <select class="cp-input" id="${rootId}-market">${marketOptions}</select>
+      </div>
+      <div class="cp-card">
+        <div class="cp-section-label" style="margin:0 0 8px">Barriers</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Over ≥</span><select class="cp-input" id="${rootId}-over-barrier">${barrierOptions(c.overBarrier ?? 5)}</select></div>
+          <div class="cp-input-group"><span class="cp-input-label">Under ≤</span><select class="cp-input" id="${rootId}-under-barrier">${barrierOptions(c.underBarrier ?? 4)}</select></div>
+        </div>
+        <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.7)">
+          Digits strictly between Under and Over (inclusive of either barrier) make BOTH legs lose in the same tick.
+        </div>
+      </div>
+      <div class="cp-card">
+        <div class="cp-section-label" style="margin:0 0 8px">Trade Settings</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Stake per leg</span><input class="cp-input" type="number" step="0.01" min="0.35" id="${rootId}-stake" value="${c.stake ?? 1}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Target Runs</span><input class="cp-input" type="number" min="1" id="${rootId}-runs" value="${c.targetRuns ?? 10}"></div>
+        </div>
+        <div class="cp-input-group" style="margin-top:8px"><span class="cp-input-label">Cooldown between pairs (sec)</span><input class="cp-input" type="number" min="0" step="1" id="${rootId}-cooldown" value="${c.cooldownSeconds ?? 2}"></div>
+      </div>
+      <div class="cp-card">
+        <div class="cp-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
+          <div class="cp-section-label" style="margin:0">Martingale on double-loss</div>
+          <button class="titan-toggle ${c.martingaleEnabled?'on':''}" id="${rootId}-mg-toggle"></button>
+        </div>
+        <div style="${c.martingaleEnabled?'':'display:none'}">
+          <div class="cp-input-row">
+            <div class="cp-input-group"><span class="cp-input-label">Multiplier</span><input class="cp-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier ?? 2}"></div>
+            <div class="cp-input-group"><span class="cp-input-label">Stop after N double-losses</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-stop-step" value="${c.martingaleStopStep ?? 3}"></div>
+          </div>
+        </div>
+        <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.7)">
+          Only escalates when BOTH legs lose in the same run. Any pair with at least one win resets it.
+        </div>
+      </div>
+      <button id="${rootId}-start-stop" class="cp-engage-btn ${hs.active?'active':''}">${hs.active ? '⏹ STOP HEDGER' : '▶ START HEDGER'}</button>`;
+    if (shHtml(host, html)) {
+      el(`${rootId}-market`, host).onchange = (e) => engine.setConfig({ selectedMarket: e.target.value });
+      el(`${rootId}-over-barrier`, host).onchange = (e) => engine.setConfig({ overBarrier: parseInt(e.target.value) });
+      el(`${rootId}-under-barrier`, host).onchange = (e) => engine.setConfig({ underBarrier: parseInt(e.target.value) });
+      el(`${rootId}-stake`, host).onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) engine.setConfig({ stake: v }); };
+      el(`${rootId}-runs`, host).onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) engine.setConfig({ targetRuns: v }); };
+      el(`${rootId}-cooldown`, host).onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 0) engine.setConfig({ cooldownSeconds: v }); };
+      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
+      const multEl = el(`${rootId}-mult`, host);
+      if (multEl) multEl.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 1) engine.setConfig({ martingaleMultiplier: v }); };
+      const stopEl = el(`${rootId}-stop-step`, host);
+      if (stopEl) stopEl.onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) engine.setConfig({ martingaleStopStep: v }); };
+      el(`${rootId}-start-stop`, host).onclick = () => {
+        if (engine.hedgeState.active) engine.stopHedger(); else engine.startHedger();
+      };
+    }
+  }
+
+  // ── RIGHT: pair history + engine log ────────────────────────────────
+  function renderRight(engine, rootId, snap) {
+    const host = el(`${rootId}-right`);
+    const hs = snap.hedgeState || {};
+    const history = hs.history || [];
+    const wins = history.filter(h => h.outcome === 'win').length;
+    const losses = history.filter(h => h.outcome === 'loss').length;
+    const total = history.length;
+    const wrPct = total ? (wins / total) * 100 : 0;
+    const logs = snap.logs || [];
+    const html = `
+      <div class="jnl-header-card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:3px;color:hsl(var(--win))">PAIR JOURNAL</span>
+          <span style="margin-left:auto;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${total} pairs</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+          <div class="jnl-stat-box" style="background:hsl(var(--win)/0.06);border:1px solid hsl(var(--win)/0.2)"><div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--win))">${wins}</div><div class="jnl-stat-label">WIN PAIRS</div></div>
+          <div class="jnl-stat-box" style="background:hsl(var(--loss)/0.06);border:1px solid hsl(var(--loss)/0.2)"><div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--loss))">${losses}</div><div class="jnl-stat-label">DOUBLE-LOSS</div></div>
+          <div class="jnl-stat-box" style="background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.2)"><div class="jnl-stat-val" style="font-size:16px;color:hsl(var(--accent))">${wrPct.toFixed(0)}%</div><div class="jnl-stat-label">PAIR WIN %</div></div>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding-right:2px">
+        ${history.length === 0 ? `
+        <div style="text-align:center;padding:40px 20px;color:hsl(var(--muted-foreground))">
+          <div style="font-size:28px;margin-bottom:10px;opacity:0.3">🔀</div>
+          <div style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:2px">NO PAIRS RECORDED</div>
+          <div style="font-size:9px;margin-top:6px;opacity:0.6">Start the hedger to begin</div>
+        </div>` :
+        history.slice(0, 60).map(h => {
+          const color = h.outcome === 'win' ? 'hsl(var(--win))' : h.outcome === 'loss' ? 'hsl(var(--loss))' : 'hsl(var(--muted-foreground))';
+          const label = h.outcome === 'win' ? '✓ NET WIN' : h.outcome === 'loss' ? '✕ DOUBLE-LOSS' : '— BREAKEVEN';
+          return `<div class="jnl-entry ${h.outcome==='win'?'win':'loss'}">
+            <div class="jnl-top-row">
+              <span class="jnl-badge ${h.outcome==='win'?'win':'loss'}">${h.outcome==='win'?'✓':'✕'}</span>
+              <span style="font-size:9px;font-family:'DM Mono',monospace;font-weight:800;color:${color}">${label}</span>
+              <span style="margin-left:auto;font-size:9px;font-family:'DM Mono',monospace;font-weight:800;color:${color}">${h.netProfit>=0?'+':''}${h.netProfit.toFixed(2)}</span>
+            </div>
+            <div style="display:flex;gap:10px;font-family:'DM Mono',monospace;font-size:9px;color:hsl(var(--muted-foreground))">
+              <span>OVER ${h.overBarrier} ${h.overWin?'✓':'✕'}</span><span>UNDER ${h.underBarrier} ${h.underWin?'✓':'✕'}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="ahub-card" style="margin-top:10px">
+        <div class="ahub-label">Engine Log</div>
+        <div style="font-size:10px;font-family:'DM Mono',monospace;max-height:180px;overflow-y:auto">
+          ${logs.slice(0,20).map(l => `<div style="padding:2px 0;color:${l.type==='win'?'hsl(var(--win))':l.type==='loss'?'hsl(var(--loss))':'hsl(var(--muted-foreground))'}">${l.title}: ${l.message}</div>`).join('') || '<div style="color:hsl(var(--muted-foreground))">No activity yet</div>'}
+        </div>
+      </div>`;
+    shHtml(host, html);
+  }
+
+  function render(engine, rootId, label) {
+    const root = buildShell(rootId, label || 'HEDGER BOT');
+    if (!root) return;
+    const snap = engine.getSnapshot();
+    renderLeft(engine, rootId, snap);
+    renderCenter(engine, rootId, snap);
+    renderRight(engine, rootId, snap);
+    const dot = el(`${rootId}-conn-dot`, root);
+    if (dot) {
+      const live = !!snap.state.connected;
+      dot.style.background = live ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+      dot.style.boxShadow = live ? '0 0 10px hsl(var(--win)/0.9)' : '0 0 8px hsl(var(--loss)/0.7)';
+    }
+  }
+
+  global.HedgerUI = { render, renderLive: render };
+})(window);
+</script>
+
+<script>
 // ── HOT REPEAT ENGINE ──────────────────────────────────────────────────
 // Single-strategy sibling to the Differ Terminal (BenzEngine). Only trigger:
 // digit X lands twice in a row (X -> X) -> fire DIGITDIFF[X] on the very
@@ -22443,7 +22937,7 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'accumulator', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'hedger'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
@@ -22493,9 +22987,14 @@ window.NexusStrategies=exports;
     const isMatches = id === 'matches';
     const isAccumulator = id === 'accumulator';
     const isEvenOddMR = id === 'evenmr' || id === 'oddmr';
+    // Hedger shares the digit-market socket/scanner with Over/Under (same
+    // 10 markets, same DIGITOVER/DIGITUNDER contract family) but fires
+    // BOTH a DIGITOVER and DIGITUNDER leg per run instead of picking one
+    // side — see TitanEngine.fireHedgePair.
+    const isHedger = id === 'hedger';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
-    const safeSocket = (isOU || isRiseFall || isMeanRev || isAccumulator ? window.NexusSocket : window.EvenSocket)
+    const safeSocket = (isOU || isRiseFall || isMeanRev || isAccumulator || isHedger ? window.NexusSocket : window.EvenSocket)
       || { globalSocket: null };
     // Higher/Lower gets its OWN scanner (RiseFallScanner) that ranks markets
     // by price-trend/RSI/Bollinger confluence via RiseFallAnalyzer — the same
@@ -22512,6 +23011,8 @@ window.NexusStrategies=exports;
       ? (window.RiseFallScanner || scannerFallback)
       : isMatches
       ? (window.MatchesScanner || scannerFallback)
+      : isHedger
+      ? (window.NexusScanner || scannerFallback)
       : (isOU ? window.NexusScanner : window.EvenScanner) || scannerFallback;
     const opts = isAccumulator
       ? {
@@ -22598,6 +23099,16 @@ window.NexusStrategies=exports;
           scanner: safeScanner,
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         }
+      : isHedger
+      ? {
+          // Hedger — fires a DIGITOVER + DIGITUNDER pair on the same digit
+          // market every run (see TitanEngine.fireHedgePair). Shares the
+          // same digit socket/scanner/trading modules Over/Under use.
+          id, mode: 'hedger', fixedTradeMode: null, botLabel: 'Hedger Bot',
+          fixedDirection: null, fixedMarket: null,
+          trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
+          strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
+        }
       : {
           id, mode: 'evenodd', fixedTradeMode: id, botLabel: id === 'even' ? 'Even Bot' : 'Odd Bot',
           trading: window.EvenTrading,
@@ -22613,7 +23124,8 @@ window.NexusStrategies=exports;
         if ((isRiseFall || isMeanRev || isAccumulator) && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
         else if (isMatches && window.MatchesUI) window.MatchesUI.renderLive(eng, rootId, opts.botLabel);
         else if (isEvenOddMR && window.EvenOddReversionUI) window.EvenOddReversionUI.renderLive(eng, rootId, opts.botLabel);
-        else if (!isRiseFall && !isMeanRev && !isMatches && !isAccumulator && !isEvenOddMR && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
+        else if (isHedger && window.HedgerUI) window.HedgerUI.renderLive(eng, rootId, opts.botLabel);
+        else if (!isRiseFall && !isMeanRev && !isMatches && !isAccumulator && !isEvenOddMR && !isHedger && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
       }
       if (activeApp === 'dashboard') queueDashboardRender();
     };
@@ -22654,6 +23166,11 @@ window.NexusStrategies=exports;
     }
     if (id === 'evenmr' || id === 'oddmr') {
       if (window.EvenOddReversionUI) window.EvenOddReversionUI.render(eng, id + '-root', id === 'evenmr' ? 'EVEN (MEAN REVERSION)' : 'ODD (MEAN REVERSION)');
+      titanBuilt[id] = true;
+      return;
+    }
+    if (id === 'hedger') {
+      if (window.HedgerUI) window.HedgerUI.render(eng, id + '-root', 'HEDGER BOT');
       titanBuilt[id] = true;
       return;
     }
