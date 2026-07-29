@@ -131,11 +131,6 @@
           <span class="hub-tab-label">Odd MR</span>
           <span class="dot live"></span>
         </button>
-        <button type="button" class="hub-tab" data-app="hedger" data-label="Hedger" title="Hedger — fires a DIGITOVER + DIGITUNDER pair simultaneously every run. Not an arbitrage: barriers leave a gap where both legs can lose at once.">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l10 10M17 7L7 17"/><circle cx="12" cy="12" r="9"/></svg></span>
-          <span class="hub-tab-label">Hedger</span>
-          <span class="dot live"></span>
-        </button>
         <div class="hub-nav-label">Account</div>
         <div class="hub-balance-pill glass-pill font-mono" id="hub-balance-pill" style="display:none;width:100%;box-sizing:border-box;justify-content:center"></div>
       </nav>
@@ -201,9 +196,6 @@
     </section>
     <section id="panel-oddmr" class="app-panel" aria-label="Odd Mean Reversion dashboard">
       <div id="oddmr-root" class="app-root"></div>
-    </section>
-    <section id="panel-hedger" class="app-panel" aria-label="Hedger dashboard">
-      <div id="hedger-root" class="app-root"></div>
     </section>
     </div>
 
@@ -10039,33 +10031,6 @@ function analyzeMarketDominance(history, tickPeriod, zoneDigits, isWinDigit, dom
   return { score, dominant: score >= threshold, samples: data.length, threshold };
 }
 
-// Hedger's entry trigger. A DIGITOVER(overBarrier) + DIGITUNDER(underBarrier)
-// pair loses on BOTH legs whenever the last digit falls in the shared "dead
-// zone" [underBarrier..overBarrier] (e.g. Over 5 / Under 4 -> dead zone {4,5}).
-// This does not create an edge — Deriv's payout odds already price in the
-// house edge on each leg regardless of when you fire — but firing right
-// after a run of dead-zone digits is firing blind into whatever just
-// produced that run. Waiting for `minGapStreak` consecutive ticks OUTSIDE
-// the dead zone before arming is a modest timing filter, not a guarantee.
-function analyzeHedgeGap(history, overBarrier, underBarrier, minGapStreak) {
-  const need = Math.max(1, minGapStreak || 3);
-  const data = history || [];
-  if (data.length < need + 1) {
-    return { ready: false, strength: 0, streak: 0, needed: need, reason: `Building tick history… (${data.length}/${need + 1})` };
-  }
-  const inDeadZone = (d) => d >= underBarrier && d <= overBarrier;
-  let streak = 0;
-  for (let i = data.length - 1; i >= 0; i--) {
-    if (!inDeadZone(data[i])) streak++; else break;
-  }
-  const ready = streak >= need;
-  const strength = Math.min(100, Math.round((streak / need) * 100));
-  const reason = ready
-    ? `${streak} consecutive ticks clear of the ${underBarrier}-${overBarrier} dead zone — armed`
-    : `${streak}/${need} ticks clear of the ${underBarrier}-${overBarrier} dead zone`;
-  return { ready, strength, streak, needed: need, reason };
-}
-
 exports.MARKETS = MARKETS;
 exports.analyzeDigits = analyzeDigits;
 exports.analyzeOver3Condition = analyzeOver3Condition;
@@ -10081,7 +10046,6 @@ exports.calculateNextStake = calculateNextStake;
 exports.createLogEntry = createLogEntry;
 exports.analyzeReversalTrigger = analyzeReversalTrigger;
 exports.analyzeMarketDominance = analyzeMarketDominance;
-exports.analyzeHedgeGap = analyzeHedgeGap;
 window.NexusTrading = exports;
 })();
 
@@ -12188,15 +12152,6 @@ window.NexusStrategies=exports;
       // _isSacrificeTrade: the trade currently in flight is a 'sacrifice'
       // test trade whose result must be excluded from Runs/stats.
       this._skipArmed = false; this._isSacrificeTrade = false;
-      // Hedger mode state — kept entirely separate from pendingTrade/
-      // openTrade/executionGuard (the single-trade pipeline every other
-      // mode uses) since a hedge run has TWO concurrent open contracts.
-      // _hedgeContractIds maps a live contract_id -> 'over'|'under' so
-      // proposal_open_contract settlement routes here instead of the
-      // generic handleContractResult path. See fireHedgePair.
-      this.hedgeState = { active: false, runsDone: 0, pair: null, history: [], netTotal: 0, lossStreak: 0, currentStake: null };
-      this._hedgeContractIds = new Map();
-      this._hedgePendingReqIds = {};
       this.lastTickTime = Date.now(); this.lastTradeTime = Date.now();
       this.latestLiveAnalysis = null; this.connectRef = null;
 
@@ -12247,7 +12202,6 @@ window.NexusStrategies=exports;
     // digit (0-9) instead of parity/over-under/direction, using its own
     // frequency-based analyzer (MatchesAnalyzer).
     get isMatchMode() { return this.mode === 'matches'; }
-    get isHedgerMode() { return this.mode === 'hedger'; }
 
     // Extra args passed into the shared Trading module's analyzeDigits /
     // checkEntryConditions / MarketScanner so each bot instance scores and
@@ -12465,19 +12419,7 @@ window.NexusStrategies=exports;
         // "hottest digit" condition from re-firing on the very next tick.
         matchesCooldownTicks: 3,
       };
-      // Hedger — fires a DIGITOVER + DIGITUNDER pair simultaneously every
-      // run. NOT an arbitrage: the two barriers leave a gap (e.g. Over 5 /
-      // Under 4 leaves digits 4 and 5 where BOTH legs lose at once) and
-      // Deriv's payout odds already price in the house edge on each leg,
-      // so this cannot guarantee profit — it's a risk-shaping tool, not a
-      // sure thing. See fireHedgePair/handleHedgeLegResult.
-      const hedgerDefaults = {
-        overBarrier: 5, underBarrier: 4, stake: 1, targetRuns: 10,
-        cooldownSeconds: 2, tickPeriod: 50, selectedMarket: '1HZ100V',
-        minGapStreak: 3, minSignal: 60,
-        martingaleEnabled: false, martingaleMultiplier: 2, martingaleStopStep: 3,
-      };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : this.isHedgerMode ? hedgerDefaults : evenDefaults;
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -12512,7 +12454,6 @@ window.NexusStrategies=exports;
         fixedTradeMode: this.fixedTradeMode, botLabel: this.botLabel, _cdMax: this._cdMax || 25,
         previousMarket: this.previousMarket || null,
         mtf: this.mtf || null,
-        hedgeState: this.hedgeState || null,
       };
     }
 
@@ -12625,204 +12566,6 @@ window.NexusStrategies=exports;
         if (!this._mrDurationBlacklist) this._mrDurationBlacklist = {};
         this._mrDurationBlacklist[symbol] = Date.now();
       }
-    }
-
-    // ── Hedger ──────────────────────────────────────────────────────
-    // Fires a DIGITOVER (barrier = overBarrier) and a DIGITUNDER
-    // (barrier = underBarrier) contract together on the same market, once
-    // analyzeHedgeGap's dead-zone-clear streak is ready (same "arm on a
-    // tick-handler gate, fire once ready" shape every other digit bot
-    // here uses — see the isHedgerMode branch in subscribeToMarket).
-    // This is NOT an arbitrage — digits strictly between the two barriers
-    // (or equal to either) make BOTH legs lose at once, and Deriv's
-    // payout odds already have the house edge baked in on each leg, so
-    // there's no combination of barriers/timing that guarantees profit.
-    // It's a risk-shaping tool: frequent small net wins, occasional
-    // double loss.
-    startHedger() {
-      if (!this.isHedgerMode) return;
-      this.hedgeState = { active: true, runsDone: 0, pair: null, history: [], netTotal: 0, lossStreak: 0, currentStake: this.config.stake };
-      this.state = { ...this.state, active: true, isLocked: false, isCooldown: false };
-      this.addLog('system', 'HEDGE', `▶ Hedger armed — OVER ${this.config.overBarrier} / UNDER ${this.config.underBarrier}, target ${this.config.targetRuns} pairs. Waiting for dead-zone-clear signal…`);
-      this.emit();
-    }
-
-    stopHedger() {
-      this.hedgeState.active = false;
-      this.state = { ...this.state, active: false };
-      this.addLog('system', 'HEDGE', '⏹ Hedger stopped.');
-      this.emit();
-    }
-
-    fireHedgePair() {
-      if (!this.isHedgerMode) return;
-      if (!this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) {
-        this.addLog('error', 'HEDGE', 'Not connected — cannot fire hedge pair.');
-        return;
-      }
-      const cfg = this.config;
-      const stake = this.hedgeState.currentStake ?? cfg.stake;
-      const currency = window.HubStore.getState().currency || 'USD';
-      const reqOver = (this._reqIdSeq = (this._reqIdSeq || 0) + 1);
-      const reqUnder = (this._reqIdSeq = (this._reqIdSeq || 0) + 1);
-      this._hedgePendingReqIds[reqOver] = 'over';
-      this._hedgePendingReqIds[reqUnder] = 'under';
-      this.hedgeState.pair = {
-        over: { contractId: null, stake, barrier: cfg.overBarrier, status: 'buying', profit: null, win: false },
-        under: { contractId: null, stake, barrier: cfg.underBarrier, status: 'buying', profit: null, win: false },
-      };
-      this.state = { ...this.state, isLocked: true };
-      this.addLog('engine', 'HEDGE', `🔀 Firing pair — OVER ${cfg.overBarrier} @ ${stake.toFixed(2)} / UNDER ${cfg.underBarrier} @ ${stake.toFixed(2)}`);
-      const buildParams = (contractType, barrier) => ({
-        amount: stake, basis: 'stake', contract_type: contractType, currency,
-        duration: 1, duration_unit: 't', underlying_symbol: cfg.selectedMarket, barrier,
-      });
-      // Pre-build (and pre-stringify) BOTH leg payloads before sending
-      // either one. Stringifying inline between the two send() calls, like
-      // this used to do, put JSON.stringify's work in the gap between the
-      // legs — small, but real, and asymmetric (OVER always paid it,
-      // UNDER never did). Doing both conversions up front means the two
-      // send() calls that follow are back-to-back with nothing but the
-      // socket write itself between them — as close to simultaneous as
-      // this transport allows.
-      const overMsg = JSON.stringify({ buy: '1', subscribe: 1, price: stake, req_id: reqOver, parameters: buildParams('DIGITOVER', cfg.overBarrier) });
-      const underMsg = JSON.stringify({ buy: '1', subscribe: 1, price: stake, req_id: reqUnder, parameters: buildParams('DIGITUNDER', cfg.underBarrier) });
-      const firedAt = Date.now();
-      this.hedgeState.pair.over.firedAt = firedAt;
-      this.hedgeState.pair.under.firedAt = firedAt;
-      try {
-        this.tradingSocket.send(overMsg);
-        this.tradingSocket.send(underMsg);
-      } catch (e) {
-        this.addLog('error', 'HEDGE', 'Failed to send hedge pair — releasing lock.');
-        this.state = { ...this.state, isLocked: false };
-        this.hedgeState.pair = null;
-      }
-      this.emit();
-    }
-
-    // Routes a buy confirmation/rejection for one leg of the current pair.
-    // Called from the tradingSocket.onmessage 'buy' branch instead of the
-    // generic pendingTrade/openTrade path — hedger never touches those.
-    handleHedgeBuyAck(leg, data) {
-      const pair = this.hedgeState.pair;
-      if (!pair || !pair[leg]) return;
-      if (data.error) {
-        this.addLog('error', 'HEDGE', `${leg.toUpperCase()} leg rejected: ${data.error.message} (code: ${data.error.code})`);
-        pair[leg].status = 'failed'; pair[leg].profit = 0; pair[leg].win = false;
-        this._settleHedgeIfDone();
-        return;
-      }
-      const cid = data.buy.contract_id.toString();
-      pair[leg].contractId = cid;
-      pair[leg].status = 'open';
-      this._hedgeContractIds.set(cid, leg);
-      this.addLog('engine', 'HEDGE', `${leg.toUpperCase()} leg confirmed — contract #${cid} @ ${data.buy.buy_price}`);
-      this.emit();
-    }
-
-    // Called from the proposal_open_contract is_sold branch when the
-    // settling contract_id belongs to a live hedge leg.
-    handleHedgeLegResult(contract) {
-      const cid = contract.contract_id.toString();
-      const leg = this._hedgeContractIds.get(cid);
-      this._hedgeContractIds.delete(cid);
-      const pair = this.hedgeState.pair;
-      if (!leg || !pair || !pair[leg]) return;
-      const profit = parseFloat(contract.profit) || 0;
-      pair[leg].status = 'settled'; pair[leg].profit = profit; pair[leg].win = profit > 0;
-      this.addLog(profit > 0 ? 'win' : 'loss', 'HEDGE', `${leg.toUpperCase()} leg ${profit > 0 ? 'WON' : 'LOST'} — ${profit >= 0 ? '+' : ''}${profit.toFixed(2)}`);
-      this._settleHedgeIfDone();
-    }
-
-    _settleHedgeIfDone() {
-      const pair = this.hedgeState.pair;
-      if (!pair) return;
-      const overDone = pair.over.status === 'settled' || pair.over.status === 'failed';
-      const underDone = pair.under.status === 'settled' || pair.under.status === 'failed';
-      if (!overDone || !underDone) { this.emit(); return; }
-      const netProfit = (pair.over.profit || 0) + (pair.under.profit || 0);
-      const outcome = netProfit > 0 ? 'win' : netProfit < 0 ? 'loss' : 'breakeven';
-      const cfg = this.config;
-      this.hedgeState.history = [{
-        time: Date.now(), overBarrier: pair.over.barrier, underBarrier: pair.under.barrier,
-        stake: pair.over.stake, overWin: pair.over.win, underWin: pair.under.win, netProfit, outcome,
-      }, ...this.hedgeState.history].slice(0, 200);
-      this.hedgeState.runsDone += 1;
-      this.hedgeState.netTotal = (this.hedgeState.netTotal || 0) + netProfit;
-      // Feed the shared stats object too — getBotStats (used for the
-      // Dashboard's Net P&L / Win Rate cards) reads this for every bot,
-      // but Hedger only ever updated hedgeState.netTotal, so its results
-      // never moved those headline numbers even though they showed up in
-      // its own panel. A win-pair counts as one win, a double-loss (or
-      // breakeven) counts as one loss, consistent with the W/L badge each
-      // pair gets in the journal entry above.
-      this.state.stats = {
-        win: this.state.stats.win + (outcome === 'win' ? 1 : 0),
-        loss: this.state.stats.loss + (outcome === 'win' ? 0 : 1),
-        profit: this.state.stats.profit + netProfit,
-      };
-      // Push the settled pair into the shared journal too — this is what
-      // feeds the Dashboard's global "All"/per-bot journal list (see
-      // getBotJournal, which just reads engine.journal). Before this, a
-      // Hedger pair only ever landed in hedgeState.history, which the
-      // Hedger's OWN in-panel Pair Journal reads — so pairs never showed
-      // up on the Dashboard at all. Shaped like a normal trade journal
-      // entry (profit/stake/type) so it folds correctly into the
-      // Dashboard's Net P&L / won-lost totals, plus isHedgePair + the
-      // over/under breakdown so the Dashboard can render the pair (both
-      // legs' stakes and the net win) instead of a single digit result.
-      this.journal = [{
-        id: `hedge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        time: new Date().toLocaleTimeString(), ts: Date.now(),
-        type: outcome === 'win' ? 'win' : 'loss', botId: this.id, botLabel: this.botLabel,
-        market: cfg.selectedMarket,
-        isHedgePair: true,
-        overBarrier: pair.over.barrier, underBarrier: pair.under.barrier,
-        overStake: pair.over.stake, underStake: pair.under.stake,
-        overWin: pair.over.win, underWin: pair.under.win,
-        overProfit: pair.over.profit || 0, underProfit: pair.under.profit || 0,
-        outcome, profit: netProfit,
-        stake: (pair.over.stake || 0) + (pair.under.stake || 0),
-      }, ...this.journal].slice(0, 500);
-      this.addLog(outcome === 'win' ? 'win' : outcome === 'loss' ? 'loss' : 'engine', 'HEDGE',
-        `PAIR RESULT: ${outcome.toUpperCase()} — net ${netProfit >= 0 ? '+' : ''}${netProfit.toFixed(2)} (over ${pair.over.win ? 'WIN' : 'LOSS'} / under ${pair.under.win ? 'WIN' : 'LOSS'})`);
-      // Martingale only escalates on the double-loss outcome (the one case
-      // with zero payout on either leg) — any win resets it.
-      let haltForMartingale = false;
-      if (cfg.martingaleEnabled) {
-        if (!pair.over.win && !pair.under.win) {
-          this.hedgeState.lossStreak = (this.hedgeState.lossStreak || 0) + 1;
-          if (this.hedgeState.lossStreak <= cfg.martingaleStopStep) {
-            this.hedgeState.currentStake = Math.round(((this.hedgeState.currentStake ?? cfg.stake) * cfg.martingaleMultiplier) * 100) / 100;
-          } else {
-            this.addLog('error', 'HEDGE', `Martingale stopped after ${cfg.martingaleStopStep} straight double-losses — resetting stake and halting.`);
-            this.hedgeState.currentStake = cfg.stake; this.hedgeState.lossStreak = 0;
-            haltForMartingale = true;
-          }
-        } else {
-          this.hedgeState.lossStreak = 0; this.hedgeState.currentStake = cfg.stake;
-        }
-      }
-      this.hedgeState.pair = null;
-      if (haltForMartingale || this.hedgeState.runsDone >= (cfg.targetRuns || 1)) {
-        this.hedgeState.active = false;
-        this.state = { ...this.state, isLocked: false, active: false };
-        this.addLog('system', 'HEDGE', haltForMartingale ? '⏹ Hedger stopped (martingale limit).' : '✅ Target runs reached — engine stopped.');
-        this.emit();
-        return;
-      }
-      // Back to scouting: release the lock but hold a short cooldown
-      // (reuses the same state.isCooldown gate every other bot's tick
-      // handler already respects) before the analyzer is allowed to arm
-      // the next pair, so runs don't chain instantly back-to-back.
-      this.state = { ...this.state, isLocked: false, isCooldown: true };
-      this.emit();
-      setTimeout(() => {
-        if (!this.hedgeState.active) return;
-        this.state = { ...this.state, isCooldown: false };
-        this.emit();
-      }, Math.max(0, cfg.cooldownSeconds ?? 2) * 1000);
     }
 
     subscribeToMarket(market) {
@@ -12950,11 +12693,6 @@ window.NexusStrategies=exports;
           // rather than any bot-local buffer.
           result = window.EvenOddReversionAnalyzer.analyze(fullHistory, this.config);
           this.analysis = result;
-        } else if (this.isHedgerMode) {
-          // See analyzeHedgeGap — arms once the dead zone between the two
-          // barriers has gone quiet for minGapStreak ticks in a row.
-          result = this.T.analyzeHedgeGap(fullHistory, this.config.overBarrier, this.config.underBarrier, this.config.minGapStreak);
-          this.analysis = result;
         } else if (isOver3) {
           result = this.T.analyzeOver3Condition(history, tickPeriod, this.config.minStreak, this.config.minSignal);
           // Over 3 fires off fast streak+digit gates, not a slow drifting
@@ -13003,26 +12741,6 @@ window.NexusStrategies=exports;
         if (this._skipArmed) {
           this.addLog('win', 'ENGINE', '▶ Skip-tick window passed — firing chain now (First-Tick Handling).');
           this.startChainExecution(true);
-          this.emit();
-          return;
-        }
-        if (this.isHedgerMode) {
-          // Both legs fire together (fireHedgePair), so there's no
-          // direction to confirm — the only gate is analyzeHedgeGap's
-          // dead-zone-clear streak computed in the analysis block above.
-          // A pair in flight is already covered by state.isLocked in the
-          // shared gate at the top of this handler.
-          if (this.hedgeState.runsDone >= (this.config.targetRuns || 1)) {
-            this.hedgeState.active = false;
-            this.state = { ...this.state, active: false };
-            this.addLog('system', 'HEDGE', '✅ Target runs reached — engine stopped.');
-            this.emit();
-            return;
-          }
-          if (this.analysis && this.analysis.ready) {
-            this.addLog('win', 'SIGNAL', `🔀 Dead-zone-clear signal ${this.analysis.strength}% — ${this.analysis.reason}`);
-            this.fireHedgePair();
-          }
           this.emit();
           return;
         }
@@ -14531,9 +14249,7 @@ window.NexusStrategies=exports;
 
           if (data.msg_type === 'proposal_open_contract') {
             const _c = data.proposal_open_contract;
-            if (_c && _c.is_sold && _c.contract_id && _titan._hedgeContractIds && _titan._hedgeContractIds.has(_c.contract_id.toString())) {
-              _titan.handleHedgeLegResult(_c);
-            } else if (_c && _c.is_sold && _c.contract_id) {
+            if (_c && _c.is_sold && _c.contract_id) {
               if (_titan.ownContractIds.has(_c.contract_id)) {
                 // Normal path: buy was already confirmed, process immediately
                 _titan.ownContractIds.delete(_c.contract_id);
@@ -14611,11 +14327,7 @@ window.NexusStrategies=exports;
           }
 
           if (data.msg_type === 'buy') {
-            const _hedgeLeg = data.req_id && _titan._hedgePendingReqIds && _titan._hedgePendingReqIds[data.req_id];
-            if (_hedgeLeg) {
-              delete _titan._hedgePendingReqIds[data.req_id];
-              _titan.handleHedgeBuyAck(_hedgeLeg, data);
-            } else if (data.error) {
+            if (data.error) {
               {
                 // Deriv's top-level error.message for InputValidationFailed is
                 // always the same generic string ("Input validation failed:
@@ -14682,18 +14394,6 @@ window.NexusStrategies=exports;
 
     toggleEngine() {
       if (this.state.isCooldown) return;
-      // Hedger tracks its own session (runsDone, netTotal, currentStake,
-      // ARMED/IDLE badge) on hedgeState, separate from the generic
-      // state.active this method otherwise flips. Routing through here
-      // without delegating would leave hedgeState.active stale — the
-      // engine would actually be trading (the tick-handler's firing gate
-      // reads state.active) while the Hedger panel kept showing "IDLE"
-      // forever. Delegate so master Engage-All/Terminate-All stays in
-      // sync with the panel exactly like the dedicated hg toggle button.
-      if (this.isHedgerMode) {
-        if (this.hedgeState.active) this.stopHedger(); else this.startHedger();
-        return;
-      }
       const newActive = !this.state.active;
       if (newActive && !window.HubStore.isBotEnabled(this.id)) {
         this.addLog('error', 'ENGINE', `${this.botLabel} is disabled — enable it from the Dashboard first`);
@@ -17527,7 +17227,6 @@ window.NexusStrategies=exports;
     evenmr: { label: 'Even MR Bot', dot: 'hsl(var(--win))' },
     oddmr: { label: 'Odd MR Bot', dot: 'hsl(var(--win))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
-    hedger: { label: 'Hedger Bot', dot: 'hsl(340 82% 62%)' },
   };
 
   function getBotJournal(engine, botId) {
@@ -18325,7 +18024,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'hedger'];
+    const botIds = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -18714,52 +18413,6 @@ window.NexusStrategies=exports;
       const botLabel = j.isHistory ? 'DERIV' : (BOT_META[j.botId] ? BOT_META[j.botId].label : (j.botId || '—'));
       const botDot = j.isHistory ? 'hsl(var(--secondary))' : (BOT_META[j.botId] ? BOT_META[j.botId].dot : 'hsl(var(--muted-foreground))');
       const plStr = (j.profit >= 0 ? '+' : '') + '$' + j.profit.toFixed(2);
-      // ── Hedger pair entries ───────────────────────────────────────────
-      // A hedge "trade" is really two legs (DIGITOVER + DIGITUNDER) fired
-      // together — the single-digit entry/exit layout below doesn't fit,
-      // so this renders OVER stake / UNDER stake per leg (with each leg's
-      // own win/loss color) plus the pair's combined Net Win, instead of
-      // one exit digit and one flat P&L.
-      if (j.isHedgePair) {
-        const overColor = j.overWin ? 'hsl(var(--win))' : 'hsl(var(--loss)/0.6)';
-        const underColor = j.underWin ? 'hsl(var(--win))' : 'hsl(var(--loss)/0.6)';
-        return `<div class="journal-entry ${j.type}"
-          data-nav-jnl="${j.botId || ''}"
-          style="padding:8px 12px;min-height:0;gap:10px;cursor:${j.botId ? 'pointer' : 'default'};
-                 background:hsl(0 0% 4%);border:1px solid hsl(${isWin?'var(--win)/0.16':'var(--loss)/0.12'});
-                 border-radius:10px;margin-bottom:5px;display:flex;align-items:center;
-                 transition:border-color .15s,transform .15s;"
-          onmouseover="if(this.dataset.navJnl)this.style.transform='translateX(3px)'"
-          onmouseout="this.style.transform=''">
-          <div style="width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;
-                      font-family:'Outfit',sans-serif;font-size:12px;font-weight:900;flex-shrink:0;
-                      background:hsl(0 0% 0%);
-                      ${isWin
-                        ? 'color:hsl(var(--win));border:1.5px solid hsl(var(--win)/0.35);text-shadow:0 0 12px hsl(var(--win)/0.9),0 0 24px hsl(var(--win)/0.5);box-shadow:0 0 8px hsl(var(--win)/0.2);'
-                        : 'color:hsl(var(--loss)/0.5);border:1.5px solid hsl(var(--loss)/0.2);'}">${isWin ? 'W' : 'L'}</div>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:3px">
-              <span style="color:${botDot};font-size:10px;font-weight:700;font-family:'DM Mono',monospace;white-space:nowrap">
-                <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${botDot};margin-right:4px;vertical-align:middle"></span>${botLabel}
-              </span>
-              <span style="font-size:9px;color:hsl(var(--muted-foreground)/0.4);font-family:'DM Mono',monospace;margin-left:auto;white-space:nowrap">${j.time || ''}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <span style="font-size:10px;font-family:'DM Mono',monospace;font-weight:800;color:${overColor}">
-                OVER ${j.overBarrier ?? ''} stake $${(j.overStake || 0).toFixed(2)} ${j.overWin ? '✓' : '✕'}
-              </span>
-              <span style="font-size:10px;font-family:'DM Mono',monospace;font-weight:800;color:${underColor}">
-                UNDER ${j.underBarrier ?? ''} stake $${(j.underStake || 0).toFixed(2)} ${j.underWin ? '✓' : '✕'}
-              </span>
-            </div>
-          </div>
-          <div style="flex-shrink:0;text-align:right">
-            <div style="font-size:8px;font-weight:900;font-family:'Outfit',sans-serif;letter-spacing:0.5px;color:hsl(var(--muted-foreground)/0.6);margin-bottom:2px">NET WIN</div>
-            <div style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:900;letter-spacing:-0.5px;
-                        ${isWin ? 'color:hsl(var(--win));text-shadow:0 0 8px hsl(var(--win)/0.5);' : 'color:hsl(var(--loss)/0.6);'}">${plStr}</div>
-          </div>
-        </div>`;
-      }
       const exitD = (j.exitDigit != null && j.exitDigit !== '?') ? j.exitDigit : '—';
       const entryD = (j.entryDigit != null && j.entryDigit !== '?') ? j.entryDigit : '—';
       const winColor = isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))';
@@ -21840,437 +21493,6 @@ window.NexusStrategies=exports;
 })(window);
 </script>
 
-<script>
-// ── HEDGER UI ────────────────────────────────────────────────────────────
-// Fires a DIGITOVER + DIGITUNDER pair every run (see TitanEngine.
-// fireHedgePair/hedgeState). This is a risk-shaping tool, not an
-// arbitrage — see the barrier-gap note in the settings card below.
-//
-// Visual identity: a "scale" — two legs (OVER in rose, UNDER in cyan)
-// balanced against a shared amber dead-zone, rather than the single-signal
-// look the direction-picking bots use. The signature element is the live
-// barrier gauge: a 0–9 digit rail that shows exactly which face-values
-// win, lose, or double-lose, with the current tick riding along it.
-(function (global) {
-  'use strict';
-  function el(id, parent) { return (parent || document).querySelector(id.startsWith('#') ? id : '#' + id); }
-  const shHtml = global.setHtmlIfChanged || function (node, html) { if (!node || node.__lastHtml === html) return false; node.innerHTML = html; node.__lastHtml = html; return true; };
-  const shells = {};
-  const MARKETS = (global.NexusTrading && global.NexusTrading.MARKETS) || [{ symbol: '1HZ100V', name: 'V100 (1S)' }];
-
-  // Self-contained styles, scoped to this root — mirrors the pattern the
-  // other bot modules use (EvenOddReversionUI/RiseFallUI/etc: each panel
-  // owns its own look via #${rootId} selectors) so nothing here leaks
-  // into, or is affected by, any other tab's CSS.
-  const SELF_STYLE = (rootId) => `
-    <style>
-      #${rootId} {
-        --hg-over: 340 82% 62%;
-        --hg-under: 189 84% 55%;
-        --hg-gap: 38 92% 58%;
-      }
-      @keyframes hg-armed-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.55;transform:scale(1.15)} }
-      @keyframes hg-tick-pop { 0%{transform:scale(.6);opacity:0} 55%{transform:scale(1.14)} 100%{transform:scale(1);opacity:1} }
-      @keyframes hg-open-glow { 0%,100%{box-shadow:0 0 0 0 hsl(var(--hg-live-c,var(--primary))/0.35)} 50%{box-shadow:0 0 0 6px hsl(var(--hg-live-c,var(--primary))/0)} }
-      @keyframes hg-sheen { 0%{transform:translateX(-120%) skewX(-15deg)} 100%{transform:translateX(220%) skewX(-15deg)} }
-      @keyframes hg-header-sweep { 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
-      @keyframes hg-title-glow { 0%,100%{text-shadow:0 0 10px hsl(var(--hg-over)/0.35),0 0 10px hsl(var(--hg-under)/0.35)} 50%{text-shadow:0 0 22px hsl(var(--hg-over)/0.6),0 0 22px hsl(var(--hg-under)/0.6)} }
-      @keyframes hg-stripe { 0%{background-position:0 0} 100%{background-position:28px 0} }
-      @keyframes hg-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-      @keyframes hg-slide { from{opacity:0;transform:translateY(-10px) scale(.98)} to{opacity:1;transform:translateY(0) scale(1)} }
-      @keyframes hg-count { from{opacity:0;transform:translateY(3px) scale(.96)} to{opacity:1;transform:translateY(0) scale(1)} }
-      @keyframes hg-scale-tilt { 0%{transform:rotate(-1.5deg)} 50%{transform:rotate(1.5deg)} 100%{transform:rotate(-1.5deg)} }
-      @keyframes hg-win-ring { 0%{box-shadow:0 0 0 0 hsl(var(--win)/0)} 30%{box-shadow:0 0 0 8px hsl(var(--win)/0.32)} 100%{box-shadow:0 0 0 0 hsl(var(--win)/0)} }
-      @keyframes hg-loss-ring { 0%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} 30%{box-shadow:0 0 0 8px hsl(var(--loss)/0.32)} 100%{box-shadow:0 0 0 0 hsl(var(--loss)/0)} }
-
-      #${rootId} .hg-header-glow {
-        position:absolute; bottom:0; left:0; height:2px; width:100%;
-        background:linear-gradient(90deg, transparent, hsl(var(--hg-under)/0.55), hsl(var(--hg-over)/0.55), transparent);
-        background-size:200% 100%; animation:hg-header-sweep 5s linear infinite;
-      }
-      #${rootId} h1.font-display { animation:hg-title-glow 3.4s ease-in-out infinite; }
-      #${rootId} .hg-scale-icon { display:inline-block; margin-right:6px; animation:hg-scale-tilt 4s ease-in-out infinite; transform-origin:50% 20%; }
-
-      #${rootId} .hg-card {
-        background:linear-gradient(150deg,hsl(var(--card)/0.92),hsl(var(--bg-soft)/0.7));
-        border:1px solid hsl(var(--border)/0.5); border-radius:16px; padding:14px; margin-bottom:10px;
-        position:relative; overflow:hidden; backdrop-filter:blur(10px);
-        box-shadow:0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
-        animation:hg-in .3s ease both;
-      }
-      #${rootId} .hg-card::before {
-        content:''; position:absolute; top:0; left:0; right:0; height:1px;
-        background:linear-gradient(90deg, transparent, hsl(var(--hg-under)/0.4) 35%, hsl(var(--hg-over)/0.4) 70%, transparent);
-      }
-      #${rootId} .hg-label {
-        font-family:'Space Grotesk',sans-serif !important; font-size:8.5px; font-weight:800;
-        letter-spacing:3px; text-transform:uppercase; color:hsl(var(--muted-foreground)/0.65);
-        margin-bottom:10px; display:flex; align-items:center; gap:7px;
-      }
-      #${rootId} .hg-label::after { content:''; flex:1; height:1px; background:linear-gradient(90deg, hsl(var(--primary)/0.2), transparent); }
-
-      /* ── Barrier gauge (signature element) ─────────────────────────── */
-      #${rootId} .hg-gauge-track { display:flex; gap:3px; margin-bottom:8px; }
-      #${rootId} .hg-gauge-cell {
-        flex:1; aspect-ratio:1/1; display:flex; align-items:center; justify-content:center;
-        border-radius:8px; font-family:'DM Mono',monospace; font-size:12px; font-weight:800;
-        border:1px solid hsl(var(--border)/0.35); position:relative; transition:transform .15s ease;
-      }
-      #${rootId} .hg-gauge-cell.hg-z-under { background:hsl(var(--hg-under)/0.14); color:hsl(var(--hg-under)); border-color:hsl(var(--hg-under)/0.35); }
-      #${rootId} .hg-gauge-cell.hg-z-over  { background:hsl(var(--hg-over)/0.14); color:hsl(var(--hg-over)); border-color:hsl(var(--hg-over)/0.35); }
-      #${rootId} .hg-gauge-cell.hg-z-gap   { background:hsl(var(--hg-gap)/0.12); color:hsl(var(--hg-gap)); border-color:hsl(var(--hg-gap)/0.3); }
-      #${rootId} .hg-gauge-cell.hg-live { transform:scale(1.16); z-index:2; animation:hg-tick-pop .35s ease; box-shadow:0 0 0 2px hsl(var(--foreground)/0.85), 0 0 14px currentColor; }
-      #${rootId} .hg-gauge-legend { display:flex; gap:12px; font-family:'DM Mono',monospace; font-size:8px; color:hsl(var(--muted-foreground)); flex-wrap:wrap; }
-      #${rootId} .hg-gauge-legend span { display:inline-flex; align-items:center; gap:4px; }
-      #${rootId} .hg-gauge-legend i { width:8px; height:8px; border-radius:2px; display:inline-block; }
-
-      /* ── Arming meter ───────────────────────────────────────────────── */
-      #${rootId} .hg-arm-bar-track { height:6px; border-radius:4px; background:hsl(var(--bg)/0.7); border:1px solid hsl(var(--border)/0.4); overflow:hidden; margin-top:6px; }
-      #${rootId} .hg-arm-bar-fill {
-        height:100%; border-radius:4px; transition:width .5s cubic-bezier(.34,1.56,.64,1), background-color .3s ease;
-        background:repeating-linear-gradient(45deg, hsl(var(--accent)), hsl(var(--accent)) 6px, hsl(var(--accent)/0.5) 6px, hsl(var(--accent)/0.5) 12px);
-        background-size:28px 28px; animation:hg-stripe 1s linear infinite; box-shadow:0 0 8px hsl(var(--accent)/0.55);
-      }
-      #${rootId} .hg-arm-bar-fill.hg-armed { background:hsl(var(--win)); box-shadow:0 0 10px hsl(var(--win)/0.7); animation:none; }
-
-      /* ── Dual-leg cards ─────────────────────────────────────────────── */
-      #${rootId} .hg-legs { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-      #${rootId} .hg-leg {
-        border-radius:12px; padding:10px; text-align:center; border:1px solid hsl(var(--border)/0.4);
-        background:hsl(var(--bg)/0.55); transition:border-color .2s, box-shadow .2s;
-      }
-      #${rootId} .hg-leg.hg-over { border-color:hsl(var(--hg-over)/0.3); }
-      #${rootId} .hg-leg.hg-under { border-color:hsl(var(--hg-under)/0.3); }
-      #${rootId} .hg-leg.hg-pulse.hg-over { --hg-live-c:var(--hg-over); animation:hg-open-glow 1.8s ease-in-out infinite; }
-      #${rootId} .hg-leg.hg-pulse.hg-under { --hg-live-c:var(--hg-under); animation:hg-open-glow 1.8s ease-in-out infinite; }
-      #${rootId} .hg-leg-name { font-family:'Outfit',sans-serif; font-size:9px; font-weight:900; letter-spacing:2px; margin-bottom:6px; }
-      #${rootId} .hg-leg.hg-over .hg-leg-name { color:hsl(var(--hg-over)); }
-      #${rootId} .hg-leg.hg-under .hg-leg-name { color:hsl(var(--hg-under)); }
-      #${rootId} .hg-leg-status { font-family:'DM Mono',monospace; font-size:11px; font-weight:800; }
-
-      /* ── Session stat grid ──────────────────────────────────────────── */
-      #${rootId} .hg-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; font-family:'DM Mono',monospace; font-size:11px; }
-      #${rootId} .hg-stat-grid > div { animation:hg-count .25s ease both; }
-      #${rootId} .hg-stat-val { font-size:16px; font-weight:900; }
-
-      /* ── Center: settings cards stagger in ──────────────────────────── */
-      #${rootId} .hg-center-card { animation:hg-in .3s ease both; }
-      #${rootId} .hg-center-card:nth-child(1) { animation-delay:.02s; }
-      #${rootId} .hg-center-card:nth-child(2) { animation-delay:.06s; }
-      #${rootId} .hg-center-card:nth-child(3) { animation-delay:.10s; }
-      #${rootId} .hg-center-card:nth-child(4) { animation-delay:.14s; }
-      #${rootId} .hg-section-label {
-        font-family:'Space Grotesk',sans-serif !important; font-size:8.5px; font-weight:800;
-        letter-spacing:3px; text-transform:uppercase; color:hsl(var(--muted-foreground)/0.6);
-        margin-bottom:10px; display:flex; align-items:center; gap:7px;
-      }
-      #${rootId} .hg-section-label::after { content:''; flex:1; height:1px; background:linear-gradient(90deg, hsl(var(--primary)/0.2), transparent); }
-      #${rootId} .hg-input-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
-      #${rootId} .hg-input-group { display:flex; flex-direction:column; gap:4px; }
-      #${rootId} .hg-input-label { font-family:'Space Grotesk',sans-serif !important; font-size:8px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; }
-      #${rootId} .hg-input-group.hg-over-field .hg-input-label { color:hsl(var(--hg-over)/0.85); }
-      #${rootId} .hg-input-group.hg-under-field .hg-input-label { color:hsl(var(--hg-under)/0.85); }
-      #${rootId} .hg-input-label:not([class]) {}
-      #${rootId} .hg-input {
-        background:hsl(var(--bg)/0.75) !important; border:1px solid hsl(var(--border)/0.5) !important;
-        border-radius:10px !important; color:hsl(var(--foreground)) !important;
-        font-family:'DM Mono',monospace !important; font-size:12px !important; font-weight:500 !important;
-        padding:8px 10px !important; width:100%; outline:none !important; backdrop-filter:blur(6px) !important;
-      }
-      #${rootId} .hg-input:focus { border-color:hsl(var(--primary)/0.55) !important; }
-      @media (max-width:820px) { #${rootId} .hg-input { font-size:16px !important; } }
-      #${rootId} select.hg-input option { background:hsl(var(--card)) !important; color:hsl(var(--foreground)) !important; }
-      #${rootId} .hg-toggle-row {
-        display:flex; align-items:center; justify-content:space-between; padding:10px 12px; margin-bottom:8px;
-        background:hsl(var(--bg)/0.4); border:1px solid hsl(var(--border)/0.3); border-radius:12px;
-        transition:background .16s, border-color .16s;
-      }
-      #${rootId} .hg-toggle-row:hover { background:hsl(var(--card)/0.5); border-color:hsl(var(--border)/0.5); }
-      #${rootId} .hg-engage-btn {
-        width:100%; padding:14px 18px; margin-top:4px; font-family:'Space Grotesk',sans-serif !important;
-        font-size:11px; font-weight:800; letter-spacing:3px; text-transform:uppercase;
-        border:1px solid transparent; position:relative; overflow:hidden;
-        background:linear-gradient(135deg, hsl(var(--hg-under)/0.14), hsl(var(--hg-over)/0.14));
-        border-color:hsl(var(--hg-under)/0.35); color:hsl(var(--foreground));
-        border-radius:14px; cursor:pointer; box-shadow:0 0 0 1px hsl(var(--hg-under)/0.08);
-        transition:all .22s cubic-bezier(.34,1.56,.64,1);
-      }
-      #${rootId} .hg-engage-btn:hover { border-color:hsl(var(--hg-over)/0.6); transform:translateY(-2px); }
-      #${rootId} .hg-engage-btn:active { transform:scale(.97); }
-      #${rootId} .hg-engage-btn.active {
-        background:linear-gradient(135deg, hsl(var(--loss)/0.14), hsl(var(--loss)/0.06));
-        border-color:hsl(var(--loss)/0.45); color:hsl(var(--loss));
-        box-shadow:0 4px 20px hsl(var(--loss)/0.18);
-      }
-      #${rootId} .hg-engage-btn::before {
-        content:''; position:absolute; top:0; bottom:0; width:35%; left:0;
-        background:linear-gradient(90deg, transparent, hsl(255 100% 100%/0.16), transparent);
-        animation:hg-sheen 2.8s ease-in-out infinite;
-      }
-
-      /* ── Right: journal ──────────────────────────────────────────────── */
-      #${rootId} .hg-jnl-header { animation:hg-in .3s ease both; }
-      #${rootId} .hg-jnl-stat-box { border-radius:10px; padding:8px; text-align:center; }
-      #${rootId} .hg-jnl-stat-val { font-family:'Outfit',sans-serif; font-weight:900; animation:hg-count .3s ease both; }
-      #${rootId} .hg-jnl-stat-label { font-size:7.5px; font-family:'DM Mono',monospace; letter-spacing:1px; color:hsl(var(--muted-foreground)); margin-top:2px; }
-      #${rootId} .hg-entry {
-        border-radius:11px; padding:9px 11px; margin-bottom:7px; border:1px solid hsl(var(--border)/0.3);
-        background:hsl(var(--bg)/0.4);
-      }
-      #${rootId} .hg-entry:first-child { animation:hg-slide .35s ease both; }
-      #${rootId} .hg-entry.hg-win:first-child { animation:hg-slide .35s ease both, hg-win-ring 1.1s ease-out .3s 1; }
-      #${rootId} .hg-entry.hg-loss:first-child { animation:hg-slide .35s ease both, hg-loss-ring 1.1s ease-out .3s 1; }
-      #${rootId} .hg-entry-top { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
-      #${rootId} .hg-badge {
-        width:16px; height:16px; border-radius:5px; display:flex; align-items:center; justify-content:center;
-        font-size:9px; font-weight:900; flex-shrink:0;
-      }
-      #${rootId} .hg-badge.win { background:hsl(var(--win)/0.18); color:hsl(var(--win)); }
-      #${rootId} .hg-badge.loss { background:hsl(var(--loss)/0.18); color:hsl(var(--loss)); }
-      #${rootId} .hg-badge.push { background:hsl(var(--muted-foreground)/0.18); color:hsl(var(--muted-foreground)); }
-    </style>`;
-
-  function buildShell(rootId, label) {
-    const root = document.getElementById(rootId);
-    if (!root || shells[rootId]) return root;
-    shells[rootId] = true;
-    root.innerHTML = `
-      ${SELF_STYLE(rootId)}
-      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0;position:relative">
-        <div>
-          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700"><span class="hg-scale-icon">⚖</span>${label}</h1>
-          <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">DIGITOVER + DIGITUNDER DUAL-LEG · RISK-SHAPING, NOT ARBITRAGE</div>
-        </div>
-        <div style="flex:1"></div>
-        <div id="${rootId}-conn-dot" style="width:10px;height:10px;border-radius:50%;background:hsl(var(--loss))"></div>
-        <div class="hg-header-glow"></div>
-      </header>
-      <div class="titan-grid">
-        <div class="benz-col"><div class="benz-scroll" id="${rootId}-left"></div></div>
-        <div class="benz-col"><div class="benz-scroll" id="${rootId}-center"></div></div>
-        <div class="benz-col"><div class="benz-scroll" id="${rootId}-right"></div></div>
-      </div>`;
-    return root;
-  }
-
-  // ── LEFT: live pair status + barrier gauge ─────────────────────────────
-  function renderLeft(engine, rootId, snap) {
-    const host = el(`${rootId}-left`);
-    const hs = snap.hedgeState || {};
-    const pair = hs.pair;
-    const c = snap.config || {};
-    const overB = c.overBarrier ?? 5, underB = c.underBarrier ?? 4;
-    const liveDigit = snap.liveDigit;
-    const a = snap.analysis || {};
-
-    // Signature element: the barrier gauge. Every digit 0-9 is colored by
-    // which leg (if any) it wins for the CURRENT barrier setting, so the
-    // dead zone is visible at a glance instead of implied by two numbers.
-    const gaugeCells = Array.from({ length: 10 }, (_, d) => {
-      const zone = d > overB ? 'hg-z-over' : d < underB ? 'hg-z-under' : 'hg-z-gap';
-      const live = d === liveDigit ? ' hg-live' : '';
-      return `<div class="hg-gauge-cell ${zone}${live}">${d}</div>`;
-    }).join('');
-
-    const armPct = a.needed ? Math.min(100, Math.round(((a.streak || 0) / a.needed) * 100)) : 0;
-
-    const legBadge = (leg, className) => {
-      if (!pair || !pair[leg]) return `<div class="hg-leg ${className}"><div class="hg-leg-name">${leg.toUpperCase()}</div><div class="hg-leg-status" style="color:hsl(var(--muted-foreground))">—</div></div>`;
-      const l = pair[leg];
-      const isLive = l.status === 'buying' || l.status === 'open';
-      const color = l.status === 'settled' ? (l.win ? 'hsl(var(--win))' : 'hsl(var(--loss))')
-        : l.status === 'failed' ? 'hsl(var(--loss))' : 'inherit';
-      const text = l.status === 'buying' ? 'BUYING…' : l.status === 'open' ? `OPEN #${l.contractId}` : l.status === 'settled' ? (l.win ? '✓ WON' : '✕ LOST') : 'FAILED';
-      return `<div class="hg-leg ${className}${isLive ? ' hg-pulse' : ''}"><div class="hg-leg-name">${leg.toUpperCase()} ${leg === 'over' ? overB : underB}</div><div class="hg-leg-status" style="color:${color}">${text}</div></div>`;
-    };
-
-    const html = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid hsl(var(--border)/0.3)">
-      <div style="position:relative;width:10px;height:10px">
-        <div style="position:absolute;inset:0;border-radius:50%;background:hsl(var(--primary));animation:hg-armed-pulse 1.5s infinite"></div>
-      </div>
-      <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:3px;color:hsl(var(--primary));text-transform:uppercase">Hedge Status</span>
-      <div style="flex:1"></div>
-      <span style="font-family:'DM Mono',monospace;font-size:9px;color:${hs.active ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${hs.active ? '● ARMED' : '○ IDLE'}</span>
-    </div>
-
-    <div class="hg-card">
-      <div class="hg-label">Barrier Gauge</div>
-      <div class="hg-gauge-track">${gaugeCells}</div>
-      <div class="hg-gauge-legend">
-        <span><i style="background:hsl(var(--hg-under))"></i>Under wins ≤ ${underB - 1 < 0 ? 0 : underB - 1}</span>
-        <span><i style="background:hsl(var(--hg-gap))"></i>Both lose ${underB}–${overB}</span>
-        <span><i style="background:hsl(var(--hg-over))"></i>Over wins ≥ ${overB + 1}</span>
-      </div>
-    </div>
-
-    <div class="hg-card">
-      <div class="hg-label">Arming Meter</div>
-      <div style="font-family:'DM Mono',monospace;font-size:9.5px;color:hsl(var(--muted-foreground))">${a.reason || 'Waiting for tick history…'}</div>
-      <div class="hg-arm-bar-track"><div class="hg-arm-bar-fill${a.ready ? ' hg-armed' : ''}" style="width:${armPct}%"></div></div>
-    </div>
-
-    <div class="hg-card">
-      <div class="hg-label">Current Pair</div>
-      <div class="hg-legs">
-        ${legBadge('over', 'hg-over')}
-        ${legBadge('under', 'hg-under')}
-      </div>
-    </div>
-
-    <div class="hg-card">
-      <div class="hg-label">Session</div>
-      <div class="hg-stat-grid">
-        <div>Runs<div class="hg-stat-val" style="color:hsl(var(--foreground))">${hs.runsDone || 0} / ${c.targetRuns ?? 10}</div></div>
-        <div>Net P&amp;L<div class="hg-stat-val" style="color:${(hs.netTotal||0)>=0?'hsl(var(--win))':'hsl(var(--loss))'}">${(hs.netTotal||0)>=0?'+':''}${(hs.netTotal||0).toFixed(2)}</div></div>
-        <div>Next Stake<div style="font-size:14px;font-weight:800">${(hs.currentStake ?? c.stake ?? 1).toFixed(2)}</div></div>
-        <div>Loss Streak<div style="font-size:14px;font-weight:800;color:${(hs.lossStreak||0)>0?'hsl(var(--loss))':'hsl(var(--foreground))'}">${hs.lossStreak || 0}</div></div>
-      </div>
-    </div>
-
-    <div class="hg-card" style="font-size:9.5px;line-height:1.5;color:hsl(var(--muted-foreground))">
-      ⚠ Not an arbitrage. Digits between the two barriers (or equal to either) make BOTH legs lose at once, and Deriv's payout odds already price in a house edge on each leg — no barrier choice guarantees profit.
-    </div>`;
-    shHtml(host, html);
-  }
-
-  // ── CENTER: settings ─────────────────────────────────────────────────
-  function renderCenter(engine, rootId, snap) {
-    const host = el(`${rootId}-center`);
-    const c = snap.config;
-    const hs = snap.hedgeState || {};
-    const marketOptions = MARKETS.map(m => `<option value="${m.symbol}" ${c.selectedMarket===m.symbol?'selected':''}>${m.name}</option>`).join('');
-    const barrierOptions = (sel) => Array.from({length:10},(_,d)=>`<option value="${d}" ${sel===d?'selected':''}>${d}</option>`).join('');
-    const html = `
-      <div class="hg-card hg-center-card">
-        <div class="hg-section-label">Market</div>
-        <select class="hg-input" id="${rootId}-market">${marketOptions}</select>
-      </div>
-      <div class="hg-card hg-center-card">
-        <div class="hg-section-label">Barriers</div>
-        <div class="hg-input-row">
-          <div class="hg-input-group hg-over-field"><span class="hg-input-label">Over ≥</span><select class="hg-input" id="${rootId}-over-barrier">${barrierOptions(c.overBarrier ?? 5)}</select></div>
-          <div class="hg-input-group hg-under-field"><span class="hg-input-label">Under ≤</span><select class="hg-input" id="${rootId}-under-barrier">${barrierOptions(c.underBarrier ?? 4)}</select></div>
-        </div>
-        <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.7)">
-          Digits strictly between Under and Over (inclusive of either barrier) make BOTH legs lose in the same tick.
-        </div>
-      </div>
-      <div class="hg-card hg-center-card">
-        <div class="hg-section-label">Trade Settings</div>
-        <div class="hg-input-row">
-          <div class="hg-input-group"><span class="hg-input-label">Stake per leg</span><input class="hg-input" type="number" step="0.01" min="0.35" id="${rootId}-stake" value="${c.stake ?? 1}"></div>
-          <div class="hg-input-group"><span class="hg-input-label">Target Runs</span><input class="hg-input" type="number" min="1" id="${rootId}-runs" value="${c.targetRuns ?? 10}"></div>
-        </div>
-        <div class="hg-input-group" style="margin-top:8px"><span class="hg-input-label">Cooldown between pairs (sec)</span><input class="hg-input" type="number" min="0" step="1" id="${rootId}-cooldown" value="${c.cooldownSeconds ?? 2}"></div>
-      </div>
-      <div class="hg-card hg-center-card">
-        <div class="hg-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
-          <div class="hg-section-label" style="margin:0">Martingale on double-loss</div>
-          <button class="titan-toggle ${c.martingaleEnabled?'on':''}" id="${rootId}-mg-toggle"></button>
-        </div>
-        <div style="${c.martingaleEnabled?'':'display:none'}">
-          <div class="hg-input-row">
-            <div class="hg-input-group"><span class="hg-input-label">Multiplier</span><input class="hg-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier ?? 2}"></div>
-            <div class="hg-input-group"><span class="hg-input-label">Stop after N double-losses</span><input class="hg-input" type="number" min="1" max="10" id="${rootId}-stop-step" value="${c.martingaleStopStep ?? 3}"></div>
-          </div>
-        </div>
-        <div style="margin-top:6px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.7)">
-          Only escalates when BOTH legs lose in the same run. Any pair with at least one win resets it.
-        </div>
-      </div>
-      <button id="${rootId}-start-stop" class="hg-engage-btn ${hs.active?'active':''}">${hs.active ? '⏹ STOP HEDGER' : '▶ START HEDGER'}</button>`;
-    if (shHtml(host, html)) {
-      el(`${rootId}-market`, host).onchange = (e) => engine.setConfig({ selectedMarket: e.target.value });
-      el(`${rootId}-over-barrier`, host).onchange = (e) => engine.setConfig({ overBarrier: parseInt(e.target.value) });
-      el(`${rootId}-under-barrier`, host).onchange = (e) => engine.setConfig({ underBarrier: parseInt(e.target.value) });
-      el(`${rootId}-stake`, host).onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) engine.setConfig({ stake: v }); };
-      el(`${rootId}-runs`, host).onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) engine.setConfig({ targetRuns: v }); };
-      el(`${rootId}-cooldown`, host).onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 0) engine.setConfig({ cooldownSeconds: v }); };
-      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
-      const multEl = el(`${rootId}-mult`, host);
-      if (multEl) multEl.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 1) engine.setConfig({ martingaleMultiplier: v }); };
-      const stopEl = el(`${rootId}-stop-step`, host);
-      if (stopEl) stopEl.onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) engine.setConfig({ martingaleStopStep: v }); };
-      el(`${rootId}-start-stop`, host).onclick = () => {
-        if (engine.hedgeState.active) engine.stopHedger(); else engine.startHedger();
-      };
-    }
-  }
-
-  // ── RIGHT: pair history + engine log ────────────────────────────────
-  function renderRight(engine, rootId, snap) {
-    const host = el(`${rootId}-right`);
-    const hs = snap.hedgeState || {};
-    const history = hs.history || [];
-    const wins = history.filter(h => h.outcome === 'win').length;
-    const losses = history.filter(h => h.outcome === 'loss').length;
-    const total = history.length;
-    const wrPct = total ? (wins / total) * 100 : 0;
-    const logs = snap.logs || [];
-    const html = `
-      <div class="hg-card hg-jnl-header">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-          <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:3px;color:hsl(var(--win))">PAIR JOURNAL</span>
-          <span style="margin-left:auto;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">${total} pairs</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-          <div class="hg-jnl-stat-box" style="background:hsl(var(--win)/0.06);border:1px solid hsl(var(--win)/0.2)"><div class="hg-jnl-stat-val" style="font-size:16px;color:hsl(var(--win))">${wins}</div><div class="hg-jnl-stat-label">WIN PAIRS</div></div>
-          <div class="hg-jnl-stat-box" style="background:hsl(var(--loss)/0.06);border:1px solid hsl(var(--loss)/0.2)"><div class="hg-jnl-stat-val" style="font-size:16px;color:hsl(var(--loss))">${losses}</div><div class="hg-jnl-stat-label">DOUBLE-LOSS</div></div>
-          <div class="hg-jnl-stat-box" style="background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.2)"><div class="hg-jnl-stat-val" style="font-size:16px;color:hsl(var(--accent))">${wrPct.toFixed(0)}%</div><div class="hg-jnl-stat-label">PAIR WIN %</div></div>
-        </div>
-      </div>
-      <div style="flex:1;overflow-y:auto;padding-right:2px">
-        ${history.length === 0 ? `
-        <div style="text-align:center;padding:40px 20px;color:hsl(var(--muted-foreground))">
-          <div style="font-size:28px;margin-bottom:10px;opacity:0.3">⚖</div>
-          <div style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:2px">NO PAIRS RECORDED</div>
-          <div style="font-size:9px;margin-top:6px;opacity:0.6">Start the hedger to begin</div>
-        </div>` :
-        history.slice(0, 60).map(h => {
-          const color = h.outcome === 'win' ? 'hsl(var(--win))' : h.outcome === 'loss' ? 'hsl(var(--loss))' : 'hsl(var(--muted-foreground))';
-          const label = h.outcome === 'win' ? '✓ NET WIN' : h.outcome === 'loss' ? '✕ DOUBLE-LOSS' : '— BREAKEVEN';
-          const cls = h.outcome === 'win' ? 'hg-win' : h.outcome === 'loss' ? 'hg-loss' : '';
-          const badgeCls = h.outcome === 'win' ? 'win' : h.outcome === 'loss' ? 'loss' : 'push';
-          return `<div class="hg-entry ${cls}">
-            <div class="hg-entry-top">
-              <span class="hg-badge ${badgeCls}">${h.outcome==='win'?'✓':h.outcome==='loss'?'✕':'–'}</span>
-              <span style="font-size:9px;font-family:'DM Mono',monospace;font-weight:800;color:${color}">${label}</span>
-              <span style="margin-left:auto;font-size:9px;font-family:'DM Mono',monospace;font-weight:800;color:${color}">${h.netProfit>=0?'+':''}${h.netProfit.toFixed(2)}</span>
-            </div>
-            <div style="display:flex;gap:10px;font-family:'DM Mono',monospace;font-size:9px;color:hsl(var(--muted-foreground))">
-              <span style="color:hsl(var(--hg-over))">OVER ${h.overBarrier} ${h.overWin?'✓':'✕'}</span><span style="color:hsl(var(--hg-under))">UNDER ${h.underBarrier} ${h.underWin?'✓':'✕'}</span>
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-      <div class="hg-card" style="margin-top:10px">
-        <div class="hg-label">Engine Log</div>
-        <div style="font-size:10px;font-family:'DM Mono',monospace;max-height:180px;overflow-y:auto">
-          ${logs.slice(0,20).map(l => `<div style="padding:2px 0;color:${l.type==='win'?'hsl(var(--win))':l.type==='loss'?'hsl(var(--loss))':'hsl(var(--muted-foreground))'}">${l.title}: ${l.message}</div>`).join('') || '<div style="color:hsl(var(--muted-foreground))">No activity yet</div>'}
-        </div>
-      </div>`;
-    shHtml(host, html);
-  }
-
-  function render(engine, rootId, label) {
-    const root = buildShell(rootId, label || 'HEDGER BOT');
-    if (!root) return;
-    const snap = engine.getSnapshot();
-    renderLeft(engine, rootId, snap);
-    renderCenter(engine, rootId, snap);
-    renderRight(engine, rootId, snap);
-    const dot = el(`${rootId}-conn-dot`, root);
-    if (dot) {
-      const live = !!snap.state.connected;
-      dot.style.background = live ? 'hsl(var(--win))' : 'hsl(var(--loss))';
-      dot.style.boxShadow = live ? '0 0 10px hsl(var(--win)/0.9)' : '0 0 8px hsl(var(--loss)/0.7)';
-    }
-  }
-
-  global.HedgerUI = { render, renderLive: render };
-})(window);
-</script>
 
 <script>
 // ── HOT REPEAT ENGINE ──────────────────────────────────────────────────
@@ -23063,7 +22285,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'hedger'];
+  const BOT_IDS = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -23075,12 +22297,12 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'hedger'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { hotrepeat: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, hedger: null };
+  const engines = { hotrepeat: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null };
   const titanBuilt = { nexus: false, under: false, meanrev: false, risemr: false, fallmr: false, evenmr: false, oddmr: false };
 
   function queueDashboardRender() {
@@ -23124,14 +22346,9 @@ window.NexusStrategies=exports;
     const isMeanRev = id === 'meanrev' || id === 'risemr' || id === 'fallmr';
     const isMatches = id === 'matches';
     const isEvenOddMR = id === 'evenmr' || id === 'oddmr';
-    // Hedger shares the digit-market socket/scanner with Over/Under (same
-    // 10 markets, same DIGITOVER/DIGITUNDER contract family) but fires
-    // BOTH a DIGITOVER and DIGITUNDER leg per run instead of picking one
-    // side — see TitanEngine.fireHedgePair.
-    const isHedger = id === 'hedger';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
-    const safeSocket = (isOU || isRiseFall || isMeanRev || isHedger ? window.NexusSocket : window.EvenSocket)
+    const safeSocket = (isOU || isRiseFall || isMeanRev ? window.NexusSocket : window.EvenSocket)
       || { globalSocket: null };
     // Higher/Lower gets its OWN scanner (RiseFallScanner) that ranks markets
     // by price-trend/RSI/Bollinger confluence via RiseFallAnalyzer — the same
@@ -23148,8 +22365,6 @@ window.NexusStrategies=exports;
       ? (window.RiseFallScanner || scannerFallback)
       : isMatches
       ? (window.MatchesScanner || scannerFallback)
-      : isHedger
-      ? (window.NexusScanner || scannerFallback)
       : (isOU ? window.NexusScanner : window.EvenScanner) || scannerFallback;
     const opts = isMatches
       ? {
@@ -23222,16 +22437,6 @@ window.NexusStrategies=exports;
           scanner: safeScanner,
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         }
-      : isHedger
-      ? {
-          // Hedger — fires a DIGITOVER + DIGITUNDER pair on the same digit
-          // market every run (see TitanEngine.fireHedgePair). Shares the
-          // same digit socket/scanner/trading modules Over/Under use.
-          id, mode: 'hedger', fixedTradeMode: null, botLabel: 'Hedger Bot',
-          fixedDirection: null, fixedMarket: null,
-          trading: window.NexusTrading || window.EvenTrading, socket: safeSocket, scanner: safeScanner,
-          strategies: window.NexusStrategies || window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
-        }
       : {
           id, mode: 'evenodd', fixedTradeMode: id, botLabel: id === 'even' ? 'Even Bot' : 'Odd Bot',
           trading: window.EvenTrading,
@@ -23247,8 +22452,7 @@ window.NexusStrategies=exports;
         if ((isRiseFall || isMeanRev) && window.RiseFallUI) window.RiseFallUI.renderLive(eng, rootId, opts.botLabel);
         else if (isMatches && window.MatchesUI) window.MatchesUI.renderLive(eng, rootId, opts.botLabel);
         else if (isEvenOddMR && window.EvenOddReversionUI) window.EvenOddReversionUI.renderLive(eng, rootId, opts.botLabel);
-        else if (isHedger && window.HedgerUI) window.HedgerUI.renderLive(eng, rootId, opts.botLabel);
-        else if (!isRiseFall && !isMeanRev && !isMatches && !isEvenOddMR && !isHedger && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
+        else if (!isRiseFall && !isMeanRev && !isMatches && !isEvenOddMR && window.TitanUI) window.TitanUI.renderLive(eng, rootId, opts.botLabel);
       }
       if (activeApp === 'dashboard') queueDashboardRender();
     };
@@ -23288,11 +22492,6 @@ window.NexusStrategies=exports;
     }
     if (id === 'evenmr' || id === 'oddmr') {
       if (window.EvenOddReversionUI) window.EvenOddReversionUI.render(eng, id + '-root', id === 'evenmr' ? 'EVEN (MEAN REVERSION)' : 'ODD (MEAN REVERSION)');
-      titanBuilt[id] = true;
-      return;
-    }
-    if (id === 'hedger') {
-      if (window.HedgerUI) window.HedgerUI.render(eng, id + '-root', 'HEDGER BOT');
       titanBuilt[id] = true;
       return;
     }
