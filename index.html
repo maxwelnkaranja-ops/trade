@@ -100,8 +100,8 @@
           <span class="hub-tab-label">Under</span>
           <span class="dot live"></span>
         </button>
-        <button type="button" class="hub-tab" data-app="risefall" data-label="Higher/Lower" title="Higher/Lower — price direction bot">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></span>
+        <button type="button" class="hub-tab" data-app="risefall" data-label="Higher/Lower" title="Higher/Lower — price-direction (CALL/PUT) bot, no barrier">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/><path d="M6 15l6 6 6-6" opacity="0.4"/></svg></span>
           <span class="hub-tab-label">Higher/Lower</span>
           <span class="dot live"></span>
         </button>
@@ -12150,15 +12150,6 @@ window.NexusStrategies=exports;
       // Per-symbol "already logged the pause" flag so the blacklist skip
       // logs once per cooldown window instead of once per signal.
       this._mrDurationBlacklistLogged = {};
-      // Rise/Fall (isPriceMode) versions of the three fields above. Rise/Fall
-      // trades in TICKS (not seconds) and reads the 'atm' duration bucket
-      // (not 'nonAtm'), so it needs its own ladder/blacklist state — it used
-      // to have NONE at all (handleDurationRejection was hardcoded to only
-      // ever act when isMeanRevMode was true), which is why a bad tick
-      // duration for Rise/Fall just rejected forever with zero recovery.
-      this._rfDurationFallback = {};
-      this._rfDurationBlacklist = {};
-      this._rfDurationBlacklistLogged = {};
       this.ownContractIds = new Set();
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
@@ -12563,64 +12554,28 @@ window.NexusStrategies=exports;
       return (bySymbol && bySymbol[category]) || null;
     }
 
-    // Shared by both the `proposal` and `buy` error handlers, for BOTH
-    // Mean-Rev (seconds duration, 'nonAtm' barrier category) and Rise/Fall
-    // (ticks duration, 'atm' barrier category) — a duration rejection can
-    // in principle surface at either step, for either mode. Climbs the
-    // relevant fallback ladder so the NEXT signal tries a different
+    // Shared by both the `proposal` and `buy` error handlers (Mean-Rev now
+    // goes through proposal-first — see executeBoltPurchase — but a
+    // duration rejection can in principle surface at either step). Climbs
+    // the fallback ladder (15s…600s) so the NEXT signal tries a longer
     // duration instead of repeating the identical rejected one — and once
     // the ladder is exhausted with no real limits ever reported by
     // contracts_for, blacklists the symbol for a few minutes instead of
     // hammering it forever (see executeBoltPurchase's blacklist guard).
-    //
-    // BUGFIX: this used to hard-require errorCode === 'InvalidtoBuy' AND
-    // isMeanRevMode. Neither restriction held up in practice:
-    //  1. Deriv does NOT always use 'InvalidtoBuy' for "Trading is not
-    //     offered for this duration" — it has also been observed as
-    //     'ContractBuyValidationError' with details.field === 'duration'
-    //     for the exact same rejection. Matching one hardcoded code meant
-    //     real duration rejections silently fell through doing nothing,
-    //     so the engine just kept re-firing the identical rejected
-    //     duration forever with no escalation (the "same signal, same
-    //     error, forever" loop). Match on the message text and/or the
-    //     details.field instead of a specific code.
-    //  2. Rise/Fall (isPriceMode) hit the exact same error but had NO
-    //     ladder/blacklist path at all — only Mean-Rev did. Rise/Fall now
-    //     gets its own ticks-based ladder below.
-    handleDurationRejection(errorCode, errorMessage, errorDetails) {
-      const isDurationRejection = /not offered for this duration/i.test(errorMessage || '')
-        || /duration/i.test(errorMessage || '')
-        || (errorDetails && errorDetails.field === 'duration');
-      if (!isDurationRejection) return;
-      if (this.isMeanRevMode) {
-        const symbol = this.config.selectedMarket;
-        const ladder = [15, 30, 60, 120, 300, 600];
-        const cur = (this._mrDurationFallback[symbol] || 0);
-        const next = Math.min(cur + 1, ladder.length - 1);
-        if (next > cur) {
-          this._mrDurationFallback[symbol] = next;
-          this.addLog('engine', 'DURATION', `⏱ ${symbol} rejected that duration — stepping up to ${ladder[next]}s for the next signal.`);
-        } else {
-          if (!this._mrDurationBlacklist) this._mrDurationBlacklist = {};
-          this._mrDurationBlacklist[symbol] = Date.now();
-        }
-      } else if (this.isPriceMode) {
-        const symbol = this.config.selectedMarket;
-        const ladder = [1, 2, 5, 10, 15, 20, 30, 60];
-        const cur = (this._rfDurationFallback[symbol] || 0);
-        const next = Math.min(cur + 1, ladder.length - 1);
-        if (next > cur) {
-          this._rfDurationFallback[symbol] = next;
-          this.addLog('engine', 'DURATION', `⏱ ${symbol} rejected that duration — stepping up to ${ladder[next]}t for the next signal.`);
-        } else {
-          if (!this._rfDurationBlacklist) this._rfDurationBlacklist = {};
-          this._rfDurationBlacklist[symbol] = Date.now();
-        }
+    handleMrDurationRejection(errorCode, errorMessage) {
+      if (!this.isMeanRevMode || errorCode !== 'InvalidtoBuy' || !/duration/i.test(errorMessage || '')) return;
+      const symbol = this.config.selectedMarket;
+      const ladder = [15, 30, 60, 120, 300, 600];
+      const cur = (this._mrDurationFallback[symbol] || 0);
+      const next = Math.min(cur + 1, ladder.length - 1);
+      if (next > cur) {
+        this._mrDurationFallback[symbol] = next;
+        this.addLog('engine', 'DURATION', `⏱ ${symbol} rejected that duration — stepping up to ${ladder[next]}s for the next signal.`);
+      } else {
+        if (!this._mrDurationBlacklist) this._mrDurationBlacklist = {};
+        this._mrDurationBlacklist[symbol] = Date.now();
       }
     }
-    // Back-compat alias — keep the old name working in case anything else
-    // in this file still calls it by the original signature.
-    handleMrDurationRejection(errorCode, errorMessage) { this.handleDurationRejection(errorCode, errorMessage); }
 
     subscribeToMarket(market) {
       if (this.tickUnsub) this.tickUnsub();
@@ -13321,30 +13276,6 @@ window.NexusStrategies=exports;
           this.requestContractsFor(symbol);
         }
       }
-      // Rise/Fall's own version of the circuit breaker above — same idea,
-      // but keyed off the ticks ladder (1t…60t) instead of the seconds one,
-      // since this bot used to have no circuit breaker (or any escalation
-      // at all) and would otherwise hammer the same rejected tick duration
-      // on every single signal forever.
-      if (this.isPriceMode) {
-        const symbol = cfg.selectedMarket;
-        const blacklistedAt = this._rfDurationBlacklist && this._rfDurationBlacklist[symbol];
-        if (blacklistedAt) {
-          if (Date.now() - blacklistedAt < 5 * 60 * 1000) {
-            if (!this._rfDurationBlacklistLogged[symbol]) {
-              this._rfDurationBlacklistLogged[symbol] = true;
-              this.addLog('engine', 'DURATION', `⏸ ${symbol} rejected every fallback duration up to 60t — pausing entries here for 5 min instead of repeating the same doomed buy. Try a different market, or wait for auto-recheck.`);
-            }
-            this.executionGuard = false;
-            this.state = { ...this.state, isLocked: false, openTrade: null };
-            return;
-          }
-          delete this._rfDurationBlacklist[symbol];
-          delete this._rfDurationFallback[symbol];
-          delete this._rfDurationBlacklistLogged[symbol];
-          this.requestContractsFor(symbol);
-        }
-      }
       let contractType, barrierValue = 0;
       if (this.mode === 'evenodd') {
         const isOddMode = cfg.tradeMode === 'odd';
@@ -13594,23 +13525,9 @@ window.NexusStrategies=exports;
       }
       let rfDuration = cfg.duration || 5;
       const rfLimits = this.getDurationLimits(cfg.selectedMarket, 'atm');
-      if (rfLimits && (rfLimits.minTicks != null || rfLimits.maxTicks != null)) {
+      if (rfLimits) {
         if (rfLimits.minTicks != null && rfDuration < rfLimits.minTicks) rfDuration = rfLimits.minTicks;
         if (rfLimits.maxTicks != null && rfDuration > rfLimits.maxTicks) rfDuration = rfLimits.maxTicks;
-      } else {
-        // No tick-based limits for this symbol's atm CALL/PUT yet — either
-        // contracts_for hasn't replied, or (just as likely) this symbol's
-        // Rise/Fall is only offered in seconds/minutes rather than ticks,
-        // so min/max_contract_duration never parsed as ticks at all. Same
-        // story as Mean-Rev: once a rejection has actually happened for
-        // this symbol, step up through the ladder instead of resending the
-        // same duration we already know Deriv refuses (see
-        // handleDurationRejection).
-        const fallbackIdx = (this._rfDurationFallback && this._rfDurationFallback[cfg.selectedMarket]) || 0;
-        if (fallbackIdx > 0) {
-          const ladder = [1, 2, 5, 10, 15, 20, 30, 60];
-          rfDuration = ladder[Math.min(fallbackIdx, ladder.length - 1)];
-        }
       }
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
@@ -14315,20 +14232,9 @@ window.NexusStrategies=exports;
               // Real limits just arrived — the ladder fallback above was
               // only ever a stand-in for not having this data yet, so drop
               // any escalation and let the real min/max clamp do its job.
-              // Only clear the tick-based (Rise/Fall) fallback if this
-              // reply actually contained tick limits for the atm bucket —
-              // if the symbol's atm CALL/PUT is only offered in
-              // seconds/minutes, contracts_for will never give us
-              // minTicks/maxTicks, and clearing the ladder here would just
-              // put Rise/Fall right back to guessing with no escalation.
               if (_titan._mrDurationFallback) delete _titan._mrDurationFallback[symbol];
               if (_titan._mrDurationBlacklist) delete _titan._mrDurationBlacklist[symbol];
               if (_titan._mrDurationBlacklistLogged) delete _titan._mrDurationBlacklistLogged[symbol];
-              if (limits.atm.minTicks != null || limits.atm.maxTicks != null) {
-                if (_titan._rfDurationFallback) delete _titan._rfDurationFallback[symbol];
-                if (_titan._rfDurationBlacklist) delete _titan._rfDurationBlacklist[symbol];
-                if (_titan._rfDurationBlacklistLogged) delete _titan._rfDurationBlacklistLogged[symbol];
-              }
             }
           }
           // Log every server reply that isn't a ping/balance/heartbeat so trade
@@ -14396,17 +14302,14 @@ window.NexusStrategies=exports;
                 else if (data.error.fields) extra = ' — fields: ' + JSON.stringify(data.error.fields);
               } catch (_) {}
               _titan.addLog('error', 'TRADE', `Proposal rejected: ${data.error.message} (code: ${data.error.code})${extra}`);
-              // Mean-Rev's and Rise/Fall's duration ceiling/floor varies by
-              // symbol and we may not have heard back from contracts_for
-              // with real limits yet — if that's exactly what just failed,
-              // climb the relevant fallback ladder (see executeBoltPurchase/
-              // handleDurationRejection) so the NEXT signal tries a
-              // different duration instead of the identical rejected one,
-              // forever. Pass the parsed details through too, since Deriv
-              // sometimes reports the rejection as details.field==='duration'
-              // under a generic error code/message instead of a message
-              // that mentions "duration" directly.
-              _titan.handleDurationRejection(data.error.code, data.error.message, data.error.details);
+              // Mean-Rev's duration ceiling/floor varies by symbol and we
+              // may not have heard back from contracts_for with real
+              // limits yet — if that's exactly what just failed, climb
+              // the fallback ladder (see executeBoltPurchase/
+              // handleMrDurationRejection) so the NEXT signal tries a
+              // longer duration instead of the identical rejected one,
+              // forever.
+              _titan.handleMrDurationRejection(data.error.code, data.error.message);
               _titan.pendingTrade = null;
               _titan._pendingProposal = null;
               _titan.executionGuard = false;
@@ -14450,12 +14353,11 @@ window.NexusStrategies=exports;
                 } catch (_) {}
                 _titan.addLog('error', 'TRADE', `Buy rejected: ${data.error.message} (code: ${data.error.code})${extra}`);
                 if (extra) console.error('[Trade] Full buy error:', data.error); else console.error('[Trade] Full buy error (no details field):', data.error);
-                // Mean-Rev and Rise/Fall both go through proposal-first
-                // (see executeBoltPurchase), so a duration rejection
-                // normally surfaces at the proposal step, not here — but
-                // handle it here too in case it ever slips through to a
-                // raw buy.
-                _titan.handleDurationRejection(data.error.code, data.error.message, data.error.details);
+                // Mean-Rev now goes through proposal-first (see
+                // executeBoltPurchase), so a duration rejection normally
+                // surfaces at the proposal step, not here — but handle it
+                // here too in case it ever slips through to a raw buy.
+                _titan.handleMrDurationRejection(data.error.code, data.error.message);
               }
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
@@ -18131,7 +18033,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['hotrepeat', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
+    const botIds = ['hotrepeat', 'nexus', 'under', 'risefall', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -19988,42 +19890,6 @@ window.NexusStrategies=exports;
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Target Runs</span><input class="cp-input" type="number" min="1" id="${rootId}-runs-in" value="${targetRuns}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Min Signal %</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-signal" value="${c.minSignal}"></div>
-        </div>
-        <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Confirm Ticks</span><input class="cp-input" type="number" min="1" max="6" id="${rootId}-confirmticks" value="${c.confirmTicks || 2}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Min Confidence % (0=off)</span><input class="cp-input" type="number" min="0" max="100" id="${rootId}-minconf" value="${c.minConfidence || 0}"></div>
-        </div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:6px 9px;margin-bottom:2px">
-          Confirm Ticks = how many consecutive ticks the signal must hold before it fires (higher = fewer, cleaner trades). Min Confidence = how lopsided callScore vs putScore must be, on top of Min Signal — a second filter for how clean the read is, not just how strong.
-        </div>
-        <div class="cp-toggle-row" style="margin-top:8px">
-          <div class="cp-section-label" style="margin:0">Multi-Timeframe Confirmation</div>
-          <button class="titan-toggle ${c.requireMTF?'on':''}" id="${rootId}-mtf-toggle"></button>
-        </div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));line-height:1.5;padding:6px 9px 2px">
-          When ON, a fast (35-tick) and a slow (full-buffer) read of the same indicators must independently agree on direction before this counts as a signal at all — on top of Min Signal / Min Confidence / Confirm Ticks, not instead of them. Fewer trades, filters out reads where the short-term and settled picture disagree.
-        </div>
-        <div class="cp-section-label" style="margin-top:10px">First-Tick Handling</div>
-        <div class="cp-input-row">
-          <div class="cp-input-group" style="flex:1.4">
-            <span class="cp-input-label">Mode</span>
-            <select class="cp-input" id="${rootId}-firsttick-mode" style="font-size:11px">
-              <option value="normal" ${(c.firstTickMode||'normal')==='normal'?'selected':''}>Normal — no special handling</option>
-              <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — probe trade gates the real run</option>
-              <option value="skip" ${c.firstTickMode==='skip'?'selected':''}>Skip Tick — wait 1 tick, then trade</option>
-            </select>
-          </div>
-          <div class="cp-input-group">
-            <span class="cp-input-label">Test Stake $</span>
-            <input class="cp-input" type="number" step="0.01" min="0.01" id="${rootId}-firsttick-stake" value="${c.firstTickStake ?? 0.35}" ${c.firstTickMode!=='sacrifice'?'disabled style="opacity:.45"':''}>
-          </div>
-        </div>
-        <div style="margin-top:4px;margin-bottom:2px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px">
-          ${c.firstTickMode==='sacrifice'
-            ? 'Fires a small test trade on the entry tick (not counted toward Runs/stats). WIN → real run at Stake $ fires immediately. LOSS → signal rejected, real run is skipped and the engine goes back to scouting.'
-            : c.firstTickMode==='skip'
-            ? 'Entry tick is skipped (no trade placed); the real run at Stake $ fires unconditionally on the very next tick.'
-            : 'Every run trades normally from the entry tick — no probe or skip.'}
         </div>
         <div class="cp-input-group">
           <span class="cp-input-label">Direction</span>
