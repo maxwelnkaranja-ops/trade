@@ -90,6 +90,16 @@
           <span class="hub-tab-label">Hot Repeat</span>
           <span class="dot live"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="even" data-label="Even Omega" title="Even Omega Engine">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="7" height="11" rx="1.5"/><rect x="13" y="3" width="7" height="17" rx="1.5"/></svg></span>
+          <span class="hub-tab-label">Even</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="odd" data-label="Odd Omega" title="Odd Omega Engine">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="7" height="17" rx="1.5"/><rect x="13" y="9" width="7" height="11" rx="1.5"/></svg></span>
+          <span class="hub-tab-label">Odd</span>
+          <span class="dot live"></span>
+        </button>
         <button type="button" class="hub-tab" data-app="nexus" data-label="Over" title="Nexus Profit Finder — Over">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5-6 5 6"/></svg></span>
           <span class="hub-tab-label">Over</span>
@@ -98,11 +108,6 @@
         <button type="button" class="hub-tab" data-app="under" data-label="Under" title="Nexus Profit Finder — Under">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14l5 6 5-6"/></svg></span>
           <span class="hub-tab-label">Under</span>
-          <span class="dot live"></span>
-        </button>
-        <button type="button" class="hub-tab" data-app="risefall" data-label="Higher/Lower" title="Higher/Lower — price-direction (CALL/PUT) bot, no barrier">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/><path d="M6 15l6 6 6-6" opacity="0.4"/></svg></span>
-          <span class="hub-tab-label">Higher/Lower</span>
           <span class="dot live"></span>
         </button>
         <button type="button" class="hub-tab" data-app="meanrev" data-label="Rise &amp; Fall MR" title="Rise &amp; Fall (Mean Reversion) — ADX/Bollinger/RSI/Stochastic/ATR Higher-Lower offset-barrier bot">
@@ -134,6 +139,22 @@
         <button type="button" class="hub-tab" data-app="oddmr" data-label="Odd MR" title="Odd (Mean Reversion) — macro dominance + micro cluster + exhaustion/confirmation bot, separate from Odd Omega above">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="7" height="17" rx="1.5"/><rect x="13" y="9" width="7" height="11" rx="1.5"/><path d="M2 2l20 20" stroke-width="1.4" opacity="0.55"/></svg></span>
           <span class="hub-tab-label">Odd MR</span>
+          <span class="dot live"></span>
+        </button>
+        <div class="hub-nav-label">Old Version</div>
+        <button type="button" class="hub-tab" data-app="oldeven" data-label="Even Omega (Old)" title="Even Omega Engine — original, unmodified">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="7" height="11" rx="1.5"/><rect x="13" y="3" width="7" height="17" rx="1.5"/></svg></span>
+          <span class="hub-tab-label">Even (Old)</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="oldodd" data-label="Odd Omega (Old)" title="Odd Omega Engine — original, unmodified">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="7" height="17" rx="1.5"/><rect x="13" y="9" width="7" height="11" rx="1.5"/></svg></span>
+          <span class="hub-tab-label">Odd (Old)</span>
+          <span class="dot live"></span>
+        </button>
+        <button type="button" class="hub-tab" data-app="oldrisefall" data-label="Higher/Lower (Old)" title="Higher/Lower — price direction bot — original, unmodified">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></span>
+          <span class="hub-tab-label">Higher/Lower (Old)</span>
           <span class="dot live"></span>
         </button>
         <div class="hub-nav-label">Account</div>
@@ -174,16 +195,20 @@
       <div id="hotrepeat-root" class="app-root"></div>
     </section>
 
+    <section id="panel-even" class="app-panel" aria-label="Even dashboard">
+      <div id="even-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-odd" class="app-panel" aria-label="Odd dashboard">
+      <div id="odd-root" class="app-root"></div>
+    </section>
+
     <section id="panel-nexus" class="app-panel" aria-label="Over dashboard">
       <div id="nexus-root" class="app-root"></div>
     </section>
 
     <section id="panel-under" class="app-panel" aria-label="Under dashboard">
       <div id="under-root" class="app-root"></div>
-    </section>
-
-    <section id="panel-risefall" class="app-panel" aria-label="Higher/Lower dashboard">
-      <div id="risefall-root" class="app-root"></div>
     </section>
 
     <section id="panel-meanrev" class="app-panel" aria-label="Rise &amp; Fall Mean Reversion dashboard">
@@ -205,6 +230,18 @@
     </section>
     <section id="panel-oddmr" class="app-panel" aria-label="Odd Mean Reversion dashboard">
       <div id="oddmr-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-oldeven" class="app-panel" aria-label="Even dashboard (Old Version)">
+      <div id="oldeven-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-oldodd" class="app-panel" aria-label="Odd dashboard (Old Version)">
+      <div id="oldodd-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-oldrisefall" class="app-panel" aria-label="Higher/Lower dashboard (Old Version)">
+      <div id="oldrisefall-root" class="app-root"></div>
     </section>
     </div>
 
@@ -17229,13 +17266,15 @@ window.NexusStrategies=exports;
     odd: { label: 'Odd Bot', dot: 'hsl(var(--primary-2))' },
     nexus: { label: 'Over Bot', dot: 'hsl(var(--accent))' },
     under: { label: 'Under Bot', dot: 'hsl(var(--loss))' },
-    risefall: { label: 'Higher/Lower Bot', dot: 'hsl(var(--win))' },
     meanrev: { label: 'Rise & Fall MR Bot', dot: 'hsl(var(--win))' },
     risemr: { label: 'Rise MR Bot', dot: 'hsl(var(--win))' },
     fallmr: { label: 'Fall MR Bot', dot: 'hsl(var(--loss))' },
     evenmr: { label: 'Even MR Bot', dot: 'hsl(var(--win))' },
     oddmr: { label: 'Odd MR Bot', dot: 'hsl(var(--win))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
+    oldeven: { label: 'Even Bot (Old)', dot: 'hsl(var(--win))' },
+    oldodd: { label: 'Odd Bot (Old)', dot: 'hsl(var(--primary-2))' },
+    oldrisefall: { label: 'Higher/Lower Bot (Old)', dot: 'hsl(var(--win))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -18033,7 +18072,7 @@ window.NexusStrategies=exports;
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['hotrepeat', 'nexus', 'under', 'risefall', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
+    const botIds = ['hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -22258,7 +22297,7 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['hotrepeat', 'nexus', 'under', 'risefall', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
+  const BOT_IDS = ['hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -22270,13 +22309,13 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'nexus', 'under', 'risefall', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { hotrepeat: null, nexus: null, under: null, risefall: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null };
-  const titanBuilt = { nexus: false, under: false, risefall: false, meanrev: false, risemr: false, fallmr: false, evenmr: false, oddmr: false };
+  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null };
+  const titanBuilt = { even: false, odd: false, nexus: false, under: false, meanrev: false, risemr: false, fallmr: false, evenmr: false, oddmr: false, oldeven: false, oldodd: false, oldrisefall: false };
 
   function queueDashboardRender() {
     if (dashRenderQueued) return;
@@ -22311,7 +22350,7 @@ window.NexusStrategies=exports;
     const isOver = id === 'nexus';
     const isUnder = id === 'under';
     const isOU = isOver || isUnder;
-    const isRiseFall = id === 'risefall';
+    const isRiseFall = id === 'oldrisefall';
     // Rise MR and Fall MR are the same 'meanrev' mode/pipeline as Rise & Fall
     // MR — they share its socket, scanner, and UI module — but each is
     // built below with fixedDirection locked to one side (see opts), so
@@ -22411,7 +22450,8 @@ window.NexusStrategies=exports;
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         }
       : {
-          id, mode: 'evenodd', fixedTradeMode: id, botLabel: id === 'even' ? 'Even Bot' : 'Odd Bot',
+          id, mode: 'evenodd', fixedTradeMode: (id === 'odd' || id === 'oldodd') ? 'odd' : 'even',
+          botLabel: (id === 'even' || id === 'oldeven') ? 'Even Bot' : 'Odd Bot',
           trading: window.EvenTrading,
           socket:  safeSocket,
           scanner: safeScanner,
@@ -22449,7 +22489,7 @@ window.NexusStrategies=exports;
     }
     const eng = ensureTitanEngine(id);
     if (!eng) return;
-    if (id === 'risefall' || id === 'meanrev' || id === 'risemr' || id === 'fallmr') {
+    if (id === 'oldrisefall' || id === 'meanrev' || id === 'risemr' || id === 'fallmr') {
       const mrTitle = id === 'meanrev' ? 'RISE & FALL MEAN REVERSION BOT'
         : id === 'risemr' ? 'RISE MEAN REVERSION BOT (HIGHER ONLY)'
         : id === 'fallmr' ? 'FALL MEAN REVERSION BOT (LOWER ONLY)'
@@ -22468,7 +22508,7 @@ window.NexusStrategies=exports;
       titanBuilt[id] = true;
       return;
     }
-    const label = id === 'even' ? 'EVEN OMEGA' : id === 'odd' ? 'ODD OMEGA' : id === 'under' ? 'UNDER PROFIT FINDER' : 'NEXUS PROFIT FINDER';
+    const label = (id === 'even' || id === 'oldeven') ? 'EVEN OMEGA' : (id === 'odd' || id === 'oldodd') ? 'ODD OMEGA' : id === 'under' ? 'UNDER PROFIT FINDER' : 'NEXUS PROFIT FINDER';
     if (window.TitanUI) window.TitanUI.render(eng, id + '-root', label);
     titanBuilt[id] = true;
   }
@@ -22839,11 +22879,11 @@ window.NexusStrategies=exports;
       if (id === 'hotrepeat') {
         eng.dispatch && eng.dispatch({ type: 'SET_TP', value: tp });
         eng.dispatch && eng.dispatch({ type: 'SET_SL', value: sl });
-      } else if (id !== 'risefall' && id !== 'meanrev' && id !== 'risemr' && id !== 'fallmr') {
-        // Higher/Lower and all three Rise/Fall MR bots are excluded on
-        // purpose: they read the master gate live
-        // (window.getMasterGateValues) rather than a locally-set
-        // takeProfit/stopLoss, so there is nothing to push here.
+      } else if (id !== 'oldrisefall' && id !== 'meanrev' && id !== 'risemr' && id !== 'fallmr') {
+        // Higher/Lower (both current and Old Version) and all three
+        // Rise/Fall MR bots are excluded on purpose: they read the master
+        // gate live (window.getMasterGateValues) rather than a
+        // locally-set takeProfit/stopLoss, so there is nothing to push here.
         eng.setConfig && eng.setConfig({ takeProfit: tp, stopLoss: sl });
       }
     });
@@ -22992,7 +23032,7 @@ window.NexusStrategies=exports;
         savedAny = true;
       }
     } catch (e) { console.error('[Hub] Hot Repeat save error:', e); }
-    ['nexus', 'under', 'risefall', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr'].forEach((id) => {
+    ['even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
         try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
@@ -23045,7 +23085,7 @@ window.NexusStrategies=exports;
     // at least once — including them here fixes that.
     try { ensureHotRepeatEngine(); } catch(e) { console.error('[Hub] ensureHotRepeatEngine error:', e); }
     try {
-      ['nexus', 'under', 'risefall', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr']
+      ['even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall']
         .forEach((id) => { try { ensureTitanEngine(id); } catch (e) { console.error(`[Hub] ensureTitanEngine(${id}) error:`, e); } });
     } catch(e) { console.error('[Hub] ensureTitanEngine error:', e); }
     try { bindHubTabs(); } catch(e) { console.error('[Hub] bindHubTabs error:', e); }
