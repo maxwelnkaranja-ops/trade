@@ -7485,6 +7485,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 
   function setAccountType(accountType) {
     state.accountType = accountType;
+    state.accountId = ''; // clear cached account so OTP fetch re-resolves for the newly selected account type (demo vs real)
     save('hub_account_type', accountType);
     emit();
     connectAccount(); // reconnect to pick the right account (demo vs real)
