@@ -120,6 +120,11 @@
           <span class="hub-tab-label">Matches</span>
           <span class="dot live"></span>
         </button>
+        <div class="hub-nav-label">Tools</div>
+        <button type="button" class="hub-tab" data-app="fairbot" data-label="Fair Bot" title="Provably-Fair Round Verifier — audits crash-game rounds after they resolve, plus a live round feed">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 8.4-7 9-4-.6-7-4.6-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg></span>
+          <span class="hub-tab-label">Fair Bot</span>
+        </button>
         <div class="hub-nav-label">Mean Reversion</div>
         <button type="button" class="hub-tab" data-app="risemr" data-label="Rise MR" title="Rise (Mean Reversion) — HIGHER-only ADX/Bollinger/RSI/Stochastic/ATR offset-barrier bot, split from Rise &amp; Fall MR">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l7-10 5 6 4-9"/><path d="M14 5h6v6"/></svg></span>
@@ -216,6 +221,10 @@
     </section>
     <section id="panel-matches" class="app-panel" aria-label="Matches dashboard">
       <div id="matches-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-fairbot" class="app-panel" aria-label="Fair Bot — provably fair round verifier">
+      <div id="fairbot-root" class="app-root"></div>
     </section>
 
     <section id="panel-risemr" class="app-panel" aria-label="Rise Mean Reversion dashboard">
@@ -12600,8 +12609,19 @@ window.NexusStrategies=exports;
     // the ladder is exhausted with no real limits ever reported by
     // contracts_for, blacklists the symbol for a few minutes instead of
     // hammering it forever (see executeBoltPurchase's blacklist guard).
-    handleMrDurationRejection(errorCode, errorMessage) {
-      if (!this.isMeanRevMode || errorCode !== 'InvalidtoBuy' || !/duration/i.test(errorMessage || '')) return;
+    handleMrDurationRejection(errorCode, errorMessage, errorDetails) {
+      // Deriv actually sends 'ContractBuyValidationError' (with
+      // details.field === 'duration') for this rejection, not 'InvalidtoBuy'
+      // — the original check only matched the latter, so this handler was
+      // silently a no-op on every real-world duration rejection and the
+      // fallback ladder never advanced. Match on either the known error
+      // codes OR details.field === 'duration' so a code Deriv changes again
+      // in the future still gets caught by the message/field checks instead
+      // of going dark again.
+      const knownCodes = errorCode === 'InvalidtoBuy' || errorCode === 'ContractBuyValidationError';
+      const fieldIsDuration = errorDetails && errorDetails.field === 'duration';
+      const messageMentionsDuration = /duration/i.test(errorMessage || '');
+      if (!this.isMeanRevMode || !(knownCodes || fieldIsDuration) || !(fieldIsDuration || messageMentionsDuration)) return;
       const symbol = this.config.selectedMarket;
       const ladder = [15, 30, 60, 120, 300, 600];
       const cur = (this._mrDurationFallback[symbol] || 0);
@@ -14347,7 +14367,7 @@ window.NexusStrategies=exports;
               // handleMrDurationRejection) so the NEXT signal tries a
               // longer duration instead of the identical rejected one,
               // forever.
-              _titan.handleMrDurationRejection(data.error.code, data.error.message);
+              _titan.handleMrDurationRejection(data.error.code, data.error.message, data.error.details);
               _titan.pendingTrade = null;
               _titan._pendingProposal = null;
               _titan.executionGuard = false;
@@ -14395,7 +14415,7 @@ window.NexusStrategies=exports;
                 // executeBoltPurchase), so a duration rejection normally
                 // surfaces at the proposal step, not here — but handle it
                 // here too in case it ever slips through to a raw buy.
-                _titan.handleMrDurationRejection(data.error.code, data.error.message);
+                _titan.handleMrDurationRejection(data.error.code, data.error.message, data.error.details);
               }
               _titan.pendingTrade = null;
               _titan.executionGuard = false;
@@ -22320,6 +22340,326 @@ window.NexusStrategies=exports;
 </script>
 
 <script>
+// ── FAIR BOT — provably-fair round verifier + live round feed ──────────────
+// Verifies rounds AFTER the platform reveals the server seed. It cannot and
+// does not predict upcoming rounds — the server seed for the next round is
+// only known (as a hash) until that round resolves.
+(function (global) {
+  'use strict';
+
+  const STORE_KEY = 'fairbot_rounds_v1';
+  const MAX_ROUNDS = 300;
+  let mounted = false;
+  let ws = null;
+  let wsUrl = '';
+  let rounds = [];
+
+  function loadRounds() {
+    try { rounds = JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch (e) { rounds = []; }
+  }
+  function saveRounds() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(rounds.slice(0, MAX_ROUNDS))); } catch (e) {}
+  }
+
+  function toHex(buf) {
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  async function sha256Hex(str) {
+    const data = new TextEncoder().encode(str);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return toHex(digest);
+  }
+  async function hmacSha256Hex(keyStr, msgStr) {
+    const keyData = new TextEncoder().encode(keyStr);
+    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msgStr));
+    return toHex(sig);
+  }
+
+  // Crash-multiplier formulas seen across common provably-fair crash games.
+  // Platforms vary in exact slicing / edge handling, hence the dropdown —
+  // if the computed multiplier doesn't match what the platform displayed,
+  // try the other variant before assuming anything is wrong.
+  function hexToUnitFloat(hex, chars) {
+    const slice = hex.slice(0, chars);
+    const intVal = parseInt(slice, 16);
+    const max = Math.pow(16, chars);
+    return intVal / max;
+  }
+  function computeCrash(hmacHex, variant, houseEdgePct) {
+    const edge = Math.max(0, Math.min(50, Number(houseEdgePct) || 0)) / 100;
+    if (variant === 'modulo33') {
+      // Stake/BC.game-style: 1-in-33 instant-crash floor baked into the modulo
+      const h = BigInt('0x' + hmacHex.slice(0, 13));
+      if (h % 33n === 0n) return 1.00;
+      const X = hexToUnitFloat(hmacHex, 13);
+      const raw = Math.floor((100 * (1 - edge)) / (1 - X)) / 100;
+      return Math.max(1.00, raw);
+    }
+    if (variant === 'direct52') {
+      // Spribe/Aviator-style: direct 1/(1-X) with a house-edge multiplier, no modulo floor
+      const X = hexToUnitFloat(hmacHex, 13);
+      const raw = ((1 - edge) / (1 - X));
+      return Math.max(1.00, Math.floor(raw * 100) / 100);
+    }
+    // 'raw01' — exposes X itself, for platforms with a custom mapping function
+    return hexToUnitFloat(hmacHex, 13);
+  }
+
+  function fmt(n, d) { return (typeof n === 'number' && isFinite(n)) ? n.toFixed(d == null ? 2 : d) : '—'; }
+
+  function badge(ok, label) {
+    const c = ok ? 'hsl(var(--secondary,142 71% 45%))' : 'hsl(0 84% 60%)';
+    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:0.5px;background:${c}/0.14;color:${c};border:1px solid ${c}/0.35">${label}</span>`;
+  }
+
+  function css() {
+    return `
+      .fb-wrap{display:flex;flex-direction:column;gap:14px;padding:16px;height:100%;overflow-y:auto;font-family:'Outfit',sans-serif;}
+      .fb-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+      .fb-title{font-size:15px;font-weight:900;letter-spacing:0.5px;color:hsl(var(--foreground));}
+      .fb-sub{font-size:11px;color:hsl(var(--muted-foreground));line-height:1.5;max-width:640px;}
+      .fb-tabs{display:flex;gap:8px;}
+      .fb-tab{padding:8px 14px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;border-radius:10px;border:1px solid transparent;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;transition:all .18s;}
+      .fb-tab.active{border-color:hsl(var(--primary)/0.35);background:hsl(var(--primary)/0.1);color:hsl(var(--primary));}
+      .fb-card{background:linear-gradient(135deg,hsl(var(--card)/0.9),hsl(var(--bg)/0.7));border:1px solid hsl(var(--card-2, var(--card))/0.6);border-radius:var(--radius);padding:16px;}
+      .fb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
+      .fb-field label{display:block;font-size:9.5px;font-weight:800;letter-spacing:1px;color:hsl(var(--muted-foreground));margin-bottom:4px;text-transform:uppercase;}
+      .fb-field input,.fb-field select{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:var(--radius-sm);border:1px solid hsl(var(--card-2, var(--card))/0.9);background:hsl(var(--bg)/0.5);color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:12px;}
+      .fb-btn{padding:10px 18px;border-radius:var(--radius-sm);border:1px solid hsl(var(--primary)/0.5);background:linear-gradient(135deg,hsl(var(--primary)/0.22),hsl(var(--primary)/0.1));color:hsl(var(--primary));font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;letter-spacing:1px;cursor:pointer;}
+      .fb-btn.ghost{border-color:hsl(var(--card-2, var(--card))/0.9);background:transparent;color:hsl(var(--muted-foreground));}
+      .fb-result{margin-top:12px;padding:12px;border-radius:var(--radius-sm);background:hsl(var(--bg)/0.5);font-family:'DM Mono',monospace;font-size:12px;display:flex;flex-direction:column;gap:6px;}
+      .fb-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);background:hsl(var(--bg)/0.4);cursor:pointer;}
+      .fb-row:hover{background:hsl(var(--bg)/0.65);}
+      .fb-list{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;}
+      .fb-dot{width:8px;height:8px;border-radius:50%;background:hsl(0 84% 60%);}
+      .fb-dot.on{background:hsl(142 71% 45%);box-shadow:0 0 6px hsl(142 71% 45%);}
+      .fb-note{font-size:10.5px;color:hsl(var(--muted-foreground));line-height:1.5;background:hsl(var(--bg)/0.4);border-radius:var(--radius-sm);padding:10px 12px;}
+    `;
+  }
+
+  function ensureStyle() {
+    if (document.getElementById('fairbot-style')) return;
+    const s = document.createElement('style');
+    s.id = 'fairbot-style';
+    s.textContent = css();
+    document.head.appendChild(s);
+  }
+
+  function extractField(obj, names) {
+    for (const n of names) {
+      if (obj && obj[n] !== undefined && obj[n] !== null) return obj[n];
+    }
+    return null;
+  }
+  function bestEffortParse(raw) {
+    let obj;
+    try { obj = JSON.parse(raw); } catch (e) { return null; }
+    const payload = obj.data || obj.round || obj.payload || obj;
+    return {
+      serverSeed: extractField(payload, ['serverSeed', 'server_seed', 'seed']),
+      seedHash: extractField(payload, ['serverSeedHash', 'server_seed_hash', 'hash', 'hashedServerSeed']),
+      clientSeed: extractField(payload, ['clientSeed', 'client_seed']),
+      nonce: extractField(payload, ['nonce', 'roundId', 'round_id', 'id']),
+      shownMultiplier: extractField(payload, ['crashPoint', 'crash_point', 'multiplier', 'result']),
+      raw: payload,
+    };
+  }
+
+  function render(rootId) {
+    ensureStyle();
+    loadRounds();
+    const root = document.getElementById(rootId);
+    if (!root) return;
+    let tab = 'verify';
+
+    function paint() {
+      root.innerHTML = `
+        <div class="fb-wrap">
+          <div class="fb-head">
+            <div>
+              <div class="fb-title">🛡️ FAIR BOT — PROVABLY-FAIR VERIFIER</div>
+              <div class="fb-sub">Recomputes a crash round's outcome from its revealed server seed, client seed and nonce, and checks it against what the platform showed. Only works after a round resolves — the server seed for the next round stays hidden (usually just its hash is published) until then, so this can never forecast what's coming.</div>
+            </div>
+            <div class="fb-tabs">
+              <button class="fb-tab ${tab === 'verify' ? 'active' : ''}" data-fbtab="verify">VERIFY</button>
+              <button class="fb-tab ${tab === 'feed' ? 'active' : ''}" data-fbtab="feed">LIVE FEED</button>
+            </div>
+          </div>
+          <div id="fb-body"></div>
+        </div>
+      `;
+      root.querySelectorAll('[data-fbtab]').forEach((b) => b.onclick = () => { tab = b.dataset.fbtab; paint(); });
+      paintBody();
+    }
+
+    function paintBody() {
+      const body = document.getElementById('fb-body');
+      if (!body) return;
+      if (tab === 'verify') {
+        body.innerHTML = `
+          <div class="fb-card">
+            <div class="fb-grid">
+              <div class="fb-field"><label>Server Seed (revealed)</label><input id="fb-seed" placeholder="e.g. 7f2a9c..." /></div>
+              <div class="fb-field"><label>Pre-round Seed Hash (optional)</label><input id="fb-hash" placeholder="SHA-256 shown before round" /></div>
+              <div class="fb-field"><label>Client Seed</label><input id="fb-cseed" placeholder="e.g. player-supplied seed" /></div>
+              <div class="fb-field"><label>Nonce / Round #</label><input id="fb-nonce" placeholder="e.g. 10432" /></div>
+              <div class="fb-field"><label>Formula Variant</label>
+                <select id="fb-variant">
+                  <option value="modulo33">Modulo house-edge (Stake/BC.game-style)</option>
+                  <option value="direct52">Direct 1/(1-X) (Spribe/Aviator-style)</option>
+                  <option value="raw01">Raw 0–1 float (custom mapping)</option>
+                </select>
+              </div>
+              <div class="fb-field"><label>House Edge %</label><input id="fb-edge" type="number" value="1" min="0" max="50" step="0.1" /></div>
+              <div class="fb-field"><label>Platform-shown Result (optional)</label><input id="fb-shown" placeholder="e.g. 2.14x" /></div>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:10px;">
+              <button class="fb-btn" id="fb-verify-btn">VERIFY ROUND</button>
+              <button class="fb-btn ghost" id="fb-save-btn">SAVE TO HISTORY</button>
+            </div>
+            <div id="fb-result"></div>
+          </div>
+          <div class="fb-note">Every crash-game platform tweaks the exact byte-slicing and edge handling slightly. If your computed number doesn't match what the platform displayed, try the other formula variant before concluding anything is wrong — a mismatch is far more often a format difference than evidence of unfairness.</div>
+        `;
+        document.getElementById('fb-verify-btn').onclick = doVerify;
+        document.getElementById('fb-save-btn').onclick = () => doVerify(true);
+      } else {
+        body.innerHTML = `
+          <div class="fb-card">
+            <div class="fb-grid" style="grid-template-columns:2fr 1fr;">
+              <div class="fb-field"><label>WebSocket URL (your platform's feed)</label><input id="fb-ws-url" placeholder="wss://your-platform-endpoint" value="${wsUrl}" /></div>
+              <div class="fb-field"><label>Status</label>
+                <div style="display:flex;align-items:center;gap:8px;padding-top:8px;">
+                  <span class="fb-dot ${ws ? 'on' : ''}" id="fb-ws-dot"></span>
+                  <span id="fb-ws-status" style="font-family:'DM Mono',monospace;font-size:11px;color:hsl(var(--muted-foreground));">${ws ? 'connected' : 'disconnected'}</span>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:10px;">
+              <button class="fb-btn" id="fb-ws-connect">${ws ? 'DISCONNECT' : 'CONNECT'}</button>
+              <button class="fb-btn ghost" id="fb-ws-clear">CLEAR SAVED ROUNDS</button>
+            </div>
+            <div class="fb-note" style="margin-top:10px;">This connects to whatever endpoint you provide — plug in your own platform's round-history socket. Each incoming message is parsed with a best-effort field matcher (looking for keys like <b>serverSeed</b>, <b>clientSeed</b>, <b>nonce</b>, <b>crashPoint</b>); rounds are saved locally in your browser as they arrive so you can click one to load and verify it. Only connect to endpoints you're authorized to use — some platforms restrict programmatic access to their sockets in their terms of service.</div>
+          </div>
+          <div class="fb-card">
+            <div class="fb-title" style="font-size:12px;margin-bottom:10px;">SAVED ROUNDS (${rounds.length})</div>
+            <div class="fb-list" id="fb-round-list"></div>
+          </div>
+        `;
+        document.getElementById('fb-ws-connect').onclick = toggleWs;
+        document.getElementById('fb-ws-clear').onclick = () => { rounds = []; saveRounds(); paintBody(); };
+        renderRoundList();
+      }
+    }
+
+    function renderRoundList() {
+      const listEl = document.getElementById('fb-round-list');
+      if (!listEl) return;
+      if (!rounds.length) { listEl.innerHTML = `<div class="fb-sub">No rounds saved yet. Connect a feed above, or use "SAVE TO HISTORY" on the Verify tab.</div>`; return; }
+      listEl.innerHTML = rounds.map((r, i) => `
+        <div class="fb-row" data-idx="${i}">
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <span style="font-family:'DM Mono',monospace;font-size:11px;">Nonce ${r.nonce != null ? r.nonce : '—'} · ${r.time || ''}</span>
+            <span style="font-size:10px;color:hsl(var(--muted-foreground));">${(r.serverSeed || '').slice(0, 18)}${r.serverSeed ? '…' : 'no seed captured'}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-family:'DM Mono',monospace;font-size:13px;font-weight:800;">${r.shownMultiplier != null ? r.shownMultiplier + 'x' : '—'}</span>
+            ${r.verified === true ? badge(true, 'MATCH') : r.verified === false ? badge(false, 'MISMATCH') : ''}
+          </div>
+        </div>
+      `).join('');
+      listEl.querySelectorAll('[data-idx]').forEach((row) => row.onclick = () => {
+        const r = rounds[Number(row.dataset.idx)];
+        tab = 'verify'; paint();
+        setTimeout(() => {
+          if (r.serverSeed) document.getElementById('fb-seed').value = r.serverSeed;
+          if (r.seedHash) document.getElementById('fb-hash').value = r.seedHash;
+          if (r.clientSeed) document.getElementById('fb-cseed').value = r.clientSeed;
+          if (r.nonce != null) document.getElementById('fb-nonce').value = r.nonce;
+          if (r.shownMultiplier != null) document.getElementById('fb-shown').value = r.shownMultiplier;
+        }, 0);
+      });
+    }
+
+    async function doVerify(alsoSave) {
+      const seed = document.getElementById('fb-seed').value.trim();
+      const hash = document.getElementById('fb-hash').value.trim();
+      const cseed = document.getElementById('fb-cseed').value.trim();
+      const nonce = document.getElementById('fb-nonce').value.trim();
+      const variant = document.getElementById('fb-variant').value;
+      const edge = document.getElementById('fb-edge').value;
+      const shown = document.getElementById('fb-shown').value.trim();
+      const resultEl = document.getElementById('fb-result');
+      if (!seed || !cseed || nonce === '') {
+        resultEl.innerHTML = `<div class="fb-result">${badge(false, 'INCOMPLETE')} Server seed, client seed and nonce are all required.</div>`;
+        return;
+      }
+      let hashOk = null;
+      if (hash) {
+        const computedHash = await sha256Hex(seed);
+        hashOk = computedHash.toLowerCase() === hash.toLowerCase().trim();
+      }
+      const hmacHex = await hmacSha256Hex(seed, `${cseed}:${nonce}`);
+      const crash = computeCrash(hmacHex, variant, edge);
+      let resultOk = null;
+      if (shown) {
+        const shownNum = parseFloat(shown.replace(/x/i, ''));
+        if (!isNaN(shownNum)) resultOk = Math.abs(shownNum - crash) < 0.011;
+      }
+      resultEl.innerHTML = `
+        <div class="fb-result">
+          <div>HMAC-SHA256(seed, clientSeed:nonce) = <span style="color:hsl(var(--muted-foreground));word-break:break-all;">${hmacHex}</span></div>
+          <div>Computed crash multiplier: <b style="font-size:15px;">${fmt(crash)}${variant === 'raw01' ? '' : 'x'}</b></div>
+          ${hash ? `<div>Seed-hash check: ${badge(hashOk, hashOk ? 'HASH MATCHES' : 'HASH MISMATCH')}</div>` : ''}
+          ${shown ? `<div>Vs. platform-shown result (${shown}): ${badge(resultOk, resultOk ? 'MATCH' : 'MISMATCH')}</div>` : ''}
+        </div>
+      `;
+      if (alsoSave) {
+        rounds.unshift({
+          serverSeed: seed, seedHash: hash, clientSeed: cseed, nonce,
+          shownMultiplier: shown || null, computed: crash,
+          verified: shown ? resultOk : null, time: new Date().toLocaleString(),
+        });
+        rounds = rounds.slice(0, MAX_ROUNDS);
+        saveRounds();
+      }
+    }
+
+    function toggleWs() {
+      if (ws) { try { ws.close(); } catch (e) {} ws = null; wsUrl = ''; paintBody(); return; }
+      const url = document.getElementById('fb-ws-url').value.trim();
+      if (!url) return;
+      wsUrl = url;
+      try {
+        ws = new WebSocket(url);
+        ws.onopen = () => paintBody();
+        ws.onclose = () => { ws = null; paintBody(); };
+        ws.onerror = () => { ws = null; paintBody(); };
+        ws.onmessage = (evt) => {
+          const parsed = bestEffortParse(typeof evt.data === 'string' ? evt.data : '');
+          if (!parsed) return;
+          rounds.unshift({ ...parsed, time: new Date().toLocaleString(), verified: null });
+          rounds = rounds.slice(0, MAX_ROUNDS);
+          saveRounds();
+          if (tab === 'feed') renderRoundList();
+        };
+      } catch (e) {
+        console.error('[FairBot] WebSocket connect failed:', e);
+        ws = null;
+      }
+      paintBody();
+    }
+
+    mounted = true;
+    paint();
+  }
+
+  global.FairBotUI = { render };
+})(window);
+</script>
+
+<script>
 (function () {
   'use strict';
 
@@ -22335,7 +22675,7 @@ window.NexusStrategies=exports;
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
@@ -22511,6 +22851,10 @@ window.NexusStrategies=exports;
       const eng = ensureHotRepeatEngine();
       if (!eng) return;
       if (window.HotRepeatUI) window.HotRepeatUI.renderFull(eng.state);
+      return;
+    }
+    if (id === 'fairbot') {
+      if (window.FairBotUI) window.FairBotUI.render('fairbot-root');
       return;
     }
     const eng = ensureTitanEngine(id);
