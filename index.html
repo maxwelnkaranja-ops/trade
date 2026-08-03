@@ -19958,6 +19958,31 @@ window.NexusStrategies=exports;
         </div>
       </div>
 
+      <div class="cp-card">
+        <div class="cp-section-label">First-Tick Handling</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group" style="flex:1.4">
+            <span class="cp-input-label">Mode</span>
+            <select class="cp-input" id="${rootId}-firsttick-mode" style="font-size:11px">
+              <option value="normal" ${(c.firstTickMode||'normal')==='normal'?'selected':''}>Normal — no special handling</option>
+              <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — probe trade gates the real run</option>
+              <option value="skip" ${c.firstTickMode==='skip'?'selected':''}>Skip Tick — wait 1 tick, then trade</option>
+            </select>
+          </div>
+          <div class="cp-input-group">
+            <span class="cp-input-label">Test Stake $</span>
+            <input class="cp-input" type="number" step="0.01" min="0.01" id="${rootId}-firsttick-stake" value="${c.firstTickStake ?? 0.35}" ${c.firstTickMode!=='sacrifice'?'disabled style="opacity:.45"':''}>
+          </div>
+        </div>
+        <div style="margin-top:4px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px">
+          ${c.firstTickMode==='sacrifice'
+            ? 'Fires a small test trade on the entry tick (not counted toward Runs/stats). WIN → real run at Stake $ fires immediately. LOSS → signal rejected, real run is skipped and the engine goes back to scouting.'
+            : c.firstTickMode==='skip'
+            ? 'Entry tick is skipped (no trade placed); the real run at Stake $ fires unconditionally on the very next tick.'
+            : 'Every run trades normally from the entry tick — no probe or skip.'}
+        </div>
+      </div>
+
       ${engine.isMeanRevMode ? `
       <div class="cp-card">
         <div class="cp-section-label">Mean Reversion Parameters</div>
