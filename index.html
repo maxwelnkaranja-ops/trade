@@ -351,7 +351,7 @@
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">WS App ID <span style="font-size:10px;opacity:0.6;">(Analysis / Digits)</span></label>
-            <p class="settings-hint">Your <strong>numeric</strong> App ID for <code>ws.derivws.com</code> public sockets — used for live digit/tick analysis only, not trading. Register at <strong>api.deriv.com</strong> → Applications. Default is <code>1089</code> (Deriv test ID).</p>
+            <p class="settings-hint">No longer required — Deriv's public analysis feed (<code>wss://api.derivws.com/trading/v1/options/ws/public</code>) doesn't take an App ID. This field is kept for backward compatibility only and has no effect on live digits.</p>
             <div class="settings-row">
               <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
               <button type="button" class="btn-primary font-display" id="settings-wsappid-save">Save</button>
@@ -7611,15 +7611,51 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
     state.connectionError = '';
     emit();
 
-    // Real Deriv API: single WebSocket + on-socket {authorize} handshake.
-    // (There is no REST accounts/OTP endpoint on Deriv's real API — see
-    // wss://ws.derivws.com/websockets/v3?app_id=... and the "authorize" call.)
+    // 2026 Deriv API flow:
+    // 1. REST POST /trading/v1/options/accounts/{accountId}/otp  → get OTP WebSocket URL
+    // 2. WebSocket connect to that URL (auth is embedded, no {authorize} message needed)
+    // We first fetch accounts to discover the accountId, then get the OTP.
     let pingInterval = null;
 
-    function connectViaAuthorize() {
-      const wsAppId = state.wsAppId || '1089';
+    async function connectViaOtp() {
+      // Step 1: resolve the accountId via the shared DerivAuth singleton so
+      // this doesn't fire its own duplicate /accounts request alongside
+      // every Titan/HotRepeat engine doing the same thing on page load.
+      let accountId = state.accountId;
+      const appId = state.appId || '33ADPhDZXR2F60qhPudXB';
+
+      if (!accountId) {
+        try {
+          const resolved = await window.DerivAuth.resolveAccountId(state.apiToken, appId, state.accountType);
+          accountId = resolved.accountId;
+          state.accountId = accountId;
+          state.currency = resolved.currency || state.currency;
+        } catch (e) {
+          state.isAuthenticated = false;
+          state.connectionStatus = 'disconnected';
+          state.connectionError = e.message || 'Could not fetch accounts — check your token and App ID';
+          emit();
+          return;
+        }
+      }
+
+      // Step 2: get an OTP-authenticated WebSocket URL. Goes through the
+      // shared queue in DerivAuth so it's spaced out from every other
+      // engine's OTP request instead of firing in the same tick.
+      let wsUrl;
+      try {
+        wsUrl = await window.DerivAuth.getOtpUrl(state.apiToken, appId, accountId);
+      } catch (e) {
+        state.isAuthenticated = false;
+        state.connectionStatus = 'disconnected';
+        state.connectionError = e.message || 'OTP request failed — check your App ID and token scopes';
+        emit();
+        return;
+      }
+
+      // Step 3: Connect to the authenticated WebSocket URL
       try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (_) {}
-      const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=' + wsAppId);
+      const ws = new WebSocket(wsUrl);
       statusSocket = ws;
 
       ws.onerror = () => {
@@ -7627,36 +7663,22 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
         emit();
       };
       ws.onopen = () => {
-        try { ws.send(JSON.stringify({ authorize: state.apiToken })); } catch (e) { /* */ }
+        reconnectDelay = 8000;
+        state.isAuthenticated = true;
+        state.connectionStatus = 'connected';
+        state.connectionError = '';
+        emit();
+        // Subscribe to live balance updates + keep alive
+        try {
+          ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+          pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
+          }, 25000);
+        } catch (e) { /* */ }
       };
       ws.onmessage = (m) => {
         try {
           const d = JSON.parse(m.data);
-          if (d.error) {
-            state.isAuthenticated = false;
-            state.connectionStatus = 'disconnected';
-            state.connectionError = d.error.message || 'Authorization failed — check your API token.';
-            emit();
-            try { ws.close(); } catch (_) {}
-            return;
-          }
-          if (d.msg_type === 'authorize' && d.authorize) {
-            reconnectDelay = 8000;
-            state.isAuthenticated = true;
-            state.connectionStatus = 'connected';
-            state.connectionError = '';
-            state.accountId = d.authorize.loginid || state.accountId;
-            state.currency = d.authorize.currency || state.currency;
-            if (typeof d.authorize.balance !== 'undefined') state.balanceUSD = parseFloat(d.authorize.balance);
-            emit();
-            // Subscribe to live balance updates + keep alive
-            try {
-              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-              pingInterval = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
-              }, 25000);
-            } catch (e) { /* */ }
-          }
           if (d.msg_type === 'balance' && d.balance) {
             const bal = parseFloat(d.balance.balance);
             if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
@@ -7674,7 +7696,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
         }
       };
     }
-    connectViaAuthorize();
+    connectViaOtp();
   }
 
   function setToken(token) {
@@ -8462,7 +8484,7 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -10150,7 +10172,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
 
   class GlobalSocketManager {
     constructor() {
@@ -10692,7 +10714,7 @@ window.NexusTrading = exports;
 (function () {
   'use strict';
 
-  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
+  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -11262,26 +11284,21 @@ window.NexusTrading = exports;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
       try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) { /* */ }
 
-      // 2026 Deriv API: REST OTP → authenticated WebSocket URL
+      // 2026 Deriv API: REST OTP → authenticated WebSocket URL, via the
+      // shared DerivAuth singleton (see its definition near the top of the
+      // file) so this doesn't fire duplicate /accounts and /otp requests
+      // alongside HubStore's status socket and every Titan/HotRepeat bot.
       const _self = this;
       (async () => {
         const hub = window.HubStore.getState();
         const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
-        const headers = { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
 
         // Resolve accountId
         let accountId = hub.accountId;
         if (!accountId) {
           try {
-            const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
-            if (!r.ok) throw new Error(`Accounts ${r.status}`);
-            const d = await r.json();
-            const accounts = d.data || [];
-            const preferred = hub.accountType === 'real'
-              ? accounts.find(a => !a.is_virtual) || accounts[0]
-              : accounts.find(a => a.is_virtual) || accounts[0];
-            if (!preferred) throw new Error('No accounts found');
-            accountId = preferred.account_id;
+            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
+            accountId = resolved.accountId;
           } catch (e) {
             _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
             _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' });
@@ -11292,11 +11309,7 @@ window.NexusTrading = exports;
         // Get OTP WebSocket URL
         let wsUrl;
         try {
-          const r = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, { method: 'POST', headers });
-          if (!r.ok) throw new Error(`OTP ${r.status}`);
-          const d = await r.json();
-          wsUrl = d.data?.url;
-          if (!wsUrl) throw new Error('No WS URL in OTP response');
+          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
         } catch (e) {
           _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
           _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' });
@@ -12141,7 +12154,7 @@ window.NexusStrategies=exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
   const ANALYSIS_HOLD = 20;
 
   // Generalized TP/SL popup — kind: 'tp' (win/green) or 'sl' (loss/red).
@@ -14191,39 +14204,22 @@ window.NexusStrategies=exports;
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
       if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
 
-      // 2026 Deriv API: REST OTP → authenticated WebSocket URL
+      // 2026 Deriv API: REST OTP → authenticated WebSocket URL, via the
+      // shared DerivAuth singleton. resolveAccountId() is single-flight, so
+      // even though every Titan bot (and HubStore, and HotRepeat) calls
+      // this on load, only ONE /accounts request actually goes out and
+      // everyone shares the result. getOtpUrl() is queued/spaced so 13
+      // simultaneous bot connects don't all POST /otp in the same tick.
       const _titan = this;
       (async () => {
         const hub = window.HubStore.getState();
         const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
-        const headers = { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
 
-        // Resolve accountId — wait up to 6s for HubStore to finish its own
-        // accounts fetch (which runs in parallel on page load / token save).
-        // This avoids a race condition where the Titan engine fires its own
-        // duplicate accounts+OTP fetch before HubStore has resolved the ID,
-        // resulting in mismatched sockets or OTP URL mismatches.
         let accountId = hub.accountId;
         if (!accountId) {
-          _titan.addLog('engine', 'AUTH', 'Waiting for HubStore accountId…');
-          for (let i = 0; i < 12; i++) {
-            await new Promise(r => setTimeout(r, 500));
-            accountId = window.HubStore.getState().accountId;
-            if (accountId) break;
-          }
-        }
-        if (!accountId) {
-          // HubStore still hasn't resolved — fall back to our own fetch
           try {
-            const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
-            if (!r.ok) throw new Error(`Accounts ${r.status}`);
-            const d = await r.json();
-            const accounts = d.data || [];
-            const preferred = window.HubStore.getState().accountType === 'real'
-              ? accounts.find(a => !a.is_virtual) || accounts[0]
-              : accounts.find(a => a.is_virtual) || accounts[0];
-            if (!preferred) throw new Error('No accounts found');
-            accountId = preferred.account_id;
+            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
+            accountId = resolved.accountId;
           } catch (e) {
             _titan.addLog('error', 'AUTH', `Accounts fetch failed: ${e.message}`);
             _titan.state.connected = false; _titan.emit(); return;
@@ -14233,11 +14229,7 @@ window.NexusStrategies=exports;
         // Get OTP WebSocket URL
         let wsUrl;
         try {
-          const r = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, { method: 'POST', headers });
-          if (!r.ok) throw new Error(`OTP ${r.status}`);
-          const d = await r.json();
-          wsUrl = d.data?.url;
-          if (!wsUrl) throw new Error('No WS URL in OTP response');
+          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
         } catch (e) {
           _titan.addLog('error', 'AUTH', `OTP failed: ${e.message}`);
           _titan.state.connected = false; _titan.emit(); return;
@@ -21606,7 +21598,7 @@ window.NexusStrategies=exports;
   function hrGetPublicWsUrl() {
     const id = (window.HubStore && window.HubStore.getState().wsAppId) ||
       (function () { try { return localStorage.getItem('hub_ws_app_id') || ''; } catch (_) { return ''; } })() || '1089';
-    return 'wss://ws.derivws.com/websockets/v3?app_id=' + id;
+    return 'wss://api.derivws.com/trading/v1/options/ws/public';
   }
   const HR_MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
@@ -21885,26 +21877,19 @@ window.NexusStrategies=exports;
       (async () => {
         const hub = window.HubStore.getState();
         const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
-        const headers = { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
+        // Shared DerivAuth singleton: single-flight accountId lookup and a
+        // queued/spaced OTP request, so this engine's connect doesn't stack
+        // a duplicate burst on top of HubStore's and every Titan bot's.
         let accountId = hub.accountId;
         if (!accountId) {
           try {
-            const r = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
-            if (!r.ok) throw new Error(`Accounts ${r.status}`);
-            const d = await r.json();
-            const accounts = d.data || [];
-            const preferred = hub.accountType === 'real' ? accounts.find((a) => !a.is_virtual) || accounts[0] : accounts.find((a) => a.is_virtual) || accounts[0];
-            if (!preferred) throw new Error('No accounts found');
-            accountId = preferred.account_id;
+            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
+            accountId = resolved.accountId;
           } catch (e) { _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' }); return; }
         }
         let wsUrl;
         try {
-          const r = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, { method: 'POST', headers });
-          if (!r.ok) throw new Error(`OTP ${r.status}`);
-          const d = await r.json();
-          wsUrl = d.data?.url;
-          if (!wsUrl) throw new Error('No WS URL in OTP response');
+          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
         } catch (e) { _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' }); return; }
 
         const ws = new WebSocket(wsUrl);
