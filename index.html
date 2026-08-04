@@ -35,6 +35,86 @@
       }
     };
   </script>
+  <script>
+    // ── Shared Deriv REST auth (accounts + OTP) singleton ────────────────
+    // Every engine (HubStore status socket, HotRepeat, each of the 13 Titan
+    // bots) used to run its own copy of "fetch /accounts, then POST /otp"
+    // independently. On page load they all fire within the same ~500ms
+    // window, which turned one page load into 10-15 near-simultaneous
+    // requests to the same two endpoints — tripping CORS in some
+    // environments and 429 rate-limits once retries stacked on top.
+    //
+    // This module fixes that:
+    //  - resolveAccountId() is single-flight per (token, accountType): if
+    //    5 engines call it while a lookup is already in progress, they all
+    //    await the SAME promise instead of firing 5 separate fetches.
+    //  - getOtpUrl() cannot be deduped the same way (each OTP is single-use
+    //    and mints its own WebSocket URL), so instead it's serialized
+    //    through a queue with a minimum gap between requests, spreading a
+    //    burst of 14 simultaneous calls out over a couple of seconds
+    //    instead of firing them all in the same tick.
+    window.DerivAuth = (function () {
+      const ACCOUNTS_URL = 'https://api.derivws.com/trading/v1/options/accounts';
+      let accountLookup = null; // { key, promise }
+      let otpQueueTail = Promise.resolve();
+      const OTP_MIN_GAP_MS = 350;
+
+      function authHeaders(token, appId) {
+        return { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
+      }
+
+      async function resolveAccountId(token, appId, accountType) {
+        const key = `${token}|${appId}|${accountType}`;
+        if (accountLookup && accountLookup.key === key) return accountLookup.promise;
+        const promise = (async () => {
+          const resp = await fetch(ACCOUNTS_URL, { headers: authHeaders(token, appId) });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error((err.errors && err.errors[0]?.message) || `Accounts fetch failed (${resp.status})`);
+          }
+          const data = await resp.json();
+          const accounts = data.data || [];
+          const preferred = accountType === 'real'
+            ? accounts.find((a) => !a.is_virtual) || accounts[0]
+            : accounts.find((a) => a.is_virtual) || accounts[0];
+          if (!preferred) throw new Error('No accounts found for this token');
+          return { accountId: preferred.account_id, currency: preferred.currency };
+        })();
+        accountLookup = { key, promise };
+        // Don't cache a rejected lookup — let the next caller retry cleanly.
+        promise.catch(() => { if (accountLookup && accountLookup.promise === promise) accountLookup = null; });
+        return promise;
+      }
+
+      function getOtpUrl(token, appId, accountId) {
+        const run = async () => {
+          const resp = await fetch(`${ACCOUNTS_URL}/${accountId}/otp`, { method: 'POST', headers: authHeaders(token, appId) });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error((err.errors && err.errors[0]?.message) || `OTP request failed (${resp.status})`);
+          }
+          const data = await resp.json();
+          const wsUrl = data.data?.url;
+          if (!wsUrl) throw new Error('No WebSocket URL in OTP response');
+          return wsUrl;
+        };
+        // Chain onto the shared queue so concurrent callers are spaced out
+        // by OTP_MIN_GAP_MS instead of firing together. Each caller gets
+        // its own result/error via the returned promise; queue failures
+        // don't block later callers.
+        const result = otpQueueTail.then(run, run);
+        otpQueueTail = result.then(
+          () => new Promise((r) => setTimeout(r, OTP_MIN_GAP_MS)),
+          () => new Promise((r) => setTimeout(r, OTP_MIN_GAP_MS))
+        );
+        return result;
+      }
+
+      function resetAccountCache() { accountLookup = null; }
+
+      return { resolveAccountId, getOtpUrl, resetAccountCache };
+    })();
+  </script>
   <div id="global-error-toast" class="global-error-toast" role="alert" aria-live="assertive"></div>
   <script>
     // Surface uncaught errors instead of failing silently — vital on a
@@ -22341,18 +22421,23 @@ window.NexusStrategies=exports;
 
 <script>
 // ── FAIR BOT — provably-fair round verifier + live round feed ──────────────
-// Verifies rounds AFTER the platform reveals the server seed. It cannot and
-// does not predict upcoming rounds — the server seed for the next round is
-// only known (as a hash) until that round resolves.
+// Verifies rounds AFTER the platform reveals the server seed, and displays
+// whatever a connected feed broadcasts in real time. It does NOT forecast
+// or "speculate" on the outcome of a round that hasn't resolved yet — under
+// a provably-fair scheme that's cryptographically impossible to do
+// honestly (the server seed stays hidden, usually only its hash is
+// published, until the round ends), so this tool only ever shows what has
+// already happened or is broadcast live by your own connected source.
 (function (global) {
   'use strict';
 
   const STORE_KEY = 'fairbot_rounds_v1';
   const MAX_ROUNDS = 300;
-  let mounted = false;
   let ws = null;
   let wsUrl = '';
   let rounds = [];
+  let current = { multiplier: null, status: 'idle' }; // idle | running | crashed
+  let paintFeed = null;
 
   function loadRounds() {
     try { rounds = JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch (e) { rounds = []; }
@@ -22365,8 +22450,7 @@ window.NexusStrategies=exports;
     return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
   }
   async function sha256Hex(str) {
-    const data = new TextEncoder().encode(str);
-    const digest = await crypto.subtle.digest('SHA-256', data);
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
     return toHex(digest);
   }
   async function hmacSha256Hex(keyStr, msgStr) {
@@ -22376,10 +22460,6 @@ window.NexusStrategies=exports;
     return toHex(sig);
   }
 
-  // Crash-multiplier formulas seen across common provably-fair crash games.
-  // Platforms vary in exact slicing / edge handling, hence the dropdown —
-  // if the computed multiplier doesn't match what the platform displayed,
-  // try the other variant before assuming anything is wrong.
   function hexToUnitFloat(hex, chars) {
     const slice = hex.slice(0, chars);
     const intVal = parseInt(slice, 16);
@@ -22389,7 +22469,6 @@ window.NexusStrategies=exports;
   function computeCrash(hmacHex, variant, houseEdgePct) {
     const edge = Math.max(0, Math.min(50, Number(houseEdgePct) || 0)) / 100;
     if (variant === 'modulo33') {
-      // Stake/BC.game-style: 1-in-33 instant-crash floor baked into the modulo
       const h = BigInt('0x' + hmacHex.slice(0, 13));
       if (h % 33n === 0n) return 1.00;
       const X = hexToUnitFloat(hmacHex, 13);
@@ -22397,19 +22476,31 @@ window.NexusStrategies=exports;
       return Math.max(1.00, raw);
     }
     if (variant === 'direct52') {
-      // Spribe/Aviator-style: direct 1/(1-X) with a house-edge multiplier, no modulo floor
       const X = hexToUnitFloat(hmacHex, 13);
-      const raw = ((1 - edge) / (1 - X));
+      const raw = (1 - edge) / (1 - X);
       return Math.max(1.00, Math.floor(raw * 100) / 100);
     }
-    // 'raw01' — exposes X itself, for platforms with a custom mapping function
     return hexToUnitFloat(hmacHex, 13);
   }
 
   function fmt(n, d) { return (typeof n === 'number' && isFinite(n)) ? n.toFixed(d == null ? 2 : d) : '—'; }
 
+  // ── color scale for multipliers, matches the chip styling most crash games use
+  function bucketColor(m) {
+    if (m == null) return { hue: 220, label: '—' };
+    if (m < 1.5) return { hue: 350, label: 'low' };      // red
+    if (m < 2)   return { hue: 265, label: 'mid-low' };  // violet
+    if (m < 5)   return { hue: 210, label: 'mid' };       // blue
+    if (m < 10)  return { hue: 43,  label: 'high' };      // gold
+    return { hue: 320, label: 'huge' };                    // pink/magenta
+  }
+  function chip(m) {
+    const b = bucketColor(m);
+    return `<span class="fb-chip" style="--h:${b.hue}">${m != null ? fmt(m) + 'x' : '—'}</span>`;
+  }
+
   function badge(ok, label) {
-    const c = ok ? 'hsl(var(--secondary,142 71% 45%))' : 'hsl(0 84% 60%)';
+    const c = ok ? 'hsl(142 71% 45%)' : 'hsl(0 84% 60%)';
     return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:0.5px;background:${c}/0.14;color:${c};border:1px solid ${c}/0.35">${label}</span>`;
   }
 
@@ -22417,29 +22508,59 @@ window.NexusStrategies=exports;
     return `
       .fb-wrap{display:flex;flex-direction:column;gap:14px;padding:16px;height:100%;overflow-y:auto;font-family:'Outfit',sans-serif;}
       .fb-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
-      .fb-title{font-size:15px;font-weight:900;letter-spacing:0.5px;color:hsl(var(--foreground));}
+      .fb-title{font-size:15px;font-weight:900;letter-spacing:0.5px;color:hsl(var(--foreground));display:flex;align-items:center;gap:8px;}
       .fb-sub{font-size:11px;color:hsl(var(--muted-foreground));line-height:1.5;max-width:640px;}
       .fb-tabs{display:flex;gap:8px;}
       .fb-tab{padding:8px 14px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;border-radius:10px;border:1px solid transparent;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;transition:all .18s;}
       .fb-tab.active{border-color:hsl(var(--primary)/0.35);background:hsl(var(--primary)/0.1);color:hsl(var(--primary));}
-      .fb-card{background:linear-gradient(135deg,hsl(var(--card)/0.9),hsl(var(--bg)/0.7));border:1px solid hsl(var(--card-2, var(--card))/0.6);border-radius:var(--radius);padding:16px;}
+      .fb-card{position:relative;background:linear-gradient(135deg,hsl(var(--card)/0.9),hsl(var(--bg)/0.7));border:1px solid hsl(var(--card-2, var(--card))/0.6);border-radius:var(--radius);padding:16px;overflow:hidden;}
       .fb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
       .fb-field label{display:block;font-size:9.5px;font-weight:800;letter-spacing:1px;color:hsl(var(--muted-foreground));margin-bottom:4px;text-transform:uppercase;}
       .fb-field input,.fb-field select{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:var(--radius-sm);border:1px solid hsl(var(--card-2, var(--card))/0.9);background:hsl(var(--bg)/0.5);color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:12px;}
-      .fb-btn{padding:10px 18px;border-radius:var(--radius-sm);border:1px solid hsl(var(--primary)/0.5);background:linear-gradient(135deg,hsl(var(--primary)/0.22),hsl(var(--primary)/0.1));color:hsl(var(--primary));font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;letter-spacing:1px;cursor:pointer;}
+      .fb-btn{padding:10px 18px;border-radius:var(--radius-sm);border:1px solid hsl(var(--primary)/0.5);background:linear-gradient(135deg,hsl(var(--primary)/0.22),hsl(var(--primary)/0.1));color:hsl(var(--primary));font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;letter-spacing:1px;cursor:pointer;transition:transform .12s;}
+      .fb-btn:active{transform:scale(0.97);}
       .fb-btn.ghost{border-color:hsl(var(--card-2, var(--card))/0.9);background:transparent;color:hsl(var(--muted-foreground));}
       .fb-result{margin-top:12px;padding:12px;border-radius:var(--radius-sm);background:hsl(var(--bg)/0.5);font-family:'DM Mono',monospace;font-size:12px;display:flex;flex-direction:column;gap:6px;}
-      .fb-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);background:hsl(var(--bg)/0.4);cursor:pointer;}
+      .fb-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);background:hsl(var(--bg)/0.4);cursor:pointer;transition:background .15s;}
       .fb-row:hover{background:hsl(var(--bg)/0.65);}
       .fb-list{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;}
       .fb-dot{width:8px;height:8px;border-radius:50%;background:hsl(0 84% 60%);}
-      .fb-dot.on{background:hsl(142 71% 45%);box-shadow:0 0 6px hsl(142 71% 45%);}
+      .fb-dot.on{background:hsl(142 71% 45%);box-shadow:0 0 6px hsl(142 71% 45%);animation:fb-pulse 1.6s ease-in-out infinite;}
       .fb-note{font-size:10.5px;color:hsl(var(--muted-foreground));line-height:1.5;background:hsl(var(--bg)/0.4);border-radius:var(--radius-sm);padding:10px 12px;}
+
+      /* live multiplier stage */
+      .fb-stage{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:34px 16px;gap:6px;position:relative;}
+      .fb-stage::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 30%,hsl(var(--primary)/0.14),transparent 65%);pointer-events:none;}
+      .fb-stage-num{font-family:'Outfit',sans-serif;font-weight:900;font-size:56px;letter-spacing:-1px;line-height:1;transition:color .25s;}
+      .fb-stage-num.running{color:hsl(150 80% 55%);animation:fb-rise 0.9s ease-in-out infinite alternate;}
+      .fb-stage-num.crashed{color:hsl(0 84% 60%);animation:fb-shake .35s ease;}
+      .fb-stage-num.idle{color:hsl(var(--muted-foreground));}
+      .fb-stage-label{font-size:10px;font-weight:800;letter-spacing:2px;color:hsl(var(--muted-foreground));text-transform:uppercase;}
+      .fb-rocket{font-size:22px;display:inline-block;transform-origin:center;}
+      .fb-rocket.running{animation:fb-float 1.1s ease-in-out infinite;}
+      .fb-rocket.crashed{animation:fb-fall .5s ease forwards;}
+
+      /* history chip strip */
+      .fb-chipstrip{display:flex;gap:6px;flex-wrap:wrap;}
+      .fb-chip{--h:220;padding:5px 10px;border-radius:999px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;background:hsl(var(--h) 70% 55% / 0.16);color:hsl(var(--h) 80% 65%);border:1px solid hsl(var(--h) 70% 55% / 0.35);}
+
+      /* stat cards */
+      .fb-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;}
+      .fb-stat{background:hsl(var(--bg)/0.4);border-radius:var(--radius-sm);padding:10px 12px;text-align:center;}
+      .fb-stat b{display:block;font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;}
+      .fb-stat span{font-size:9px;letter-spacing:1px;color:hsl(var(--muted-foreground));text-transform:uppercase;}
+
+      @keyframes fb-pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+      @keyframes fb-rise{from{transform:translateY(0);}to{transform:translateY(-4px);}}
+      @keyframes fb-shake{0%,100%{transform:translateX(0);}25%{transform:translateX(-6px);}75%{transform:translateX(6px);}}
+      @keyframes fb-float{0%,100%{transform:translateY(0) rotate(-6deg);}50%{transform:translateY(-6px) rotate(-3deg);}}
+      @keyframes fb-fall{to{transform:translateY(30px) rotate(35deg);opacity:0;}}
     `;
   }
 
   function ensureStyle() {
-    if (document.getElementById('fairbot-style')) return;
+    const existing = document.getElementById('fairbot-style');
+    if (existing) existing.remove();
     const s = document.createElement('style');
     s.id = 'fairbot-style';
     s.textContent = css();
@@ -22447,23 +22568,42 @@ window.NexusStrategies=exports;
   }
 
   function extractField(obj, names) {
-    for (const n of names) {
-      if (obj && obj[n] !== undefined && obj[n] !== null) return obj[n];
-    }
+    for (const n of names) if (obj && obj[n] !== undefined && obj[n] !== null) return obj[n];
     return null;
   }
   function bestEffortParse(raw) {
     let obj;
     try { obj = JSON.parse(raw); } catch (e) { return null; }
     const payload = obj.data || obj.round || obj.payload || obj;
+    const statusRaw = extractField(payload, ['status', 'state', 'phase']);
+    const shownMultiplier = extractField(payload, ['crashPoint', 'crash_point', 'multiplier', 'result']);
+    const serverSeed = extractField(payload, ['serverSeed', 'server_seed', 'seed']);
+    // A message is treated as a "final, resolved round" only if it carries a
+    // revealed seed (the thing that actually makes it provably-fair-checkable).
+    // Anything else with just a multiplier is treated as a live in-progress
+    // tick and only used to update the on-screen readout, never saved as a
+    // verifiable round.
+    const isResolved = !!serverSeed || statusRaw === 'crashed' || statusRaw === 'busted' || statusRaw === 'ended';
     return {
-      serverSeed: extractField(payload, ['serverSeed', 'server_seed', 'seed']),
+      isResolved,
+      isRunning: statusRaw === 'running' || statusRaw === 'flying' || statusRaw === 'in_progress',
+      serverSeed,
       seedHash: extractField(payload, ['serverSeedHash', 'server_seed_hash', 'hash', 'hashedServerSeed']),
       clientSeed: extractField(payload, ['clientSeed', 'client_seed']),
       nonce: extractField(payload, ['nonce', 'roundId', 'round_id', 'id']),
-      shownMultiplier: extractField(payload, ['crashPoint', 'crash_point', 'multiplier', 'result']),
+      shownMultiplier,
       raw: payload,
     };
+  }
+
+  function statsFor(list) {
+    const vals = list.map((r) => parseFloat(r.shownMultiplier)).filter((n) => !isNaN(n));
+    if (!vals.length) return { count: 0 };
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const max = Math.max(...vals);
+    const min = Math.min(...vals);
+    const under2 = vals.filter((v) => v < 2).length;
+    return { count: vals.length, avg, max, min, under2pct: (100 * under2) / vals.length };
   }
 
   function render(rootId) {
@@ -22471,19 +22611,19 @@ window.NexusStrategies=exports;
     loadRounds();
     const root = document.getElementById(rootId);
     if (!root) return;
-    let tab = 'verify';
+    let tab = 'feed';
 
     function paint() {
       root.innerHTML = `
         <div class="fb-wrap">
           <div class="fb-head">
             <div>
-              <div class="fb-title">🛡️ FAIR BOT — PROVABLY-FAIR VERIFIER</div>
-              <div class="fb-sub">Recomputes a crash round's outcome from its revealed server seed, client seed and nonce, and checks it against what the platform showed. Only works after a round resolves — the server seed for the next round stays hidden (usually just its hash is published) until then, so this can never forecast what's coming.</div>
+              <div class="fb-title">🛡️ FAIR BOT</div>
+              <div class="fb-sub">Live round display + provably-fair verifier. Shows what a connected feed broadcasts and audits rounds after they resolve — it never forecasts a round in progress, since under provably-fair rules that outcome is cryptographically locked in but hidden until the round ends.</div>
             </div>
             <div class="fb-tabs">
-              <button class="fb-tab ${tab === 'verify' ? 'active' : ''}" data-fbtab="verify">VERIFY</button>
               <button class="fb-tab ${tab === 'feed' ? 'active' : ''}" data-fbtab="feed">LIVE FEED</button>
+              <button class="fb-tab ${tab === 'verify' ? 'active' : ''}" data-fbtab="verify">VERIFY</button>
             </div>
           </div>
           <div id="fb-body"></div>
@@ -22496,7 +22636,58 @@ window.NexusStrategies=exports;
     function paintBody() {
       const body = document.getElementById('fb-body');
       if (!body) return;
-      if (tab === 'verify') {
+      if (tab === 'feed') {
+        const st = statsFor(rounds);
+        body.innerHTML = `
+          <div class="fb-card">
+            <div class="fb-grid" style="grid-template-columns:2fr 1fr;">
+              <div class="fb-field"><label>WebSocket URL (your platform's feed)</label><input id="fb-ws-url" placeholder="wss://your-platform-endpoint" value="${wsUrl}" /></div>
+              <div class="fb-field"><label>Status</label>
+                <div style="display:flex;align-items:center;gap:8px;padding-top:8px;">
+                  <span class="fb-dot ${ws ? 'on' : ''}"></span>
+                  <span style="font-family:'DM Mono',monospace;font-size:11px;color:hsl(var(--muted-foreground));">${ws ? 'connected' : 'disconnected'}</span>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:10px;">
+              <button class="fb-btn" id="fb-ws-connect">${ws ? 'DISCONNECT' : 'CONNECT'}</button>
+              <button class="fb-btn ghost" id="fb-ws-clear">CLEAR SAVED ROUNDS</button>
+            </div>
+          </div>
+
+          <div class="fb-card fb-stage">
+            <span class="fb-rocket ${current.status}">🚀</span>
+            <div class="fb-stage-num ${current.status}" id="fb-stage-num">${current.multiplier != null ? fmt(current.multiplier) + 'x' : '—'}</div>
+            <div class="fb-stage-label">${current.status === 'running' ? 'round in progress' : current.status === 'crashed' ? 'busted' : 'waiting for feed'}</div>
+          </div>
+
+          <div class="fb-card">
+            <div class="fb-title" style="font-size:12px;margin-bottom:10px;">HISTORY (${rounds.length})</div>
+            <div class="fb-chipstrip" id="fb-chipstrip">${rounds.slice(0, 40).map((r) => chip(parseFloat(r.shownMultiplier))).join('') || '<span class="fb-sub">No rounds saved yet — connect a feed above.</span>'}</div>
+          </div>
+
+          ${st.count ? `
+          <div class="fb-card">
+            <div class="fb-title" style="font-size:12px;margin-bottom:10px;">DESCRIPTIVE STATS — last ${st.count} resolved rounds (history only, not a forecast)</div>
+            <div class="fb-stats">
+              <div class="fb-stat"><b>${fmt(st.avg)}x</b><span>average</span></div>
+              <div class="fb-stat"><b>${fmt(st.min)}x</b><span>lowest</span></div>
+              <div class="fb-stat"><b>${fmt(st.max)}x</b><span>highest</span></div>
+              <div class="fb-stat"><b>${fmt(st.under2pct, 0)}%</b><span>under 2x</span></div>
+            </div>
+          </div>` : ''}
+
+          <div class="fb-card">
+            <div class="fb-title" style="font-size:12px;margin-bottom:10px;">ROUND LOG</div>
+            <div class="fb-list" id="fb-round-list"></div>
+          </div>
+          <div class="fb-note">Connects to whatever endpoint you provide — plug in your platform's own round-history socket; there's no built-in "global JetX" feed I have access to, so this can't auto-connect anywhere on its own. Rounds are only logged as verifiable once a message includes a revealed server seed — bare in-progress ticks just update the live number above. Only connect to endpoints you're authorized to use; some platforms restrict programmatic access to their sockets in their terms of service.</div>
+        `;
+        document.getElementById('fb-ws-connect').onclick = toggleWs;
+        document.getElementById('fb-ws-clear').onclick = () => { rounds = []; saveRounds(); paintBody(); };
+        renderRoundList();
+        paintFeed = paintBody;
+      } else {
         body.innerHTML = `
           <div class="fb-card">
             <div class="fb-grid">
@@ -22524,32 +22715,6 @@ window.NexusStrategies=exports;
         `;
         document.getElementById('fb-verify-btn').onclick = doVerify;
         document.getElementById('fb-save-btn').onclick = () => doVerify(true);
-      } else {
-        body.innerHTML = `
-          <div class="fb-card">
-            <div class="fb-grid" style="grid-template-columns:2fr 1fr;">
-              <div class="fb-field"><label>WebSocket URL (your platform's feed)</label><input id="fb-ws-url" placeholder="wss://your-platform-endpoint" value="${wsUrl}" /></div>
-              <div class="fb-field"><label>Status</label>
-                <div style="display:flex;align-items:center;gap:8px;padding-top:8px;">
-                  <span class="fb-dot ${ws ? 'on' : ''}" id="fb-ws-dot"></span>
-                  <span id="fb-ws-status" style="font-family:'DM Mono',monospace;font-size:11px;color:hsl(var(--muted-foreground));">${ws ? 'connected' : 'disconnected'}</span>
-                </div>
-              </div>
-            </div>
-            <div style="margin-top:10px;display:flex;gap:10px;">
-              <button class="fb-btn" id="fb-ws-connect">${ws ? 'DISCONNECT' : 'CONNECT'}</button>
-              <button class="fb-btn ghost" id="fb-ws-clear">CLEAR SAVED ROUNDS</button>
-            </div>
-            <div class="fb-note" style="margin-top:10px;">This connects to whatever endpoint you provide — plug in your own platform's round-history socket. Each incoming message is parsed with a best-effort field matcher (looking for keys like <b>serverSeed</b>, <b>clientSeed</b>, <b>nonce</b>, <b>crashPoint</b>); rounds are saved locally in your browser as they arrive so you can click one to load and verify it. Only connect to endpoints you're authorized to use — some platforms restrict programmatic access to their sockets in their terms of service.</div>
-          </div>
-          <div class="fb-card">
-            <div class="fb-title" style="font-size:12px;margin-bottom:10px;">SAVED ROUNDS (${rounds.length})</div>
-            <div class="fb-list" id="fb-round-list"></div>
-          </div>
-        `;
-        document.getElementById('fb-ws-connect').onclick = toggleWs;
-        document.getElementById('fb-ws-clear').onclick = () => { rounds = []; saveRounds(); paintBody(); };
-        renderRoundList();
       }
     }
 
@@ -22564,7 +22729,7 @@ window.NexusStrategies=exports;
             <span style="font-size:10px;color:hsl(var(--muted-foreground));">${(r.serverSeed || '').slice(0, 18)}${r.serverSeed ? '…' : 'no seed captured'}</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-family:'DM Mono',monospace;font-size:13px;font-weight:800;">${r.shownMultiplier != null ? r.shownMultiplier + 'x' : '—'}</span>
+            ${chip(parseFloat(r.shownMultiplier))}
             ${r.verified === true ? badge(true, 'MATCH') : r.verified === false ? badge(false, 'MISMATCH') : ''}
           </div>
         </div>
@@ -22626,6 +22791,24 @@ window.NexusStrategies=exports;
       }
     }
 
+    function handleMessage(evt) {
+      const parsed = bestEffortParse(typeof evt.data === 'string' ? evt.data : '');
+      if (!parsed) return;
+      if (parsed.isResolved) {
+        current = { multiplier: parseFloat(parsed.shownMultiplier) || current.multiplier, status: 'crashed' };
+        rounds.unshift({
+          serverSeed: parsed.serverSeed, seedHash: parsed.seedHash, clientSeed: parsed.clientSeed,
+          nonce: parsed.nonce, shownMultiplier: parsed.shownMultiplier, time: new Date().toLocaleString(), verified: null,
+        });
+        rounds = rounds.slice(0, MAX_ROUNDS);
+        saveRounds();
+        setTimeout(() => { current = { multiplier: null, status: 'idle' }; if (tab === 'feed' && paintFeed) paintFeed(); }, 1800);
+      } else if (parsed.isRunning || parsed.shownMultiplier != null) {
+        current = { multiplier: parseFloat(parsed.shownMultiplier) || current.multiplier, status: 'running' };
+      }
+      if (tab === 'feed' && paintFeed) paintFeed();
+    }
+
     function toggleWs() {
       if (ws) { try { ws.close(); } catch (e) {} ws = null; wsUrl = ''; paintBody(); return; }
       const url = document.getElementById('fb-ws-url').value.trim();
@@ -22636,14 +22819,7 @@ window.NexusStrategies=exports;
         ws.onopen = () => paintBody();
         ws.onclose = () => { ws = null; paintBody(); };
         ws.onerror = () => { ws = null; paintBody(); };
-        ws.onmessage = (evt) => {
-          const parsed = bestEffortParse(typeof evt.data === 'string' ? evt.data : '');
-          if (!parsed) return;
-          rounds.unshift({ ...parsed, time: new Date().toLocaleString(), verified: null });
-          rounds = rounds.slice(0, MAX_ROUNDS);
-          saveRounds();
-          if (tab === 'feed') renderRoundList();
-        };
+        ws.onmessage = handleMessage;
       } catch (e) {
         console.error('[FairBot] WebSocket connect failed:', e);
         ws = null;
@@ -22651,7 +22827,6 @@ window.NexusStrategies=exports;
       paintBody();
     }
 
-    mounted = true;
     paint();
   }
 
@@ -22663,7 +22838,8 @@ window.NexusStrategies=exports;
 (function () {
   'use strict';
 
-  const BOT_IDS = ['hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
+  const BOT_IDS
+ = ['hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
