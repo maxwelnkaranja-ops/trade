@@ -351,7 +351,7 @@
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">WS App ID <span style="font-size:10px;opacity:0.6;">(Analysis / Digits)</span></label>
-            <p class="settings-hint">No longer required — Deriv's public analysis feed (<code>wss://api.derivws.com/trading/v1/options/ws/public</code>) doesn't take an App ID. This field is kept for backward compatibility only and has no effect on live digits.</p>
+            <p class="settings-hint">Your <strong>numeric</strong> App ID for <code>ws.derivws.com</code> public sockets — used for live digit/tick analysis only, not trading. Register at <strong>api.deriv.com</strong> → Applications. Default is <code>1089</code> (Deriv test ID).</p>
             <div class="settings-row">
               <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
               <button type="button" class="btn-primary font-display" id="settings-wsappid-save">Save</button>
@@ -7611,66 +7611,15 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
     state.connectionError = '';
     emit();
 
-    // 2026 Deriv API flow:
-    // 1. REST POST /trading/v1/options/accounts/{accountId}/otp  → get OTP WebSocket URL
-    // 2. WebSocket connect to that URL (auth is embedded, no {authorize} message needed)
-    // We first fetch accounts to discover the accountId, then get the OTP.
+    // Real Deriv API: single WebSocket + on-socket {authorize} handshake.
+    // (There is no REST accounts/OTP endpoint on Deriv's real API — see
+    // wss://ws.derivws.com/websockets/v3?app_id=... and the "authorize" call.)
     let pingInterval = null;
 
-    async function connectViaOtp() {
-      // Step 1: get accounts list to find the correct accountId
-      let accountId = state.accountId;
-      const appId = state.appId || '33ADPhDZXR2F60qhPudXB';
-      const headers = { 'Authorization': `Bearer ${state.apiToken}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' };
-
-      if (!accountId) {
-        try {
-          const acctResp = await fetch('https://api.derivws.com/trading/v1/options/accounts', { headers });
-          if (!acctResp.ok) {
-            const err = await acctResp.json().catch(() => ({}));
-            throw new Error((err.errors && err.errors[0]?.message) || `Accounts fetch failed (${acctResp.status})`);
-          }
-          const acctData = await acctResp.json();
-          // Pick demo or real account based on accountType setting
-          const accounts = acctData.data || [];
-          const preferred = state.accountType === 'real'
-            ? accounts.find(a => !a.is_virtual) || accounts[0]
-            : accounts.find(a => a.is_virtual) || accounts[0];
-          if (!preferred) throw new Error('No accounts found for this token');
-          accountId = preferred.account_id;
-          state.accountId = accountId;
-          state.currency = preferred.currency || state.currency;
-        } catch (e) {
-          state.isAuthenticated = false;
-          state.connectionStatus = 'disconnected';
-          state.connectionError = e.message || 'Could not fetch accounts — check your token and App ID';
-          emit();
-          return;
-        }
-      }
-
-      // Step 2: POST OTP to get authenticated WebSocket URL
-      let wsUrl;
-      try {
-        const otpResp = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, { method: 'POST', headers });
-        if (!otpResp.ok) {
-          const err = await otpResp.json().catch(() => ({}));
-          throw new Error((err.errors && err.errors[0]?.message) || `OTP request failed (${otpResp.status})`);
-        }
-        const otpData = await otpResp.json();
-        wsUrl = otpData.data?.url;
-        if (!wsUrl) throw new Error('No WebSocket URL in OTP response');
-      } catch (e) {
-        state.isAuthenticated = false;
-        state.connectionStatus = 'disconnected';
-        state.connectionError = e.message || 'OTP request failed — check your App ID and token scopes';
-        emit();
-        return;
-      }
-
-      // Step 3: Connect to the authenticated WebSocket URL
+    function connectViaAuthorize() {
+      const wsAppId = state.wsAppId || '1089';
       try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (_) {}
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=' + wsAppId);
       statusSocket = ws;
 
       ws.onerror = () => {
@@ -7678,22 +7627,36 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
         emit();
       };
       ws.onopen = () => {
-        reconnectDelay = 8000;
-        state.isAuthenticated = true;
-        state.connectionStatus = 'connected';
-        state.connectionError = '';
-        emit();
-        // Subscribe to live balance updates + keep alive
-        try {
-          ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-          pingInterval = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
-          }, 25000);
-        } catch (e) { /* */ }
+        try { ws.send(JSON.stringify({ authorize: state.apiToken })); } catch (e) { /* */ }
       };
       ws.onmessage = (m) => {
         try {
           const d = JSON.parse(m.data);
+          if (d.error) {
+            state.isAuthenticated = false;
+            state.connectionStatus = 'disconnected';
+            state.connectionError = d.error.message || 'Authorization failed — check your API token.';
+            emit();
+            try { ws.close(); } catch (_) {}
+            return;
+          }
+          if (d.msg_type === 'authorize' && d.authorize) {
+            reconnectDelay = 8000;
+            state.isAuthenticated = true;
+            state.connectionStatus = 'connected';
+            state.connectionError = '';
+            state.accountId = d.authorize.loginid || state.accountId;
+            state.currency = d.authorize.currency || state.currency;
+            if (typeof d.authorize.balance !== 'undefined') state.balanceUSD = parseFloat(d.authorize.balance);
+            emit();
+            // Subscribe to live balance updates + keep alive
+            try {
+              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+              pingInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
+              }, 25000);
+            } catch (e) { /* */ }
+          }
           if (d.msg_type === 'balance' && d.balance) {
             const bal = parseFloat(d.balance.balance);
             if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
@@ -7711,7 +7674,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
         }
       };
     }
-    connectViaOtp();
+    connectViaAuthorize();
   }
 
   function setToken(token) {
@@ -8499,7 +8462,7 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -10187,7 +10150,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
 
   class GlobalSocketManager {
     constructor() {
@@ -10729,7 +10692,7 @@ window.NexusTrading = exports;
 (function () {
   'use strict';
 
-  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -12178,7 +12141,7 @@ window.NexusStrategies=exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://ws.derivws.com/websockets/v3?app_id=' + id; }
   const ANALYSIS_HOLD = 20;
 
   // Generalized TP/SL popup — kind: 'tp' (win/green) or 'sl' (loss/red).
@@ -21643,7 +21606,7 @@ window.NexusStrategies=exports;
   function hrGetPublicWsUrl() {
     const id = (window.HubStore && window.HubStore.getState().wsAppId) ||
       (function () { try { return localStorage.getItem('hub_ws_app_id') || ''; } catch (_) { return ''; } })() || '1089';
-    return 'wss://api.derivws.com/trading/v1/options/ws/public';
+    return 'wss://ws.derivws.com/websockets/v3?app_id=' + id;
   }
   const HR_MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
