@@ -114,6 +114,80 @@
 
       return { resolveAccountId, getOtpUrl, resetAccountCache };
     })();
+
+    // ── Recovery Pattern Engine ───────────────────────────────────────
+    // Powers "Smart Toggle" recovery. Instead of a single flat heuristic
+    // ("which side looks starved"), this backtests all five recovery
+    // patterns (Standard, Alt A/B/C, Alt R) against the bot's own recent
+    // tick history — for every tick, simulate what each pattern would
+    // have bet at that point in a repeating 9-step recovery cycle, and
+    // check whether it would have won — then ranks the five patterns by
+    // hit rate, exactly the way the Reversal Trigger Engine ranks
+    // candidate digits by flip rate. Whichever pattern currently ranks
+    // #1 is the one live recovery trades actually use.
+    window.RecoveryPatternEngine = (function () {
+      const PATTERN_DEFS = [
+        { id: 'plain', label: 'Standard',   icon: '💡', flips: () => false },
+        { id: 'altA',  label: 'Alt Mode A', icon: '🔄', flips: (step) => step % 3 === 2 },
+        { id: 'altB',  label: 'Alt Mode B', icon: '🔁', flips: (step) => step % 3 === 1 },
+        { id: 'altC',  label: 'Alt Mode C', icon: '🔀', flips: (step) => step % 3 === 0 },
+        { id: 'altR',  label: 'Alt Mode R', icon: '🎲', flips: () => Math.random() < 0.4 },
+      ];
+      const MIN_SAMPLES = 12;   // qualify a pattern only once it's had a fair number of simulated attempts
+      const CYCLE = 9;          // simulated recovery depth per pass through history (matches martingaleStopStep's practical ceiling)
+
+      function rank(history, winCheck) {
+        const data = (history || []).slice(-160);
+        const empty = { patterns: PATTERN_DEFS.map((p) => ({ id: p.id, label: p.label, icon: p.icon, rate: 0, hits: 0, attempts: 0 })), best: null, bestRate: 0, ready: false, samples: data.length };
+        if (data.length < MIN_SAMPLES + 1) return empty;
+        const results = PATTERN_DEFS.map((p) => {
+          let hits = 0, attempts = 0;
+          for (let i = 0; i < data.length - 1; i++) {
+            const step = (i % CYCLE) + 1;
+            const flip = p.flips(step);
+            attempts++;
+            if (winCheck(data[i + 1], flip)) hits++;
+          }
+          return { id: p.id, label: p.label, icon: p.icon, hits, attempts, rate: attempts ? hits / attempts : 0 };
+        });
+        const qualified = results.filter((r) => r.attempts >= MIN_SAMPLES).sort((a, b) => b.rate - a.rate || b.hits - a.hits);
+        const best = qualified[0] || null;
+        return { patterns: results, best: best ? best.id : null, bestRate: best ? best.rate : 0, ready: !!best, samples: data.length };
+      }
+
+      // Parity bots (Even/Odd, Even/Odd MR): base direction is a fixed
+      // side (ODD or EVEN) that only flips when the pattern's own rule
+      // fires for the current step.
+      function rankParity(history, isOddMode) {
+        return rank(history, (nextDigit, flip) => {
+          const betOdd = flip ? !isOddMode : isOddMode;
+          return betOdd === (nextDigit % 2 === 1);
+        });
+      }
+
+      // Threshold bots (Over/Under): base direction bets over/under a
+      // barrier; a flip mirrors both the side AND the barrier (9 -
+      // barrier), exactly like the live Alt A/B/C/R recovery logic does.
+      function rankThreshold(history, isUnderMode, barrier) {
+        return rank(history, (nextDigit, flip) => {
+          const useUnder = flip ? !isUnderMode : isUnderMode;
+          const useBarrier = flip ? 9 - barrier : barrier;
+          return useUnder ? nextDigit < useBarrier : nextDigit > useBarrier;
+        });
+      }
+
+      // Applies the current #1-ranked pattern's own step-rule to a given
+      // martingale step, returning whether THIS step should flip. Used at
+      // trade time so recovery follows the ranked pattern's actual cycle
+      // rather than just copying its historical average.
+      function shouldFlipForStep(ranking, step) {
+        if (!ranking || !ranking.ready || !ranking.best) return false;
+        const def = PATTERN_DEFS.find((p) => p.id === ranking.best);
+        return def ? def.flips(step) : false;
+      }
+
+      return { rankParity, rankThreshold, shouldFlipForStep, PATTERN_DEFS };
+    })();
   </script>
   <div id="global-error-toast" class="global-error-toast" role="alert" aria-live="assertive"></div>
   <script>
@@ -11009,6 +11083,16 @@ window.NexusTrading = exports;
           const isCold = s.coldDigit !== null && action.digit === s.coldDigit;
           const newSilence = isCold ? 0 : (s.coldDigit !== null ? s.silenceCount + 1 : 0);
           s.historyP = newHist; s.currentTick = action.digit; s.silenceCount = newSilence;
+          // ── Recovery Pattern Engine (live ranking, observational only) ──
+          // Differ has no martingale/recovery cycle of its own, so this
+          // never drives a trade — it just surfaces the same live pattern
+          // telemetry the digit-parity bots show, backtested against this
+          // market's own recent tick history.
+          try {
+            if (window.RecoveryPatternEngine) {
+              s.smartRecoveryRanking = window.RecoveryPatternEngine.rankParity(newHist, false);
+            }
+          } catch (e) { /* non-critical — never let this break trading */ }
           if (isCold) {
             s.coldStreakHistory = [...s.coldStreakHistory, s.silenceCount].slice(-50);
             // ── UNPREDICTABLE TRIGGER: the digit just hit, so a fresh silence
@@ -12837,6 +12921,24 @@ window.NexusStrategies=exports;
         this.marketHealth = this.socket.getHealth(market);
         this.liveDigit = data.digit; this.liveQuote = data.quote;
         this.state = { ...this.state, history, currentDigit: data.digit, currentQuote: data.quote, streak };
+        // ── Recovery Pattern Engine (live ranking) ─────────────────────
+        // Runs continuously for every applicable bot — Even/Odd, Even MR/
+        // Odd MR, and Over/Under — regardless of which recovery pattern
+        // is currently selected, so the terminal (rendered below the
+        // journal) is always live telemetry, the same "always learning"
+        // feel as the Reversal Trigger Engine. Whether it actually DRIVES
+        // a trade is still gated on Smart Toggle being the selected
+        // Recovery Mode (see the trade-execution branches below) — this
+        // just keeps the ranking itself always up to date so switching
+        // to Smart Toggle mid-session doesn't start from a cold read.
+        if (window.RecoveryPatternEngine) {
+          if (this.mode === 'evenodd' || this.isEvenOddMRMode) {
+            const isOddMode = this.config.tradeMode === 'odd';
+            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankParity(fullHistory, isOddMode);
+          } else if (this.isOU) {
+            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankThreshold(fullHistory, this.isUnderMode, this.config.recoveryBarrier != null ? this.config.recoveryBarrier : this.config.overBarrier);
+          }
+        }
         // Feed any journal entries still waiting on their post-trade 3-tick
         // readout — once each has 3, stamp it onto that entry.
         if (this._pendingDigitCaptures.length) {
@@ -13404,10 +13506,27 @@ window.NexusStrategies=exports;
         if (st.inRecovery) {
           contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
           if (cfg.smartRecovery) {
-            const recent = st.history.slice(-20);
-            const oddPct = recent.length ? recent.filter((d) => this.T.isOdd(d)).length / recent.length : 0.5;
-            contractType = oddPct > 0.5 ? 'DIGITEVEN' : 'DIGITODD';
-            this.addLog('engine', 'SMART-REC', `Smart: ODD ${(oddPct*100).toFixed(0)}% → betting ${contractType.replace('DIGIT','')}`);
+            // ── 🧠 Smart Toggle: Recovery Pattern Engine ──
+            // Applies whichever of the 5 patterns currently ranks #1 by
+            // backtested hit rate (computed live every tick — see
+            // smartRecoveryRanking above), using THAT pattern's own
+            // step-rule for this exact step, instead of guessing off a
+            // flat "which side is starved" read.
+            const step = st.martingaleStep;
+            const ranking = this.smartRecoveryRanking;
+            if (ranking && ranking.ready) {
+              const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
+              contractType = flip ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD') : (isOddMode ? 'DIGITODD' : 'DIGITEVEN');
+              const top = ranking.patterns.find((p) => p.id === ranking.best);
+              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
+            } else {
+              // Not enough tick history yet to rank patterns — fall back
+              // to the original starved-side read until it warms up.
+              const recent = st.history.slice(-20);
+              const oddPct = recent.length ? recent.filter((d) => this.T.isOdd(d)).length / recent.length : 0.5;
+              contractType = oddPct > 0.5 ? 'DIGITEVEN' : 'DIGITODD';
+              this.addLog('engine', 'SMART-REC', `Smart: warming up (${(oddPct*100).toFixed(0)}% ODD) → betting ${contractType.replace('DIGIT','')}`);
+            }
           } else if (cfg.alternatingRecovery) {
             // ── 🔄 Alt Mode A ───────────────────────────────────────────────────
             // UI pattern (base parity): same → opposite → same → same → opposite → …
@@ -13492,13 +13611,71 @@ window.NexusStrategies=exports;
         const mrOffset = Math.max(minOffset, rawOffset).toFixed(barrierDecimals);
         barrierValue = contractType === 'PUT' ? `+${mrOffset}` : `-${mrOffset}`;
       } else if (this.isEvenOddMRMode) {
-        // Simple, direct mapping — no strategy-flip/recovery-side logic at
-        // all, on purpose. The whole point of this bot is that macro +
-        // micro + exhaustion/confirmation already decided the direction;
-        // recovery just re-bets the same target side with the martingale
-        // stake, exactly like the classic Even/Odd bots do.
-        contractType = this.config.tradeMode === 'odd' ? 'DIGITODD' : 'DIGITEVEN';
+        // Base entry: macro + micro + exhaustion/confirmation already
+        // decided the target side, so outside of recovery this always bets
+        // that side, no strategy-flip logic.
+        //
+        // Recovery previously had NO pattern logic at all here — Standard,
+        // Alt A/B/C/R and Smart Toggle were all silently ignored and it
+        // just kept re-betting the same target side forever. This mirrors
+        // the classic Even/Odd bot's recovery branch so all six Recovery
+        // Mode options actually do something for Even MR / Odd MR too.
+        const isOddMode = cfg.tradeMode === 'odd';
+        contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN';
         barrierValue = 0;
+        if (st.inRecovery) {
+          contractType = isOddMode ? 'DIGITODD' : 'DIGITEVEN'; // Standard default: keep re-betting the target side
+          if (cfg.smartRecovery) {
+            // ── 🧠 Smart Toggle: Recovery Pattern Engine ──
+            // Same ranking engine as Even/Odd — applies the current #1
+            // pattern's step-rule instead of a flat starved-side read.
+            const step = st.martingaleStep;
+            const ranking = this.smartRecoveryRanking;
+            if (ranking && ranking.ready) {
+              const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
+              contractType = flip ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD') : (isOddMode ? 'DIGITODD' : 'DIGITEVEN');
+              const top = ranking.patterns.find((p) => p.id === ranking.best);
+              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
+            } else {
+              const recent = st.history.slice(-20);
+              const oddPct = recent.length ? recent.filter((d) => this.T.isOdd(d)).length / recent.length : 0.5;
+              contractType = oddPct > 0.5 ? 'DIGITEVEN' : 'DIGITODD';
+              this.addLog('engine', 'SMART-REC', `Smart: warming up (${(oddPct*100).toFixed(0)}% ODD) → betting ${contractType.replace('DIGIT','')}`);
+            }
+          } else if (cfg.alternatingRecovery) {
+            // ── 🔄 Alt Mode A ── flip only on steps where (step % 3 === 2): 2, 5, 8…
+            const step = st.martingaleStep;
+            const flipToOpposite = (step % 3 === 2);
+            contractType = flipToOpposite
+              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
+              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
+            this.addLog('engine', 'ALT-A', `AltA step ${step}: ${contractType.replace('DIGIT','')}`);
+          } else if (cfg.alternatingRecoveryB) {
+            // ── 🔁 Alt Mode B ── mirror of Alt A: flip at steps ≡ 1 (mod 3): 1, 4, 7…
+            const step = st.martingaleStep;
+            const flipToOpposite = (step % 3 === 1);
+            contractType = flipToOpposite
+              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
+              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
+            this.addLog('engine', 'ALT-B', `AltB step ${step}: ${contractType.replace('DIGIT','')}`);
+          } else if (cfg.alternatingRecoveryC) {
+            // ── 🔀 Alt Mode C ── third phase of the period-3 cycle: flip at steps ≡ 0 (mod 3): 3, 6, 9…
+            const step = st.martingaleStep;
+            const flipToOpposite = (step % 3 === 0);
+            contractType = flipToOpposite
+              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
+              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
+            this.addLog('engine', 'ALT-C', `AltC step ${step}: ${contractType.replace('DIGIT','')}`);
+          } else if (cfg.alternatingRecoveryR) {
+            // ── 🎲 Alt Mode R (random) ── no fixed cycle — flips with ~40% probability each step
+            const step = st.martingaleStep;
+            const flipToOpposite = Math.random() < 0.4;
+            contractType = flipToOpposite
+              ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD')
+              : (isOddMode ? 'DIGITODD'  : 'DIGITEVEN');
+            this.addLog('engine', 'ALT-R', `AltR step ${step}: ${contractType.replace('DIGIT','')} (random)`);
+          }
+        }
       } else if (this.isMatchMode) {
         // Matches: bet DIGITMATCH on whichever digit the analyzer most
         // recently flagged. On recovery, Smart Toggle re-reads the live
@@ -13531,18 +13708,29 @@ window.NexusStrategies=exports;
           contractType = baseCT;
           barrierValue = cfg.recoveryBarrier;
           if (cfg.smartRecovery) {
-            // ── 🧠 Smart Toggle: reads last 25 ticks; bets base or flipped direction, whichever side is starved ──
-            // If the base direction has been dominant recently (base-rate high), switch to the
-            // opposite side to catch the correction; otherwise stay on the base direction.
-            const recent = st.history.slice(-25);
-            const baseRate = recent.length ? recent.filter((d) => this.isUnderMode ? d < cfg.recoveryBarrier : d > cfg.recoveryBarrier).length / recent.length : 0.5;
-            if (baseRate >= 0.6) {
-              // Base direction is dominant → flip to catch the correction
-              contractType = flipCT;
-              barrierValue = 9 - cfg.recoveryBarrier;
-              this.addLog('engine', 'SMART-REC', `Smart: ${baseWord} ${(baseRate*100).toFixed(0)}% dominant → betting ${flipWord} ${barrierValue}`);
+            // ── 🧠 Smart Toggle: Recovery Pattern Engine ──
+            // Same ranking engine as Even/Odd — applies the current #1
+            // pattern's step-rule (flip side + mirror barrier) instead of
+            // a flat "which side is dominant" read.
+            const step = st.martingaleStep;
+            const ranking = this.smartRecoveryRanking;
+            if (ranking && ranking.ready) {
+              const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
+              if (flip) { contractType = flipCT; barrierValue = 9 - cfg.recoveryBarrier; }
+              const top = ranking.patterns.find((p) => p.id === ranking.best);
+              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType} ${barrierValue}`);
             } else {
-              this.addLog('engine', 'SMART-REC', `Smart: ${baseWord} ${(baseRate*100).toFixed(0)}% → staying ${baseWord} ${barrierValue}`);
+              // Not enough tick history yet to rank patterns — fall back
+              // to the original dominant-side read until it warms up.
+              const recent = st.history.slice(-25);
+              const baseRate = recent.length ? recent.filter((d) => this.isUnderMode ? d < cfg.recoveryBarrier : d > cfg.recoveryBarrier).length / recent.length : 0.5;
+              if (baseRate >= 0.6) {
+                contractType = flipCT;
+                barrierValue = 9 - cfg.recoveryBarrier;
+                this.addLog('engine', 'SMART-REC', `Smart: warming up — ${baseWord} ${(baseRate*100).toFixed(0)}% dominant → betting ${flipWord} ${barrierValue}`);
+              } else {
+                this.addLog('engine', 'SMART-REC', `Smart: warming up — ${baseWord} ${(baseRate*100).toFixed(0)}% → staying ${baseWord} ${barrierValue}`);
+              }
             }
           } else if (cfg.alternatingRecovery) {
             // ── 🔄 Alt Mode A ─────────────────────────────────────────────────────────────
@@ -15240,6 +15428,60 @@ window.NexusStrategies=exports;
           ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.4);letter-spacing:0.5px;margin-top:1px">traded ${enD} · next ${j.followingDigits.join(' ')}</div>` : ''}
         </div>`;
       }).join('') || '<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>'}</div>
+
+      <!-- ── RECOVERY PATTERN ENGINE (big terminal, below the journal, observational) ── -->
+      ${(() => {
+        const ranking = s.smartRecoveryRanking || { patterns: [], best: null, bestRate: 0, ready: false, samples: 0 };
+        const sorted = [...ranking.patterns].sort((a, b) => b.rate - a.rate || b.hits - a.hits);
+        const top = ranking.patterns.find((p) => p.id === ranking.best);
+        return `
+        <div style="margin-top:14px;padding:24px;position:relative;overflow:hidden;border-radius:16px;border:1px solid ${ranking.ready ? 'hsl(var(--primary)/0.4)' : 'hsl(var(--border)/0.3)'};background:${ranking.ready ? 'linear-gradient(180deg,hsl(var(--primary)/0.06),hsl(var(--bg)/0.6))' : 'hsl(var(--bg)/0.4)'}">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:14px;position:relative;flex-wrap:wrap">
+            <div style="position:relative;width:11px;height:11px;flex-shrink:0">
+              <div style="position:absolute;inset:0;border-radius:50%;background:${ranking.ready ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground)/0.4)'};${ranking.ready ? 'animation:ahub-pulse 1.2s infinite' : ''}"></div>
+            </div>
+            <span style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;letter-spacing:3px;color:${ranking.ready ? 'hsl(var(--primary))' : 'hsl(var(--foreground))'};text-transform:uppercase">Recovery Pattern Engine</span>
+            <div style="flex:1"></div>
+            <span style="padding:7px 18px;border-radius:20px;border:1px solid hsl(var(--border)/0.5);background:hsl(var(--bg)/0.7);color:hsl(var(--muted-foreground));font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">○ OBSERVING</span>
+          </div>
+          <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
+            Backtests all 5 recovery patterns — Standard, Alt A/B/C, Alt R — against this market's own recent tick history every single tick, ranked live by hit rate. Atomic Bolt fires in batches rather than a step martingale, so this panel is telemetry only here — it doesn't drive Differ's trades.
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
+            <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
+              <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">TOP PATTERN</div>
+              <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:${ranking.ready ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))'}">${ranking.ready ? `${top.icon} ${top.label}` : '—'}</div>
+              <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? 'highest simulated hit rate' : `${ranking.samples} ticks buffered`}</div>
+            </div>
+            <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
+              <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">HIT RATE</div>
+              <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:hsl(var(--primary))">${ranking.ready ? `${Math.round(ranking.bestRate * 100)}%` : '—'}</div>
+              <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? `${top.hits}/${top.attempts} simulated` : 'warming up…'}</div>
+            </div>
+          </div>
+          <div style="margin-top:14px;position:relative">
+            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">PATTERNS RANKED BY HIT RATE</div>
+            ${sorted.length ? `
+            <div style="display:flex;flex-direction:column;gap:6px">
+              ${sorted.map((p) => {
+                const isPicked = ranking.ready && p.id === ranking.best;
+                const pct = Math.round((p.rate || 0) * 100);
+                const barColor = isPicked ? 'hsl(var(--primary))' : p.attempts >= 12 ? 'hsl(var(--primary)/0.6)' : 'hsl(var(--muted-foreground)/0.5)';
+                return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:${isPicked ? 'hsl(var(--primary)/0.08)' : 'hsl(var(--bg)/0.5)'};border:1px solid ${isPicked ? 'hsl(var(--primary)/0.35)' : 'hsl(var(--border)/0.25)'}">
+                  <span style="font-size:15px;width:18px;text-align:center;flex-shrink:0">${p.icon}</span>
+                  <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;color:${isPicked ? 'hsl(var(--primary))' : 'hsl(var(--foreground))'};width:82px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.label}</span>
+                  <div style="flex:1;height:6px;background:hsl(var(--bg)/0.8);border-radius:3px;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px"></div>
+                  </div>
+                  <span style="font-family:'DM Mono',monospace;font-size:10px;color:${isPicked ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))'};width:38px;text-align:right;flex-shrink:0">${pct}%</span>
+                  ${isPicked ? `<span style="font-size:9px;color:hsl(var(--primary));flex-shrink:0;font-weight:800">#1</span>` : ''}
+                </div>`;
+              }).join('')}
+            </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
+          </div>
+        </div>`;
+      })()}
+
       <button id="differ-reset" style="width:100%;margin-top:8px;padding:10px;border:1px solid hsl(var(--border));border-radius:10px;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:'Outfit',sans-serif;font-size:10px;letter-spacing:3px">RESET JOURNAL</button>`;
     if (setHtmlIfChanged(el('differ-right'), rightHtml)) {
       el('differ-reset').onclick = () => global.benzEngine.dispatch({ type: 'RESET_JOURNAL' });
@@ -16152,7 +16394,7 @@ window.NexusStrategies=exports;
               {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:`Opens on ${opp} immediately, back to ${base} for 2 steps, repeats every 3rd step (1, 4, 7…) — mirrors Alt A`, sel:c.alternatingRecoveryB},
               {id:'altC',  icon:'🔀', title:'Alt Mode C', desc:`Stays ${base} for 2 steps, flips to ${opp} every 3rd step (3, 6, 9…) — the third phase A/B didn't cover`, sel:c.alternatingRecoveryC},
               {id:'altR',  icon:'🎲', title:'Alt Mode R', desc:`No fixed cycle — flips to ${opp} at random (~40% per step). Least readable, hardest to fingerprint`, sel:c.alternatingRecoveryR},
-              {id:'smart', icon:'🧠', title:'Smart Toggle', desc:isOU?`Reads last 25 ticks; bets ${base} or ${opp} based on which side is starved`:'Reads last 20 ticks; bets ODD or EVEN based on which appears less', sel:c.smartRecovery},
+              {id:'smart', icon:'🧠', title:'Smart Toggle', desc:'Recovery Pattern Engine — ranks all 5 patterns live by backtested hit rate, auto-applies whichever ranks #1', sel:c.smartRecovery},
             ];
           })().map(rm=>`
           <div class="cp-mart-card ${rm.sel?'selected':''}" data-rmode="${rm.id}" id="${rootId}-rmode-${rm.id}">
@@ -16166,6 +16408,11 @@ window.NexusStrategies=exports;
             </div>
           </div>`).join('')}
         </div>
+
+        ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) ? `
+        <div style="margin-top:8px;padding:8px 10px;border-radius:9px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border)/0.4);font-size:8.5px;color:hsl(var(--muted-foreground));display:flex;align-items:center;gap:6px">
+          <span>🧠</span><span>Live pattern rankings for Smart Toggle now live in the <b style="color:hsl(var(--primary))">Recovery Pattern Engine</b> terminal below the journal →</span>
+        </div>` : ''}
 
         <div class="cp-toggle-row" style="margin-top:10px;padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border))">
           <div style="display:flex;align-items:center;gap:10px">
@@ -16423,7 +16670,7 @@ window.NexusStrategies=exports;
   }
 
   function renderRight(engine, rootId, snap) {
-    const { state: s, logs } = snap;
+    const { state: s, logs, config: c } = snap;
     const total = s.stats.win + s.stats.loss;
     const wr = total ? ((s.stats.win / total) * 100).toFixed(1) : '0.0';
     const journal = engine.journal || [];
@@ -16983,6 +17230,72 @@ window.NexusStrategies=exports;
       onmouseover="this.style.background='hsl(var(--loss)/0.12)'" onmouseout="this.style.background='hsl(var(--loss)/0.06)'">
       ✕ CLEAR JOURNAL
     </button>
+
+    <!-- ── RECOVERY PATTERN ENGINE (big terminal, below the journal) ── -->
+    ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || engine.isOU) ? (() => {
+      const ranking = engine.smartRecoveryRanking || { patterns: [], best: null, bestRate: 0, ready: false, samples: 0 };
+      const sorted = [...ranking.patterns].sort((a, b) => b.rate - a.rate || b.hits - a.hits);
+      const top = ranking.patterns.find((p) => p.id === ranking.best);
+      const isDriving = !!c.smartRecovery; // Smart Toggle actually selected → this ranking drives real trades
+      const glow = ranking.ready && isDriving;
+      return `
+      <div style="margin-top:14px;padding:24px;position:relative;overflow:hidden;border-radius:16px;border:1px solid ${glow ? 'hsl(var(--win)/0.5)' : ranking.ready ? 'hsl(var(--primary)/0.4)' : 'hsl(var(--border)/0.3)'};background:${glow ? 'linear-gradient(180deg,hsl(var(--win)/0.1),hsl(var(--bg)/0.6))' : ranking.ready ? 'linear-gradient(180deg,hsl(var(--primary)/0.06),hsl(var(--bg)/0.6))' : 'hsl(var(--bg)/0.4)'}">
+        ${glow ? `<div style="position:absolute;inset:0;pointer-events:none;overflow:hidden"><div style="position:absolute;top:0;bottom:0;width:40%;background:linear-gradient(90deg,transparent,hsl(var(--win)/0.12),transparent);animation:alt-scan 2.4s linear infinite"></div></div>` : ''}
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:14px;position:relative;flex-wrap:wrap">
+          <div style="position:relative;width:11px;height:11px;flex-shrink:0">
+            <div style="position:absolute;inset:0;border-radius:50%;background:${glow ? 'hsl(var(--win))' : ranking.ready ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground)/0.4)'};${ranking.ready ? 'animation:ahub-pulse 1.2s infinite' : ''}"></div>
+            ${glow ? `<div style="position:absolute;inset:-4px;border-radius:50%;background:hsl(var(--win)/0.2);animation:ahub-ping 1.2s infinite"></div>` : ''}
+          </div>
+          <span style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;letter-spacing:3px;color:${glow ? 'hsl(var(--win))' : ranking.ready ? 'hsl(var(--primary))' : 'hsl(var(--foreground))'};text-transform:uppercase">Recovery Pattern Engine</span>
+          <div style="flex:1"></div>
+          <span style="padding:7px 18px;border-radius:20px;border:1px solid ${isDriving ? 'hsl(var(--win))' : 'hsl(var(--border)/0.5)'};background:${isDriving ? 'hsl(var(--win)/0.15)' : 'hsl(var(--bg)/0.7)'};color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'};font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">${isDriving ? '● DRIVING TRADES' : '○ OBSERVING'}</span>
+        </div>
+        <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
+          Backtests all 5 recovery patterns — Standard, Alt A/B/C, Alt R — against this bot's own recent tick history every single tick: for each one, simulates what it would have bet at every step of a repeating 9-step recovery cycle and checks whether it would have won. Ranked live by hit rate, exactly like the Reversal Trigger Engine ranks candidate digits by flip rate.
+          ${isDriving ? ' <b style="color:hsl(var(--win))">Smart Toggle is selected — recovery trades apply whichever pattern currently ranks #1.</b>' : ' Select <b style="color:hsl(var(--primary))">Smart Toggle</b> above in Recovery Mode to have live trades act on this ranking — it keeps computing either way.'}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
+          <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
+            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">TOP PATTERN</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:${ranking.ready ? (glow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'}">${ranking.ready ? `${top.icon} ${top.label}` : '—'}</div>
+            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? (isDriving ? 'active — step-rule applied on recovery' : 'would be applied if Smart Toggle is on') : `${ranking.samples} ticks buffered`}</div>
+          </div>
+          <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
+            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">HIT RATE</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:hsl(var(--primary))">${ranking.ready ? `${Math.round(ranking.bestRate * 100)}%` : '—'}</div>
+            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? `${top.hits}/${top.attempts} simulated` : 'warming up…'}</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;padding:11px 13px;background:hsl(var(--bg)/0.6);border-radius:10px;border:1px solid hsl(var(--border)/0.3);font-size:10px;color:hsl(var(--foreground)/0.85);position:relative">
+          ${ranking.ready
+            ? (s.inRecovery
+                ? (isDriving ? `🧠 In recovery — applying ${top.label}'s step-rule to step ${s.martingaleStep}` : `In recovery — using the selected Recovery Mode (Smart Toggle is off, so this pattern isn't driving)`)
+                : (isDriving ? `Standing by — will apply ${top.label} the moment a recovery starts` : `Standing by, observing only — turn on Smart Toggle above to let this drive recovery`))
+            : 'Buffering tick history — needs a bit more data before a pattern can be trusted with real money'}
+        </div>
+        <div style="margin-top:14px;position:relative">
+          <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">PATTERNS RANKED BY HIT RATE</div>
+          ${sorted.length ? `
+          <div style="display:flex;flex-direction:column;gap:6px">
+            ${sorted.map((p) => {
+              const isPicked = ranking.ready && p.id === ranking.best;
+              const pct = Math.round((p.rate || 0) * 100);
+              const barColor = isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : p.attempts >= 12 ? 'hsl(var(--primary)/0.6)' : 'hsl(var(--muted-foreground)/0.5)';
+              return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:${isPicked ? (isDriving ? 'hsl(var(--win)/0.1)' : 'hsl(var(--primary)/0.08)') : 'hsl(var(--bg)/0.5)'};border:1px solid ${isPicked ? (isDriving ? 'hsl(var(--win)/0.4)' : 'hsl(var(--primary)/0.35)') : 'hsl(var(--border)/0.25)'}">
+                <span style="font-size:15px;width:18px;text-align:center;flex-shrink:0">${p.icon}</span>
+                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;color:${isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--foreground))'};width:82px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.label}</span>
+                <div style="flex:1;height:6px;background:hsl(var(--bg)/0.8);border-radius:3px;overflow:hidden">
+                  <div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px"></div>
+                </div>
+                <span style="font-family:'DM Mono',monospace;font-size:10px;color:${isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'};width:38px;text-align:right;flex-shrink:0">${pct}%</span>
+                ${isPicked ? `<span style="font-size:9px;color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))'};flex-shrink:0;font-weight:800">#1</span>` : ''}
+              </div>`;
+            }).join('')}
+          </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
+        </div>
+      </div>`;
+    })() : ''}
+
       <div style="margin-top:14px">
         <button id="${rootId}-audit-toggle" style="width:100%;background:hsl(var(--card));border:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));border-radius:var(--radius-sm);padding:8px 12px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;text-align:left;display:flex;align-items:center;justify-content:space-between" onclick="(function(btn){const p=btn.nextElementSibling;const open=p.style.display!=='none';p.style.display=open?'none':'block';btn.querySelector('.audit-arrow').textContent=open?'▶':'▼';})(this)">
           <span>🔍 ENGINE LOGIC AUDIT</span><span class="audit-arrow">▶</span>
@@ -17514,6 +17827,28 @@ window.NexusStrategies=exports;
           <!-- hidden gate inputs kept for JS logic, invisible -->
           <input id="dash-pnl-gate-sl" type="hidden" value="20">
           <input id="dash-pnl-gate-tp" type="hidden" value="50">
+          <!-- Stake box: small collapsed control, opens a popup to view/adjust every bot's stake -->
+          <div style="position:relative;align-self:flex-end">
+            <button id="dash-stake-box" type="button" title="Adjust any bot's stake" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px;border:1px solid hsl(var(--border)/0.7);background:hsl(var(--muted)/0.35);color:hsl(var(--foreground)/0.85);cursor:pointer;font-family:'Outfit',sans-serif;transition:all .2s"
+              onmouseover="this.style.background='hsl(var(--muted)/0.55)';this.style.borderColor='hsl(var(--border))'"
+              onmouseout="this.style.background='hsl(var(--muted)/0.35)';this.style.borderColor='hsl(var(--border)/0.7)'">
+              <span style="font-size:14px;line-height:1">💰</span>
+              <span style="display:flex;flex-direction:column;align-items:flex-start;gap:1px">
+                <span style="font-size:8px;letter-spacing:2px;font-weight:800;text-transform:uppercase;color:hsl(var(--muted-foreground));white-space:nowrap">Stake</span>
+                <span style="font-size:11px;font-weight:800;font-family:'DM Mono',monospace;white-space:nowrap">Adjust</span>
+              </span>
+            </button>
+            <div id="dash-stake-popup" style="display:none;position:absolute;bottom:calc(100% + 10px);right:0;z-index:60;width:300px;max-height:380px;padding:14px;border-radius:14px;background:hsl(var(--card)/0.98);border:1px solid hsl(var(--border)/0.6);box-shadow:0 12px 40px rgba(0,0,0,0.45);backdrop-filter:blur(10px)">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+                <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:2px;color:hsl(var(--foreground)/0.8);text-transform:uppercase">Per-Bot Stake</span>
+                <div style="flex:1"></div>
+                <button id="dash-stake-close" type="button" style="border:none;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">✕</button>
+              </div>
+              <div id="dash-stake-list" style="display:flex;flex-direction:column;gap:6px;max-height:270px;overflow-y:auto;padding-right:2px"></div>
+              <button id="dash-stake-save" type="button" style="width:100%;margin-top:10px;padding:9px;border:1px solid hsl(var(--border));border-radius:10px;background:hsl(var(--muted)/0.6);color:hsl(var(--foreground)/0.9);font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:2px;cursor:pointer;transition:all .2s"
+                onmouseover="this.style.background='hsl(var(--muted)/0.85)'" onmouseout="this.style.background='hsl(var(--muted)/0.6)'">💾 SAVE STAKES</button>
+            </div>
+          </div>
           <!-- Engage button -->
           <button id="dash-master-toggle" style="margin:0;padding:13px 26px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;align-self:flex-end;flex-shrink:0;min-width:148px;white-space:nowrap">
             ⚡ ENGAGE ALL
@@ -18631,6 +18966,10 @@ window.NexusStrategies=exports;
   }
 
   global.DashboardUI = { render };
+  // Exposed so the dashboard's Stake widget (bound later, in the main
+  // controller IIFE) can look up bot labels/dots without duplicating this
+  // table — BOT_META otherwise stays private to this module's closure.
+  global.BOT_META = BOT_META;
 })(window);
 
 
@@ -21460,7 +21799,7 @@ window.NexusStrategies=exports;
   // ── RIGHT: Journal ────────────────────────────────────────────────────
   function renderRight(engine, rootId, snap) {
     const host = el(`${rootId}-right`);
-    const s = snap.state, logs = snap.logs || [];
+    const s = snap.state, logs = snap.logs || [], c = snap.config || {};
     const total = s.stats.win + s.stats.loss;
     const wrPct = total ? (s.stats.win/total)*100 : 0;
     const wrArc = 2*Math.PI*36;
@@ -21555,6 +21894,72 @@ window.NexusStrategies=exports;
           </div>`;
         }).join('')}
       </div>
+
+
+    <!-- ── RECOVERY PATTERN ENGINE (big terminal, below the journal) ── -->
+    ${(() => {
+      const ranking = engine.smartRecoveryRanking || { patterns: [], best: null, bestRate: 0, ready: false, samples: 0 };
+      const sorted = [...ranking.patterns].sort((a, b) => b.rate - a.rate || b.hits - a.hits);
+      const top = ranking.patterns.find((p) => p.id === ranking.best);
+      const isDriving = !!c.smartRecovery; // Smart Toggle actually selected → this ranking drives real trades
+      const glow = ranking.ready && isDriving;
+      return `
+      <div style="margin-top:14px;padding:24px;position:relative;overflow:hidden;border-radius:16px;border:1px solid ${glow ? 'hsl(var(--win)/0.5)' : ranking.ready ? 'hsl(var(--primary)/0.4)' : 'hsl(var(--border)/0.3)'};background:${glow ? 'linear-gradient(180deg,hsl(var(--win)/0.1),hsl(var(--bg)/0.6))' : ranking.ready ? 'linear-gradient(180deg,hsl(var(--primary)/0.06),hsl(var(--bg)/0.6))' : 'hsl(var(--bg)/0.4)'}">
+        ${glow ? `<div style="position:absolute;inset:0;pointer-events:none;overflow:hidden"><div style="position:absolute;top:0;bottom:0;width:40%;background:linear-gradient(90deg,transparent,hsl(var(--win)/0.12),transparent);animation:alt-scan 2.4s linear infinite"></div></div>` : ''}
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:14px;position:relative;flex-wrap:wrap">
+          <div style="position:relative;width:11px;height:11px;flex-shrink:0">
+            <div style="position:absolute;inset:0;border-radius:50%;background:${glow ? 'hsl(var(--win))' : ranking.ready ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground)/0.4)'};${ranking.ready ? 'animation:ahub-pulse 1.2s infinite' : ''}"></div>
+            ${glow ? `<div style="position:absolute;inset:-4px;border-radius:50%;background:hsl(var(--win)/0.2);animation:ahub-ping 1.2s infinite"></div>` : ''}
+          </div>
+          <span style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:900;letter-spacing:3px;color:${glow ? 'hsl(var(--win))' : ranking.ready ? 'hsl(var(--primary))' : 'hsl(var(--foreground))'};text-transform:uppercase">Recovery Pattern Engine</span>
+          <div style="flex:1"></div>
+          <span style="padding:7px 18px;border-radius:20px;border:1px solid ${isDriving ? 'hsl(var(--win))' : 'hsl(var(--border)/0.5)'};background:${isDriving ? 'hsl(var(--win)/0.15)' : 'hsl(var(--bg)/0.7)'};color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'};font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">${isDriving ? '● DRIVING TRADES' : '○ OBSERVING'}</span>
+        </div>
+        <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
+          Backtests all 5 recovery patterns — Standard, Alt A/B/C, Alt R — against this bot's own recent tick history every single tick: for each one, simulates what it would have bet at every step of a repeating 9-step recovery cycle and checks whether it would have won. Ranked live by hit rate, exactly like the Reversal Trigger Engine ranks candidate digits by flip rate.
+          ${isDriving ? ' <b style="color:hsl(var(--win))">Smart Toggle is selected — recovery trades apply whichever pattern currently ranks #1.</b>' : ' Select <b style="color:hsl(var(--primary))">Smart Toggle</b> above in Recovery Mode to have live trades act on this ranking — it keeps computing either way.'}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
+          <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
+            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">TOP PATTERN</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:${ranking.ready ? (glow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'}">${ranking.ready ? `${top.icon} ${top.label}` : '—'}</div>
+            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? (isDriving ? 'active — step-rule applied on recovery' : 'would be applied if Smart Toggle is on') : `${ranking.samples} ticks buffered`}</div>
+          </div>
+          <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
+            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">HIT RATE</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:hsl(var(--primary))">${ranking.ready ? `${Math.round(ranking.bestRate * 100)}%` : '—'}</div>
+            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? `${top.hits}/${top.attempts} simulated` : 'warming up…'}</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;padding:11px 13px;background:hsl(var(--bg)/0.6);border-radius:10px;border:1px solid hsl(var(--border)/0.3);font-size:10px;color:hsl(var(--foreground)/0.85);position:relative">
+          ${ranking.ready
+            ? (s.inRecovery
+                ? (isDriving ? `🧠 In recovery — applying ${top.label}'s step-rule to step ${s.martingaleStep}` : `In recovery — using the selected Recovery Mode (Smart Toggle is off, so this pattern isn't driving)`)
+                : (isDriving ? `Standing by — will apply ${top.label} the moment a recovery starts` : `Standing by, observing only — turn on Smart Toggle above to let this drive recovery`))
+            : 'Buffering tick history — needs a bit more data before a pattern can be trusted with real money'}
+        </div>
+        <div style="margin-top:14px;position:relative">
+          <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">PATTERNS RANKED BY HIT RATE</div>
+          ${sorted.length ? `
+          <div style="display:flex;flex-direction:column;gap:6px">
+            ${sorted.map((p) => {
+              const isPicked = ranking.ready && p.id === ranking.best;
+              const pct = Math.round((p.rate || 0) * 100);
+              const barColor = isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : p.attempts >= 12 ? 'hsl(var(--primary)/0.6)' : 'hsl(var(--muted-foreground)/0.5)';
+              return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:${isPicked ? (isDriving ? 'hsl(var(--win)/0.1)' : 'hsl(var(--primary)/0.08)') : 'hsl(var(--bg)/0.5)'};border:1px solid ${isPicked ? (isDriving ? 'hsl(var(--win)/0.4)' : 'hsl(var(--primary)/0.35)') : 'hsl(var(--border)/0.25)'}">
+                <span style="font-size:15px;width:18px;text-align:center;flex-shrink:0">${p.icon}</span>
+                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;color:${isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--foreground))'};width:82px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.label}</span>
+                <div style="flex:1;height:6px;background:hsl(var(--bg)/0.8);border-radius:3px;overflow:hidden">
+                  <div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px"></div>
+                </div>
+                <span style="font-family:'DM Mono',monospace;font-size:10px;color:${isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'};width:38px;text-align:right;flex-shrink:0">${pct}%</span>
+                ${isPicked ? `<span style="font-size:9px;color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))'};flex-shrink:0;font-weight:800">#1</span>` : ''}
+              </div>`;
+            }).join('')}
+          </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
+        </div>
+      </div>`;
+    })()}
 
       <div class="ahub-card" style="margin-top:10px">
         <div class="ahub-label"><span class="ahub-label-dot" style="background:hsl(var(--secondary));box-shadow:0 0 8px hsl(var(--secondary))"></span>Engine Log</div>
@@ -22805,6 +23210,10 @@ window.NexusStrategies=exports;
   let dashboardEl = null;
   let dashRenderQueued = false;
   const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null };
+  // Exposed so the Dashboard's Master Control "Stake" popup (defined in
+  // buildShell, a separate function/closure) can read/write every bot's
+  // stake without needing to be threaded through as a parameter.
+  window.__BotEngines = engines;
   const titanBuilt = { even: false, odd: false, nexus: false, under: false, meanrev: false, risemr: false, fallmr: false, evenmr: false, oddmr: false, oldeven: false, oldodd: false, oldrisefall: false };
 
   function queueDashboardRender() {
@@ -22830,6 +23239,25 @@ window.NexusStrategies=exports;
     };
     engines.hotrepeat = eng;
     window._hotRepeatEngineRef = eng;
+    if (eng.emit) eng.emit();
+    return eng;
+  }
+
+  // Pre-existing gap: BenzEngine (Differ) was never lazily instantiated —
+  // every call site referenced `global.benzEngine` / `ensureDifferEngine()`
+  // as if this existed, but nothing ever created it. Wired up here
+  // following the exact same lazy-init pattern as Hot Repeat/Titan above.
+  function ensureDifferEngine() {
+    if (window.benzEngine) { engines.differ = window.benzEngine; return window.benzEngine; }
+    if (!window.BenzEngine) { console.warn('[Hub] BenzEngine not loaded yet'); return null; }
+    let eng;
+    try { eng = new window.BenzEngine(); } catch(e) { console.error('[Hub] BenzEngine init failed:', e); return null; }
+    eng.onUpdate = function (s) {
+      if (activeApp === 'differ' && window.BenzUI) window.BenzUI.renderFull(s);
+      if (activeApp === 'dashboard') queueDashboardRender();
+    };
+    window.benzEngine = eng;
+    engines.differ = eng;
     if (eng.emit) eng.emit();
     return eng;
   }
@@ -23563,11 +23991,108 @@ window.NexusStrategies=exports;
     });
   }
 
+  // ── STAKE WIDGET (Master Control) ───────────────────────────────────────
+  // Small collapsed box in the Master Control panel that opens a popup
+  // listing every bot's stake, editable in one place without leaving the
+  // dashboard. Bots keep their own stake field on their own tab too — this
+  // is just a fast path. Save here persists immediately per-engine (same
+  // saveConfig() each bot's own Save uses) rather than waiting on the
+  // navbar's global Save button, since the whole point is a quick tweak.
+  const STAKE_IDS = ['differ', ...BOT_IDS];
+
+  function getStakeEngine(id) {
+    if (id === 'differ') return ensureDifferEngine();
+    if (id === 'hotrepeat') return ensureHotRepeatEngine();
+    return ensureTitanEngine(id);
+  }
+  function getStakeValue(eng, id) {
+    if (!eng) return null;
+    return (id === 'differ' || id === 'hotrepeat') ? (eng.state && eng.state.stake) : (eng.config && eng.config.stake);
+  }
+  function setStakeValue(eng, id, value) {
+    const v = Math.max(0.35, parseFloat(value) || 0.35);
+    if (id === 'differ' || id === 'hotrepeat') {
+      eng.dispatch({ type: 'SET_STAKE', value: v });
+    } else {
+      eng.setConfig({ stake: v });
+    }
+    try { eng.saveConfig(); } catch (e) { console.error(`[Hub] stake save error (${id}):`, e); }
+  }
+
+  function populateStakePopup() {
+    const list = document.getElementById('dash-stake-list');
+    if (!list) return;
+    list.innerHTML = STAKE_IDS.map((id) => {
+      const eng = getStakeEngine(id);
+      const val = getStakeValue(eng, id);
+      const meta = window.BOT_META && window.BOT_META[id] || { label: id, dot: 'hsl(var(--muted-foreground))' };
+      return `<div style="display:flex;align-items:center;gap:8px">
+        <span class="bot-card-dot" style="background:${meta.dot};flex-shrink:0"></span>
+        <span style="flex:1;font-size:10.5px;font-family:'DM Mono',monospace;color:hsl(var(--foreground)/0.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${meta.label}</span>
+        <input type="number" min="0.35" step="0.01" data-stake-id="${id}" value="${val != null ? val : ''}" placeholder="—" style="width:74px;padding:6px 8px;border-radius:8px;border:1px solid hsl(var(--border)/0.5);background:hsl(var(--bg)/0.6);color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:11px;text-align:center;outline:none">
+      </div>`;
+    }).join('');
+  }
+
+  // Delegated on `document` (not bound to the panel's own elements) because
+  // #dashboard-root's innerHTML gets fully regenerated on every dashboard
+  // render (queueDashboardRender runs every few seconds) — direct .onclick
+  // bindings on those nodes would go dead the moment the panel refreshes.
+  function bindStakeWidget() {
+    document.addEventListener('click', (e) => {
+      const box = e.target.closest('#dash-stake-box');
+      const popup = document.getElementById('dash-stake-popup');
+      if (!popup) return;
+      if (box) {
+        e.stopPropagation();
+        const willOpen = popup.style.display === 'none';
+        if (willOpen) populateStakePopup();
+        popup.style.display = willOpen ? 'block' : 'none';
+        return;
+      }
+      if (e.target.closest('#dash-stake-close')) {
+        e.stopPropagation();
+        popup.style.display = 'none';
+        return;
+      }
+      const saveBtn = e.target.closest('#dash-stake-save');
+      if (saveBtn) {
+        e.stopPropagation();
+        let savedAny = false;
+        popup.querySelectorAll('[data-stake-id]').forEach((input) => {
+          const id = input.dataset.stakeId;
+          const raw = input.value;
+          if (raw === '' || raw == null) return;
+          const eng = getStakeEngine(id);
+          if (!eng) return;
+          setStakeValue(eng, id, raw);
+          savedAny = true;
+        });
+        const toast = document.getElementById('global-error-toast');
+        if (toast) {
+          toast.textContent = savedAny ? '✅ Stakes saved' : '⚠ Nothing to save';
+          toast.style.background = savedAny ? 'hsl(var(--win)/0.15)' : '';
+          toast.style.borderColor = savedAny ? 'hsl(var(--win)/0.5)' : '';
+          toast.style.color = savedAny ? 'hsl(var(--win))' : '';
+          toast.classList.add('show');
+          setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 2500);
+        }
+        popup.style.display = 'none';
+        return;
+      }
+      // Click was inside the open popup itself (e.g. an input) — keep it open.
+      if (e.target.closest('#dash-stake-popup')) return;
+      // Click anywhere else on the page — close the popup if it's open.
+      if (popup.style.display !== 'none') popup.style.display = 'none';
+    });
+  }
+
   function init() {
     try { bindTopbarAndSettings(); } catch(e) { console.error('[Hub] bindTopbarAndSettings error:', e); }
     try { refreshTopbar(); } catch(e) { console.error('[Hub] refreshTopbar error:', e); }
     dashboardEl = document.getElementById('dashboard-root');
     try { bindMasterControl(); } catch(e) { console.error('[Hub] bindMasterControl error:', e); }
+    try { bindStakeWidget(); } catch(e) { console.error('[Hub] bindStakeWidget error:', e); }
     try { bindGlobalSaveButton(); } catch(e) { console.error('[Hub] bindGlobalSaveButton error:', e); }
     // Start every engine's public analysis socket immediately, regardless of
     // which tab is active — ticks/digits (and journal/stats tracking) should
