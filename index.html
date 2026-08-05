@@ -136,9 +136,86 @@
       const MIN_SAMPLES = 12;   // qualify a pattern only once it's had a fair number of simulated attempts
       const CYCLE = 9;          // simulated recovery depth per pass through history (matches martingaleStopStep's practical ceiling)
 
+      // ── Adaptive Mask ──────────────────────────────────────────────
+      // Everything above tests five FIXED cycles and ranks them. This
+      // builds a sixth candidate that isn't picked from a menu at all —
+      // for each step 1..CYCLE independently, it replays the window and
+      // asks "at this step, did flipping or staying land more often?"
+      // then only commits to a flip for that step if the gap clears a
+      // significance bar (two-proportion z-test), so a step with thin or
+      // noisy samples just falls back to staying rather than flipping on
+      // a coin-flip-sized sample. The output is a step->boolean mask
+      // assembled fresh from the data every recompute, not a label from
+      // PATTERN_DEFS.
+      const ADAPTIVE_MIN_SAMPLES = 8;  // per-step samples required on BOTH sides before that step is even eligible to flip
+      const Z_THRESHOLD = 1.645;       // ~95% one-tailed confidence flip-rate genuinely beats stay-rate, not just noise
+
+      // Two-proportion z-test: is p1 (flip hit-rate) significantly above
+      // p2 (stay hit-rate) given their sample sizes? Pure sampling-noise
+      // check — this does not claim the underlying digits are non-random,
+      // only that IF there's a gap this wide, it's unlikely to be noise.
+      function flipSignificantlyBeatsStay(flipHits, flipN, stayHits, stayN) {
+        if (flipN < ADAPTIVE_MIN_SAMPLES || stayN < ADAPTIVE_MIN_SAMPLES) return false;
+        const p1 = flipHits / flipN, p2 = stayHits / stayN;
+        if (p1 <= p2) return false;
+        const pPool = (flipHits + stayHits) / (flipN + stayN);
+        const se = Math.sqrt(pPool * (1 - pPool) * (1 / flipN + 1 / stayN));
+        if (!se) return false;
+        return (p1 - p2) / se >= Z_THRESHOLD;
+      }
+
+      function buildAdaptiveMask(data, winCheck) {
+        const steps = {};
+        for (let s = 1; s <= CYCLE; s++) steps[s] = { flipHits: 0, flipN: 0, stayHits: 0, stayN: 0 };
+        // Same historical tick feeds BOTH the "what if we flipped here"
+        // and "what if we stayed here" tally for its step, so every step
+        // accumulates two independent samples per pass through the
+        // window instead of the one sample a fixed-cycle pattern gets.
+        for (let i = 0; i < data.length - 1; i++) {
+          const step = (i % CYCLE) + 1;
+          const bucket = steps[step];
+          if (winCheck(data[i + 1], true)) bucket.flipHits++;
+          bucket.flipN++;
+          if (winCheck(data[i + 1], false)) bucket.stayHits++;
+          bucket.stayN++;
+        }
+        const mask = {};
+        const detail = {};
+        let flippedSteps = 0, gatedSteps = 0;
+        for (let s = 1; s <= CYCLE; s++) {
+          const b = steps[s];
+          const eligible = b.flipN >= ADAPTIVE_MIN_SAMPLES && b.stayN >= ADAPTIVE_MIN_SAMPLES;
+          if (eligible) gatedSteps++;
+          const flip = eligible && flipSignificantlyBeatsStay(b.flipHits, b.flipN, b.stayHits, b.stayN);
+          mask[s] = flip;
+          detail[s] = { ...b, eligible, flip, flipRate: b.flipN ? b.flipHits / b.flipN : 0, stayRate: b.stayN ? b.stayHits / b.stayN : 0 };
+          if (flip) flippedSteps++;
+        }
+        return { mask, detail, flippedSteps, gatedSteps };
+      }
+
+      // Evaluates the adaptive mask as a sixth pattern candidate, in the
+      // same {id,label,icon,hits,attempts,rate} shape the fixed patterns
+      // use, so it can compete for #1 on equal footing inside rank().
+      function evaluateAdaptive(data, winCheck) {
+        const { mask, detail, flippedSteps, gatedSteps } = buildAdaptiveMask(data, winCheck);
+        let hits = 0, attempts = 0;
+        for (let i = 0; i < data.length - 1; i++) {
+          const step = (i % CYCLE) + 1;
+          attempts++;
+          if (winCheck(data[i + 1], !!mask[step])) hits++;
+        }
+        return {
+          id: 'adaptive', label: 'Adaptive Mask', icon: '🧬',
+          hits, attempts, rate: attempts ? hits / attempts : 0,
+          mask, detail, flippedSteps, gatedSteps,
+        };
+      }
+
       function rank(history, winCheck) {
         const data = (history || []).slice(-160);
-        const empty = { patterns: PATTERN_DEFS.map((p) => ({ id: p.id, label: p.label, icon: p.icon, rate: 0, hits: 0, attempts: 0 })), best: null, bestRate: 0, ready: false, samples: data.length };
+        const emptyPatterns = [...PATTERN_DEFS.map((p) => ({ id: p.id, label: p.label, icon: p.icon, rate: 0, hits: 0, attempts: 0 })), { id: 'adaptive', label: 'Adaptive Mask', icon: '🧬', rate: 0, hits: 0, attempts: 0 }];
+        const empty = { patterns: emptyPatterns, best: null, bestRate: 0, ready: false, samples: data.length, adaptiveMask: null };
         if (data.length < MIN_SAMPLES + 1) return empty;
         const results = PATTERN_DEFS.map((p) => {
           let hits = 0, attempts = 0;
@@ -150,9 +227,14 @@
           }
           return { id: p.id, label: p.label, icon: p.icon, hits, attempts, rate: attempts ? hits / attempts : 0 };
         });
-        const qualified = results.filter((r) => r.attempts >= MIN_SAMPLES).sort((a, b) => b.rate - a.rate || b.hits - a.hits);
+        const adaptive = evaluateAdaptive(data, winCheck);
+        const allResults = [...results, adaptive];
+        const qualified = allResults.filter((r) => r.attempts >= MIN_SAMPLES).sort((a, b) => b.rate - a.rate || b.hits - a.hits);
         const best = qualified[0] || null;
-        return { patterns: results, best: best ? best.id : null, bestRate: best ? best.rate : 0, ready: !!best, samples: data.length };
+        return {
+          patterns: allResults, best: best ? best.id : null, bestRate: best ? best.rate : 0,
+          ready: !!best, samples: data.length, adaptiveMask: adaptive.mask,
+        };
       }
 
       // Parity bots (Even/Odd, Even/Odd MR): base direction is a fixed
@@ -179,9 +261,16 @@
       // Applies the current #1-ranked pattern's own step-rule to a given
       // martingale step, returning whether THIS step should flip. Used at
       // trade time so recovery follows the ranked pattern's actual cycle
-      // rather than just copying its historical average.
+      // rather than just copying its historical average. 'adaptive' has
+      // no PATTERN_DEFS entry (its rule is data-built, not fixed), so it
+      // reads the mask rank() attached to the ranking object instead.
       function shouldFlipForStep(ranking, step) {
         if (!ranking || !ranking.ready || !ranking.best) return false;
+        if (ranking.best === 'adaptive') {
+          if (!ranking.adaptiveMask) return false;
+          const cycleStep = ((step - 1) % CYCLE) + 1;
+          return !!ranking.adaptiveMask[cycleStep];
+        }
         const def = PATTERN_DEFS.find((p) => p.id === ranking.best);
         return def ? def.flips(step) : false;
       }
@@ -15445,7 +15534,7 @@ window.NexusStrategies=exports;
             <span style="padding:7px 18px;border-radius:20px;border:1px solid hsl(var(--border)/0.5);background:hsl(var(--bg)/0.7);color:hsl(var(--muted-foreground));font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">○ OBSERVING</span>
           </div>
           <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
-            Backtests all 5 recovery patterns — Standard, Alt A/B/C, Alt R — against this market's own recent tick history every single tick, ranked live by hit rate. Atomic Bolt fires in batches rather than a step martingale, so this panel is telemetry only here — it doesn't drive Differ's trades.
+            Backtests the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — plus a self-built Adaptive Mask, against this market's own recent tick history every single tick, ranked live by hit rate. Atomic Bolt fires in batches rather than a step martingale, so this panel is telemetry only here — it doesn't drive Differ's trades.
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
             <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
@@ -16394,17 +16483,17 @@ window.NexusStrategies=exports;
               {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:`Opens on ${opp} immediately, back to ${base} for 2 steps, repeats every 3rd step (1, 4, 7…) — mirrors Alt A`, sel:c.alternatingRecoveryB},
               {id:'altC',  icon:'🔀', title:'Alt Mode C', desc:`Stays ${base} for 2 steps, flips to ${opp} every 3rd step (3, 6, 9…) — the third phase A/B didn't cover`, sel:c.alternatingRecoveryC},
               {id:'altR',  icon:'🎲', title:'Alt Mode R', desc:`No fixed cycle — flips to ${opp} at random (~40% per step). Least readable, hardest to fingerprint`, sel:c.alternatingRecoveryR},
-              {id:'smart', icon:'🧠', title:'Smart Toggle', desc:'Recovery Pattern Engine — ranks all 5 patterns live by backtested hit rate, auto-applies whichever ranks #1', sel:c.smartRecovery},
+              {id:'smart', icon:'🧠', title:'Smart Toggle', desc:'Recovery Pattern Engine — ranks the 5 fixed patterns plus a self-built Adaptive Mask live by backtested hit rate, auto-applies whichever ranks #1', sel:c.smartRecovery},
             ];
           })().map(rm=>`
           <div class="cp-mart-card ${rm.sel?'selected':''}" data-rmode="${rm.id}" id="${rootId}-rmode-${rm.id}">
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:14px">${rm.icon}</span>
-              <div>
+            <div class="cp-mart-card-row">
+              <span class="cp-mart-card-icon">${rm.icon}</span>
+              <div class="cp-mart-card-body">
                 <div class="cp-mart-card-title">${rm.title}</div>
                 <div class="cp-mart-card-desc">${rm.desc}</div>
               </div>
-              ${rm.sel?`<div style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:hsl(var(--primary));box-shadow:0 0 8px hsl(var(--primary));animation:cp-pulse 1.5s infinite"></div>`:''}
+              ${rm.sel?`<span class="cp-mart-card-dot"></span>`:''}
             </div>
           </div>`).join('')}
         </div>
@@ -17002,29 +17091,61 @@ window.NexusStrategies=exports;
         border: 1px solid hsl(var(--border)/0.35);
         border-radius: 12px;
         padding: 10px 12px;
-        margin-bottom: 5px;
+        margin-bottom: 6px;
         cursor: pointer;
-        transition: all .18s cubic-bezier(.16,1,.3,1);
-        position: relative; overflow: hidden;
+        transition: background .18s cubic-bezier(.16,1,.3,1), border-color .18s cubic-bezier(.16,1,.3,1), box-shadow .18s cubic-bezier(.16,1,.3,1), transform .18s cubic-bezier(.16,1,.3,1);
+        position: relative;
       }
       .cp-mart-card:hover {
         background: hsl(var(--card)/0.7);
-        border-color: hsl(var(--primary)/0.25);
+        border-color: hsl(var(--primary)/0.3);
         transform: translateX(2px);
       }
+      .cp-mart-card:active { transform: translateX(2px) scale(.985); }
       .cp-mart-card.selected {
-        background: linear-gradient(135deg, hsl(var(--primary)/0.1), hsl(var(--primary)/0.04));
-        border-color: hsl(var(--primary)/0.45);
-        box-shadow: 0 0 16px hsl(var(--primary)/0.1), inset 0 1px 0 hsl(255 100% 100%/0.04);
+        background: linear-gradient(135deg, hsl(var(--primary)/0.12), hsl(var(--primary)/0.04));
+        border-color: hsl(var(--primary)/0.5);
+        box-shadow: 0 0 0 1px hsl(var(--primary)/0.15), 0 0 16px hsl(var(--primary)/0.12), inset 0 1px 0 hsl(255 100% 100%/0.04);
       }
+      .cp-mart-card-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .cp-mart-card-icon {
+        flex-shrink: 0;
+        width: 26px; height: 26px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; line-height: 1;
+        border-radius: 8px;
+        background: hsl(var(--bg)/0.7);
+        border: 1px solid hsl(var(--border)/0.3);
+        transition: background .18s cubic-bezier(.16,1,.3,1), border-color .18s cubic-bezier(.16,1,.3,1);
+      }
+      .cp-mart-card.selected .cp-mart-card-icon {
+        background: hsl(var(--primary)/0.15);
+        border-color: hsl(var(--primary)/0.4);
+      }
+      .cp-mart-card-body { min-width: 0; flex: 1; padding-top: 1px; }
       .cp-mart-card-title {
         font-family: 'Space Grotesk', sans-serif !important;
         font-size: 11px; font-weight: 700;
         color: hsl(var(--foreground));
+        letter-spacing: .2px;
       }
       .cp-mart-card-desc {
-        font-size: 9px; color: hsl(var(--muted-foreground));
-        margin-top: 2px; font-family: 'DM Mono', monospace;
+        font-size: 9.5px; line-height: 1.55;
+        color: hsl(var(--muted-foreground));
+        margin-top: 3px; font-family: 'DM Mono', monospace;
+      }
+      .cp-mart-card-dot {
+        flex-shrink: 0;
+        width: 8px; height: 8px;
+        margin-top: 5px;
+        border-radius: 50%;
+        background: hsl(var(--primary));
+        box-shadow: 0 0 8px hsl(var(--primary));
+        animation: cp-pulse 1.5s infinite;
       }
 
       /* ── ENGAGE BUTTON ── */
@@ -17251,7 +17372,7 @@ window.NexusStrategies=exports;
           <span style="padding:7px 18px;border-radius:20px;border:1px solid ${isDriving ? 'hsl(var(--win))' : 'hsl(var(--border)/0.5)'};background:${isDriving ? 'hsl(var(--win)/0.15)' : 'hsl(var(--bg)/0.7)'};color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'};font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">${isDriving ? '● DRIVING TRADES' : '○ OBSERVING'}</span>
         </div>
         <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
-          Backtests all 5 recovery patterns — Standard, Alt A/B/C, Alt R — against this bot's own recent tick history every single tick: for each one, simulates what it would have bet at every step of a repeating 9-step recovery cycle and checks whether it would have won. Ranked live by hit rate, exactly like the Reversal Trigger Engine ranks candidate digits by flip rate.
+          Backtests the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — against this bot's own recent tick history every single tick: for each one, simulates what it would have bet at every step of a repeating 9-step recovery cycle and checks whether it would have won. A 6th candidate, Adaptive Mask, is built fresh from the same data — per step 1-9, it independently checks whether flipping or staying actually won more often, only committing to a flip where that gap clears a significance test, then bets whatever it just measured instead of a preset cycle. All 6 are ranked live by hit rate, exactly like the Reversal Trigger Engine ranks candidate digits by flip rate.
           ${isDriving ? ' <b style="color:hsl(var(--win))">Smart Toggle is selected — recovery trades apply whichever pattern currently ranks #1.</b>' : ' Select <b style="color:hsl(var(--primary))">Smart Toggle</b> above in Recovery Mode to have live trades act on this ranking — it keeps computing either way.'}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
@@ -21694,6 +21815,47 @@ window.NexusStrategies=exports;
             <div class="cp-input-group"><span class="cp-input-label">Multiplier</span><input class="cp-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier}"></div>
             <div class="cp-input-group"><span class="cp-input-label">Stop after N losses</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-stop-step" value="${c.martingaleStopStep}"></div>
           </div>
+
+          <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
+          <div style="display:flex;flex-direction:column;gap:5px">
+            ${(() => {
+              const base = (c.tradeMode || engine.fixedTradeMode) === 'odd' ? 'ODD' : 'EVEN';
+              const opp  = base === 'ODD' ? 'EVEN' : 'ODD';
+              const noneSelected = !c.alternatingRecovery && !c.alternatingRecoveryB && !c.alternatingRecoveryC && !c.alternatingRecoveryR && !c.smartRecovery;
+              return [
+                {id:'plain', icon:'💡', title:'Standard', desc:`Stays on ${base} every step — pure martingale`, sel:noneSelected},
+                {id:'altA',  icon:'🔄', title:'Alt Mode A', desc:`Stays ${base}, flips to ${opp} every 3rd step (2, 5, 8…) — anti-pattern`, sel:c.alternatingRecovery},
+                {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:`Opens on ${opp} immediately, back to ${base} for 2 steps, repeats every 3rd step (1, 4, 7…) — mirrors Alt A`, sel:c.alternatingRecoveryB},
+                {id:'altC',  icon:'🔀', title:'Alt Mode C', desc:`Stays ${base} for 2 steps, flips to ${opp} every 3rd step (3, 6, 9…) — the third phase A/B didn't cover`, sel:c.alternatingRecoveryC},
+                {id:'altR',  icon:'🎲', title:'Alt Mode R', desc:`No fixed cycle — flips to ${opp} at random (~40% per step). Least readable, hardest to fingerprint`, sel:c.alternatingRecoveryR},
+                {id:'smart', icon:'🧠', title:'Smart Toggle', desc:'Recovery Pattern Engine — ranks the 5 fixed patterns plus a self-built Adaptive Mask live by backtested hit rate, auto-applies whichever ranks #1', sel:c.smartRecovery},
+              ];
+            })().map(rm=>`
+            <div class="cp-mart-card ${rm.sel?'selected':''}" data-rmode="${rm.id}" id="${rootId}-rmode-${rm.id}">
+              <div class="cp-mart-card-row">
+                <span class="cp-mart-card-icon">${rm.icon}</span>
+                <div class="cp-mart-card-body">
+                  <div class="cp-mart-card-title">${rm.title}</div>
+                  <div class="cp-mart-card-desc">${rm.desc}</div>
+                </div>
+                ${rm.sel?`<span class="cp-mart-card-dot"></span>`:''}
+              </div>
+            </div>`).join('')}
+          </div>
+
+          <div style="margin-top:8px;padding:8px 10px;border-radius:9px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border)/0.4);font-size:8.5px;color:hsl(var(--muted-foreground));display:flex;align-items:center;gap:6px">
+            <span>🧠</span><span>Live pattern rankings for Smart Toggle now live in the <b style="color:hsl(var(--primary))">Recovery Pattern Engine</b> terminal below the journal →</span>
+          </div>
+
+          <div class="cp-toggle-row" style="margin-top:10px;padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border))">
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="titan-toggle ${c.altAutomation?'on':''}" id="${rootId}-alt-auto" onclick="event.stopPropagation()"></button>
+              <div>
+                <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">🔀 Alt Automation</div>
+                <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Session ends in a loss → auto-switch to the next pattern (A→B→C→R→A…)</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -21787,6 +21949,26 @@ window.NexusStrategies=exports;
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
+      // Recovery mode cards — instant (binary switches, not numeric)
+      ['plain','altA','altB','altC','altR','smart'].forEach(mode => {
+        const card = el(`${rootId}-rmode-${mode}`, host);
+        if (!card) return;
+        card.onclick = () => {
+          engine.setConfig({
+            smartRecovery: mode === 'smart',
+            alternatingRecovery: mode === 'altA',
+            alternatingRecoveryB: mode === 'altB',
+            alternatingRecoveryC: mode === 'altC',
+            alternatingRecoveryR: mode === 'altR',
+          });
+          renderCenter(engine, rootId, engine.getSnapshot());
+        };
+      });
+      const altAutoBtn = el(`${rootId}-alt-auto`, host);
+      if (altAutoBtn) altAutoBtn.onclick = () => {
+        engine.setConfig({ altAutomation: !engine.config.altAutomation });
+        renderCenter(engine, rootId, engine.getSnapshot());
+      };
       el(`${rootId}-auto`, host).onclick = () => { engine.setConfig({ autoPilot: !c.autoPilot }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-autorefresh`, host).onclick = () => { engine.setConfig({ autoRefresh: !c.autoRefresh }); renderCenter(engine, rootId, engine.getSnapshot()); };
       const tpEl = el(`${rootId}-tp`, host);
@@ -21916,7 +22098,7 @@ window.NexusStrategies=exports;
           <span style="padding:7px 18px;border-radius:20px;border:1px solid ${isDriving ? 'hsl(var(--win))' : 'hsl(var(--border)/0.5)'};background:${isDriving ? 'hsl(var(--win)/0.15)' : 'hsl(var(--bg)/0.7)'};color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'};font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">${isDriving ? '● DRIVING TRADES' : '○ OBSERVING'}</span>
         </div>
         <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
-          Backtests all 5 recovery patterns — Standard, Alt A/B/C, Alt R — against this bot's own recent tick history every single tick: for each one, simulates what it would have bet at every step of a repeating 9-step recovery cycle and checks whether it would have won. Ranked live by hit rate, exactly like the Reversal Trigger Engine ranks candidate digits by flip rate.
+          Backtests the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — against this bot's own recent tick history every single tick: for each one, simulates what it would have bet at every step of a repeating 9-step recovery cycle and checks whether it would have won. A 6th candidate, Adaptive Mask, is built fresh from the same data — per step 1-9, it independently checks whether flipping or staying actually won more often, only committing to a flip where that gap clears a significance test, then bets whatever it just measured instead of a preset cycle. All 6 are ranked live by hit rate, exactly like the Reversal Trigger Engine ranks candidate digits by flip rate.
           ${isDriving ? ' <b style="color:hsl(var(--win))">Smart Toggle is selected — recovery trades apply whichever pattern currently ranks #1.</b>' : ' Select <b style="color:hsl(var(--primary))">Smart Toggle</b> above in Recovery Mode to have live trades act on this ranking — it keeps computing either way.'}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
