@@ -116,15 +116,17 @@
     })();
 
     // ── Recovery Pattern Engine ───────────────────────────────────────
-    // Powers "Smart Toggle" recovery. Instead of a single flat heuristic
-    // ("which side looks starved"), this backtests all five recovery
-    // patterns (Standard, Alt A/B/C, Alt R) against the bot's own recent
-    // tick history — for every tick, simulate what each pattern would
-    // have bet at that point in a repeating 9-step recovery cycle, and
-    // check whether it would have won — then ranks the five patterns by
-    // hit rate, exactly the way the Reversal Trigger Engine ranks
-    // candidate digits by flip rate. Whichever pattern currently ranks
-    // #1 is the one live recovery trades actually use.
+    // Powers "Smart Toggle" recovery. This used to rank five FIXED
+    // recovery patterns (Standard, Alt A/B/C, Alt R) against the bot's
+    // own recent tick history and drive trades off whichever one came
+    // out on top. It no longer does that: the 5 fixed patterns are still
+    // backtested and shown, but purely as a reference strip for the
+    // person watching the terminal — they no longer compete for control.
+    // The engine now builds its OWN pattern from scratch every recompute
+    // (see "Dynamic Pattern" below) — step 1..CYCLE, independently, using
+    // only this bot's live tick history — and that self-built pattern is
+    // the one live recovery trades always use once it has enough samples
+    // to be trusted. Nothing is picked from a fixed menu anymore.
     window.RecoveryPatternEngine = (function () {
       const PATTERN_DEFS = [
         { id: 'plain', label: 'Standard',   icon: '💡', flips: () => false },
@@ -136,26 +138,28 @@
       const MIN_SAMPLES = 12;   // qualify a pattern only once it's had a fair number of simulated attempts
       const CYCLE = 9;          // simulated recovery depth per pass through history (matches martingaleStopStep's practical ceiling)
 
-      // ── Adaptive Mask ──────────────────────────────────────────────
-      // Everything above tests five FIXED cycles and ranks them. This
-      // builds a sixth candidate that isn't picked from a menu at all —
-      // for each step 1..CYCLE independently, it replays the window and
-      // asks "at this step, did flipping or staying land more often?"
-      // then only commits to a flip for that step if the gap clears a
-      // significance bar (two-proportion z-test), so a step with thin or
+      // ── Dynamic Pattern Engine ───────────────────────────────────────
+      // This is the actual "independent terminal engine": it is never
+      // picked from PATTERN_DEFS and never competes against the 5 fixed
+      // patterns for the win. For each step 1..CYCLE independently, it
+      // replays this bot's own recent tick window and asks "at this
+      // step, did flipping or staying actually land more often?", then
+      // only commits to a flip for that step if the gap clears a
+      // significance bar (two-proportion z-test) — a step with thin or
       // noisy samples just falls back to staying rather than flipping on
-      // a coin-flip-sized sample. The output is a step->boolean mask
-      // assembled fresh from the data every recompute, not a label from
-      // PATTERN_DEFS.
-      const ADAPTIVE_MIN_SAMPLES = 8;  // per-step samples required on BOTH sides before that step is even eligible to flip
-      const Z_THRESHOLD = 1.645;       // ~95% one-tailed confidence flip-rate genuinely beats stay-rate, not just noise
+      // a coin-flip-sized sample. The output is a step->boolean mask,
+      // rebuilt fresh from live data every recompute. This mask (once it
+      // has enough samples) is unconditionally what live recovery trades
+      // use — there is no ranking step, no fallback to a fixed pattern.
+      const DYNAMIC_MIN_SAMPLES = 8;  // per-step samples required on BOTH sides before that step is even eligible to flip
+      const Z_THRESHOLD = 1.645;      // ~95% one-tailed confidence flip-rate genuinely beats stay-rate, not just noise
 
       // Two-proportion z-test: is p1 (flip hit-rate) significantly above
       // p2 (stay hit-rate) given their sample sizes? Pure sampling-noise
       // check — this does not claim the underlying digits are non-random,
       // only that IF there's a gap this wide, it's unlikely to be noise.
       function flipSignificantlyBeatsStay(flipHits, flipN, stayHits, stayN) {
-        if (flipN < ADAPTIVE_MIN_SAMPLES || stayN < ADAPTIVE_MIN_SAMPLES) return false;
+        if (flipN < DYNAMIC_MIN_SAMPLES || stayN < DYNAMIC_MIN_SAMPLES) return false;
         const p1 = flipHits / flipN, p2 = stayHits / stayN;
         if (p1 <= p2) return false;
         const pPool = (flipHits + stayHits) / (flipN + stayN);
@@ -164,7 +168,7 @@
         return (p1 - p2) / se >= Z_THRESHOLD;
       }
 
-      function buildAdaptiveMask(data, winCheck) {
+      function buildDynamicPattern(data, winCheck) {
         const steps = {};
         for (let s = 1; s <= CYCLE; s++) steps[s] = { flipHits: 0, flipN: 0, stayHits: 0, stayN: 0 };
         // Same historical tick feeds BOTH the "what if we flipped here"
@@ -184,7 +188,7 @@
         let flippedSteps = 0, gatedSteps = 0;
         for (let s = 1; s <= CYCLE; s++) {
           const b = steps[s];
-          const eligible = b.flipN >= ADAPTIVE_MIN_SAMPLES && b.stayN >= ADAPTIVE_MIN_SAMPLES;
+          const eligible = b.flipN >= DYNAMIC_MIN_SAMPLES && b.stayN >= DYNAMIC_MIN_SAMPLES;
           if (eligible) gatedSteps++;
           const flip = eligible && flipSignificantlyBeatsStay(b.flipHits, b.flipN, b.stayHits, b.stayN);
           mask[s] = flip;
@@ -194,11 +198,13 @@
         return { mask, detail, flippedSteps, gatedSteps };
       }
 
-      // Evaluates the adaptive mask as a sixth pattern candidate, in the
-      // same {id,label,icon,hits,attempts,rate} shape the fixed patterns
-      // use, so it can compete for #1 on equal footing inside rank().
-      function evaluateAdaptive(data, winCheck) {
-        const { mask, detail, flippedSteps, gatedSteps } = buildAdaptiveMask(data, winCheck);
+      // Evaluates the self-built dynamic pattern in the same
+      // {id,label,icon,hits,attempts,rate} shape the fixed patterns use,
+      // purely so the terminal can display it on the same bar chart as
+      // the reference patterns for comparison — NOT so it can compete
+      // for #1. It always drives once ready; see rank() below.
+      function evaluateDynamicPattern(data, winCheck) {
+        const { mask, detail, flippedSteps, gatedSteps } = buildDynamicPattern(data, winCheck);
         let hits = 0, attempts = 0;
         for (let i = 0; i < data.length - 1; i++) {
           const step = (i % CYCLE) + 1;
@@ -206,7 +212,7 @@
           if (winCheck(data[i + 1], !!mask[step])) hits++;
         }
         return {
-          id: 'adaptive', label: 'Adaptive Mask', icon: '🧬',
+          id: 'dynamic', label: 'Dynamic Pattern', icon: '🧬',
           hits, attempts, rate: attempts ? hits / attempts : 0,
           mask, detail, flippedSteps, gatedSteps,
         };
@@ -214,10 +220,16 @@
 
       function rank(history, winCheck) {
         const data = (history || []).slice(-160);
-        const emptyPatterns = [...PATTERN_DEFS.map((p) => ({ id: p.id, label: p.label, icon: p.icon, rate: 0, hits: 0, attempts: 0 })), { id: 'adaptive', label: 'Adaptive Mask', icon: '🧬', rate: 0, hits: 0, attempts: 0 }];
-        const empty = { patterns: emptyPatterns, best: null, bestRate: 0, ready: false, samples: data.length, adaptiveMask: null };
+        const emptyReference = PATTERN_DEFS.map((p) => ({ id: p.id, label: p.label, icon: p.icon, rate: 0, hits: 0, attempts: 0 }));
+        const emptyDynamic = { id: 'dynamic', label: 'Dynamic Pattern', icon: '🧬', rate: 0, hits: 0, attempts: 0 };
+        const empty = { patterns: [...emptyReference, emptyDynamic], reference: emptyReference, best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null };
         if (data.length < MIN_SAMPLES + 1) return empty;
-        const results = PATTERN_DEFS.map((p) => {
+
+        // Reference-only backtest of the 5 fixed patterns. Shown in the
+        // terminal purely for comparison — they no longer compete for
+        // control of live trades, and "best" below never resolves to one
+        // of these ids.
+        const reference = PATTERN_DEFS.map((p) => {
           let hits = 0, attempts = 0;
           for (let i = 0; i < data.length - 1; i++) {
             const step = (i % CYCLE) + 1;
@@ -227,13 +239,17 @@
           }
           return { id: p.id, label: p.label, icon: p.icon, hits, attempts, rate: attempts ? hits / attempts : 0 };
         });
-        const adaptive = evaluateAdaptive(data, winCheck);
-        const allResults = [...results, adaptive];
-        const qualified = allResults.filter((r) => r.attempts >= MIN_SAMPLES).sort((a, b) => b.rate - a.rate || b.hits - a.hits);
-        const best = qualified[0] || null;
+
+        // The engine's actual decision: build its own pattern fresh from
+        // this bot's live data. Once it has enough simulated attempts to
+        // be trustworthy, it IS the answer — unconditionally, not "if it
+        // beats the fixed patterns."
+        const dynamic = evaluateDynamicPattern(data, winCheck);
+        const ready = dynamic.attempts >= MIN_SAMPLES;
         return {
-          patterns: allResults, best: best ? best.id : null, bestRate: best ? best.rate : 0,
-          ready: !!best, samples: data.length, adaptiveMask: adaptive.mask,
+          patterns: [...reference, dynamic], reference,
+          best: ready ? dynamic.id : null, bestRate: ready ? dynamic.rate : 0,
+          ready, samples: data.length, dynamicMask: dynamic.mask,
         };
       }
 
@@ -258,21 +274,14 @@
         });
       }
 
-      // Applies the current #1-ranked pattern's own step-rule to a given
-      // martingale step, returning whether THIS step should flip. Used at
-      // trade time so recovery follows the ranked pattern's actual cycle
-      // rather than just copying its historical average. 'adaptive' has
-      // no PATTERN_DEFS entry (its rule is data-built, not fixed), so it
-      // reads the mask rank() attached to the ranking object instead.
+      // Applies the engine's live self-built mask to a given martingale
+      // step, returning whether THIS step should flip. There's no longer
+      // a fixed-pattern branch here — the engine only ever drives off its
+      // own dynamicMask once ready, so this just reads that mask.
       function shouldFlipForStep(ranking, step) {
-        if (!ranking || !ranking.ready || !ranking.best) return false;
-        if (ranking.best === 'adaptive') {
-          if (!ranking.adaptiveMask) return false;
-          const cycleStep = ((step - 1) % CYCLE) + 1;
-          return !!ranking.adaptiveMask[cycleStep];
-        }
-        const def = PATTERN_DEFS.find((p) => p.id === ranking.best);
-        return def ? def.flips(step) : false;
+        if (!ranking || !ranking.ready || !ranking.dynamicMask) return false;
+        const cycleStep = ((step - 1) % CYCLE) + 1;
+        return !!ranking.dynamicMask[cycleStep];
       }
 
       return { rankParity, rankThreshold, shouldFlipForStep, PATTERN_DEFS };
@@ -15534,7 +15543,7 @@ window.NexusStrategies=exports;
             <span style="padding:7px 18px;border-radius:20px;border:1px solid hsl(var(--border)/0.5);background:hsl(var(--bg)/0.7);color:hsl(var(--muted-foreground));font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">○ OBSERVING</span>
           </div>
           <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
-            Backtests the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — plus a self-built Adaptive Mask, against this market's own recent tick history every single tick, ranked live by hit rate. Atomic Bolt fires in batches rather than a step martingale, so this panel is telemetry only here — it doesn't drive Differ's trades.
+            Shows the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — as reference, plus the engine's own self-built Dynamic Pattern, backtested against this market's own recent tick history every single tick. Atomic Bolt fires in batches rather than a step martingale, so this panel is telemetry only here — it doesn't drive Differ's trades.
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
             <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
@@ -16483,7 +16492,7 @@ window.NexusStrategies=exports;
               {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:`Opens on ${opp} immediately, back to ${base} for 2 steps, repeats every 3rd step (1, 4, 7…) — mirrors Alt A`, sel:c.alternatingRecoveryB},
               {id:'altC',  icon:'🔀', title:'Alt Mode C', desc:`Stays ${base} for 2 steps, flips to ${opp} every 3rd step (3, 6, 9…) — the third phase A/B didn't cover`, sel:c.alternatingRecoveryC},
               {id:'altR',  icon:'🎲', title:'Alt Mode R', desc:`No fixed cycle — flips to ${opp} at random (~40% per step). Least readable, hardest to fingerprint`, sel:c.alternatingRecoveryR},
-              {id:'smart', icon:'🧠', title:'Smart Toggle', desc:'Recovery Pattern Engine — ranks the 5 fixed patterns plus a self-built Adaptive Mask live by backtested hit rate, auto-applies whichever ranks #1', sel:c.smartRecovery},
+              {id:'smart', icon:'🧠', title:'Smart Toggle', desc:'Recovery Pattern Engine — builds its own dynamic pattern live from this bot\'s tick history and drives recovery off it directly (5 fixed patterns shown as reference only)', sel:c.smartRecovery},
             ];
           })().map(rm=>`
           <div class="cp-mart-card ${rm.sel?'selected':''}" data-rmode="${rm.id}" id="${rootId}-rmode-${rm.id}">
@@ -17372,14 +17381,14 @@ window.NexusStrategies=exports;
           <span style="padding:7px 18px;border-radius:20px;border:1px solid ${isDriving ? 'hsl(var(--win))' : 'hsl(var(--border)/0.5)'};background:${isDriving ? 'hsl(var(--win)/0.15)' : 'hsl(var(--bg)/0.7)'};color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'};font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">${isDriving ? '● DRIVING TRADES' : '○ OBSERVING'}</span>
         </div>
         <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
-          Backtests the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — against this bot's own recent tick history every single tick: for each one, simulates what it would have bet at every step of a repeating 9-step recovery cycle and checks whether it would have won. A 6th candidate, Adaptive Mask, is built fresh from the same data — per step 1-9, it independently checks whether flipping or staying actually won more often, only committing to a flip where that gap clears a significance test, then bets whatever it just measured instead of a preset cycle. All 6 are ranked live by hit rate, exactly like the Reversal Trigger Engine ranks candidate digits by flip rate.
-          ${isDriving ? ' <b style="color:hsl(var(--win))">Smart Toggle is selected — recovery trades apply whichever pattern currently ranks #1.</b>' : ' Select <b style="color:hsl(var(--primary))">Smart Toggle</b> above in Recovery Mode to have live trades act on this ranking — it keeps computing either way.'}
+          Doesn't pick from the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — anymore. Those are backtested and shown below purely as a reference strip. The engine instead builds its own pattern from scratch every tick: per step 1-9, it independently checks whether flipping or staying actually won more often against this bot's own recent tick history, only committing to a flip where that gap clears a significance test, then bets whatever it just measured — never a preset cycle.
+          ${isDriving ? ' <b style="color:hsl(var(--win))">Smart Toggle is selected — recovery trades apply this self-built Dynamic Pattern directly.</b>' : ' Select <b style="color:hsl(var(--primary))">Smart Toggle</b> above in Recovery Mode to have live trades act on it — it keeps computing either way.'}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
           <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
-            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">TOP PATTERN</div>
+            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">DYNAMIC PATTERN</div>
             <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:${ranking.ready ? (glow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'}">${ranking.ready ? `${top.icon} ${top.label}` : '—'}</div>
-            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? (isDriving ? 'active — step-rule applied on recovery' : 'would be applied if Smart Toggle is on') : `${ranking.samples} ticks buffered`}</div>
+            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? (isDriving ? 'self-built · active — step-rule applied on recovery' : 'self-built · would be applied if Smart Toggle is on') : `${ranking.samples} ticks buffered — building its own pattern`}</div>
           </div>
           <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
             <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">HIT RATE</div>
@@ -17395,21 +17404,22 @@ window.NexusStrategies=exports;
             : 'Buffering tick history — needs a bit more data before a pattern can be trusted with real money'}
         </div>
         <div style="margin-top:14px;position:relative">
-          <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">PATTERNS RANKED BY HIT RATE</div>
+          <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">DYNAMIC PATTERN VS. FIXED PATTERNS (REFERENCE ONLY)</div>
           ${sorted.length ? `
           <div style="display:flex;flex-direction:column;gap:6px">
             ${sorted.map((p) => {
-              const isPicked = ranking.ready && p.id === ranking.best;
+              const isLive = p.id === 'dynamic';
+              const isDrivingNow = isLive && ranking.ready && isDriving;
               const pct = Math.round((p.rate || 0) * 100);
-              const barColor = isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : p.attempts >= 12 ? 'hsl(var(--primary)/0.6)' : 'hsl(var(--muted-foreground)/0.5)';
-              return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:${isPicked ? (isDriving ? 'hsl(var(--win)/0.1)' : 'hsl(var(--primary)/0.08)') : 'hsl(var(--bg)/0.5)'};border:1px solid ${isPicked ? (isDriving ? 'hsl(var(--win)/0.4)' : 'hsl(var(--primary)/0.35)') : 'hsl(var(--border)/0.25)'}">
+              const barColor = isLive ? (isDrivingNow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : p.attempts >= 12 ? 'hsl(var(--primary)/0.6)' : 'hsl(var(--muted-foreground)/0.5)';
+              return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:${isLive ? (isDrivingNow ? 'hsl(var(--win)/0.1)' : 'hsl(var(--primary)/0.08)') : 'hsl(var(--bg)/0.5)'};border:1px solid ${isLive ? (isDrivingNow ? 'hsl(var(--win)/0.4)' : 'hsl(var(--primary)/0.35)') : 'hsl(var(--border)/0.25)'}">
                 <span style="font-size:15px;width:18px;text-align:center;flex-shrink:0">${p.icon}</span>
-                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;color:${isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--foreground))'};width:82px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.label}</span>
+                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;color:${isLive ? (isDrivingNow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--foreground))'};width:82px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.label}</span>
                 <div style="flex:1;height:6px;background:hsl(var(--bg)/0.8);border-radius:3px;overflow:hidden">
                   <div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px"></div>
                 </div>
-                <span style="font-family:'DM Mono',monospace;font-size:10px;color:${isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'};width:38px;text-align:right;flex-shrink:0">${pct}%</span>
-                ${isPicked ? `<span style="font-size:9px;color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))'};flex-shrink:0;font-weight:800">#1</span>` : ''}
+                <span style="font-family:'DM Mono',monospace;font-size:10px;color:${isLive ? (isDrivingNow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'};width:38px;text-align:right;flex-shrink:0">${pct}%</span>
+                ${isLive ? `<span style="font-size:9px;color:${isDrivingNow ? 'hsl(var(--win))' : 'hsl(var(--primary))'};flex-shrink:0;font-weight:800">${isDrivingNow ? '● LIVE' : 'SELF-BUILT'}</span>` : `<span style="font-size:8px;color:hsl(var(--muted-foreground)/0.6);flex-shrink:0">ref</span>`}
               </div>`;
             }).join('')}
           </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
@@ -21828,7 +21838,7 @@ window.NexusStrategies=exports;
                 {id:'altB',  icon:'🔁', title:'Alt Mode B', desc:`Opens on ${opp} immediately, back to ${base} for 2 steps, repeats every 3rd step (1, 4, 7…) — mirrors Alt A`, sel:c.alternatingRecoveryB},
                 {id:'altC',  icon:'🔀', title:'Alt Mode C', desc:`Stays ${base} for 2 steps, flips to ${opp} every 3rd step (3, 6, 9…) — the third phase A/B didn't cover`, sel:c.alternatingRecoveryC},
                 {id:'altR',  icon:'🎲', title:'Alt Mode R', desc:`No fixed cycle — flips to ${opp} at random (~40% per step). Least readable, hardest to fingerprint`, sel:c.alternatingRecoveryR},
-                {id:'smart', icon:'🧠', title:'Smart Toggle', desc:'Recovery Pattern Engine — ranks the 5 fixed patterns plus a self-built Adaptive Mask live by backtested hit rate, auto-applies whichever ranks #1', sel:c.smartRecovery},
+                {id:'smart', icon:'🧠', title:'Smart Toggle', desc:'Recovery Pattern Engine — builds its own dynamic pattern live from this bot\'s tick history and drives recovery off it directly (5 fixed patterns shown as reference only)', sel:c.smartRecovery},
               ];
             })().map(rm=>`
             <div class="cp-mart-card ${rm.sel?'selected':''}" data-rmode="${rm.id}" id="${rootId}-rmode-${rm.id}">
@@ -22098,14 +22108,14 @@ window.NexusStrategies=exports;
           <span style="padding:7px 18px;border-radius:20px;border:1px solid ${isDriving ? 'hsl(var(--win))' : 'hsl(var(--border)/0.5)'};background:${isDriving ? 'hsl(var(--win)/0.15)' : 'hsl(var(--bg)/0.7)'};color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'};font-family:'Outfit',sans-serif;font-size:10px;font-weight:800;letter-spacing:1.5px">${isDriving ? '● DRIVING TRADES' : '○ OBSERVING'}</span>
         </div>
         <div style="font-size:10px;color:hsl(var(--muted-foreground));line-height:1.65;position:relative;margin-bottom:16px">
-          Backtests the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — against this bot's own recent tick history every single tick: for each one, simulates what it would have bet at every step of a repeating 9-step recovery cycle and checks whether it would have won. A 6th candidate, Adaptive Mask, is built fresh from the same data — per step 1-9, it independently checks whether flipping or staying actually won more often, only committing to a flip where that gap clears a significance test, then bets whatever it just measured instead of a preset cycle. All 6 are ranked live by hit rate, exactly like the Reversal Trigger Engine ranks candidate digits by flip rate.
-          ${isDriving ? ' <b style="color:hsl(var(--win))">Smart Toggle is selected — recovery trades apply whichever pattern currently ranks #1.</b>' : ' Select <b style="color:hsl(var(--primary))">Smart Toggle</b> above in Recovery Mode to have live trades act on this ranking — it keeps computing either way.'}
+          Doesn't pick from the 5 fixed recovery patterns — Standard, Alt A/B/C, Alt R — anymore. Those are backtested and shown below purely as a reference strip. The engine instead builds its own pattern from scratch every tick: per step 1-9, it independently checks whether flipping or staying actually won more often against this bot's own recent tick history, only committing to a flip where that gap clears a significance test, then bets whatever it just measured — never a preset cycle.
+          ${isDriving ? ' <b style="color:hsl(var(--win))">Smart Toggle is selected — recovery trades apply this self-built Dynamic Pattern directly.</b>' : ' Select <b style="color:hsl(var(--primary))">Smart Toggle</b> above in Recovery Mode to have live trades act on it — it keeps computing either way.'}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative">
           <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
-            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">TOP PATTERN</div>
+            <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">DYNAMIC PATTERN</div>
             <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:${ranking.ready ? (glow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'}">${ranking.ready ? `${top.icon} ${top.label}` : '—'}</div>
-            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? (isDriving ? 'active — step-rule applied on recovery' : 'would be applied if Smart Toggle is on') : `${ranking.samples} ticks buffered`}</div>
+            <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ranking.ready ? (isDriving ? 'self-built · active — step-rule applied on recovery' : 'self-built · would be applied if Smart Toggle is on') : `${ranking.samples} ticks buffered — building its own pattern`}</div>
           </div>
           <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
             <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">HIT RATE</div>
@@ -22121,21 +22131,22 @@ window.NexusStrategies=exports;
             : 'Buffering tick history — needs a bit more data before a pattern can be trusted with real money'}
         </div>
         <div style="margin-top:14px;position:relative">
-          <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">PATTERNS RANKED BY HIT RATE</div>
+          <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">DYNAMIC PATTERN VS. FIXED PATTERNS (REFERENCE ONLY)</div>
           ${sorted.length ? `
           <div style="display:flex;flex-direction:column;gap:6px">
             ${sorted.map((p) => {
-              const isPicked = ranking.ready && p.id === ranking.best;
+              const isLive = p.id === 'dynamic';
+              const isDrivingNow = isLive && ranking.ready && isDriving;
               const pct = Math.round((p.rate || 0) * 100);
-              const barColor = isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : p.attempts >= 12 ? 'hsl(var(--primary)/0.6)' : 'hsl(var(--muted-foreground)/0.5)';
-              return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:${isPicked ? (isDriving ? 'hsl(var(--win)/0.1)' : 'hsl(var(--primary)/0.08)') : 'hsl(var(--bg)/0.5)'};border:1px solid ${isPicked ? (isDriving ? 'hsl(var(--win)/0.4)' : 'hsl(var(--primary)/0.35)') : 'hsl(var(--border)/0.25)'}">
+              const barColor = isLive ? (isDrivingNow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : p.attempts >= 12 ? 'hsl(var(--primary)/0.6)' : 'hsl(var(--muted-foreground)/0.5)';
+              return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:${isLive ? (isDrivingNow ? 'hsl(var(--win)/0.1)' : 'hsl(var(--primary)/0.08)') : 'hsl(var(--bg)/0.5)'};border:1px solid ${isLive ? (isDrivingNow ? 'hsl(var(--win)/0.4)' : 'hsl(var(--primary)/0.35)') : 'hsl(var(--border)/0.25)'}">
                 <span style="font-size:15px;width:18px;text-align:center;flex-shrink:0">${p.icon}</span>
-                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;color:${isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--foreground))'};width:82px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.label}</span>
+                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800;color:${isLive ? (isDrivingNow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--foreground))'};width:82px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.label}</span>
                 <div style="flex:1;height:6px;background:hsl(var(--bg)/0.8);border-radius:3px;overflow:hidden">
                   <div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px"></div>
                 </div>
-                <span style="font-family:'DM Mono',monospace;font-size:10px;color:${isPicked ? (isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'};width:38px;text-align:right;flex-shrink:0">${pct}%</span>
-                ${isPicked ? `<span style="font-size:9px;color:${isDriving ? 'hsl(var(--win))' : 'hsl(var(--primary))'};flex-shrink:0;font-weight:800">#1</span>` : ''}
+                <span style="font-family:'DM Mono',monospace;font-size:10px;color:${isLive ? (isDrivingNow ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'};width:38px;text-align:right;flex-shrink:0">${pct}%</span>
+                ${isLive ? `<span style="font-size:9px;color:${isDrivingNow ? 'hsl(var(--win))' : 'hsl(var(--primary))'};flex-shrink:0;font-weight:800">${isDrivingNow ? '● LIVE' : 'SELF-BUILT'}</span>` : `<span style="font-size:8px;color:hsl(var(--muted-foreground)/0.6);flex-shrink:0">ref</span>`}
               </div>`;
             }).join('')}
           </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
