@@ -12509,6 +12509,10 @@ window.NexusStrategies=exports;
       // Per-symbol "already logged the pause" flag so the blacklist skip
       // logs once per cooldown window instead of once per signal.
       this._mrDurationBlacklistLogged = {};
+      // Per-symbol flag: set once a Mean-Rev symbol has exhausted the
+      // duration ladder for barriered Higher/Lower and been switched to
+      // plain Rise/Fall instead (see handleMrDurationRejection).
+      this._mrRiseFallDegrade = {};
       this.ownContractIds = new Set();
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
@@ -12933,14 +12937,33 @@ window.NexusStrategies=exports;
       const knownCodes = errorCode === 'InvalidtoBuy' || errorCode === 'ContractBuyValidationError';
       const fieldIsDuration = errorDetails && errorDetails.field === 'duration';
       const messageMentionsDuration = /duration/i.test(errorMessage || '');
-      if (!this.isMeanRevMode || !(knownCodes || fieldIsDuration) || !(fieldIsDuration || messageMentionsDuration)) return;
+      if (!(this.isMeanRevMode || this.isPriceMode) || !(knownCodes || fieldIsDuration) || !(fieldIsDuration || messageMentionsDuration)) return;
       const symbol = this.config.selectedMarket;
-      const ladder = [15, 30, 60, 120, 300, 600];
+      // Rise/Fall (isPriceMode) never had its own fallback ladder before —
+      // it kept resending the exact same rejected tick-duration forever
+      // with zero recovery. Give it a ticks ladder mirroring Mean-Rev's
+      // seconds ladder instead of leaving it permanently stuck.
+      const ladder = this.isPriceMode ? [1, 2, 5, 10, 15, 30, 60] : [15, 30, 60, 120, 300, 600];
       const cur = (this._mrDurationFallback[symbol] || 0);
       const next = Math.min(cur + 1, ladder.length - 1);
       if (next > cur) {
         this._mrDurationFallback[symbol] = next;
-        this.addLog('engine', 'DURATION', `⏱ ${symbol} rejected that duration — stepping up to ${ladder[next]}s for the next signal.`);
+        const unit = this.isPriceMode ? 't' : 's';
+        this.addLog('engine', 'DURATION', `⏱ ${symbol} rejected that duration — stepping up to ${ladder[next]}${unit} for the next signal.`);
+      } else if (this.isMeanRevMode) {
+        // Ladder exhausted (up to 600s) and contracts_for never reported
+        // real euro_non_atm limits — this almost always means the symbol
+        // simply doesn't offer barriered Higher/Lower contracts at any of
+        // the durations tried, not that a longer duration would help.
+        // Rather than pausing forever on a doomed contract type, degrade
+        // this symbol to plain Rise/Fall (no barrier, tick duration, same
+        // CALL/PUT direction the signal already picked) so entries keep
+        // firing instead of stalling out indefinitely.
+        if (!this._mrRiseFallDegrade) this._mrRiseFallDegrade = {};
+        if (!this._mrRiseFallDegrade[symbol]) {
+          this._mrRiseFallDegrade[symbol] = true;
+          this.addLog('engine', 'DURATION', `⏬ ${symbol}: Higher/Lower rejected at every duration up to 600s — switching this symbol to plain Rise/Fall (no barrier) so entries keep firing.`);
+        }
       } else {
         if (!this._mrDurationBlacklist) this._mrDurationBlacklist = {};
         this._mrDurationBlacklist[symbol] = Date.now();
@@ -13643,7 +13666,7 @@ window.NexusStrategies=exports;
       // Pause entries on this symbol for a few minutes, then give it one
       // more clean try (re-asking contracts_for first) in case Deriv's
       // offering changed.
-      if (this.isMeanRevMode) {
+      if (this.isMeanRevMode && !(this._mrRiseFallDegrade && this._mrRiseFallDegrade[cfg.selectedMarket])) {
         const symbol = cfg.selectedMarket;
         const blacklistedAt = this._mrDurationBlacklist && this._mrDurationBlacklist[symbol];
         if (blacklistedAt) {
@@ -13765,6 +13788,13 @@ window.NexusStrategies=exports;
         // reverting DOWN through it is the safety cushion.
         // HIGHER (CALL): barrier BELOW entry (-offset) — mirror image.
         contractType = this._riseFallDirection || 'CALL';
+        if (this._mrRiseFallDegrade && this._mrRiseFallDegrade[cfg.selectedMarket]) {
+          // This symbol confirmed (via the duration-rejection ladder) that
+          // it doesn't offer barriered Higher/Lower — trade the same
+          // direction as a plain no-barrier Rise/Fall instead of continuing
+          // to send an offset barrier that will only ever bounce.
+          barrierValue = 0;
+        } else {
         // Deriv rejects a barrier whose decimal places don't match the
         // underlying's own pip size (BarrierValidationError) — this used to
         // hardcode 2 decimals assuming "every market this bot trades quotes
@@ -13782,6 +13812,7 @@ window.NexusStrategies=exports;
         const minOffset = 1 / Math.pow(10, barrierDecimals); // smallest non-zero step at this precision
         const mrOffset = Math.max(minOffset, rawOffset).toFixed(barrierDecimals);
         barrierValue = contractType === 'PUT' ? `+${mrOffset}` : `-${mrOffset}`;
+        }
       } else if (this.isEvenOddMRMode) {
         // Base entry: macro + micro + exhaustion/confirmation already
         // decided the target side, so outside of recovery this always bets
@@ -14002,7 +14033,19 @@ window.NexusStrategies=exports;
       if (rfLimits) {
         if (rfLimits.minTicks != null && rfDuration < rfLimits.minTicks) rfDuration = rfLimits.minTicks;
         if (rfLimits.maxTicks != null && rfDuration > rfLimits.maxTicks) rfDuration = rfLimits.maxTicks;
+      } else {
+        const fallbackIdx = (this._mrDurationFallback && this._mrDurationFallback[cfg.selectedMarket]) || 0;
+        if (this.isPriceMode && fallbackIdx > 0) {
+          const rfLadder = [1, 2, 5, 10, 15, 30, 60];
+          rfDuration = rfLadder[Math.min(fallbackIdx, rfLadder.length - 1)];
+        }
       }
+      // Once a symbol has been degraded to plain Rise/Fall (see
+      // handleMrDurationRejection), Mean-Rev's trade also needs to go out
+      // on ticks like real Rise/Fall — sending duration_unit:'s' with no
+      // barrier is a different (and on some symbols unsupported) contract
+      // shape than tick-duration Rise/Fall.
+      const mrDegraded = this.isMeanRevMode && this._mrRiseFallDegrade && this._mrRiseFallDegrade[cfg.selectedMarket];
       const params = {
         amount: st.currentStake, basis: 'stake', contract_type: contractType,
         currency: accountCurrency,
@@ -14013,8 +14056,8 @@ window.NexusStrategies=exports;
         // come back "Invalid barrier" regardless of the barrier's value.
         // Plain Higher/Lower (isPriceMode, barrier always 0 → true Rise/Fall)
         // and Matches both stay on ticks, which they do support.
-        duration: this.isMeanRevMode ? mrDuration : this.isPriceMode ? rfDuration : this.isMatchMode ? (cfg.numTicks || 2) : 1,
-        duration_unit: this.isMeanRevMode ? 's' : 't',
+        duration: mrDegraded ? rfDuration : this.isMeanRevMode ? mrDuration : this.isPriceMode ? rfDuration : this.isMatchMode ? (cfg.numTicks || 2) : 1,
+        duration_unit: mrDegraded ? 't' : this.isMeanRevMode ? 's' : 't',
         underlying_symbol: cfg.selectedMarket,
       };
       if (barrierValue !== 0 || contractType.includes('OVER') || contractType.includes('UNDER') || contractType.includes('MATCH')) params.barrier = barrierValue;
@@ -14688,6 +14731,7 @@ window.NexusStrategies=exports;
               if (_titan._mrDurationFallback) delete _titan._mrDurationFallback[symbol];
               if (_titan._mrDurationBlacklist) delete _titan._mrDurationBlacklist[symbol];
               if (_titan._mrDurationBlacklistLogged) delete _titan._mrDurationBlacklistLogged[symbol];
+              if (_titan._mrRiseFallDegrade) delete _titan._mrRiseFallDegrade[symbol];
             }
           }
           // Log every server reply that isn't a ping/balance/heartbeat so trade
