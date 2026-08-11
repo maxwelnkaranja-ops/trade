@@ -12663,6 +12663,15 @@ window.NexusStrategies=exports;
         //               regardless of whether that next tick still matches
         //               the entry condition on its own.
         firstTickMode: 'normal', firstTickStake: 0.35,
+        // ── STAKE ADDITION (Even/Odd classic bots only) ──────────────────
+        // Manual-only stake escalation, opt-in per run. When armed, the
+        // NEXT time a run finishes in a win (session resets — martingale
+        // recovered or a clean first-trade win, either way state.martingaleStep
+        // goes back to 0), Stake $ is bumped up to stakeAdditionNextStake and
+        // the arm switch flips itself off — one shot, not a standing rule.
+        // It NEVER lowers the stake or re-arms itself; only the operator can
+        // do either of those, by re-toggling it on before the next win.
+        stakeAdditionArmed: false, stakeAdditionNextStake: null,
       };
       // Even/Odd (Mean Reversion) — a completely separate, statistically
       // sound rebuild of the classic "wait for a streak of 4, bet the
@@ -14453,6 +14462,22 @@ window.NexusStrategies=exports;
       let ns = { ...this.state, stats };
       if (win) {
         ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = cfg.stake;
+        // ── STAKE ADDITION (Even/Odd classic bots only) ────────────────
+        // This session just finished in a win (fresh win or a fully
+        // recovered martingale chain — either way we're back at step 0).
+        // If the operator armed Stake Addition, promote Stake $ to the
+        // "Next High Stake" they set, one time, then disarm. Never fires
+        // on a loss, never lowers anything, never re-arms itself.
+        if (this.mode === 'evenodd' && cfg.stakeAdditionArmed) {
+          const nextHigh = parseFloat(cfg.stakeAdditionNextStake);
+          if (!isNaN(nextHigh) && nextHigh > 0) {
+            this.addLog('engine', 'STAKE-ADD', `Winning session complete — Stake Addition promoting Stake $ from $${cfg.stake.toFixed(2)} to $${nextHigh.toFixed(2)}. Arming switch off.`);
+            this.config = { ...this.config, stake: nextHigh, stakeAdditionArmed: false };
+            ns.currentStake = nextHigh;
+          } else {
+            this.addLog('engine', 'STAKE-ADD', `Stake Addition was armed but no valid Next High Stake was set — skipped, arm switch left on.`);
+          }
+        }
       } else {
         const nextStep = this.state.martingaleStep + 1;
         ns.martingaleStep = nextStep; ns.inRecovery = cfg.martingaleEnabled;
@@ -16501,12 +16526,19 @@ window.NexusStrategies=exports;
         <button class="cp-mode-btn ${c.tradeMode==='even'?'active':''}" id="${rootId}-even">◈ EVEN</button>
       </div>`}
 
+      <!-- ── STAKE POPUP ─────────────────────────────────────────── -->
+      <div class="cp-stake-pop" id="${rootId}-stake-pop">
+        <div class="cp-stake-pop-glow"></div>
+        <div class="cp-stake-pop-label">💰 Stake</div>
+        <div class="cp-stake-pop-row">
+          <span class="cp-stake-pop-dollar">$</span>
+          <input class="cp-stake-pop-input" type="number" step="0.01" min="0.01" id="${rootId}-stake" value="${c.stake}">
+        </div>
+        <div class="cp-stake-pop-hint">tap to edit · applied on your next run</div>
+      </div>
+
       <div class="cp-section-label">Parameters</div>
       <div class="cp-input-row">
-        <div class="cp-input-group">
-          <span class="cp-input-label">Stake $</span>
-          <input class="cp-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}">
-        </div>
         <div class="cp-input-group">
           <span class="cp-input-label">Target Runs</span>
           <input class="cp-input" type="number" id="${rootId}-runs-in" value="${c.targetRuns}">
@@ -16552,6 +16584,31 @@ window.NexusStrategies=exports;
         Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
       </div>
     </div>
+    ${engine.mode === 'evenodd' ? `
+    <!-- ── STAKE ADDITION ─────────────────────────────────────────── -->
+    <div class="cp-card" style="border:1px solid hsl(var(--accent)/0.4);${c.stakeAdditionArmed ? 'box-shadow:0 0 18px hsl(var(--accent)/0.15)' : ''}">
+      <div class="cp-toggle-row" style="margin-bottom:0">
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="titan-toggle ${c.stakeAdditionArmed?'on':''}" id="${rootId}-stakeadd" onclick="event.stopPropagation()"></button>
+          <div>
+            <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">📈 Stake Addition</div>
+            <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Arms a ONE-TIME bump: next session that finishes in a WIN promotes Stake $ to the value below, then switches itself back off. Never lowers or resets anything — that's on you.</div>
+          </div>
+        </div>
+      </div>
+      <div class="cp-input-row" style="margin-top:10px">
+        <div class="cp-input-group">
+          <span class="cp-input-label">Next High Stake $</span>
+          <input class="cp-input" type="number" step="0.01" min="0.01" id="${rootId}-stakeadd-next" value="${c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : ''}" placeholder="e.g. 5.00">
+        </div>
+      </div>
+      ${c.stakeAdditionArmed ? `
+      <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:hsl(var(--accent)/0.1);border:1px solid hsl(var(--accent)/0.3);font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--accent));letter-spacing:.4px">
+        ⏳ ARMED — waiting for a winning session to finish. Stake $ stays at $${(c.stake||0).toFixed(2)} until then, then jumps to $${c.stakeAdditionNextStake != null ? parseFloat(c.stakeAdditionNextStake).toFixed(2) : '—'}.
+      </div>
+      ` : ''}
+    </div>
+    ` : ''}
     <!-- ── MARTINGALE ENGINE ─────────────────────────────────────── -->
     <div class="cp-card">
       <div class="cp-section-label">Martingale Engine</div>
@@ -16787,6 +16844,28 @@ window.NexusStrategies=exports;
       ftStakeEl.onchange = (e) => {
         const v = parseFloat(e.target.value);
         if (!isNaN(v) && v > 0) engine.setConfig({ firstTickStake: Math.max(0.01, v) });
+      };
+    }
+
+    // ── STAKE ADDITION bindings (Even/Odd classic bots only) ───────────
+    const stakeAddToggle = el(`${rootId}-stakeadd`);
+    if (stakeAddToggle) {
+      stakeAddToggle.onclick = (e) => {
+        e.stopPropagation();
+        const arming = !c.stakeAdditionArmed;
+        if (arming && (c.stakeAdditionNextStake == null || isNaN(parseFloat(c.stakeAdditionNextStake)) || parseFloat(c.stakeAdditionNextStake) <= 0)) {
+          engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
+          return;
+        }
+        engine.setConfig({ stakeAdditionArmed: arming });
+        renderCenterConfig(engine, rootId, engine.getSnapshot());
+      };
+    }
+    const stakeAddNextEl = el(`${rootId}-stakeadd-next`);
+    if (stakeAddNextEl) {
+      stakeAddNextEl.onchange = (e) => {
+        const v = parseFloat(e.target.value);
+        engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
       };
     }
 
@@ -17190,6 +17269,62 @@ window.NexusStrategies=exports;
         background: hsl(var(--card)) !important;
         color: hsl(var(--foreground)) !important;
       }
+
+      /* ── STAKE POPUP (hero stake card) ── */
+      .cp-stake-pop {
+        position: relative;
+        border-radius: 18px;
+        padding: 16px 16px 12px;
+        margin-bottom: 12px;
+        text-align: center;
+        overflow: hidden;
+        background: radial-gradient(120% 160% at 50% -10%, hsl(var(--primary)/0.22), hsl(var(--card)/0.94) 62%);
+        border: 1px solid hsl(var(--primary)/0.45);
+        box-shadow: 0 0 0 1px hsl(var(--primary)/0.08), 0 10px 30px hsl(var(--primary)/0.14), inset 0 1px 0 hsl(255 100% 100%/0.06);
+        animation: cp-stake-pop-in .4s cubic-bezier(.34,1.56,.64,1);
+      }
+      .cp-stake-pop-glow {
+        position: absolute; inset: -60%;
+        background: conic-gradient(from 0deg, transparent, hsl(var(--primary)/0.28), transparent 28%, transparent 72%, hsl(var(--secondary)/0.22), transparent);
+        animation: cp-stake-spin 7s linear infinite;
+        opacity: .55; pointer-events: none;
+      }
+      .cp-stake-pop::after {
+        content: ''; position: absolute; inset: 1.5px; border-radius: 16.5px;
+        background: linear-gradient(155deg, hsl(var(--card)/0.97), hsl(var(--bg-soft)/0.88));
+        z-index: 0;
+      }
+      .cp-stake-pop-label, .cp-stake-pop-row, .cp-stake-pop-hint { position: relative; z-index: 1; }
+      .cp-stake-pop-label {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 9px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+        color: hsl(var(--primary)/0.9);
+      }
+      .cp-stake-pop-row {
+        display: flex; align-items: baseline; justify-content: center; gap: 2px;
+        margin-top: 4px;
+      }
+      .cp-stake-pop-dollar {
+        font-family: 'Outfit', sans-serif; font-size: 24px; font-weight: 900;
+        color: hsl(var(--primary)); text-shadow: 0 0 16px hsl(var(--primary)/0.5);
+      }
+      .cp-stake-pop-input {
+        background: transparent !important; border: none !important; outline: none !important;
+        box-shadow: none !important; -webkit-appearance: none;
+        font-family: 'Outfit', sans-serif !important; font-size: 36px !important; font-weight: 900 !important;
+        color: hsl(var(--foreground)) !important; -webkit-text-fill-color: hsl(var(--foreground)) !important;
+        text-align: center; width: 150px; letter-spacing: -1px;
+        text-shadow: 0 0 20px hsl(var(--primary)/0.22);
+        transition: text-shadow .18s;
+      }
+      .cp-stake-pop-input:focus { text-shadow: 0 0 26px hsl(var(--primary)/0.55); }
+      .cp-stake-pop-hint {
+        font-family: 'DM Mono', monospace; font-size: 8px; letter-spacing: .5px;
+        color: hsl(var(--muted-foreground)/0.55); margin-top: 2px;
+      }
+      @keyframes cp-stake-pop-in { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+      @keyframes cp-stake-spin { to { transform: rotate(360deg); } }
+      @media (max-width: 820px) { .cp-stake-pop-input { font-size: 30px !important; } }
 
       /* ── TOGGLE ROW ── */
       .cp-toggle-row {
@@ -17792,7 +17927,8 @@ window.NexusStrategies=exports;
           || sh.lastMartingaleMultiplier !== snap.config.martingaleMultiplier || sh.lastMartingaleStopStep !== snap.config.martingaleStopStep
           || sh.lastRecoveryBarrier !== snap.config.recoveryBarrier || sh.lastSmartRecovery !== snap.config.smartRecovery
           || sh.lastAlternatingRecovery !== snap.config.alternatingRecovery || sh.lastAlternatingRecoveryB !== snap.config.alternatingRecoveryB
-          || sh.lastAutoRefresh !== snap.config.autoRefresh || sh.lastAutoPilot !== snap.config.autoPilot) {
+          || sh.lastAutoRefresh !== snap.config.autoRefresh || sh.lastAutoPilot !== snap.config.autoPilot
+          || sh.lastStakeAdditionArmed !== snap.config.stakeAdditionArmed || sh.lastStake !== snap.config.stake) {
         renderCenterConfig(engine, rootId, snap);
         sh.lastStrategy = snap.config.currentStrategy;
         sh.lastOverBarrier = snap.config.overBarrier;
@@ -17807,6 +17943,8 @@ window.NexusStrategies=exports;
         sh.lastAlternatingRecoveryB = snap.config.alternatingRecoveryB;
         sh.lastAutoRefresh = snap.config.autoRefresh;
         sh.lastAutoPilot = snap.config.autoPilot;
+        sh.lastStakeAdditionArmed = snap.config.stakeAdditionArmed;
+        sh.lastStake = snap.config.stake;
       }
       renderRight(engine, rootId, snap);
       updateLive(rootId, snap);
@@ -17826,7 +17964,8 @@ window.NexusStrategies=exports;
           || sh.lastMartingaleMultiplier !== snap.config.martingaleMultiplier || sh.lastMartingaleStopStep !== snap.config.martingaleStopStep
           || sh.lastRecoveryBarrier !== snap.config.recoveryBarrier || sh.lastSmartRecovery !== snap.config.smartRecovery
           || sh.lastAlternatingRecovery !== snap.config.alternatingRecovery || sh.lastAlternatingRecoveryB !== snap.config.alternatingRecoveryB
-          || sh.lastAutoRefresh !== snap.config.autoRefresh || sh.lastAutoPilot !== snap.config.autoPilot) {
+          || sh.lastAutoRefresh !== snap.config.autoRefresh || sh.lastAutoPilot !== snap.config.autoPilot
+          || sh.lastStakeAdditionArmed !== snap.config.stakeAdditionArmed || sh.lastStake !== snap.config.stake) {
         renderCenterConfig(engine, rootId, snap);
         sh.lastStrategy = snap.config.currentStrategy;
         sh.lastOverBarrier = snap.config.overBarrier;
@@ -17841,6 +17980,8 @@ window.NexusStrategies=exports;
         sh.lastAlternatingRecoveryB = snap.config.alternatingRecoveryB;
         sh.lastAutoRefresh = snap.config.autoRefresh;
         sh.lastAutoPilot = snap.config.autoPilot;
+        sh.lastStakeAdditionArmed = snap.config.stakeAdditionArmed;
+        sh.lastStake = snap.config.stake;
       }
       if (!sh._lastLeftRender || (now - sh._lastLeftRender) >= 4000) {
         // Only rebuild if no dropdown is focused (avoid interrupting user interaction)
