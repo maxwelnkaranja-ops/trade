@@ -6849,6 +6849,81 @@ html body #panel-dashboard .journal-entry {
 /* Stop Profit / Stop Loss inputs — tighter */
 #dash-master-tp,
 
+/* ══════════════════════════════════════════════════════════════
+   DASHBOARD STAKE POPUP — upgrade
+   ══════════════════════════════════════════════════════════════ */
+.dash-stake-trigger {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-radius: 12px; cursor: pointer;
+  font-family: 'Outfit', sans-serif; color: hsl(var(--foreground)/0.9);
+  position: relative; overflow: hidden;
+  background: linear-gradient(150deg, hsl(var(--primary)/0.14), hsl(var(--muted)/0.35));
+  border: 1px solid hsl(var(--primary)/0.4);
+  box-shadow: 0 2px 14px hsl(var(--primary)/0.08);
+  transition: all .2s;
+}
+.dash-stake-trigger:hover {
+  border-color: hsl(var(--primary)/0.7);
+  box-shadow: 0 4px 20px hsl(var(--primary)/0.2);
+  transform: translateY(-1px);
+}
+.dash-stake-trigger-glow {
+  position: absolute; inset: -50%;
+  background: conic-gradient(from 0deg, transparent, hsl(var(--primary)/0.25), transparent 30%);
+  animation: cp-stake-spin 8s linear infinite;
+  opacity: .5; pointer-events: none;
+}
+.dash-stake-popup {
+  display: none; position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 60;
+  width: 310px; max-height: 400px; padding: 16px; border-radius: 18px;
+  background: radial-gradient(140% 100% at 100% 0%, hsl(var(--primary)/0.1), hsl(var(--card)/0.98) 55%);
+  border: 1px solid hsl(var(--primary)/0.35);
+  box-shadow: 0 0 0 1px hsl(var(--primary)/0.06), 0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 hsl(255 100% 100%/0.06);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+.dash-stake-popup.open {
+  display: block;
+  animation: dash-stake-pop-in .28s cubic-bezier(.34,1.56,.64,1);
+}
+.dash-stake-popup-glow {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(120deg, transparent, hsl(var(--primary)/0.06), transparent 60%);
+}
+@keyframes dash-stake-pop-in {
+  from { opacity: 0; transform: scale(.92) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.dash-stake-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px; border-radius: 10px;
+  background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.35);
+  transition: border-color .15s, background .15s;
+}
+.dash-stake-row:hover { border-color: hsl(var(--primary)/0.35); background: hsl(var(--bg)/0.6); }
+.dash-stake-input {
+  width: 78px; padding: 7px 8px; border-radius: 8px;
+  border: 1px solid hsl(var(--border)/0.5); background: hsl(var(--bg)/0.7);
+  color: hsl(var(--foreground)); font-family: 'DM Mono', monospace; font-size: 11.5px;
+  font-weight: 700; text-align: center; outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.dash-stake-input:focus {
+  border-color: hsl(var(--primary)/0.65);
+  box-shadow: 0 0 0 3px hsl(var(--primary)/0.12);
+}
+.dash-stake-save-btn {
+  position: relative; z-index: 1; width: 100%; margin-top: 12px; padding: 11px;
+  border: none; border-radius: 12px; cursor: pointer;
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)));
+  color: #fff; font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 900;
+  letter-spacing: 2px; box-shadow: 0 4px 16px hsl(var(--primary)/0.35);
+  transition: all .2s;
+}
+.dash-stake-save-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px hsl(var(--primary)/0.45); }
+.dash-stake-save-btn:active { transform: translateY(0); }
+@media (max-width: 480px) { .dash-stake-popup { width: min(310px, 90vw); right: -8px; } }
+
 
 /* Luminous / Void theme overrides */
 html.luminous .cp-stat-pill { background: rgba(20,20,28,0.6) !important; border-color: rgba(0,242,254,0.1) !important; }
@@ -16853,11 +16928,29 @@ window.NexusStrategies=exports;
       stakeAddToggle.onclick = (e) => {
         e.stopPropagation();
         const arming = !c.stakeAdditionArmed;
-        if (arming && (c.stakeAdditionNextStake == null || isNaN(parseFloat(c.stakeAdditionNextStake)) || parseFloat(c.stakeAdditionNextStake) <= 0)) {
-          engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
-          return;
+        if (arming) {
+          // Read the input LIVE — don't trust the closure's `c`, which is a
+          // snapshot from the last render and won't reflect a value the
+          // operator just typed but hasn't tabbed/clicked away from yet.
+          // Relying on the stale value made the toggle look broken: type a
+          // number, click the switch immediately, nothing happens.
+          const liveInput = el(`${rootId}-stakeadd-next`);
+          const liveVal = liveInput ? parseFloat(liveInput.value) : NaN;
+          if (isNaN(liveVal) || liveVal <= 0) {
+            if (liveInput) {
+              liveInput.style.borderColor = 'hsl(var(--loss))';
+              liveInput.style.boxShadow = '0 0 0 3px hsl(var(--loss)/0.15)';
+              liveInput.placeholder = 'Enter a stake first!';
+              liveInput.focus();
+              setTimeout(() => { liveInput.style.borderColor = ''; liveInput.style.boxShadow = ''; }, 1600);
+            }
+            engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
+            return;
+          }
+          engine.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: liveVal });
+        } else {
+          engine.setConfig({ stakeAdditionArmed: false });
         }
-        engine.setConfig({ stakeAdditionArmed: arming });
         renderCenterConfig(engine, rootId, engine.getSnapshot());
       };
     }
@@ -18219,24 +18312,25 @@ window.NexusStrategies=exports;
           <input id="dash-pnl-gate-tp" type="hidden" value="50">
           <!-- Stake box: small collapsed control, opens a popup to view/adjust every bot's stake -->
           <div style="position:relative;align-self:flex-end">
-            <button id="dash-stake-box" type="button" title="Adjust any bot's stake" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px;border:1px solid hsl(var(--border)/0.7);background:hsl(var(--muted)/0.35);color:hsl(var(--foreground)/0.85);cursor:pointer;font-family:'Outfit',sans-serif;transition:all .2s"
-              onmouseover="this.style.background='hsl(var(--muted)/0.55)';this.style.borderColor='hsl(var(--border))'"
-              onmouseout="this.style.background='hsl(var(--muted)/0.35)';this.style.borderColor='hsl(var(--border)/0.7)'">
-              <span style="font-size:14px;line-height:1">💰</span>
-              <span style="display:flex;flex-direction:column;align-items:flex-start;gap:1px">
+            <button id="dash-stake-box" type="button" title="Adjust any bot's stake" class="dash-stake-trigger">
+              <span class="dash-stake-trigger-glow"></span>
+              <span style="font-size:15px;line-height:1;position:relative;z-index:1">💰</span>
+              <span style="display:flex;flex-direction:column;align-items:flex-start;gap:1px;position:relative;z-index:1">
                 <span style="font-size:8px;letter-spacing:2px;font-weight:800;text-transform:uppercase;color:hsl(var(--muted-foreground));white-space:nowrap">Stake</span>
                 <span style="font-size:11px;font-weight:800;font-family:'DM Mono',monospace;white-space:nowrap">Adjust</span>
               </span>
             </button>
-            <div id="dash-stake-popup" style="display:none;position:absolute;bottom:calc(100% + 10px);right:0;z-index:60;width:300px;max-height:380px;padding:14px;border-radius:14px;background:hsl(var(--card)/0.98);border:1px solid hsl(var(--border)/0.6);box-shadow:0 12px 40px rgba(0,0,0,0.45);backdrop-filter:blur(10px)">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
-                <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:2px;color:hsl(var(--foreground)/0.8);text-transform:uppercase">Per-Bot Stake</span>
+            <div id="dash-stake-popup" class="dash-stake-popup">
+              <div class="dash-stake-popup-glow"></div>
+              <div style="position:relative;z-index:1;display:flex;align-items:center;gap:6px;margin-bottom:12px">
+                <span style="font-size:16px;line-height:1">💰</span>
+                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:2px;color:hsl(var(--foreground)/0.9);text-transform:uppercase">Per-Bot Stake</span>
                 <div style="flex:1"></div>
-                <button id="dash-stake-close" type="button" style="border:none;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">✕</button>
+                <button id="dash-stake-close" type="button" style="border:none;background:hsl(var(--muted)/0.5);color:hsl(var(--muted-foreground));cursor:pointer;font-size:12px;line-height:1;padding:6px 8px;border-radius:8px;transition:all .15s"
+                  onmouseover="this.style.background='hsl(var(--loss)/0.2)';this.style.color='hsl(var(--loss))'" onmouseout="this.style.background='hsl(var(--muted)/0.5)';this.style.color='hsl(var(--muted-foreground))'">✕</button>
               </div>
-              <div id="dash-stake-list" style="display:flex;flex-direction:column;gap:6px;max-height:270px;overflow-y:auto;padding-right:2px"></div>
-              <button id="dash-stake-save" type="button" style="width:100%;margin-top:10px;padding:9px;border:1px solid hsl(var(--border));border-radius:10px;background:hsl(var(--muted)/0.6);color:hsl(var(--foreground)/0.9);font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:2px;cursor:pointer;transition:all .2s"
-                onmouseover="this.style.background='hsl(var(--muted)/0.85)'" onmouseout="this.style.background='hsl(var(--muted)/0.6)'">💾 SAVE STAKES</button>
+              <div id="dash-stake-list" style="position:relative;z-index:1;display:flex;flex-direction:column;gap:6px;max-height:270px;overflow-y:auto;padding-right:2px"></div>
+              <button id="dash-stake-save" type="button" class="dash-stake-save-btn">💾 SAVE STAKES</button>
             </div>
           </div>
           <!-- Engage button -->
@@ -24514,14 +24608,15 @@ window.NexusStrategies=exports;
   function populateStakePopup() {
     const list = document.getElementById('dash-stake-list');
     if (!list) return;
-    list.innerHTML = STAKE_IDS.map((id) => {
+    list.innerHTML = STAKE_IDS.map((id, i) => {
       const eng = getStakeEngine(id);
       const val = getStakeValue(eng, id);
       const meta = window.BOT_META && window.BOT_META[id] || { label: id, dot: 'hsl(var(--muted-foreground))' };
-      return `<div style="display:flex;align-items:center;gap:8px">
+      return `<div class="dash-stake-row" style="animation:dash-stake-pop-in .22s ease ${i * 0.02}s both">
         <span class="bot-card-dot" style="background:${meta.dot};flex-shrink:0"></span>
         <span style="flex:1;font-size:10.5px;font-family:'DM Mono',monospace;color:hsl(var(--foreground)/0.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${meta.label}</span>
-        <input type="number" min="0.35" step="0.01" data-stake-id="${id}" value="${val != null ? val : ''}" placeholder="—" style="width:74px;padding:6px 8px;border-radius:8px;border:1px solid hsl(var(--border)/0.5);background:hsl(var(--bg)/0.6);color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:11px;text-align:center;outline:none">
+        <span style="font-size:10px;color:hsl(var(--muted-foreground)/0.6);font-family:'DM Mono',monospace">$</span>
+        <input type="number" min="0.35" step="0.01" data-stake-id="${id}" value="${val != null ? val : ''}" placeholder="—" class="dash-stake-input">
       </div>`;
     }).join('');
   }
@@ -24537,14 +24632,14 @@ window.NexusStrategies=exports;
       if (!popup) return;
       if (box) {
         e.stopPropagation();
-        const willOpen = popup.style.display === 'none';
+        const willOpen = !popup.classList.contains('open');
         if (willOpen) populateStakePopup();
-        popup.style.display = willOpen ? 'block' : 'none';
+        popup.classList.toggle('open', willOpen);
         return;
       }
       if (e.target.closest('#dash-stake-close')) {
         e.stopPropagation();
-        popup.style.display = 'none';
+        popup.classList.remove('open');
         return;
       }
       const saveBtn = e.target.closest('#dash-stake-save');
@@ -24569,13 +24664,13 @@ window.NexusStrategies=exports;
           toast.classList.add('show');
           setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 2500);
         }
-        popup.style.display = 'none';
+        popup.classList.remove('open');
         return;
       }
       // Click was inside the open popup itself (e.g. an input) — keep it open.
       if (e.target.closest('#dash-stake-popup')) return;
       // Click anywhere else on the page — close the popup if it's open.
-      if (popup.style.display !== 'none') popup.style.display = 'none';
+      popup.classList.remove('open');
     });
   }
 
