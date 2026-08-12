@@ -6924,6 +6924,39 @@ html body #panel-dashboard .journal-entry {
 .dash-stake-save-btn:active { transform: translateY(0); }
 @media (max-width: 480px) { .dash-stake-popup { width: min(310px, 90vw); right: -8px; } }
 
+/* ══════════════════════════════════════════════════════════════
+   BEST TRADING TIMES — small rank strip in Equity Curve header
+   ══════════════════════════════════════════════════════════════ */
+.dash-best-times { margin-top: 8px; }
+.dash-best-times-label {
+  font-family: 'Outfit', sans-serif; font-size: 8px; font-weight: 800;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: hsl(var(--muted-foreground)/0.75); margin-bottom: 5px;
+}
+.dash-best-times-empty {
+  font-family: 'DM Mono', monospace; font-size: 9px;
+  color: hsl(var(--muted-foreground)/0.5); max-width: 340px; line-height: 1.5;
+}
+.dash-best-times-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.dash-best-time-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px 4px 7px; border-radius: 999px;
+  font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 700;
+  background: hsl(var(--bg)/0.55); border: 1px solid hsl(var(--border)/0.5);
+  color: hsl(var(--foreground)/0.85); cursor: default;
+  transition: transform .15s, box-shadow .15s;
+}
+.dash-best-time-pill:hover { transform: translateY(-1px); }
+.dash-best-time-medal { font-size: 11px; line-height: 1; }
+.dash-best-time-range { color: hsl(var(--foreground)/0.7); }
+.dash-best-time-profit { color: hsl(var(--win)); font-weight: 800; }
+.dash-best-time-pill.rank-1 {
+  border-color: hsl(45 90% 55% / 0.5); background: hsl(45 90% 55% / 0.08);
+  box-shadow: 0 0 12px hsl(45 90% 55% / 0.15);
+}
+.dash-best-time-pill.rank-2 { border-color: hsl(var(--border)); background: hsl(var(--muted)/0.4); }
+.dash-best-time-pill.rank-3 { border-color: hsl(25 60% 50% / 0.35); background: hsl(25 60% 50% / 0.06); }
+
 
 /* Luminous / Void theme overrides */
 html.luminous .cp-stat-pill { background: rgba(20,20,28,0.6) !important; border-color: rgba(0,242,254,0.1) !important; }
@@ -14252,6 +14285,26 @@ window.NexusStrategies=exports;
     completeSession(wonSession = true) {
       this.executionGuard = false; this.pendingTrade = null;
       this._skipArmed = false; this._isSacrificeTrade = false;
+      // ── STAKE ADDITION (Even/Odd classic bots only) ──────────────────
+      // Fires exactly once per completed TRADING SESSION (this function —
+      // the point where the bot goes into cooldown), not per individual
+      // trade. wonSession === true covers both a clean run and a fully
+      // recovered martingale chain finishing the session in profit;
+      // wonSession === false covers stop-loss / martingale-stop-step /
+      // any other session-ending loss. Only a win-finished session ever
+      // promotes the stake, and only if the operator armed it — a lost
+      // session never touches the stake in any way. One shot: it disarms
+      // itself the moment it fires, so the NEXT session starts at the new
+      // (higher) stake but nothing keeps escalating automatically after.
+      if (wonSession && this.mode === 'evenodd' && this.config.stakeAdditionArmed) {
+        const nextHigh = parseFloat(this.config.stakeAdditionNextStake);
+        if (!isNaN(nextHigh) && nextHigh > 0) {
+          this.addLog('engine', 'STAKE-ADD', `Session finished in a WIN — Stake Addition promoting Stake $ from $${this.config.stake.toFixed(2)} to $${nextHigh.toFixed(2)} for the next session. Arming switch off.`);
+          this.config = { ...this.config, stake: nextHigh, stakeAdditionArmed: false };
+        } else {
+          this.addLog('engine', 'STAKE-ADD', `Stake Addition was armed but no valid Next High Stake was set — skipped, arm switch left on.`);
+        }
+      }
       // Alt Automation: if this session ended in a loss (recovery exhausted,
       // stop-rule hit, or stop-loss hit) rather than a win, rotate to the
       // next recovery pattern for next session — only when the toggle is on
@@ -14537,22 +14590,6 @@ window.NexusStrategies=exports;
       let ns = { ...this.state, stats };
       if (win) {
         ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = cfg.stake;
-        // ── STAKE ADDITION (Even/Odd classic bots only) ────────────────
-        // This session just finished in a win (fresh win or a fully
-        // recovered martingale chain — either way we're back at step 0).
-        // If the operator armed Stake Addition, promote Stake $ to the
-        // "Next High Stake" they set, one time, then disarm. Never fires
-        // on a loss, never lowers anything, never re-arms itself.
-        if (this.mode === 'evenodd' && cfg.stakeAdditionArmed) {
-          const nextHigh = parseFloat(cfg.stakeAdditionNextStake);
-          if (!isNaN(nextHigh) && nextHigh > 0) {
-            this.addLog('engine', 'STAKE-ADD', `Winning session complete — Stake Addition promoting Stake $ from $${cfg.stake.toFixed(2)} to $${nextHigh.toFixed(2)}. Arming switch off.`);
-            this.config = { ...this.config, stake: nextHigh, stakeAdditionArmed: false };
-            ns.currentStake = nextHigh;
-          } else {
-            this.addLog('engine', 'STAKE-ADD', `Stake Addition was armed but no valid Next High Stake was set — skipped, arm switch left on.`);
-          }
-        }
       } else {
         const nextStep = this.state.martingaleStep + 1;
         ns.martingaleStep = nextStep; ns.inRecovery = cfg.martingaleEnabled;
@@ -18380,6 +18417,7 @@ window.NexusStrategies=exports;
               <div>
                 <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
                 <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · scroll up to 24h · hover for details</div>
+                <div id="dash-best-times" class="dash-best-times"></div>
               </div>
               <div style="display:flex;align-items:center;gap:12px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
                 <span class="eq-chart-live-badge" id="dash-equity-live-badge" style="display:none">LIVE</span>
@@ -18522,6 +18560,57 @@ window.NexusStrategies=exports;
     if (!ts) return '—';
     const d = new Date(ts);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  // ── BEST TRADING TIMES ─────────────────────────────────────────────────
+  // Buckets the same 24h equity-curve points by hour-of-day and ranks which
+  // hours have actually been most profitable/winning for THIS person's own
+  // trades — not a generic "best time to trade Deriv" claim, purely derived
+  // from their own history. Hours with too few trades are excluded so one
+  // lucky/unlucky trade at 3am doesn't look like a "best" or "worst" hour.
+  const BEST_TIMES_MIN_TRADES = 3;
+  function computeBestTradingHours(points) {
+    const byHour = {}; // 0-23 -> { trades, wins, profit }
+    (points || []).forEach((p) => {
+      if (!p.ts) return;
+      const h = new Date(p.ts).getHours();
+      const b = byHour[h] || (byHour[h] = { trades: 0, wins: 0, profit: 0 });
+      b.trades++;
+      if ((p.profit || 0) > 0) b.wins++;
+      b.profit += (p.profit || 0);
+    });
+    const ranked = Object.keys(byHour)
+      .map((h) => ({ hour: parseInt(h, 10), ...byHour[h] }))
+      .filter((b) => b.trades >= BEST_TIMES_MIN_TRADES)
+      .map((b) => ({ ...b, winRate: b.wins / b.trades }))
+      .sort((a, b) => b.profit - a.profit);
+    return ranked;
+  }
+  function hourRangeLabel(h) {
+    const fmt = (n) => `${String(n % 24).padStart(2, '0')}:00`;
+    return `${fmt(h)}–${fmt(h + 1)}`;
+  }
+  function renderBestTimes(root, points) {
+    const wrap = el('dash-best-times', root);
+    if (!wrap) return;
+    const ranked = computeBestTradingHours(points);
+    if (!ranked.length) {
+      wrap.innerHTML = `<div class="dash-best-times-label">🕐 BEST TIMES</div><div class="dash-best-times-empty">Not enough trades yet in the last 24h to rank your best hours (need ${BEST_TIMES_MIN_TRADES}+ trades in an hour).</div>`;
+      return;
+    }
+    const top = ranked.slice(0, 3);
+    const rankClass = ['rank-1', 'rank-2', 'rank-3'];
+    wrap.innerHTML = `
+      <div class="dash-best-times-label">🕐 YOUR BEST TIMES (24H)</div>
+      <div class="dash-best-times-pills">
+        ${top.map((b, i) => `
+          <span class="dash-best-time-pill ${rankClass[i]}" title="${b.trades} trades · ${(b.winRate * 100).toFixed(0)}% win rate">
+            <span class="dash-best-time-medal">${['🥇','🥈','🥉'][i]}</span>
+            <span class="dash-best-time-range">${hourRangeLabel(b.hour)}</span>
+            <span class="dash-best-time-profit">${b.profit >= 0 ? '+' : ''}$${b.profit.toFixed(2)}</span>
+          </span>
+        `).join('')}
+      </div>`;
   }
 
   function formatEquityDate(ts) {
@@ -19079,6 +19168,7 @@ window.NexusStrategies=exports;
     // Net P&L stat card instead of silently including probe-trade P&L that
     // card doesn't count.
     const curve = EquityStore.merge(allEntries.filter((e) => !e.isTest));
+    renderBestTimes(root, curve);
 
     const equityWrap = el('dash-equity-wrap', root);
     renderEquityChart(equityWrap, curve);
