@@ -12825,6 +12825,11 @@ window.NexusStrategies=exports;
         // implements this generically (mode-agnostic), Even/Odd MR was
         // just missing these two config defaults and its UI control.
         firstTickMode: 'normal', firstTickStake: 0.35,
+        // Stake Addition — same one-shot, win-session-only stake promotion
+        // as classic Even/Odd (see evenDefaults for the full explanation).
+        // Was only wired up for the classic bots; Even/Odd MR is one of
+        // the "even and odd bots" too, so it gets the same block.
+        stakeAdditionArmed: false, stakeAdditionNextStake: null,
       };
       const overDefaults = { ...evenDefaults, autoPilot: false, autoRefresh: false, tradeMode: undefined };
       // Under gets its own default barrier picks (Under 7 / recovery Under 6)
@@ -14285,7 +14290,7 @@ window.NexusStrategies=exports;
     completeSession(wonSession = true) {
       this.executionGuard = false; this.pendingTrade = null;
       this._skipArmed = false; this._isSacrificeTrade = false;
-      // ── STAKE ADDITION (Even/Odd classic bots only) ──────────────────
+      // ── STAKE ADDITION (Even/Odd classic + Even/Odd MR bots) ──────────
       // Fires exactly once per completed TRADING SESSION (this function —
       // the point where the bot goes into cooldown), not per individual
       // trade. wonSession === true covers both a clean run and a fully
@@ -14296,7 +14301,10 @@ window.NexusStrategies=exports;
       // session never touches the stake in any way. One shot: it disarms
       // itself the moment it fires, so the NEXT session starts at the new
       // (higher) stake but nothing keeps escalating automatically after.
-      if (wonSession && this.mode === 'evenodd' && this.config.stakeAdditionArmed) {
+      // Covers both 'evenodd' (Even/Odd classic) and 'evenoddmr' (Even/Odd
+      // Mean Reversion) — every "even and odd" bot, not just the classic
+      // pair.
+      if (wonSession && (this.mode === 'evenodd' || this.mode === 'evenoddmr') && this.config.stakeAdditionArmed) {
         const nextHigh = parseFloat(this.config.stakeAdditionNextStake);
         if (!isNaN(nextHigh) && nextHigh > 0) {
           this.addLog('engine', 'STAKE-ADD', `Session finished in a WIN — Stake Addition promoting Stake $ from $${this.config.stake.toFixed(2)} to $${nextHigh.toFixed(2)} for the next session. Arming switch off.`);
@@ -22258,18 +22266,31 @@ window.NexusStrategies=exports;
         </div>
       </div>
 
-      <div class="cp-card">
-        <div class="cp-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
-          <div class="cp-section-label" style="margin:0">Martingale</div>
-          <button class="titan-toggle ${c.martingaleEnabled?'on':''}" id="${rootId}-mg-toggle"></button>
-        </div>
-        <div style="${c.martingaleEnabled?'':'display:none'}">
-          <div class="cp-input-row">
-            <div class="cp-input-group"><span class="cp-input-label">Multiplier</span><input class="cp-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier}"></div>
-            <div class="cp-input-group"><span class="cp-input-label">Stop after N losses</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-stop-step" value="${c.martingaleStopStep}"></div>
+      <!-- ── STAKE ADDITION ─────────────────────────────────────────── -->
+      <div class="cp-card" style="border:1px solid hsl(var(--accent)/0.4);${c.stakeAdditionArmed ? 'box-shadow:0 0 18px hsl(var(--accent)/0.15)' : ''}">
+        <div class="cp-toggle-row" style="margin-bottom:0">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="titan-toggle ${c.stakeAdditionArmed?'on':''}" id="${rootId}-stakeadd" onclick="event.stopPropagation()"></button>
+            <div>
+              <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">📈 Stake Addition</div>
+              <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Arms a ONE-TIME bump: next session that finishes in a WIN promotes Stake $ to the value below, then switches itself back off. Never lowers or resets anything — that's on you.</div>
+            </div>
           </div>
+        </div>
+        <div class="cp-input-row" style="margin-top:10px">
+          <div class="cp-input-group">
+            <span class="cp-input-label">Next High Stake $</span>
+            <input class="cp-input" type="number" step="0.01" min="0.01" id="${rootId}-stakeadd-next" value="${c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : ''}" placeholder="e.g. 5.00">
+          </div>
+        </div>
+        ${c.stakeAdditionArmed ? `
+        <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:hsl(var(--accent)/0.1);border:1px solid hsl(var(--accent)/0.3);font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--accent));letter-spacing:.4px">
+          ⏳ ARMED — waiting for a winning session to finish. Stake $ stays at $${(c.stake||0).toFixed(2)} until then, then jumps to $${c.stakeAdditionNextStake != null ? parseFloat(c.stakeAdditionNextStake).toFixed(2) : '—'}.
+        </div>
+        ` : ''}
+      </div>
 
-          <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
+
           <div style="display:flex;flex-direction:column;gap:5px">
             ${(() => {
               const base = (c.tradeMode || engine.fixedTradeMode) === 'odd' ? 'ODD' : 'EVEN';
@@ -22397,6 +22418,43 @@ window.NexusStrategies=exports;
         eoFtStakeEl.onchange = (e) => {
           const v = parseFloat(e.target.value);
           if (!isNaN(v) && v > 0) engine.setConfig({ firstTickStake: Math.max(0.01, v) });
+        };
+      }
+      // ── STAKE ADDITION bindings (Even/Odd MR) ───────────────────────
+      const eoStakeAddToggle = el(`${rootId}-stakeadd`, host);
+      if (eoStakeAddToggle) {
+        eoStakeAddToggle.onclick = (e) => {
+          e.stopPropagation();
+          const arming = !c.stakeAdditionArmed;
+          if (arming) {
+            // Read the input LIVE, same fix as classic Even/Odd — a value
+            // typed but not yet blurred/tabbed-away-from must still count,
+            // otherwise the switch looks broken.
+            const liveInput = el(`${rootId}-stakeadd-next`, host);
+            const liveVal = liveInput ? parseFloat(liveInput.value) : NaN;
+            if (isNaN(liveVal) || liveVal <= 0) {
+              if (liveInput) {
+                liveInput.style.borderColor = 'hsl(var(--loss))';
+                liveInput.style.boxShadow = '0 0 0 3px hsl(var(--loss)/0.15)';
+                liveInput.placeholder = 'Enter a stake first!';
+                liveInput.focus();
+                setTimeout(() => { liveInput.style.borderColor = ''; liveInput.style.boxShadow = ''; }, 1600);
+              }
+              engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
+              return;
+            }
+            engine.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: liveVal });
+          } else {
+            engine.setConfig({ stakeAdditionArmed: false });
+          }
+          renderCenter(engine, rootId, engine.getSnapshot());
+        };
+      }
+      const eoStakeAddNextEl = el(`${rootId}-stakeadd-next`, host);
+      if (eoStakeAddNextEl) {
+        eoStakeAddNextEl.onchange = (e) => {
+          const v = parseFloat(e.target.value);
+          engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
         };
       }
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
@@ -22656,6 +22714,66 @@ window.NexusStrategies=exports;
     abort()    { try { window.Sounds.soundEngine.playAbort(); } catch (e) {} },
   };
 
+  // ── MARKET ROTATION (avoid 1s + avoid streaky markets) ────────────────
+  // Hot Repeat was intentionally built with "no market scanner" (see the
+  // note above this IIFE) to stay simple — it only ever watched whatever
+  // market was picked in the dropdown, forever, with no awareness of the
+  // other 9. Rather than build a whole second scanner+socket stack just
+  // for this, it piggybacks on window.EvenSocket.globalSocket — the Even/
+  // Odd bots' socket, which is already open and already caching live tick
+  // history for all 10 markets in the background the moment the page
+  // loads (see init(), which spins up 'even'/'odd' engines immediately,
+  // regardless of which tab is open). Zero new connections.
+  const HR_STREAK_LIMIT = 3; // 3+ identical digits back-to-back counts as "streaky"
+  function hrTrailingStreak(history) {
+    if (!history || history.length < 2) return 0;
+    const last = history[history.length - 1];
+    let streak = 1;
+    for (let i = history.length - 2; i >= 0 && history[i] === last; i--) streak++;
+    return streak;
+  }
+  function hrLongestStreak(history, windowSize = 20) {
+    const data = (history || []).slice(-windowSize);
+    let longest = 0, cur = 1;
+    for (let i = 1; i < data.length; i++) {
+      cur = data[i] === data[i - 1] ? cur + 1 : 1;
+      if (cur > longest) longest = cur;
+    }
+    return longest;
+  }
+  // Ranks the 5 non-1s markets by "how calm/healthy is this right now,"
+  // heavily penalising (not hard-excluding — always leaves something to
+  // rotate into even on a rough day everywhere) any market currently
+  // showing a run of repeated digits. Returns null only if the shared
+  // socket genuinely has no data yet (e.g. right at page load).
+  function hrPickNextMarket(currentSymbol) {
+    const gs = window.EvenSocket && window.EvenSocket.globalSocket;
+    if (!gs) return null;
+    // 1s markets are excluded from AUTO-rotation entirely — still pickable
+    // by hand from the dropdown, just never chosen automatically.
+    const candidates = HR_MARKETS.filter((m) => !m.value.startsWith('1HZ'));
+    const scored = candidates.map((m) => {
+      const history = gs.getHistory(m.value) || [];
+      const health = gs.getHealth(m.value);
+      const trailing = hrTrailingStreak(history);
+      const longest = hrLongestStreak(history);
+      const worstStreak = Math.max(trailing, longest);
+      let score = 50;
+      if (health) {
+        if (health.longTerm === 'HEALTHY') score += 20;
+        else if (health.longTerm === 'MODERATE') score += 8;
+        else if (health.longTerm === 'POOR') score -= 20;
+      }
+      score -= worstStreak * 12;
+      return { symbol: m.value, label: m.label, score, isStreaky: worstStreak >= HR_STREAK_LIMIT, streak: worstStreak, ticks: history.length };
+    }).sort((a, b) => b.score - a.score);
+    if (!scored.length) return null;
+    let pool = scored.filter((m) => m.symbol !== currentSymbol);
+    if (!pool.length) pool = scored;
+    const best = pool[0];
+    return { ...best, _forcedSwitch: best.symbol !== currentSymbol };
+  }
+
   class HotRepeatEngine {
     constructor() {
       this.onUpdate = null;
@@ -22877,6 +22995,16 @@ window.NexusStrategies=exports;
         if (remaining <= 0) {
           clearInterval(this.sessionCooldownTimer);
           this.sessionCooldownTimer = null;
+          // Rotate onto a new market every session cooldown — never onto a
+          // 1s market, and steered away from whichever market is currently
+          // showing a repeat streak. See hrPickNextMarket above.
+          const next = hrPickNextMarket(this.state.primaryMarket);
+          if (next && next._forcedSwitch) {
+            this.dispatch({ type: 'SET_MARKET', market: next.symbol });
+            this.connectAnalysis();
+            const streakNote = next.isStreaky ? ` (still its calmest healthy option — every market's a bit streaky right now)` : '';
+            this.dispatch({ type: 'NOTIFY', message: `🔀 Rotated to ${next.label || next.symbol}${streakNote}`, ntype: 'info' });
+          }
           this.dispatch({ type: 'SESSION_COOLDOWN_END' });
           if (this.state.isArmed) this.dispatch({ type: 'NOTIFY', message: '▶ Cooldown over — watching the stream again.', ntype: 'info' });
         } else {
@@ -23335,7 +23463,17 @@ window.NexusStrategies=exports;
     const eng = window._hotRepeatEngineRef;
     if (!eng) return;
     const marketSel = el('hotrepeat-market', root);
-    if (marketSel && !marketSel._bound) { marketSel._bound = true; marketSel.onchange = () => eng.dispatch({ type: 'SET_MARKET', market: marketSel.value }); }
+    if (marketSel && !marketSel._bound) {
+      marketSel._bound = true;
+      marketSel.onchange = () => {
+        // Dispatching alone only updated the label — the live tick socket
+        // stayed subscribed to whatever market connectAnalysis() last
+        // opened. Reconnecting here makes a manual market change actually
+        // take effect immediately instead of silently keeping the old feed.
+        eng.dispatch({ type: 'SET_MARKET', market: marketSel.value });
+        eng.connectAnalysis();
+      };
+    }
     const stakeInp = el('hotrepeat-stake', root);
     if (stakeInp && !stakeInp._bound) { stakeInp._bound = true; stakeInp.onchange = () => eng.dispatch({ type: 'SET_STAKE', value: Math.max(0.35, parseFloat(stakeInp.value) || 1) }); }
     const cdInp = el('hotrepeat-cooldown', root);
