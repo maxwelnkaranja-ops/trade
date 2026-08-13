@@ -168,9 +168,31 @@
         return (p1 - p2) / se >= Z_THRESHOLD;
       }
 
+      // Wilson score interval lower bound — a more honest "how confident
+      // are we" number than the raw hit rate for small samples. A raw
+      // 4/5 = 80% looks great but could easily be luck; Wilson pulls it
+      // down toward 50% until the sample size actually earns that
+      // confidence. Used for the UI display; the z-test above still
+      // gates whether a step is allowed to flip at all.
+      function wilsonLowerBound(hits, n, z = 1.645) {
+        if (!n) return 0;
+        const p = hits / n;
+        const denom = 1 + (z * z) / n;
+        const centre = p + (z * z) / (2 * n);
+        const margin = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * n)) / n);
+        return Math.max(0, (centre - margin) / denom);
+      }
+
       function buildDynamicPattern(data, winCheck) {
         const steps = {};
         for (let s = 1; s <= CYCLE; s++) steps[s] = { flipHits: 0, flipN: 0, stayHits: 0, stayN: 0 };
+        // Recency weighting: the most recent third of the window counts
+        // DOUBLE toward each step's tally. Plain backtests treat a tick
+        // from 150 samples ago identically to yesterday's tick, which
+        // makes the engine slow to notice a market's behaviour has
+        // shifted. Weighting recent data more lets it adapt faster
+        // without throwing the older data away entirely.
+        const recencyStart = Math.floor(data.length * (2 / 3));
         // Same historical tick feeds BOTH the "what if we flipped here"
         // and "what if we stayed here" tally for its step, so every step
         // accumulates two independent samples per pass through the
@@ -178,10 +200,11 @@
         for (let i = 0; i < data.length - 1; i++) {
           const step = (i % CYCLE) + 1;
           const bucket = steps[step];
-          if (winCheck(data[i + 1], true)) bucket.flipHits++;
-          bucket.flipN++;
-          if (winCheck(data[i + 1], false)) bucket.stayHits++;
-          bucket.stayN++;
+          const weight = i >= recencyStart ? 2 : 1;
+          const flipWin = winCheck(data[i + 1], true);
+          const stayWin = winCheck(data[i + 1], false);
+          bucket.flipHits += flipWin ? weight : 0; bucket.flipN += weight;
+          bucket.stayHits += stayWin ? weight : 0; bucket.stayN += weight;
         }
         const mask = {};
         const detail = {};
@@ -192,7 +215,14 @@
           if (eligible) gatedSteps++;
           const flip = eligible && flipSignificantlyBeatsStay(b.flipHits, b.flipN, b.stayHits, b.stayN);
           mask[s] = flip;
-          detail[s] = { ...b, eligible, flip, flipRate: b.flipN ? b.flipHits / b.flipN : 0, stayRate: b.stayN ? b.stayHits / b.stayN : 0 };
+          const flipRate = b.flipN ? b.flipHits / b.flipN : 0;
+          const stayRate = b.stayN ? b.stayHits / b.stayN : 0;
+          detail[s] = {
+            ...b, eligible, flip, flipRate, stayRate,
+            // Confidence shown in the UI: whichever side the mask picked,
+            // Wilson-adjusted so a thin sample can't look falsely certain.
+            confidence: wilsonLowerBound(flip ? b.flipHits : b.stayHits, flip ? b.flipN : b.stayN),
+          };
           if (flip) flippedSteps++;
         }
         return { mask, detail, flippedSteps, gatedSteps };
@@ -6925,6 +6955,121 @@ html body #panel-dashboard .journal-entry {
 @media (max-width: 480px) { .dash-stake-popup { width: min(310px, 90vw); right: -8px; } }
 
 /* ══════════════════════════════════════════════════════════════
+   STAKE ADDITION TERMINAL — big glowing "hacker terminal" block
+   ══════════════════════════════════════════════════════════════ */
+.sa-terminal {
+  position: relative; overflow: hidden;
+  border-radius: 16px; padding: 18px 18px 16px; margin-bottom: 12px;
+  background: linear-gradient(165deg, #0a0f0d, #0d1512 60%, #0a0f0d);
+  border: 1.5px solid hsl(var(--muted-foreground)/0.25);
+  box-shadow: inset 0 1px 0 hsl(255 100% 100% / 0.04), 0 10px 30px rgba(0,0,0,0.4);
+  font-family: 'DM Mono', monospace;
+  transition: border-color .3s, box-shadow .3s;
+}
+.sa-terminal.sa-armed {
+  border-color: hsl(140 85% 45% / 0.55);
+  box-shadow: inset 0 1px 0 hsl(255 100% 100% / 0.04), 0 0 0 1px hsl(140 85% 45% / 0.15), 0 0 34px hsl(140 85% 45% / 0.18), 0 10px 30px rgba(0,0,0,0.5);
+}
+.sa-terminal-scanlines {
+  position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent 2px, hsl(140 85% 60% / 0.025) 3px, transparent 4px);
+}
+.sa-terminal-topbar { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; }
+.sa-terminal-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: hsl(var(--muted-foreground)/0.4); flex-shrink: 0;
+}
+.sa-terminal-dot.sa-dot-on {
+  background: hsl(140 85% 55%); box-shadow: 0 0 10px hsl(140 85% 55%), 0 0 20px hsl(140 85% 55% / 0.6);
+  animation: sa-blink 1.4s ease-in-out infinite;
+}
+@keyframes sa-blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.sa-terminal-title {
+  font-size: 12px; font-weight: 800; letter-spacing: 2px;
+  color: hsl(140 70% 80%); text-shadow: 0 0 12px hsl(140 85% 45% / 0.4);
+}
+.sa-terminal-status {
+  margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: 1.5px;
+  padding: 3px 9px; border-radius: 999px;
+  color: hsl(var(--muted-foreground)); background: hsl(var(--muted)/0.3);
+  border: 1px solid hsl(var(--border)/0.5);
+}
+.sa-terminal.sa-armed .sa-terminal-status {
+  color: hsl(140 85% 70%); background: hsl(140 85% 45% / 0.12); border-color: hsl(140 85% 45% / 0.4);
+}
+.sa-terminal-sub {
+  position: relative; z-index: 1; margin-top: 6px; font-size: 9px; line-height: 1.5;
+  color: hsl(var(--muted-foreground)/0.75); max-width: 480px;
+}
+.sa-terminal-grid {
+  position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-top: 14px;
+}
+.sa-terminal-cell {
+  background: hsl(0 0% 100% / 0.02); border: 1px solid hsl(140 40% 40% / 0.2);
+  border-radius: 10px; padding: 10px 12px;
+}
+.sa-terminal-label {
+  font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase;
+  color: hsl(var(--muted-foreground)/0.7); margin-bottom: 4px;
+}
+.sa-terminal-bignum {
+  font-size: 24px; font-weight: 800; color: hsl(0 0% 92%); letter-spacing: -0.5px;
+}
+.sa-terminal-bignum.sa-boosted { color: hsl(140 85% 60%); text-shadow: 0 0 14px hsl(140 85% 45% / 0.5); }
+.sa-terminal-caption { font-size: 8px; color: hsl(var(--muted-foreground)/0.6); margin-top: 2px; }
+.sa-terminal-input {
+  width: 100%; background: hsl(0 0% 100% / 0.03); border: 1px solid hsl(140 40% 40% / 0.3);
+  border-radius: 8px; padding: 7px 9px; font-family: 'DM Mono', monospace;
+  font-size: 20px; font-weight: 800; color: hsl(140 85% 75%); outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sa-terminal-input:focus { border-color: hsl(140 85% 50%); box-shadow: 0 0 0 3px hsl(140 85% 45% / 0.15); }
+.sa-terminal-armbtn {
+  position: relative; z-index: 1; width: 100%; margin-top: 12px; padding: 13px;
+  border-radius: 12px; border: 1.5px solid hsl(140 60% 45% / 0.5); cursor: pointer;
+  background: hsl(140 85% 45% / 0.1); color: hsl(140 85% 75%);
+  font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 800; letter-spacing: 2px;
+  transition: all .18s;
+}
+.sa-terminal-armbtn:hover { background: hsl(140 85% 45% / 0.18); transform: translateY(-1px); }
+.sa-terminal-armbtn.sa-armed {
+  background: hsl(140 85% 45% / 0.22); box-shadow: 0 0 20px hsl(140 85% 45% / 0.3);
+}
+.sa-terminal-analysis {
+  position: relative; z-index: 1; margin-top: 12px; padding-top: 10px;
+  border-top: 1px dashed hsl(var(--border)/0.4);
+}
+.sa-terminal-analysis-row {
+  display: flex; justify-content: space-between; font-size: 9.5px;
+  color: hsl(var(--muted-foreground)/0.8); padding: 2px 0;
+}
+.sa-terminal-analysis-row b { color: hsl(0 0% 88%); font-size: 10px; }
+.sa-terminal-analysis-row b.sa-good { color: hsl(140 85% 60%); }
+.sa-terminal-suggestion {
+  margin-top: 8px; display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 9px;
+  background: hsl(45 90% 55% / 0.06); border: 1px solid hsl(45 90% 55% / 0.3);
+}
+.sa-terminal-suggestion.sa-conf-high { background: hsl(140 85% 45% / 0.08); border-color: hsl(140 85% 45% / 0.35); }
+.sa-terminal-suggestion.sa-conf-low { background: hsl(var(--muted)/0.2); border-color: hsl(var(--border)/0.5); }
+.sa-terminal-suggestion-text { flex: 1; font-size: 9px; line-height: 1.5; color: hsl(var(--foreground)/0.85); }
+.sa-conf-tag { font-size: 7.5px; text-transform: uppercase; letter-spacing: 1px; color: hsl(var(--muted-foreground)/0.7); }
+.sa-terminal-usebtn {
+  flex-shrink: 0; padding: 7px 12px; border-radius: 8px; border: 1px solid hsl(140 60% 45% / 0.5);
+  background: hsl(140 85% 45% / 0.15); color: hsl(140 85% 75%);
+  font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 800; letter-spacing: 1px; cursor: pointer;
+  transition: all .15s;
+}
+.sa-terminal-usebtn:hover { background: hsl(140 85% 45% / 0.28); }
+.sa-terminal-armed-banner {
+  position: relative; z-index: 1; margin-top: 10px; padding: 8px 10px; border-radius: 8px;
+  background: hsl(140 85% 45% / 0.1); border: 1px solid hsl(140 85% 45% / 0.3);
+  font-size: 9px; color: hsl(140 85% 75%); letter-spacing: .3px;
+}
+@media (max-width: 560px) { .sa-terminal-grid { grid-template-columns: 1fr; } }
+
+/* ══════════════════════════════════════════════════════════════
    BEST TRADING TIMES — small rank strip in Equity Curve header
    ══════════════════════════════════════════════════════════════ */
 .dash-best-times { margin-top: 8px; }
@@ -12565,9 +12710,25 @@ window.NexusStrategies=exports;
       this.onUpdate = null;
 
       this.config = this.loadConfig();
+      // Stake Addition's "boosted" stake lives ONLY here — a plain instance
+      // property, never written into this.config, never persisted to
+      // localStorage. That's the whole trick: the ARMED switch and the
+      // Next-High-Stake value are normal config (persist, survive reload),
+      // but the actual elevated number in effect resets to nothing the
+      // instant the page reloads — see getEffectiveStake().
+      this.sessionStakeOverride = null;
+      // Rolling analytics for the Stake Addition terminal's suggestion —
+      // NOT persisted (deliberately; a fresh page load starts counting
+      // fresh, same spirit as the stake override itself).
+      this.sessionOutcomes = []; // array of booleans, most recent last
+      // Forward (out-of-sample) validation for the Recovery Pattern
+      // Engine's Dynamic Pattern — see handleContractResult. NOT
+      // persisted, same reasoning as sessionOutcomes.
+      this.dynamicMaskLiveStats = { hits: 0, attempts: 0, recent: [] };
+      this._dynamicMaskLivePending = false;
       this.state = {
         active: false, isLocked: false, isCooldown: false, history: [],
-        currentRuns: 0, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false,
+        currentRuns: 0, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false,
         stats: { win: 0, loss: 0, profit: 0 }, connected: false, balance: 0,
         currentDigit: -1, currentQuote: 0, streak: 0, lastTradedDigit: null,
       };
@@ -12913,7 +13074,13 @@ window.NexusStrategies=exports;
         // "hottest digit" condition from re-firing on the very next tick.
         matchesCooldownTicks: 3,
       };
-      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : evenDefaults;
+      const defaults = {
+        // Universal fallback so EVERY bot — not just Even/Odd — has Stake
+        // Addition available, even ones whose own defaults object above
+        // doesn't mention it explicitly.
+        stakeAdditionArmed: false, stakeAdditionNextStake: null,
+        ...(this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : evenDefaults),
+      };
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -12954,6 +13121,60 @@ window.NexusStrategies=exports;
     addLog(type, title, message) {
       this.logs = [{ id: crypto.randomUUID(), timestamp: new Date(), type, title, message }, ...this.logs].slice(0, 100);
       this.emit();
+    }
+
+    // The stake actually used for the next trade/session: the Stake
+    // Addition boost if one is currently in effect, otherwise the plain
+    // Stake $ the operator set. The boost lives ONLY in-memory
+    // (this.sessionStakeOverride), so it is automatically gone — back to
+    // normal Stake $ — the moment the page reloads, with zero extra code
+    // needed anywhere else. Everywhere the engine used to read
+    // this.config.stake / cfg.stake as "what to trade with next," it now
+    // reads this instead.
+    getEffectiveStake() {
+      const v = this.sessionStakeOverride;
+      return (v != null && !isNaN(v) && v > 0) ? v : this.config.stake;
+    }
+
+    // ── STAKE ADDITION ANALYSIS ─────────────────────────────────────────
+    // A step up from "guess a number": looks at your actual recent session
+    // results (win/loss per completed session, not per trade) and turns
+    // that into a concrete suggested Next High Stake, instead of leaving
+    // the field as a totally blind manual entry. Still just a suggestion —
+    // one click fills the field, it never applies itself.
+    getSessionWinStreak() {
+      let streak = 0;
+      for (let i = this.sessionOutcomes.length - 1; i >= 0; i--) {
+        if (this.sessionOutcomes[i]) streak++; else break;
+      }
+      return streak;
+    }
+    getRecentSessionStats(n = 10) {
+      const recent = this.sessionOutcomes.slice(-n);
+      const wins = recent.filter(Boolean).length;
+      return { sessions: recent.length, wins, losses: recent.length - wins, winRate: recent.length ? wins / recent.length : null };
+    }
+    getSuggestedNextStake() {
+      const base = this.getEffectiveStake();
+      const streak = this.getSessionWinStreak();
+      const { winRate, sessions } = this.getRecentSessionStats(10);
+      // Not enough history yet to say anything meaningful — a flat,
+      // conservative nudge instead of a confident-looking number.
+      if (sessions < 3) return { value: +(base * 1.2).toFixed(2), confidence: 'low', reason: `Only ${sessions} session${sessions === 1 ? '' : 's'} of history so far — trade a few more before trusting a suggestion here.` };
+      // Losing more than winning lately → don't suggest scaling up at all.
+      if (winRate !== null && winRate < 0.5) {
+        return { value: +base.toFixed(2), confidence: 'low', reason: `Last ${sessions} sessions won only ${(winRate * 100).toFixed(0)}% — not a good moment to be scaling up. Suggestion holds at your current stake.` };
+      }
+      // Scale with the live win streak, capped so a hot run can't suggest
+      // something absurd: +20% per consecutive winning session, max 5
+      // sessions' worth (2x), then hard-capped at 3x base regardless.
+      const bump = 1 + Math.min(streak, 5) * 0.2;
+      const value = Math.min(base * bump, base * 3);
+      const confidence = streak >= 3 ? 'high' : streak >= 1 ? 'medium' : 'low';
+      const reason = streak > 0
+        ? `${streak} winning session${streak === 1 ? '' : 's'} in a row, ${(winRate * 100).toFixed(0)}% win rate over the last ${sessions}.`
+        : `No active winning streak yet, but recent win rate (${(winRate * 100).toFixed(0)}% over ${sessions} sessions) supports a small step up.`;
+      return { value: +value.toFixed(2), confidence, reason };
     }
 
     setConfig(partial) {
@@ -13833,6 +14054,7 @@ window.NexusStrategies=exports;
             const ranking = this.smartRecoveryRanking;
             if (ranking && ranking.ready) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
+              this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               contractType = flip ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD') : (isOddMode ? 'DIGITODD' : 'DIGITEVEN');
               const top = ranking.patterns.find((p) => p.id === ranking.best);
               this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
@@ -13958,6 +14180,7 @@ window.NexusStrategies=exports;
             const ranking = this.smartRecoveryRanking;
             if (ranking && ranking.ready) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
+              this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               contractType = flip ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD') : (isOddMode ? 'DIGITODD' : 'DIGITEVEN');
               const top = ranking.patterns.find((p) => p.id === ranking.best);
               this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
@@ -14041,6 +14264,7 @@ window.NexusStrategies=exports;
             const ranking = this.smartRecoveryRanking;
             if (ranking && ranking.ready) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
+              this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               if (flip) { contractType = flipCT; barrierValue = 9 - cfg.recoveryBarrier; }
               const top = ranking.patterns.find((p) => p.id === ranking.best);
               this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType} ${barrierValue}`);
@@ -14290,7 +14514,8 @@ window.NexusStrategies=exports;
     completeSession(wonSession = true) {
       this.executionGuard = false; this.pendingTrade = null;
       this._skipArmed = false; this._isSacrificeTrade = false;
-      // ── STAKE ADDITION (Even/Odd classic + Even/Odd MR bots) ──────────
+      this.sessionOutcomes = [...this.sessionOutcomes, !!wonSession].slice(-20);
+      // ── STAKE ADDITION (all bots) ──────────────────────────────────────
       // Fires exactly once per completed TRADING SESSION (this function —
       // the point where the bot goes into cooldown), not per individual
       // trade. wonSession === true covers both a clean run and a fully
@@ -14298,19 +14523,25 @@ window.NexusStrategies=exports;
       // wonSession === false covers stop-loss / martingale-stop-step /
       // any other session-ending loss. Only a win-finished session ever
       // promotes the stake, and only if the operator armed it — a lost
-      // session never touches the stake in any way. One shot: it disarms
-      // itself the moment it fires, so the NEXT session starts at the new
-      // (higher) stake but nothing keeps escalating automatically after.
-      // Covers both 'evenodd' (Even/Odd classic) and 'evenoddmr' (Even/Odd
-      // Mean Reversion) — every "even and odd" bot, not just the classic
-      // pair.
-      if (wonSession && (this.mode === 'evenodd' || this.mode === 'evenoddmr') && this.config.stakeAdditionArmed) {
+      // session never touches the stake in any way, boosted or not.
+      //
+      // STANDING switch, not one-shot: arming it no longer auto-disarms
+      // after firing — it stays armed and keeps promoting the stake at
+      // the end of every winning session until the operator manually
+      // switches it off. The boost itself lives in this.sessionStakeOverride
+      // (see getEffectiveStake()), never in this.config, so it can never
+      // get written to disk — a page reload always drops back to the
+      // plain Stake $ value, armed or not, exactly like flipping a light
+      // switch that resets when the power cycles but stays flipped
+      // otherwise. Available on every bot, not just Even/Odd.
+      if (wonSession && this.config.stakeAdditionArmed) {
         const nextHigh = parseFloat(this.config.stakeAdditionNextStake);
         if (!isNaN(nextHigh) && nextHigh > 0) {
-          this.addLog('engine', 'STAKE-ADD', `Session finished in a WIN — Stake Addition promoting Stake $ from $${this.config.stake.toFixed(2)} to $${nextHigh.toFixed(2)} for the next session. Arming switch off.`);
-          this.config = { ...this.config, stake: nextHigh, stakeAdditionArmed: false };
+          const fromStake = this.getEffectiveStake();
+          this.addLog('engine', 'STAKE-ADD', `Session finished in a WIN — Stake Addition promoting stake from $${fromStake.toFixed(2)} to $${nextHigh.toFixed(2)} for the next session. Still armed for the session after that too.`);
+          this.sessionStakeOverride = nextHigh;
         } else {
-          this.addLog('engine', 'STAKE-ADD', `Stake Addition was armed but no valid Next High Stake was set — skipped, arm switch left on.`);
+          this.addLog('engine', 'STAKE-ADD', `Stake Addition is armed but no valid Next High Stake was set — skipped this time.`);
         }
       }
       // Alt Automation: if this session ended in a loss (recovery exhausted,
@@ -14325,7 +14556,7 @@ window.NexusStrategies=exports;
       // Reset martingale state so the NEXT session always starts from the base stake,
       // regardless of what step the current session ended on (stop-loss, max step, TP, etc.)
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false,
-        currentRuns: 0, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+        currentRuns: 0, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
       const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
       this._cdMax = cd; // store for tab ring arc
@@ -14352,7 +14583,7 @@ window.NexusStrategies=exports;
           // HARD FORCE: stake/martingale step always snap back to the base
           // stake the instant cooldown ends, no matter what step/TP/SL/abort
           // path got us here, and regardless of whether Auto Pilot is on.
-          this.state = { ...this.state, isCooldown: false, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+          this.state = { ...this.state, isCooldown: false, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
           this._hideCooldownOverlay();
           this._rerollShuffles();
           // Market switch: every cooldown, always rotate onto a new market —
@@ -14376,7 +14607,7 @@ window.NexusStrategies=exports;
                   active: true,
                   isLocked: false,
                   currentRuns: 0,
-                  currentStake: this.config.stake,
+                  currentStake: this.getEffectiveStake(),
                   martingaleStep: 0,
                   inRecovery: false,
                 };
@@ -14500,6 +14731,20 @@ window.NexusStrategies=exports;
       // rest of the session, which is a real-money safety issue.
       const profit = isNaN(profitRaw) ? 0 : profitRaw;
       if (isNaN(profitRaw)) this.addLog('error', 'DATA', 'Contract result had an unreadable profit value — treated as 0 for stats.');
+      // ── DYNAMIC PATTERN LIVE (FORWARD) TRACKING ───────────────────────
+      // The Recovery Pattern Engine's on-screen hit rate is a BACKTEST —
+      // it's measuring the mask against the same history it was built
+      // from, which is exactly the setup that makes overfitting invisible.
+      // This is the honest number: every time a real recovery trade
+      // actually used the live mask's flip decision, record whether it
+      // won. Tracked completely separately from the backtest rate so the
+      // two can be compared side by side in the terminal.
+      if (this._dynamicMaskLivePending) {
+        this._dynamicMaskLivePending = false;
+        this.dynamicMaskLiveStats.attempts++;
+        if (win) this.dynamicMaskLiveStats.hits++;
+        this.dynamicMaskLiveStats.recent = [...(this.dynamicMaskLiveStats.recent || []), win].slice(-20);
+      }
       // ── DIGIT EXTRACTION ────────────────────────────────────────────
       // Deriv sends exit_tick_display_value as a full price string e.g. "1234.56"
       // The last character IS the traded digit for all Digit contract types.
@@ -14582,9 +14827,9 @@ window.NexusStrategies=exports;
       if (this._isSacrificeTrade) {
         this._isSacrificeTrade = false;
         this.executionGuard = false;
-        this.state = { ...this.state, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
+        this.state = { ...this.state, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
         if (win) {
-          this.addLog('win', 'TEST-STAKE', `Test stake WON (not counted) — firing real entry now at $${this.config.stake.toFixed(2)}.`);
+          this.addLog('win', 'TEST-STAKE', `Test stake WON (not counted) — firing real entry now at $${this.getEffectiveStake().toFixed(2)}.`);
           this.executeBoltPurchase();
         } else {
           this.addLog('loss', 'TEST-STAKE', `Test stake LOST (not counted) — signal rejected, real run skipped. Back to scouting for the next signal.`);
@@ -14597,7 +14842,7 @@ window.NexusStrategies=exports;
       const stats = { ...this.state.stats, profit: this.state.stats.profit + profit, win: this.state.stats.win + (win ? 1 : 0), loss: this.state.stats.loss + (win ? 0 : 1) };
       let ns = { ...this.state, stats };
       if (win) {
-        ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = cfg.stake;
+        ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = this.getEffectiveStake();
       } else {
         const nextStep = this.state.martingaleStep + 1;
         ns.martingaleStep = nextStep; ns.inRecovery = cfg.martingaleEnabled;
@@ -14739,7 +14984,7 @@ window.NexusStrategies=exports;
       // immediately re-fires the real run at the normal Stake once it settles.
       const useSacrifice = !forceFire && ftMode === 'sacrifice';
       this.state = { ...this.state, isLocked: true, martingaleStep: 0, inRecovery: false,
-        currentStake: useSacrifice ? (parseFloat(this.config.firstTickStake) || this.config.stake) : this.config.stake };
+        currentStake: useSacrifice ? (parseFloat(this.config.firstTickStake) || this.getEffectiveStake()) : this.getEffectiveStake() };
       this._isSacrificeTrade = useSacrifice;
       if (useSacrifice) {
         this.addLog('engine', 'TEST-STAKE', `🧪 Test stake $${this.state.currentStake.toFixed(2)} firing on the entry tick — result won't count toward Runs/stats; the real run fires right after.`);
@@ -15061,7 +15306,7 @@ window.NexusStrategies=exports;
           active: true,
           isLocked: false,
           currentRuns: 0,
-          currentStake: this.config.stake,
+          currentStake: this.getEffectiveStake(),
           martingaleStep: 0,
           inRecovery: false,
         };
@@ -15160,6 +15405,177 @@ window.NexusStrategies=exports;
 
   window.TitanEngine = TitanEngine;
 })();
+
+// ══════════════════════════════════════════════════════════════════════
+// STAKE ADDITION TERMINAL — shared big/glowing UI block + bindings.
+// One implementation, reused by every UI module (TitanUI, RiseFallUI,
+// MatchesUI, EvenOddReversionUI) so all bots get the exact same
+// behaviour instead of four hand-copied variants drifting apart.
+// ══════════════════════════════════════════════════════════════════════
+window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine, rootId, c) {
+  const armed = !!c.stakeAdditionArmed;
+  const effective = engine.getEffectiveStake ? engine.getEffectiveStake() : c.stake;
+  const boosted = effective > (c.stake || 0) + 0.001;
+  const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
+  const sug = engine.getSuggestedNextStake ? engine.getSuggestedNextStake() : null;
+  const streak = engine.getSessionWinStreak ? engine.getSessionWinStreak() : 0;
+  const stats = engine.getRecentSessionStats ? engine.getRecentSessionStats(10) : { sessions: 0, winRate: null };
+  return `
+  <div class="sa-terminal ${armed ? 'sa-armed' : ''}" id="${rootId}-sa-terminal">
+    <div class="sa-terminal-scanlines"></div>
+    <div class="sa-terminal-topbar">
+      <span class="sa-terminal-dot ${armed ? 'sa-dot-on' : ''}"></span>
+      <span class="sa-terminal-title">📈 STAKE&nbsp;ADDITION</span>
+      <span class="sa-terminal-status">${armed ? 'ARMED — STANDING' : 'OFF'}</span>
+    </div>
+    <div class="sa-terminal-sub">Promotes stake to Next High Stake at the end of every WINNING session. Stays on until YOU turn it off. Resets to normal Stake $ on page reload — never on a loss.</div>
+
+    <div class="sa-terminal-grid">
+      <div class="sa-terminal-cell">
+        <div class="sa-terminal-label">Currently trading at</div>
+        <div class="sa-terminal-bignum ${boosted ? 'sa-boosted' : ''}">$${effective.toFixed(2)}</div>
+        <div class="sa-terminal-caption">${boosted ? `boosted from base $${(c.stake||0).toFixed(2)}` : 'normal Stake $'}</div>
+      </div>
+      <div class="sa-terminal-cell">
+        <div class="sa-terminal-label">Next High Stake $</div>
+        <input class="sa-terminal-input" type="number" step="0.01" min="0.01" id="${rootId}-stakeadd-next" value="${nextVal}" placeholder="e.g. 5.00">
+      </div>
+    </div>
+
+    <button class="sa-terminal-armbtn ${armed ? 'sa-armed' : ''}" id="${rootId}-stakeadd">
+      ${armed ? '⏸ DISARM' : '▶ ARM STAKE ADDITION'}
+    </button>
+
+    <div class="sa-terminal-analysis">
+      <div class="sa-terminal-analysis-row">
+        <span>Session win streak</span><b class="${streak > 0 ? 'sa-good' : ''}">${streak}</b>
+      </div>
+      <div class="sa-terminal-analysis-row">
+        <span>Last ${stats.sessions} sessions win rate</span><b>${stats.winRate != null ? (stats.winRate * 100).toFixed(0) + '%' : '—'}</b>
+      </div>
+      ${sug ? `
+      <div class="sa-terminal-suggestion sa-conf-${sug.confidence}">
+        <div class="sa-terminal-suggestion-text"><b>Suggested: $${sug.value.toFixed(2)}</b> <span class="sa-conf-tag">${sug.confidence} confidence</span><br>${sug.reason}</div>
+        <button class="sa-terminal-usebtn" id="${rootId}-stakeadd-usesuggested" data-val="${sug.value}">USE</button>
+      </div>` : ''}
+    </div>
+
+    ${armed ? `<div class="sa-terminal-armed-banner">⏳ ARMED — waiting for a winning session to finish, then jumps to $${nextVal !== '' ? parseFloat(nextVal).toFixed(2) : '—'}.</div>` : ''}
+  </div>`;
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// RECOVERY PATTERN ENGINE — analysis buff, appended to the existing
+// terminal panel in all three places it appears (TitanUI, EvenOddReversion
+// UI, Differ/BenzUI). Two new things the old panel never showed:
+//  1. LIVE (forward) accuracy — how the mask has actually performed on
+//     REAL recovery trades since being built, tracked completely
+//     separately from the backtest rate. Backtest rate is in-sample by
+//     definition and can look better than reality; this is the honest
+//     number, and the panel now shows both side by side so a gap between
+//     them is visible instead of hidden.
+//  2. Per-step breakdown — instead of one aggregate rate, a 9-row table
+//     of exactly what the engine decided at each recovery step and how
+//     confident (Wilson lower bound) that decision is, so it's not a
+//     black box anymore.
+// ══════════════════════════════════════════════════════════════════════
+window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(engine, ranking) {
+  const live = (engine && engine.dynamicMaskLiveStats) || { hits: 0, attempts: 0, recent: [] };
+  const liveRate = live.attempts ? live.hits / live.attempts : null;
+  const backtestRate = ranking.ready ? ranking.bestRate : null;
+  const gapWarn = liveRate != null && backtestRate != null && (backtestRate - liveRate) > 0.15 && live.attempts >= 5;
+  const recent = live.recent || [];
+  const recentHalf = Math.floor(recent.length / 2);
+  const olderRate = recentHalf ? recent.slice(0, recentHalf).filter(Boolean).length / recentHalf : null;
+  const newerRate = (recent.length - recentHalf) ? recent.slice(recentHalf).filter(Boolean).length / (recent.length - recentHalf) : null;
+  const trend = (olderRate != null && newerRate != null) ? (newerRate > olderRate + 0.05 ? 'up' : newerRate < olderRate - 0.05 ? 'down' : 'flat') : null;
+  const dynamicP = ranking.patterns && ranking.patterns.find((p) => p.id === 'dynamic');
+  const stepDetail = dynamicP && dynamicP.detail ? dynamicP.detail : null;
+
+  return `
+  <div style="margin-top:14px;padding-top:14px;border-top:1px dashed hsl(var(--border)/0.4);position:relative">
+    <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">LIVE FORWARD ACCURACY (out-of-sample — the honest number)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid ${gapWarn ? 'hsl(var(--loss)/0.4)' : 'hsl(var(--border)/0.3)'}">
+        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">REAL RECOVERY TRADES</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:${liveRate == null ? 'hsl(var(--muted-foreground))' : gapWarn ? 'hsl(var(--loss))' : 'hsl(var(--win))'}">${liveRate != null ? `${Math.round(liveRate * 100)}%` : '—'}</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${live.attempts ? `${live.hits}/${live.attempts} actual trades${trend ? ` · trending ${trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'}` : ''}` : 'no live recovery trades yet this session'}</div>
+      </div>
+      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
+        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">BACKTEST (IN-SAMPLE)</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:hsl(var(--muted-foreground))">${backtestRate != null ? `${Math.round(backtestRate * 100)}%` : '—'}</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">what the panel above shows — measured against its own training window</div>
+      </div>
+    </div>
+    ${gapWarn ? `<div style="margin-top:8px;padding:9px 11px;background:hsl(var(--loss)/0.08);border:1px solid hsl(var(--loss)/0.3);border-radius:9px;font-size:9px;color:hsl(var(--loss));line-height:1.5">⚠ Live is running well below the backtest — a sign the backtest may be overfit to old data. Worth watching before leaning on this pattern harder.</div>` : ''}
+
+    ${stepDetail ? `
+    <div style="margin-top:16px;font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">PER-STEP BREAKDOWN (recovery step 1–9)</div>
+    <div style="display:grid;grid-template-columns:repeat(9,1fr);gap:4px">
+      ${Object.keys(stepDetail).map((s) => {
+        const d = stepDetail[s];
+        const conf = Math.round((d.confidence || 0) * 100);
+        const bg = !d.eligible ? 'hsl(var(--muted)/0.25)' : d.flip ? 'hsl(var(--win)/0.15)' : 'hsl(var(--primary)/0.12)';
+        const border = !d.eligible ? 'hsl(var(--border)/0.3)' : d.flip ? 'hsl(var(--win)/0.4)' : 'hsl(var(--primary)/0.35)';
+        const txt = !d.eligible ? 'hsl(var(--muted-foreground)/0.6)' : d.flip ? 'hsl(var(--win))' : 'hsl(var(--primary))';
+        return `<div title="Step ${s}: ${!d.eligible ? 'not enough samples yet' : d.flip ? 'FLIP' : 'STAY'} · ${conf}% confidence · ${d.flipN}/${d.stayN} flip/stay samples" style="padding:7px 4px;border-radius:8px;background:${bg};border:1px solid ${border};text-align:center">
+          <div style="font-size:7px;color:hsl(var(--muted-foreground)/0.7);letter-spacing:0.5px">S${s}</div>
+          <div style="font-size:9px;font-weight:800;color:${txt};margin-top:2px">${!d.eligible ? '···' : d.flip ? 'FLIP' : 'STAY'}</div>
+          <div style="font-size:7px;color:${txt};margin-top:1px;opacity:0.8">${!d.eligible ? '' : conf + '%'}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="margin-top:6px;font-size:8px;color:hsl(var(--muted-foreground)/0.55);line-height:1.5">Hover a step for its sample counts. Confidence is Wilson-adjusted (pulled toward 50% on thin samples) — not the raw hit rate, so it won't look falsely certain on a small window. Grey = not enough data yet to trust either way.</div>
+    ` : ''}
+  </div>`;
+};
+
+window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, rootId, elFn, host, rerender) {
+  const toggle = elFn(`${rootId}-stakeadd`, host);
+  if (toggle) {
+    toggle.onclick = (e) => {
+      e.stopPropagation();
+      const arming = !engine.config.stakeAdditionArmed;
+      if (arming) {
+        const liveInput = elFn(`${rootId}-stakeadd-next`, host);
+        const liveVal = liveInput ? parseFloat(liveInput.value) : NaN;
+        if (isNaN(liveVal) || liveVal <= 0) {
+          if (liveInput) {
+            liveInput.style.borderColor = 'hsl(var(--loss))';
+            liveInput.style.boxShadow = '0 0 0 3px hsl(var(--loss)/0.15)';
+            liveInput.placeholder = 'Enter a stake first!';
+            liveInput.focus();
+            setTimeout(() => { liveInput.style.borderColor = ''; liveInput.style.boxShadow = ''; }, 1600);
+          }
+          engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
+          return;
+        }
+        engine.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: liveVal });
+      } else {
+        engine.setConfig({ stakeAdditionArmed: false });
+      }
+      rerender();
+    };
+  }
+  const nextEl = elFn(`${rootId}-stakeadd-next`, host);
+  if (nextEl) {
+    nextEl.onchange = (e) => {
+      const v = parseFloat(e.target.value);
+      engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
+    };
+  }
+  const useBtn = elFn(`${rootId}-stakeadd-usesuggested`, host);
+  if (useBtn) {
+    useBtn.onclick = (e) => {
+      e.stopPropagation();
+      const v = parseFloat(useBtn.dataset.val);
+      if (!isNaN(v) && v > 0) {
+        engine.setConfig({ stakeAdditionNextStake: v });
+        rerender();
+      }
+    };
+  }
+};
 
 (function (global) {
   'use strict';
@@ -15840,6 +16256,7 @@ window.NexusStrategies=exports;
               }).join('')}
             </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
           </div>
+          ${window.renderRecoveryPatternAnalysis(null, ranking)}
         </div>`;
       })()}
 
@@ -16704,31 +17121,7 @@ window.NexusStrategies=exports;
         Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
       </div>
     </div>
-    ${engine.mode === 'evenodd' ? `
-    <!-- ── STAKE ADDITION ─────────────────────────────────────────── -->
-    <div class="cp-card" style="border:1px solid hsl(var(--accent)/0.4);${c.stakeAdditionArmed ? 'box-shadow:0 0 18px hsl(var(--accent)/0.15)' : ''}">
-      <div class="cp-toggle-row" style="margin-bottom:0">
-        <div style="display:flex;align-items:center;gap:10px">
-          <button class="titan-toggle ${c.stakeAdditionArmed?'on':''}" id="${rootId}-stakeadd" onclick="event.stopPropagation()"></button>
-          <div>
-            <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">📈 Stake Addition</div>
-            <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Arms a ONE-TIME bump: next session that finishes in a WIN promotes Stake $ to the value below, then switches itself back off. Never lowers or resets anything — that's on you.</div>
-          </div>
-        </div>
-      </div>
-      <div class="cp-input-row" style="margin-top:10px">
-        <div class="cp-input-group">
-          <span class="cp-input-label">Next High Stake $</span>
-          <input class="cp-input" type="number" step="0.01" min="0.01" id="${rootId}-stakeadd-next" value="${c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : ''}" placeholder="e.g. 5.00">
-        </div>
-      </div>
-      ${c.stakeAdditionArmed ? `
-      <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:hsl(var(--accent)/0.1);border:1px solid hsl(var(--accent)/0.3);font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--accent));letter-spacing:.4px">
-        ⏳ ARMED — waiting for a winning session to finish. Stake $ stays at $${(c.stake||0).toFixed(2)} until then, then jumps to $${c.stakeAdditionNextStake != null ? parseFloat(c.stakeAdditionNextStake).toFixed(2) : '—'}.
-      </div>
-      ` : ''}
-    </div>
-    ` : ''}
+    ${window.renderStakeAdditionTerminal(engine, rootId, c)}
     <!-- ── MARTINGALE ENGINE ─────────────────────────────────────── -->
     <div class="cp-card">
       <div class="cp-section-label">Martingale Engine</div>
@@ -16942,7 +17335,14 @@ window.NexusStrategies=exports;
           const signalVal = parseInt(el(`${rootId}-signal`)?.value);
           const streakVal = parseInt(el(`${rootId}-streak-in`)?.value);
           const multVal = parseFloat(el(`${rootId}-mult`)?.value);
-          if (!isNaN(stakeVal) && stakeVal > 0) patch.stake = Math.max(0.01, stakeVal);
+          if (!isNaN(stakeVal) && stakeVal > 0) {
+            patch.stake = Math.max(0.01, stakeVal);
+            // A manual edit to Stake $ always wins immediately, even if
+            // Stake Addition currently has a boost in effect — "only I
+            // should reduce stake" means a typed value overrides it on
+            // the spot, not just after the next reload.
+            engine.sessionStakeOverride = null;
+          }
           if (!isNaN(runsVal) && runsVal > 0) patch.targetRuns = Math.max(1, runsVal);
           if (!isNaN(signalVal)) patch.minSignal = Math.min(100, Math.max(0, signalVal));
           if (!isNaN(streakVal) && streakVal > 0) patch.minStreak = Math.max(1, streakVal);
@@ -16967,45 +17367,8 @@ window.NexusStrategies=exports;
       };
     }
 
-    // ── STAKE ADDITION bindings (Even/Odd classic bots only) ───────────
-    const stakeAddToggle = el(`${rootId}-stakeadd`);
-    if (stakeAddToggle) {
-      stakeAddToggle.onclick = (e) => {
-        e.stopPropagation();
-        const arming = !c.stakeAdditionArmed;
-        if (arming) {
-          // Read the input LIVE — don't trust the closure's `c`, which is a
-          // snapshot from the last render and won't reflect a value the
-          // operator just typed but hasn't tabbed/clicked away from yet.
-          // Relying on the stale value made the toggle look broken: type a
-          // number, click the switch immediately, nothing happens.
-          const liveInput = el(`${rootId}-stakeadd-next`);
-          const liveVal = liveInput ? parseFloat(liveInput.value) : NaN;
-          if (isNaN(liveVal) || liveVal <= 0) {
-            if (liveInput) {
-              liveInput.style.borderColor = 'hsl(var(--loss))';
-              liveInput.style.boxShadow = '0 0 0 3px hsl(var(--loss)/0.15)';
-              liveInput.placeholder = 'Enter a stake first!';
-              liveInput.focus();
-              setTimeout(() => { liveInput.style.borderColor = ''; liveInput.style.boxShadow = ''; }, 1600);
-            }
-            engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
-            return;
-          }
-          engine.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: liveVal });
-        } else {
-          engine.setConfig({ stakeAdditionArmed: false });
-        }
-        renderCenterConfig(engine, rootId, engine.getSnapshot());
-      };
-    }
-    const stakeAddNextEl = el(`${rootId}-stakeadd-next`);
-    if (stakeAddNextEl) {
-      stakeAddNextEl.onchange = (e) => {
-        const v = parseFloat(e.target.value);
-        engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
-      };
-    }
+    // ── STAKE ADDITION bindings (shared terminal, all bots) ─────────────
+    window.bindStakeAdditionTerminal(engine, rootId, el, undefined, () => renderCenterConfig(engine, rootId, engine.getSnapshot()));
 
     el(`${rootId}-mart`).onclick = (e) => { e.stopPropagation(); const en = !c.martingaleEnabled; engine.setConfig({ martingaleEnabled: en }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     const martHeader = el(`${rootId}-mart-header`);
@@ -17815,6 +18178,7 @@ window.NexusStrategies=exports;
             }).join('')}
           </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
         </div>
+        ${window.renderRecoveryPatternAnalysis(engine, ranking)}
       </div>`;
     })() : ''}
 
@@ -20959,6 +21323,8 @@ window.NexusStrategies=exports;
         </div>
       </div>
 
+      ${window.renderStakeAdditionTerminal(engine, rootId, c)}
+
       ${engine.isMeanRevMode ? `
       <div class="cp-card">
         <div class="cp-section-label">Mean Reversion Parameters</div>
@@ -21030,7 +21396,8 @@ window.NexusStrategies=exports;
       // change — only an explicit Save (below, or the navbar's global
       // "SAVE SETTINGS" button) persists anything to disk.
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
+      window.bindStakeAdditionTerminal(engine, rootId, el, host, () => renderCenter(engine, rootId, engine.getSnapshot()));
       const durationEl = el(`${rootId}-duration`, host);
       if (durationEl) durationEl.onchange = (e) => { engine.setConfig({ duration: Math.max(engine.isMeanRevMode ? 15 : 1, parseInt(e.target.value) || (engine.isMeanRevMode ? 15 : 5)) }); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
@@ -21647,6 +22014,8 @@ window.NexusStrategies=exports;
         </div>
       </div>
 
+      ${window.renderStakeAdditionTerminal(engine, rootId, c)}
+
       <div class="cp-card">
         <div class="cp-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
           <div class="cp-section-label" style="margin:0">Martingale</div>
@@ -21710,11 +22079,12 @@ window.NexusStrategies=exports;
       </div>`;
     if (shHtml(host, html)) {
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
       el(`${rootId}-ticks`, host).onchange = (e) => { engine.setConfig({ numTicks: Math.min(10, Math.max(1, parseInt(e.target.value) || 2)) }); };
       el(`${rootId}-tradegap`, host).onchange = (e) => { engine.setConfig({ matchesCooldownTicks: Math.min(20, Math.max(0, parseInt(e.target.value) || 0)) }); };
+      window.bindStakeAdditionTerminal(engine, rootId, el, host, () => renderCenter(engine, rootId, engine.getSnapshot()));
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
@@ -22266,29 +22636,7 @@ window.NexusStrategies=exports;
         </div>
       </div>
 
-      <!-- ── STAKE ADDITION ─────────────────────────────────────────── -->
-      <div class="cp-card" style="border:1px solid hsl(var(--accent)/0.4);${c.stakeAdditionArmed ? 'box-shadow:0 0 18px hsl(var(--accent)/0.15)' : ''}">
-        <div class="cp-toggle-row" style="margin-bottom:0">
-          <div style="display:flex;align-items:center;gap:10px">
-            <button class="titan-toggle ${c.stakeAdditionArmed?'on':''}" id="${rootId}-stakeadd" onclick="event.stopPropagation()"></button>
-            <div>
-              <div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:800">📈 Stake Addition</div>
-              <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Arms a ONE-TIME bump: next session that finishes in a WIN promotes Stake $ to the value below, then switches itself back off. Never lowers or resets anything — that's on you.</div>
-            </div>
-          </div>
-        </div>
-        <div class="cp-input-row" style="margin-top:10px">
-          <div class="cp-input-group">
-            <span class="cp-input-label">Next High Stake $</span>
-            <input class="cp-input" type="number" step="0.01" min="0.01" id="${rootId}-stakeadd-next" value="${c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : ''}" placeholder="e.g. 5.00">
-          </div>
-        </div>
-        ${c.stakeAdditionArmed ? `
-        <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:hsl(var(--accent)/0.1);border:1px solid hsl(var(--accent)/0.3);font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--accent));letter-spacing:.4px">
-          ⏳ ARMED — waiting for a winning session to finish. Stake $ stays at $${(c.stake||0).toFixed(2)} until then, then jumps to $${c.stakeAdditionNextStake != null ? parseFloat(c.stakeAdditionNextStake).toFixed(2) : '—'}.
-        </div>
-        ` : ''}
-      </div>
+      ${window.renderStakeAdditionTerminal(engine, rootId, c)}
 
 
           <div style="display:flex;flex-direction:column;gap:5px">
@@ -22364,7 +22712,7 @@ window.NexusStrategies=exports;
       </div>`;
     if (shHtml(host, html)) {
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       const signalEl = el(`${rootId}-signal`, host);
       if (signalEl) signalEl.onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
@@ -22420,43 +22768,8 @@ window.NexusStrategies=exports;
           if (!isNaN(v) && v > 0) engine.setConfig({ firstTickStake: Math.max(0.01, v) });
         };
       }
-      // ── STAKE ADDITION bindings (Even/Odd MR) ───────────────────────
-      const eoStakeAddToggle = el(`${rootId}-stakeadd`, host);
-      if (eoStakeAddToggle) {
-        eoStakeAddToggle.onclick = (e) => {
-          e.stopPropagation();
-          const arming = !c.stakeAdditionArmed;
-          if (arming) {
-            // Read the input LIVE, same fix as classic Even/Odd — a value
-            // typed but not yet blurred/tabbed-away-from must still count,
-            // otherwise the switch looks broken.
-            const liveInput = el(`${rootId}-stakeadd-next`, host);
-            const liveVal = liveInput ? parseFloat(liveInput.value) : NaN;
-            if (isNaN(liveVal) || liveVal <= 0) {
-              if (liveInput) {
-                liveInput.style.borderColor = 'hsl(var(--loss))';
-                liveInput.style.boxShadow = '0 0 0 3px hsl(var(--loss)/0.15)';
-                liveInput.placeholder = 'Enter a stake first!';
-                liveInput.focus();
-                setTimeout(() => { liveInput.style.borderColor = ''; liveInput.style.boxShadow = ''; }, 1600);
-              }
-              engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
-              return;
-            }
-            engine.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: liveVal });
-          } else {
-            engine.setConfig({ stakeAdditionArmed: false });
-          }
-          renderCenter(engine, rootId, engine.getSnapshot());
-        };
-      }
-      const eoStakeAddNextEl = el(`${rootId}-stakeadd-next`, host);
-      if (eoStakeAddNextEl) {
-        eoStakeAddNextEl.onchange = (e) => {
-          const v = parseFloat(e.target.value);
-          engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
-        };
-      }
+      // ── STAKE ADDITION bindings (shared terminal, all bots) ──────────
+      window.bindStakeAdditionTerminal(engine, rootId, el, host, () => renderCenter(engine, rootId, engine.getSnapshot()));
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
@@ -22652,6 +22965,7 @@ window.NexusStrategies=exports;
             }).join('')}
           </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
         </div>
+        ${window.renderRecoveryPatternAnalysis(engine, ranking)}
       </div>`;
     })()}
 
