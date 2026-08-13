@@ -248,11 +248,49 @@
         };
       }
 
-      function rank(history, winCheck) {
+      // ── Short-Span Contrarian ────────────────────────────────────────
+      // Requested fix for "Smart Rec is losing a lot": the Dynamic Pattern
+      // above deliberately looks back up to 160 ticks per step, which is
+      // stable but slow to notice the market's CURRENT short-term bias.
+      // This is the opposite instinct on purpose — look at only the last
+      // SHORT_SPAN ticks (no per-step split, no long memory), find whichever
+      // side (flip vs stay) has been the dominant/"most used" recent
+      // pattern, and bet directly against it. Simple streak-fade logic,
+      // recomputed fresh every tick so a regime change shows up almost
+      // immediately instead of being diluted by 140 older ticks.
+      const SHORT_SPAN_MIN_SAMPLES = 10;  // need at least this many ticks in the short window before trusting it
+      const SHORT_SPAN_MIN_SKEW = 0.08;   // dominant side must lead by at least 8pp — otherwise it's just noise around 50/50, not a real recent bias
+      function buildShortSpanSignal(history, winCheck, span) {
+        const window = Math.max(6, span || 20);
+        const data = (history || []).slice(-window);
+        const empty = { ready: false, span: window, samples: Math.max(0, data.length - 1), dominant: null, dominantPct: 0.5, recommendFlip: false };
+        if (data.length - 1 < SHORT_SPAN_MIN_SAMPLES) return empty;
+        let stayCount = 0, flipCount = 0;
+        // stay/flip are complementary for every single digit (exactly one
+        // of the two bet directions is satisfied by any given outcome), so
+        // counting raw occurrences over the window IS "which side has been
+        // most used" — no simulated hit-rate needed, just a straight tally.
+        for (let i = 0; i < data.length - 1; i++) {
+          if (winCheck(data[i + 1], false)) stayCount++; else flipCount++;
+        }
+        const total = stayCount + flipCount;
+        const stayPct = total ? stayCount / total : 0.5;
+        const dominant = stayPct >= 0.5 ? 'stay' : 'flip';
+        const dominantPct = Math.max(stayPct, 1 - stayPct);
+        const skew = Math.abs(stayPct - 0.5) * 2; // 0 = perfectly even, 1 = totally one-sided
+        const ready = skew >= SHORT_SPAN_MIN_SKEW;
+        // Bet AGAINST whichever side has been most used: if "stay" has
+        // been dominant, recommend flipping away from it, and vice versa.
+        const recommendFlip = ready && dominant === 'stay';
+        return { ready, span: window, samples: total, dominant, dominantPct, stayCount, flipCount, recommendFlip };
+      }
+
+      function rank(history, winCheck, shortSpanWindow) {
         const data = (history || []).slice(-160);
         const emptyReference = PATTERN_DEFS.map((p) => ({ id: p.id, label: p.label, icon: p.icon, rate: 0, hits: 0, attempts: 0 }));
         const emptyDynamic = { id: 'dynamic', label: 'Dynamic Pattern', icon: '🧬', rate: 0, hits: 0, attempts: 0 };
-        const empty = { patterns: [...emptyReference, emptyDynamic], reference: emptyReference, best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null };
+        const shortSpan = buildShortSpanSignal(history, winCheck, shortSpanWindow);
+        const empty = { patterns: [...emptyReference, emptyDynamic], reference: emptyReference, best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null, shortSpan };
         if (data.length < MIN_SAMPLES + 1) return empty;
 
         // Reference-only backtest of the 5 fixed patterns. Shown in the
@@ -279,37 +317,50 @@
         return {
           patterns: [...reference, dynamic], reference,
           best: ready ? dynamic.id : null, bestRate: ready ? dynamic.rate : 0,
-          ready, samples: data.length, dynamicMask: dynamic.mask,
+          ready, samples: data.length, dynamicMask: dynamic.mask, shortSpan,
         };
       }
 
       // Parity bots (Even/Odd, Even/Odd MR): base direction is a fixed
       // side (ODD or EVEN) that only flips when the pattern's own rule
       // fires for the current step.
-      function rankParity(history, isOddMode) {
+      function rankParity(history, isOddMode, shortSpanWindow) {
         return rank(history, (nextDigit, flip) => {
           const betOdd = flip ? !isOddMode : isOddMode;
           return betOdd === (nextDigit % 2 === 1);
-        });
+        }, shortSpanWindow);
       }
 
       // Threshold bots (Over/Under): base direction bets over/under a
       // barrier; a flip mirrors both the side AND the barrier (9 -
       // barrier), exactly like the live Alt A/B/C/R recovery logic does.
-      function rankThreshold(history, isUnderMode, barrier) {
+      function rankThreshold(history, isUnderMode, barrier, shortSpanWindow) {
         return rank(history, (nextDigit, flip) => {
           const useUnder = flip ? !isUnderMode : isUnderMode;
           const useBarrier = flip ? 9 - barrier : barrier;
           return useUnder ? nextDigit < useBarrier : nextDigit > useBarrier;
-        });
+        }, shortSpanWindow);
       }
 
-      // Applies the engine's live self-built mask to a given martingale
-      // step, returning whether THIS step should flip. There's no longer
-      // a fixed-pattern branch here — the engine only ever drives off its
-      // own dynamicMask once ready, so this just reads that mask.
+      // Applies the engine's live self-built signal to a given martingale
+      // step, returning whether THIS step should flip.
+      //
+      // PRIMARY driver is now the short-span contrarian read: it only
+      // needs ~10-20 ticks to become trustworthy, versus the long-window
+      // per-step mask below, which needs ~70+ ticks before a SPECIFIC
+      // step accumulates enough of its own samples (each step only gets
+      // hit every 9th tick). That gap was the real reason Smart Recovery
+      // kept losing — for most of a session, most steps just fell back to
+      // "stay" (repeat the base direction) not because that was the right
+      // call, just because the slow long-window mask hadn't gathered
+      // enough evidence yet to say anything else.
+      //
+      // Long-window mask is now only consulted as a fallback for the
+      // early window before the short span itself has enough ticks.
       function shouldFlipForStep(ranking, step) {
-        if (!ranking || !ranking.ready || !ranking.dynamicMask) return false;
+        if (!ranking) return false;
+        if (ranking.shortSpan && ranking.shortSpan.ready) return !!ranking.shortSpan.recommendFlip;
+        if (!ranking.ready || !ranking.dynamicMask) return false;
         const cycleStep = ((step - 1) % CYCLE) + 1;
         return !!ranking.dynamicMask[cycleStep];
       }
@@ -13079,6 +13130,10 @@ window.NexusStrategies=exports;
         // Addition available, even ones whose own defaults object above
         // doesn't mention it explicitly.
         stakeAdditionArmed: false, stakeAdditionNextStake: null,
+        // How many recent ticks the short-span contrarian read looks at
+        // (see RecoveryPatternEngine.buildShortSpanSignal). Smaller = more
+        // reactive/noisier, larger = steadier/slower to notice a shift.
+        smartRecoveryShortSpan: 20,
         ...(this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : evenDefaults),
       };
       try {
@@ -13470,11 +13525,12 @@ window.NexusStrategies=exports;
         // just keeps the ranking itself always up to date so switching
         // to Smart Toggle mid-session doesn't start from a cold read.
         if (window.RecoveryPatternEngine) {
+          const shortSpanWindow = this.config.smartRecoveryShortSpan || 20;
           if (this.mode === 'evenodd' || this.isEvenOddMRMode) {
             const isOddMode = this.config.tradeMode === 'odd';
-            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankParity(fullHistory, isOddMode);
+            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankParity(fullHistory, isOddMode, shortSpanWindow);
           } else if (this.isOU) {
-            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankThreshold(fullHistory, this.isUnderMode, this.config.recoveryBarrier != null ? this.config.recoveryBarrier : this.config.overBarrier);
+            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankThreshold(fullHistory, this.isUnderMode, this.config.recoveryBarrier != null ? this.config.recoveryBarrier : this.config.overBarrier, shortSpanWindow);
           }
         }
         // Feed any journal entries still waiting on their post-trade 3-tick
@@ -15479,7 +15535,7 @@ window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine
 //     confident (Wilson lower bound) that decision is, so it's not a
 //     black box anymore.
 // ══════════════════════════════════════════════════════════════════════
-window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(engine, ranking) {
+window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(engine, ranking, rootId) {
   const live = (engine && engine.dynamicMaskLiveStats) || { hits: 0, attempts: 0, recent: [] };
   const liveRate = live.attempts ? live.hits / live.attempts : null;
   const backtestRate = ranking.ready ? ranking.bestRate : null;
@@ -15491,10 +15547,40 @@ window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(en
   const trend = (olderRate != null && newerRate != null) ? (newerRate > olderRate + 0.05 ? 'up' : newerRate < olderRate - 0.05 ? 'down' : 'flat') : null;
   const dynamicP = ranking.patterns && ranking.patterns.find((p) => p.id === 'dynamic');
   const stepDetail = dynamicP && dynamicP.detail ? dynamicP.detail : null;
+  const ss = ranking.shortSpan || { ready: false, span: 20, samples: 0, dominant: null, dominantPct: 0.5, recommendFlip: false };
+  const cfgWindow = engine && engine.config ? engine.config.smartRecoveryShortSpan : null;
+  const editable = rootId && engine; // Differ's read-only call passes neither
 
   return `
   <div style="margin-top:14px;padding-top:14px;border-top:1px dashed hsl(var(--border)/0.4);position:relative">
-    <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">LIVE FORWARD ACCURACY (out-of-sample — the honest number)</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <span style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">SHORT-SPAN CONTRARIAN — PRIMARY DRIVER</span>
+      <span style="font-size:7.5px;padding:2px 7px;border-radius:999px;background:${ss.ready ? 'hsl(var(--win)/0.15)' : 'hsl(var(--muted)/0.3)'};color:${ss.ready ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'};border:1px solid ${ss.ready ? 'hsl(var(--win)/0.4)' : 'hsl(var(--border)/0.5)'};letter-spacing:1px">${ss.ready ? '● DRIVING' : '○ WARMING UP'}</span>
+      <div style="flex:1"></div>
+      ${editable ? `
+      <label style="display:flex;align-items:center;gap:5px;font-size:8px;color:hsl(var(--muted-foreground))">
+        SPAN
+        <input type="number" min="6" max="100" id="${rootId}-shortspan" value="${cfgWindow != null ? cfgWindow : 20}" style="width:48px;padding:3px 5px;border-radius:6px;border:1px solid hsl(var(--border)/0.5);background:hsl(var(--bg)/0.7);color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:10px;text-align:center">
+        ticks
+      </label>` : ''}
+    </div>
+    <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.6;margin-bottom:10px">
+      Looks only at the last ${ss.span} ticks, finds whichever side has been most used recently, and bets the opposite — ready almost immediately instead of the ~70+ ticks a specific recovery step needs before the long-window pattern below can say anything about it. This is what actually drives live flips now; the long-window pattern only fills in before this has enough ticks.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid ${ss.ready ? 'hsl(var(--win)/0.35)' : 'hsl(var(--border)/0.3)'}">
+        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">MOST-USED RECENTLY</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${ss.ready ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${ss.dominant ? (ss.dominant === 'stay' ? 'BASE SIDE' : 'FLIPPED SIDE') : '—'}</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ss.samples ? `${Math.round(ss.dominantPct * 100)}% of last ${ss.samples} ticks${ss.ready ? '' : ' — skew too thin to act on yet'}` : 'buffering…'}</div>
+      </div>
+      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
+        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">DECISION</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${ss.ready ? (ss.recommendFlip ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'}">${ss.ready ? (ss.recommendFlip ? 'FIRE OPPOSITE' : 'STAY BASE') : '—'}</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">fading whichever side has been dominant</div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px;font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">LIVE FORWARD ACCURACY (out-of-sample — the honest number)</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid ${gapWarn ? 'hsl(var(--loss)/0.4)' : 'hsl(var(--border)/0.3)'}">
         <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">REAL RECOVERY TRADES</div>
@@ -15502,15 +15588,15 @@ window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(en
         <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${live.attempts ? `${live.hits}/${live.attempts} actual trades${trend ? ` · trending ${trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'}` : ''}` : 'no live recovery trades yet this session'}</div>
       </div>
       <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
-        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">BACKTEST (IN-SAMPLE)</div>
+        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">LONG-WINDOW BACKTEST</div>
         <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:hsl(var(--muted-foreground))">${backtestRate != null ? `${Math.round(backtestRate * 100)}%` : '—'}</div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">what the panel above shows — measured against its own training window</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">the slower fallback pattern — reference only now</div>
       </div>
     </div>
     ${gapWarn ? `<div style="margin-top:8px;padding:9px 11px;background:hsl(var(--loss)/0.08);border:1px solid hsl(var(--loss)/0.3);border-radius:9px;font-size:9px;color:hsl(var(--loss));line-height:1.5">⚠ Live is running well below the backtest — a sign the backtest may be overfit to old data. Worth watching before leaning on this pattern harder.</div>` : ''}
 
     ${stepDetail ? `
-    <div style="margin-top:16px;font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">PER-STEP BREAKDOWN (recovery step 1–9)</div>
+    <div style="margin-top:16px;font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">LONG-WINDOW PER-STEP BREAKDOWN (fallback only, recovery step 1–9)</div>
     <div style="display:grid;grid-template-columns:repeat(9,1fr);gap:4px">
       ${Object.keys(stepDetail).map((s) => {
         const d = stepDetail[s];
@@ -15525,9 +15611,20 @@ window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(en
         </div>`;
       }).join('')}
     </div>
-    <div style="margin-top:6px;font-size:8px;color:hsl(var(--muted-foreground)/0.55);line-height:1.5">Hover a step for its sample counts. Confidence is Wilson-adjusted (pulled toward 50% on thin samples) — not the raw hit rate, so it won't look falsely certain on a small window. Grey = not enough data yet to trust either way.</div>
+    <div style="margin-top:6px;font-size:8px;color:hsl(var(--muted-foreground)/0.55);line-height:1.5">Hover a step for its sample counts. Confidence is Wilson-adjusted. Grey = not enough data yet. Only used once the short span above isn't ready.</div>
     ` : ''}
   </div>`;
+};
+
+window.bindRecoveryPatternAnalysis = function bindRecoveryPatternAnalysis(engine, rootId, elFn, host, rerender) {
+  const el = elFn(`${rootId}-shortspan`, host);
+  if (el) {
+    el.onchange = (e) => {
+      const v = parseInt(e.target.value, 10);
+      engine.setConfig({ smartRecoveryShortSpan: (!isNaN(v) && v >= 6) ? v : 20 });
+      if (rerender) rerender();
+    };
+  }
 };
 
 window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, rootId, elFn, host, rerender) {
@@ -18178,7 +18275,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }).join('')}
           </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
         </div>
-        ${window.renderRecoveryPatternAnalysis(engine, ranking)}
+        ${window.renderRecoveryPatternAnalysis(engine, ranking, rootId)}
       </div>`;
     })() : ''}
 
@@ -18253,6 +18350,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>`;
     if (global.setHtmlIfChanged(el(`${rootId}-right`), rightHtml)) {
       el(`${rootId}-clear`).onclick = () => engine.clearStats();
+      window.bindRecoveryPatternAnalysis(engine, rootId, el, undefined, () => renderRight(engine, rootId, engine.getSnapshot()));
     }
   }
 
@@ -22965,7 +23063,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }).join('')}
           </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
         </div>
-        ${window.renderRecoveryPatternAnalysis(engine, ranking)}
+        ${window.renderRecoveryPatternAnalysis(engine, ranking, rootId)}
       </div>`;
     })()}
 
@@ -22976,6 +23074,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>`;
     shHtml(host, html);
+    window.bindRecoveryPatternAnalysis(engine, rootId, el, host, () => renderRight(engine, rootId, engine.getSnapshot()));
   }
 
   function render(engine, rootId, label) {
