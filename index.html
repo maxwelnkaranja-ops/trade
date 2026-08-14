@@ -19,6 +19,27 @@
     }
   </script>
   <script>
+    // ── Back/forward-cache (bfcache) handling ────────────────────────────
+    // Browsers force-close every open WebSocket the instant a page enters
+    // the back/forward cache (navigating away, then back, with the tab
+    // frozen instead of reloaded). This app has a dozen-plus independent
+    // sockets — the dashboard status feed, each of the 13 Titan bots' own
+    // trading sockets, tick-history sockets — and every one of them has its
+    // own reconnect-on-close logic. On bfcache restore they'd all fire
+    // their reconnects at once; if the person then navigates back/forward
+    // again before those finish, the new sockets get frozen and killed too,
+    // producing the repeating "WebSocket ... failed: Page entered
+    // Back-Forward Cache" flood. Rather than teaching every one of those
+    // sockets to coordinate a clean bfcache-aware reconnect, the reliable
+    // fix is: if this exact page is ever resurrected from bfcache, just
+    // reload it. That guarantees every socket, every engine's state, and
+    // every UI listener comes back in one consistent, freshly-connected
+    // state instead of a dozen modules racing to reconnect independently.
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) window.location.reload();
+    });
+  </script>
+  <script>
     // ── Dashboard Master Gate reader ─────────────────────────────────────
     // Single source of truth for the Dashboard's master Take Profit / Stop
     // Loss inputs (persisted to localStorage as dash_master_tp / _sl).
