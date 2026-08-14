@@ -259,11 +259,25 @@
       // recomputed fresh every tick so a regime change shows up almost
       // immediately instead of being diluted by 140 older ticks.
       const SHORT_SPAN_MIN_SAMPLES = 10;  // need at least this many ticks in the short window before trusting it
-      const SHORT_SPAN_MIN_SKEW = 0.08;   // dominant side must lead by at least 8pp — otherwise it's just noise around 50/50, not a real recent bias
+      // Statistical significance gate, not a flat percentage-point bar.
+      // The old version required only an 8pp skew regardless of sample
+      // size — at n=10-20 that's easily hit by pure chance roughly a
+      // third of the time (a fair coin lands 6/4 or worse constantly),
+      // so it was reacting to noise as often as to a genuine bias, which
+      // is exactly the kind of thing that keeps a "smart" recovery
+      // performing no better than a coin flip. A z-test scales the bar
+      // with the sample size instead: it demands more evidence at n=10
+      // than at n=40, so it stays reactive on a real skew but stops
+      // firing on noise once there's actually enough data to tell them
+      // apart. 1.1 sits deliberately lower than the long-window pattern's
+      // 1.645 (~95%) — short-span exists to be FAST, so it accepts a
+      // little more false-positive risk (~86% one-tailed confidence) in
+      // exchange for reacting sooner than the slow long-window mask.
+      const SHORT_SPAN_MIN_Z = 1.1;
       function buildShortSpanSignal(history, winCheck, span) {
         const window = Math.max(6, span || 20);
         const data = (history || []).slice(-window);
-        const empty = { ready: false, span: window, samples: Math.max(0, data.length - 1), dominant: null, dominantPct: 0.5, recommendFlip: false };
+        const empty = { ready: false, span: window, samples: Math.max(0, data.length - 1), dominant: null, dominantPct: 0.5, recommendFlip: false, z: 0 };
         if (data.length - 1 < SHORT_SPAN_MIN_SAMPLES) return empty;
         let stayCount = 0, flipCount = 0;
         // stay/flip are complementary for every single digit (exactly one
@@ -277,12 +291,13 @@
         const stayPct = total ? stayCount / total : 0.5;
         const dominant = stayPct >= 0.5 ? 'stay' : 'flip';
         const dominantPct = Math.max(stayPct, 1 - stayPct);
-        const skew = Math.abs(stayPct - 0.5) * 2; // 0 = perfectly even, 1 = totally one-sided
-        const ready = skew >= SHORT_SPAN_MIN_SKEW;
+        const se = total ? Math.sqrt(0.25 / total) : 0;
+        const z = se ? Math.abs(stayPct - 0.5) / se : 0;
+        const ready = z >= SHORT_SPAN_MIN_Z;
         // Bet AGAINST whichever side has been most used: if "stay" has
         // been dominant, recommend flipping away from it, and vice versa.
         const recommendFlip = ready && dominant === 'stay';
-        return { ready, span: window, samples: total, dominant, dominantPct, stayCount, flipCount, recommendFlip };
+        return { ready, span: window, samples: total, dominant, dominantPct, stayCount, flipCount, recommendFlip, z };
       }
 
       function rank(history, winCheck, shortSpanWindow) {
@@ -367,6 +382,42 @@
 
       return { rankParity, rankThreshold, shouldFlipForStep, PATTERN_DEFS };
     })();
+
+    // ══════════════════════════════════════════════════════════════════
+    // REGIME METER — classifies a market as TRENDING (digits are
+    // streaking/repeating more than random chance would) or CHOPPY
+    // (digits are alternating/reverting more than random chance would),
+    // purely from the same-parity persistence of consecutive ticks. A
+    // truly random feed sits at ~50% persistence; a z-test on the gap
+    // from 50% is what decides which side of neutral it's landed on and
+    // how confidently.
+    //
+    // Why this matters for rotation: momentum-style strategies (riding a
+    // dominant streak) want TRENDING markets; contrarian/mean-reversion
+    // approaches — Smart Recovery's short-span fade, specifically — want
+    // the opposite, CHOPPY markets, since fading the recent side only
+    // keeps winning where the market tends to swing back. One market
+    // being "good" or "bad" depends entirely on which kind of edge a bot
+    // is trying to run, so this returns the raw classification and lets
+    // each caller decide which regime it actually wants.
+    window.classifyRegime = function classifyRegime(history, windowSize = 50) {
+      const data = (history || []).slice(-windowSize);
+      const empty = { regime: 'WARMING', trendScore: 50, persistence: 0.5, z: 0, samples: 0, ready: false };
+      if (data.length < 15) return { ...empty, samples: Math.max(0, data.length - 1) };
+      let same = 0, total = 0;
+      for (let i = 1; i < data.length; i++) {
+        total++;
+        if ((data[i] % 2) === (data[i - 1] % 2)) same++;
+      }
+      const persistence = total ? same / total : 0.5;
+      const se = total ? Math.sqrt(0.25 / total) : 0;
+      const z = se ? (persistence - 0.5) / se : 0;
+      let regime = 'NEUTRAL';
+      if (z >= 1.28) regime = 'TRENDING';       // ~90% one-tailed confidence: repeats beat chance
+      else if (z <= -1.28) regime = 'CHOPPY';   // ~90% one-tailed confidence: alternation beats chance
+      const trendScore = Math.round(Math.max(0, Math.min(100, 50 + z * 15)));
+      return { regime, trendScore, persistence, z, samples: total, ready: true };
+    };
   </script>
   <div id="global-error-toast" class="global-error-toast" role="alert" aria-live="assertive"></div>
   <script>
@@ -9286,6 +9337,7 @@ window.EvenTrading = exports;
         const history = globalSocket.getHistory(symbol);
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
+        if (window.classifyRegime) market.regime = window.classifyRegime(market.history);
         if (market.history.length >= 10) {
           market.analysis = this.isOddStratScan
             ? analyzeOddStrategyCondition(market.history, this.tickPeriod)
@@ -10954,6 +11006,7 @@ window.NexusTrading = exports;
         const history = globalSocket.getHistory(symbol);
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
+        if (window.classifyRegime) market.regime = window.classifyRegime(market.history);
         if (market.history.length >= 10) {
           market.analysis = this.isOver3Scan
             ? analyzeOver3Condition(market.history, this.tickPeriod)
@@ -11026,7 +11079,7 @@ window.NexusTrading = exports;
   // always chosen once cooldown ends — unless it's the only viable market
   // left, in which case we allow staying rather than picking something with
   // no data at all.
-  window.BenzPickNextMarket = function BenzPickNextMarket(scanner, currentSymbol) {
+  window.BenzPickNextMarket = function BenzPickNextMarket(scanner, currentSymbol, preferredRegime) {
     if (!scanner) return null;
     const is1s = (sym) => typeof sym === 'string' && sym.startsWith('1HZ');
 
@@ -11043,7 +11096,19 @@ window.NexusTrading = exports;
     // Sort with 1s markets prioritised first, score as the tiebreaker within
     // each group — this keeps normal markets in the running (never dropped),
     // just ranked behind the 1s ones.
+    // REGIME METER: when the caller has a preference (TRENDING for
+    // momentum/streak strategies, CHOPPY for Smart Recovery's contrarian
+    // fade), a match on that regime outranks the 1s bonus — being on the
+    // right REGIME matters more than the market's tick speed. A market
+    // still in 'WARMING' (not enough data yet) or with no regime data at
+    // all is treated as neutral, never penalised, so this never starves
+    // the pool down to nothing on a cold scanner.
     pool = pool.slice().sort((a, b) => {
+      if (preferredRegime) {
+        const aMatch = a.regime && a.regime.regime === preferredRegime ? 1 : 0;
+        const bMatch = b.regime && b.regime.regime === preferredRegime ? 1 : 0;
+        if (aMatch !== bMatch) return bMatch - aMatch;
+      }
       const aBonus = is1s(a.symbol) ? 1 : 0;
       const bBonus = is1s(b.symbol) ? 1 : 0;
       if (aBonus !== bBonus) return bBonus - aBonus;
@@ -13191,6 +13256,24 @@ window.NexusStrategies=exports;
       return (v != null && !isNaN(v) && v > 0) ? v : this.config.stake;
     }
 
+    // ── REGIME METER preference ─────────────────────────────────────────
+    // Which market regime actually suits what this bot is about to do:
+    //  - Smart Recovery armed → this bot leans on the short-span
+    //    contrarian fade during recovery, which wins by betting AGAINST
+    //    whichever side has been dominant — that only works where the
+    //    market tends to swing back, i.e. CHOPPY conditions. A strong
+    //    persistent TREND is exactly what breaks a fade strategy (it
+    //    keeps betting against a streak that keeps extending).
+    //  - Otherwise → the base strategies (S1-S9) are mostly riding
+    //    dominance/streak continuation, so TRENDING markets suit them
+    //    better than a coin-flip-random CHOPPY one.
+    // Markets with no regime data yet, or still 'WARMING', are treated as
+    // neutral by BenzPickNextMarket — this preference only re-ranks
+    // among markets that actually have a confident read either way.
+    getPreferredRegime() {
+      return this.config.smartRecovery ? 'CHOPPY' : 'TRENDING';
+    }
+
     // ── STAKE ADDITION ANALYSIS ─────────────────────────────────────────
     // A step up from "guess a number": looks at your actual recent session
     // results (win/loss per completed session, not per trade) and turns
@@ -13718,7 +13801,7 @@ window.NexusStrategies=exports;
               const scannerBest = this.scanner && this.scanner.getBestMarket && this.scanner.getBestMarket();
               let candidate = scannerBest && scannerBest.symbol && scannerBest.symbol !== market ? scannerBest.symbol : null;
               if (!candidate && window.BenzPickNextMarket && this.scanner) {
-                const next = window.BenzPickNextMarket(this.scanner, market);
+                const next = window.BenzPickNextMarket(this.scanner, market, this.getPreferredRegime());
                 if (next && next.symbol && next.symbol !== market) candidate = next.symbol;
               }
               if (candidate) {
@@ -13776,7 +13859,7 @@ window.NexusStrategies=exports;
             this._altCooldownUntil = 0;
             this._altLastDomCheck = 0;
             if (this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, market);
+              const best = window.BenzPickNextMarket(this.scanner, market, this.getPreferredRegime());
               if (best && best.symbol && best.symbol !== market) {
                 this.addLog('engine', 'ALT-GATE', `🔁 Rotating to ${best.symbol}`);
                 this.changeMarket(best.symbol);
@@ -13843,7 +13926,7 @@ window.NexusStrategies=exports;
             // into whatever market is currently scoring best.
             if (!this._over3WaitStart) this._over3WaitStart = Date.now();
             if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -13881,7 +13964,7 @@ window.NexusStrategies=exports;
               : `Streak of ${streak} ended on digit ${lastDigit} — need 7 or 9`;
             if (!this._over3WaitStart) this._over3WaitStart = Date.now();
             if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -13943,7 +14026,7 @@ window.NexusStrategies=exports;
             // of sitting here indefinitely.
             if (!this._oddWaitStart) this._oddWaitStart = Date.now();
             if (Date.now() - this._oddWaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -14004,7 +14087,7 @@ window.NexusStrategies=exports;
             this.strategyPhase = 'waiting';
             if (!this._evenWaitStart) this._evenWaitStart = Date.now();
             if (Date.now() - this._evenWaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -14108,12 +14191,22 @@ window.NexusStrategies=exports;
             // flat "which side is starved" read.
             const step = st.martingaleStep;
             const ranking = this.smartRecoveryRanking;
-            if (ranking && ranking.ready) {
+            // Gate on EITHER signal being ready — previously this only
+            // checked the slow long-window ranking.ready, so shortSpan
+            // (which is usually ready first) sat unused for the first
+            // several ticks even though shouldFlipForStep() below already
+            // prefers it once it IS available.
+            if (ranking && (ranking.ready || (ranking.shortSpan && ranking.shortSpan.ready))) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
               this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               contractType = flip ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD') : (isOddMode ? 'DIGITODD' : 'DIGITEVEN');
-              const top = ranking.patterns.find((p) => p.id === ranking.best);
-              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
+              const ss = ranking.shortSpan;
+              if (ss && ss.ready) {
+                this.addLog('engine', 'SMART-REC', `Short-span: ${ss.dominant.toUpperCase()} dominant ${(ss.dominantPct*100).toFixed(0)}% of last ${ss.samples} ticks (z=${ss.z.toFixed(2)}) → fading it, betting ${contractType.replace('DIGIT','')}`);
+              } else {
+                const top = ranking.patterns.find((p) => p.id === ranking.best);
+                this.addLog('engine', 'SMART-REC', `Long-window fallback: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
+              }
             } else {
               // Not enough tick history yet to rank patterns — fall back
               // to the original starved-side read until it warms up.
@@ -14234,12 +14327,17 @@ window.NexusStrategies=exports;
             // pattern's step-rule instead of a flat starved-side read.
             const step = st.martingaleStep;
             const ranking = this.smartRecoveryRanking;
-            if (ranking && ranking.ready) {
+            if (ranking && (ranking.ready || (ranking.shortSpan && ranking.shortSpan.ready))) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
               this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               contractType = flip ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD') : (isOddMode ? 'DIGITODD' : 'DIGITEVEN');
-              const top = ranking.patterns.find((p) => p.id === ranking.best);
-              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
+              const ss = ranking.shortSpan;
+              if (ss && ss.ready) {
+                this.addLog('engine', 'SMART-REC', `Short-span: ${ss.dominant.toUpperCase()} dominant ${(ss.dominantPct*100).toFixed(0)}% of last ${ss.samples} ticks (z=${ss.z.toFixed(2)}) → fading it, betting ${contractType.replace('DIGIT','')}`);
+              } else {
+                const top = ranking.patterns.find((p) => p.id === ranking.best);
+                this.addLog('engine', 'SMART-REC', `Long-window fallback: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
+              }
             } else {
               const recent = st.history.slice(-20);
               const oddPct = recent.length ? recent.filter((d) => this.T.isOdd(d)).length / recent.length : 0.5;
@@ -14318,12 +14416,17 @@ window.NexusStrategies=exports;
             // a flat "which side is dominant" read.
             const step = st.martingaleStep;
             const ranking = this.smartRecoveryRanking;
-            if (ranking && ranking.ready) {
+            if (ranking && (ranking.ready || (ranking.shortSpan && ranking.shortSpan.ready))) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
               this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               if (flip) { contractType = flipCT; barrierValue = 9 - cfg.recoveryBarrier; }
-              const top = ranking.patterns.find((p) => p.id === ranking.best);
-              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType} ${barrierValue}`);
+              const ss = ranking.shortSpan;
+              if (ss && ss.ready) {
+                this.addLog('engine', 'SMART-REC', `Short-span: ${ss.dominant === 'stay' ? baseWord : flipWord} dominant ${(ss.dominantPct*100).toFixed(0)}% of last ${ss.samples} ticks (z=${ss.z.toFixed(2)}) → fading it, betting ${contractType} ${barrierValue}`);
+              } else {
+                const top = ranking.patterns.find((p) => p.id === ranking.best);
+                this.addLog('engine', 'SMART-REC', `Long-window fallback: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType} ${barrierValue}`);
+              }
             } else {
               // Not enough tick history yet to rank patterns — fall back
               // to the original dominant-side read until it warms up.
@@ -14647,7 +14750,7 @@ window.NexusStrategies=exports;
           // stay in the fallback pool so they're still used whenever there's
           // no good 1s candidate available.
           if (this.scanner && window.BenzPickNextMarket && !this.fixedMarket) {
-            const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
+            const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
             if (best && best.symbol) {
               const label = best._forcedSwitch ? `🔀 Switching to ${best.symbol}` : `↻ Staying on ${best.symbol} (only viable market)`;
               this.addLog('engine', 'MARKET', `${label} (score: ${best.score || '?'}${best._rank > 1 ? `, picked #${best._rank}` : ''})`);
@@ -20838,6 +20941,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const history = globalSocket.getHistory(symbol);
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
+        if (window.classifyRegime) market.regime = window.classifyRegime(market.history);
         if (market.history.length >= 15 && window.MatchesAnalyzer) {
           market.analysis = window.MatchesAnalyzer.analyze(market.history, this.tickPeriod, { preset: 'auto' });
           market.score = this.calculateScore(market);
@@ -23171,6 +23275,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const trailing = hrTrailingStreak(history);
       const longest = hrLongestStreak(history);
       const worstStreak = Math.max(trailing, longest);
+      const regime = window.classifyRegime ? window.classifyRegime(history) : null;
       let score = 50;
       if (health) {
         if (health.longTerm === 'HEALTHY') score += 20;
@@ -23178,7 +23283,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         else if (health.longTerm === 'POOR') score -= 20;
       }
       score -= worstStreak * 12;
-      return { symbol: m.value, label: m.label, score, isStreaky: worstStreak >= HR_STREAK_LIMIT, streak: worstStreak, ticks: history.length };
+      // REGIME METER: Hot Repeat is hunting for the SAME digit twice in a
+      // row, so a market that generally tends to produce runs (TRENDING)
+      // is the better hunting ground — as long as it isn't ALREADY
+      // topped-out on one right now, which the streak penalty above
+      // already handles separately. A CHOPPY (alternates more than
+      // chance) market gets a small penalty since that's the opposite of
+      // what a repeat-hunting bot wants.
+      if (regime && regime.ready) {
+        if (regime.regime === 'TRENDING') score += 12;
+        else if (regime.regime === 'CHOPPY') score -= 8;
+      }
+      return { symbol: m.value, label: m.label, score, isStreaky: worstStreak >= HR_STREAK_LIMIT, streak: worstStreak, ticks: history.length, regime };
     }).sort((a, b) => b.score - a.score);
     if (!scored.length) return null;
     let pool = scored.filter((m) => m.symbol !== currentSymbol);
