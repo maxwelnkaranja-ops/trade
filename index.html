@@ -8212,51 +8212,20 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
     state.connectionError = '';
     emit();
 
-    // 2026 Deriv API flow:
-    // 1. REST POST /trading/v1/options/accounts/{accountId}/otp  → get OTP WebSocket URL
-    // 2. WebSocket connect to that URL (auth is embedded, no {authorize} message needed)
-    // We first fetch accounts to discover the accountId, then get the OTP.
+    // Real Deriv API flow (the "2026 REST OTP" version below this used to
+    // implement doesn't exist — there's no /trading/v1/options/accounts or
+    // /otp REST endpoint on api.derivws.com; that's what was causing the
+    // CORS failures and the WebSocket connecting to a URL that was never
+    // valid in the first place). The actual flow is one step: open the
+    // same public WebSocket every analysis socket already uses, then send
+    // {"authorize": "<token>"} as the first message. The authorize
+    // response itself carries the account id, balance and currency —
+    // no separate accounts lookup needed.
     let pingInterval = null;
 
-    async function connectViaOtp() {
-      // Step 1: resolve the accountId via the shared DerivAuth singleton so
-      // this doesn't fire its own duplicate /accounts request alongside
-      // every Titan/HotRepeat engine doing the same thing on page load.
-      let accountId = state.accountId;
-      const appId = state.appId || '33ADPhDZXR2F60qhPudXB';
-
-      if (!accountId) {
-        try {
-          const resolved = await window.DerivAuth.resolveAccountId(state.apiToken, appId, state.accountType);
-          accountId = resolved.accountId;
-          state.accountId = accountId;
-          state.currency = resolved.currency || state.currency;
-        } catch (e) {
-          state.isAuthenticated = false;
-          state.connectionStatus = 'disconnected';
-          state.connectionError = e.message || 'Could not fetch accounts — check your token and App ID';
-          emit();
-          return;
-        }
-      }
-
-      // Step 2: get an OTP-authenticated WebSocket URL. Goes through the
-      // shared queue in DerivAuth so it's spaced out from every other
-      // engine's OTP request instead of firing in the same tick.
-      let wsUrl;
-      try {
-        wsUrl = await window.DerivAuth.getOtpUrl(state.apiToken, appId, accountId);
-      } catch (e) {
-        state.isAuthenticated = false;
-        state.connectionStatus = 'disconnected';
-        state.connectionError = e.message || 'OTP request failed — check your App ID and token scopes';
-        emit();
-        return;
-      }
-
-      // Step 3: Connect to the authenticated WebSocket URL
-      try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (_) {}
-      const ws = new WebSocket(wsUrl);
+    function connectViaOtp() {
+      const numericAppId = state.wsAppId || '1089';
+      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${numericAppId}`);
       statusSocket = ws;
 
       ws.onerror = () => {
@@ -8264,22 +8233,36 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
         emit();
       };
       ws.onopen = () => {
-        reconnectDelay = 8000;
-        state.isAuthenticated = true;
-        state.connectionStatus = 'connected';
-        state.connectionError = '';
-        emit();
-        // Subscribe to live balance updates + keep alive
-        try {
-          ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-          pingInterval = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
-          }, 25000);
-        } catch (e) { /* */ }
+        try { ws.send(JSON.stringify({ authorize: state.apiToken })); } catch (e) { /* */ }
       };
       ws.onmessage = (m) => {
         try {
           const d = JSON.parse(m.data);
+          if (d.error) {
+            state.isAuthenticated = false;
+            state.connectionStatus = 'disconnected';
+            state.connectionError = d.error.message || 'Authorization failed — check your API token.';
+            emit();
+            try { ws.close(); } catch (e) { /* */ }
+            return;
+          }
+          if (d.msg_type === 'authorize' && d.authorize) {
+            reconnectDelay = 8000;
+            state.isAuthenticated = true;
+            state.connectionStatus = 'connected';
+            state.connectionError = '';
+            state.accountId = d.authorize.loginid || state.accountId;
+            state.currency = d.authorize.currency || state.currency;
+            if (typeof d.authorize.balance === 'number') state.balanceUSD = d.authorize.balance;
+            emit();
+            try {
+              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+              pingInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
+              }, 25000);
+            } catch (e) { /* */ }
+            return;
+          }
           if (d.msg_type === 'balance' && d.balance) {
             const bal = parseFloat(d.balance.balance);
             if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
@@ -9085,7 +9068,7 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -10774,7 +10757,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
 
   class GlobalSocketManager {
     constructor() {
@@ -11329,7 +11312,7 @@ window.NexusTrading = exports;
 (function () {
   'use strict';
 
-  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -11699,6 +11682,10 @@ window.NexusTrading = exports;
           break;
         }
         case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; this._tpSlLatched = false; this._pendingDigitCaptures = []; break;
+        // Used by the TP popup's "Reload Take Profit" CTA — zero the P&L
+        // counter to start a fresh gate session WITHOUT touching the
+        // journal/win-loss history, unlike RESET_JOURNAL above.
+        case 'RESET_PROFIT_ONLY': s.totalProfit = 0; this._tpSlLatched = false; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'SET_LUCKY': s.luckyNumber = action.value; break;
         case 'SET_RECOMMENDED_MARKET': s.recommendedMarket = action.market; s.analysisConfidence = action.confidence; break;
@@ -11909,72 +11896,56 @@ window.NexusTrading = exports;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
       try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) { /* */ }
 
-      // 2026 Deriv API: REST OTP → authenticated WebSocket URL, via the
-      // shared DerivAuth singleton (see its definition near the top of the
-      // file) so this doesn't fire duplicate /accounts and /otp requests
-      // alongside HubStore's status socket and every Titan/HotRepeat bot.
+      // Real Deriv API flow: one WebSocket, {"authorize": token} as the
+      // first message — no REST accounts/OTP lookup (that endpoint never
+      // existed on api.derivws.com, which is what was causing the CORS
+      // errors and the connection failures).
       const _self = this;
-      (async () => {
-        const hub = window.HubStore.getState();
-        const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
+      const hub = window.HubStore.getState();
+      const numericAppId = hub.wsAppId || '1089';
+      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${numericAppId}`);
+      _self.socketT = ws;
 
-        // Resolve accountId
-        let accountId = hub.accountId;
-        if (!accountId) {
-          try {
-            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
-            accountId = resolved.accountId;
-          } catch (e) {
+      ws.onerror = () => {
+        _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
+      };
+      ws.onopen = () => {
+        try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
+      };
+      ws.onmessage = (m) => {
+        try {
+          const d = JSON.parse(m.data);
+          if (d.error && !_self.state.isAuthenticated) {
             _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-            _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' });
+            _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${d.error.message || 'invalid token'}`, ntype: 'loss' });
             return;
           }
-        }
-
-        // Get OTP WebSocket URL
-        let wsUrl;
-        try {
-          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
-        } catch (e) {
-          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-          _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' });
-          return;
-        }
-
-        const ws = new WebSocket(wsUrl);
-        _self.socketT = ws;
-
-        ws.onerror = () => {
-          _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
-        };
-        ws.onopen = () => {
-          _self._authDelay = 8000;
-          const bal = window.HubStore.getState().balanceUSD || 0;
-          _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
-          _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
-          try {
-            ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
-            ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-          } catch (e) { /* */ }
-        };
-        ws.onmessage = (m) => {
-          try {
-            const d = JSON.parse(m.data);
-            if (d.msg_type === 'balance' && d.balance) {
-              const bal = parseFloat(d.balance.balance);
-              if (!isNaN(bal)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: bal });
-            }
-            if (d.msg_type === 'proposal_open_contract') {
-              const c = d.proposal_open_contract;
-              if (c && c.is_sold) {
-                const balAfter = parseFloat(c.balance_after);
-                if (!isNaN(balAfter)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: balAfter });
-                if (!c.contract_id || !_self.ownContractIds.has(c.contract_id)) return;
-                _self.ownContractIds.delete(c.contract_id);
-                const isWin = c.status === 'won';
-                const profit = parseFloat(c.profit) || 0;
-                // ── DIGIT EXTRACTION (Differ) ───────────────────────────────
-                // exit_tick_display_value is a full price like "1234.56" — last char is the digit.
+          if (d.msg_type === 'authorize' && d.authorize) {
+            _self._authDelay = 8000;
+            const bal = (typeof d.authorize.balance === 'number') ? d.authorize.balance : (window.HubStore.getState().balanceUSD || 0);
+            _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
+            _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
+            try {
+              ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
+              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+            } catch (e) { /* */ }
+            return;
+          }
+          if (d.msg_type === 'balance' && d.balance) {
+            const bal = parseFloat(d.balance.balance);
+            if (!isNaN(bal)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: bal });
+          }
+          if (d.msg_type === 'proposal_open_contract') {
+            const c = d.proposal_open_contract;
+            if (c && c.is_sold) {
+              const balAfter = parseFloat(c.balance_after);
+              if (!isNaN(balAfter)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: balAfter });
+              if (!c.contract_id || !_self.ownContractIds.has(c.contract_id)) return;
+              _self.ownContractIds.delete(c.contract_id);
+              const isWin = c.status === 'won';
+              const profit = parseFloat(c.profit) || 0;
+              // ── DIGIT EXTRACTION (Differ) ───────────────────────────────
+              // exit_tick_display_value is a full price like "1234.56" — last char is the digit.
                 // entry digit: prefer API field, fall back to currentTick recorded at trigger.
                 // Multiple fallback fields tried in order of reliability.
                 function _lc(v) { const s = v?.toString().trim(); return (s && s.length && /\d/.test(s.slice(-1))) ? s.slice(-1) : null; }
@@ -12047,7 +12018,6 @@ window.NexusTrading = exports;
             setTimeout(() => _self.authenticate(), _self._authDelay);
           }
         };
-      })();
     }
 
     _showDifferCooldownOverlay(duration) {
@@ -12779,30 +12749,75 @@ window.NexusStrategies=exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
   const ANALYSIS_HOLD = 20;
+
+  // USD → KSH display rate, kept consistent with the rest of the Hub (see
+  // the balance pill and the equity-panel conversionRate, both 129.5).
+  const RESULT_POPUP_USD_TO_KSH = 129.5;
+  const fmtKsh = (usd) => Number(usd).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Generalized TP/SL popup — kind: 'tp' (win/green) or 'sl' (loss/red).
   // Kept the old name as a thin wrapper so existing call sites keep working.
+  //
+  // _resultPopupLock makes this a singleton: while one is on screen, further
+  // calls are ignored instead of tearing down and rebuilding the element.
+  // That rebuild-on-every-call was the source of the "flickering"/repeated
+  // popping — several things can call showResultPopup within moments of
+  // each other (per-bot TP/SL, the dashboard's master P&L gate, and — until
+  // the gate-latch bug was fixed — the gate re-firing every 3s on its own),
+  // and each call was yanking the popup out and re-inserting it, restarting
+  // the enter animation every time. Now only the FIRST call in a given
+  // "hit" gets to show; it fully owns the popup until it's dismissed.
+  let _resultPopupLock = false;
   function showResultPopup(kind, target, netValue) {
-    const existing = document.getElementById('benz-congrats-popup');
-    if (existing) existing.remove();
+    if (_resultPopupLock || document.getElementById('benz-congrats-popup')) return;
+    _resultPopupLock = true;
     const isTp = kind !== 'sl';
     const color = isTp ? '#48ffa7' : '#ff5c6a';
     const rgb = isTp ? '72,255,167' : '255,92,106';
     const icon = isTp ? '🏆' : '🛑';
     const title = isTp ? 'Take Profit Hit!' : 'Stop Loss Hit!';
     const bodyLabel = isTp ? 'Target' : 'Limit';
-    const netTxt = (netValue !== undefined && netValue !== null) ? ` · Net P/L: <b style="color:${color}">$${Number(netValue).toFixed(2)}</b>` : '';
+    const targetUsd = Number(target);
+    const targetKsh = fmtKsh(targetUsd * RESULT_POPUP_USD_TO_KSH);
+    const netTxt = (netValue !== undefined && netValue !== null)
+      ? ` · Net P/L: <b style="color:${color}">$${Number(netValue).toFixed(2)}</b> <span style="color:rgba(255,255,255,0.45)">(KSH ${fmtKsh(Number(netValue) * RESULT_POPUP_USD_TO_KSH)})</span>`
+      : '';
     const div = document.createElement('div');
     div.id = 'benz-congrats-popup';
-    div.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(${rgb},0.12),rgba(${rgb},0.08));border:1px solid rgba(${rgb},0.5);border-radius:20px;padding:32px 40px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 60px rgba(${rgb},0.2),0 20px 60px rgba(0,0,0,0.5);backdrop-filter:blur(24px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;cursor:pointer;min-width:260px`;
-    div.innerHTML = `<div style="font-size:2.8rem;margin-bottom:10px">${icon}</div><div style="font-size:18px;font-weight:900;letter-spacing:3px;color:${color};text-transform:uppercase;margin-bottom:8px">${title}</div><div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:14px">${bodyLabel} of <b style="color:${color}">$${Number(target).toFixed(2)}</b> reached${isTp ? ' 🎉' : ''}${netTxt}</div><div style="font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.4);text-transform:uppercase">Session Stopped · Tap to dismiss</div>`;
+    div.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(${rgb},0.14),rgba(${rgb},0.09));border:1.5px solid rgba(${rgb},0.55);border-radius:26px;padding:44px 52px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 90px rgba(${rgb},0.25),0 24px 80px rgba(0,0,0,0.55);backdrop-filter:blur(28px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;min-width:360px;max-width:min(92vw,460px)`;
+    div.innerHTML = `
+      <div style="font-size:4rem;margin-bottom:14px;line-height:1">${icon}</div>
+      <div style="font-size:24px;font-weight:900;letter-spacing:3px;color:${color};text-transform:uppercase;margin-bottom:12px">${title}</div>
+      <div style="font-size:16px;color:rgba(255,255,255,0.7);margin-bottom:8px;line-height:1.5">
+        ${bodyLabel} of <b style="color:${color}">$${targetUsd.toFixed(2)}</b> <span style="color:rgba(255,255,255,0.45)">(KSH ${targetKsh})</span> reached${isTp ? ' 🎉' : ''}
+      </div>
+      <div style="font-size:14px;color:rgba(255,255,255,0.6);margin-bottom:20px">${netTxt}</div>
+      ${isTp ? `<button id="benz-reload-tp-btn" style="width:100%;padding:14px 20px;margin-bottom:14px;border-radius:14px;border:1px solid rgba(${rgb},0.6);background:rgba(${rgb},0.16);color:${color};font-family:Outfit,sans-serif;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:background .2s">🔄 Reload Take Profit</button>
+      <div style="font-size:9.5px;letter-spacing:0.5px;color:rgba(255,255,255,0.35);margin-bottom:16px;line-height:1.5">Starts the profit count fresh from $0 and re-engages the bots — journal &amp; history stay untouched</div>` : ''}
+      <div style="font-size:11px;letter-spacing:2px;color:rgba(255,255,255,0.4);text-transform:uppercase;cursor:pointer" id="benz-popup-dismiss">Session Stopped · Tap to dismiss</div>`;
     document.body.appendChild(div);
     requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translate(-50%,-50%) scale(1)'; });
-    const dismiss = () => { div.style.opacity = '0'; div.style.transform = 'translate(-50%,-50%) scale(0.85)'; setTimeout(() => { try { div.remove(); } catch(_) {} }, 350); };
-    setTimeout(dismiss, 6000);
-    div.onclick = dismiss;
+    let dismissTimer = null;
+    const dismiss = () => {
+      if (dismissTimer) clearTimeout(dismissTimer);
+      div.style.opacity = '0'; div.style.transform = 'translate(-50%,-50%) scale(0.85)';
+      setTimeout(() => { try { div.remove(); } catch(_) {} _resultPopupLock = false; }, 350);
+    };
+    dismissTimer = setTimeout(dismiss, 9000);
+    const dismissHit = div.querySelector('#benz-popup-dismiss');
+    if (dismissHit) dismissHit.onclick = dismiss;
+    const reloadBtn = div.querySelector('#benz-reload-tp-btn');
+    if (reloadBtn) {
+      reloadBtn.onmouseover = () => { reloadBtn.style.background = `rgba(${rgb},0.26)`; };
+      reloadBtn.onmouseout = () => { reloadBtn.style.background = `rgba(${rgb},0.16)`; };
+      reloadBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (window.reloadTakeProfitFresh) window.reloadTakeProfitFresh();
+        dismiss();
+      };
+    }
   }
   function showCongratulationsPopup(target) { showResultPopup('tp', target); }
   window.showResultPopup = showResultPopup;
@@ -15156,44 +15171,29 @@ window.NexusStrategies=exports;
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
       if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
 
-      // 2026 Deriv API: REST OTP → authenticated WebSocket URL, via the
-      // shared DerivAuth singleton. resolveAccountId() is single-flight, so
-      // even though every Titan bot (and HubStore, and HotRepeat) calls
-      // this on load, only ONE /accounts request actually goes out and
-      // everyone shares the result. getOtpUrl() is queued/spaced so 13
-      // simultaneous bot connects don't all POST /otp in the same tick.
+      // Real Deriv API flow: one WebSocket, {"authorize": token} as the
+      // first message sent once the socket opens — no REST accounts/OTP
+      // lookup (that endpoint never existed on api.derivws.com, which is
+      // what was causing the CORS errors and the connection failures).
       const _titan = this;
-      (async () => {
+      (() => {
         const hub = window.HubStore.getState();
-        const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
+        const appId = hub.wsAppId || '1089';
+        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${appId}`);
+        _titan.tradingSocket = ws;
 
-        let accountId = hub.accountId;
-        if (!accountId) {
-          try {
-            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
-            accountId = resolved.accountId;
-          } catch (e) {
-            _titan.addLog('error', 'AUTH', `Accounts fetch failed: ${e.message}`);
-            _titan.state.connected = false; _titan.emit(); return;
-          }
-        }
-
-        // Get OTP WebSocket URL
-        let wsUrl;
-        try {
-          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
-        } catch (e) {
-          _titan.addLog('error', 'AUTH', `OTP failed: ${e.message}`);
-          _titan.state.connected = false; _titan.emit(); return;
-        }
-
-        _titan.tradingSocket = new WebSocket(wsUrl);
-
-        _titan.tradingSocket.onerror = () => {
+        ws.onerror = () => {
           _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
           _titan.state.connected = false;
         };
-        _titan.tradingSocket.onopen = () => {
+        ws.onopen = () => {
+          try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
+        };
+        // Runs once the server confirms the authorize call — with the real
+        // Deriv flow the socket is open (but not yet authenticated) before
+        // this fires, so the "ready to trade" setup lives here instead of
+        // in onopen.
+        _titan._onAuthorized = () => {
           _titan.state.balance = hub.balanceUSD || 0;
           _titan.state.connected = true;
           _titan.sound.playConnect();
@@ -15229,6 +15229,12 @@ window.NexusStrategies=exports;
             _titan.addLog('error', 'NETWORK', 'Received malformed message from trading socket — ignored.');
             return;
           }
+          if (data.error && !_titan.state.connected) {
+            _titan.addLog('error', 'AUTH', `Auth error: ${data.error.message || 'invalid token'}`);
+            _titan.state.connected = false; _titan.emit();
+            return;
+          }
+          if (data.msg_type === 'authorize' && data.authorize) { _titan._onAuthorized(); return; }
           if (data.msg_type === 'balance') _titan.state.balance = data.balance.balance;
           // Cache each symbol's decimal precision from its pip size (e.g. pip
           // 0.001 → 3 decimals). Used to format offset barriers (mean-rev)
@@ -19136,11 +19142,58 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   // ── BEST TRADING TIMES ─────────────────────────────────────────────────
-  // Buckets the same 24h equity-curve points by hour-of-day and ranks which
-  // hours have actually been most profitable/winning for THIS person's own
-  // trades — not a generic "best time to trade Deriv" claim, purely derived
-  // from their own history. Hours with too few trades are excluded so one
-  // lucky/unlucky trade at 3am doesn't look like a "best" or "worst" hour.
+  // Buckets trade points by hour-of-day and ranks which hours have actually
+  // been most profitable/winning for THIS person's own trades — not a
+  // generic "best time to trade Deriv" claim, purely derived from their own
+  // history. Hours with too few trades are excluded so one lucky/unlucky
+  // trade at 3am doesn't look like a "best" or "worst" hour.
+  //
+  // This has its OWN persistent store, deliberately separate from
+  // EquityStore. It used to be fed straight off the equity curve, which
+  // meant hitting "RESET CURVE" (clear graph) wiped the Best Times pills
+  // too, and since it was rebuilt from each bot's live journal, hitting
+  // "CLEAR STATS" (clear journal) could empty it out as well. BestTimesStore
+  // only ever ADDS points (same de-dupe-by-id merge as EquityStore, keyed
+  // off contractId/id) and is never touched by either clear action, so the
+  // ranking survives both.
+  const BEST_TIMES_STORAGE_KEY = 'benz_best_times_curve';
+  const BestTimesStore = {
+    _points: null,
+    load() {
+      if (this._points) return this._points;
+      try {
+        const raw = localStorage.getItem(BEST_TIMES_STORAGE_KEY);
+        this._points = raw ? JSON.parse(raw) : [];
+      } catch (_) {
+        this._points = [];
+      }
+      if (!Array.isArray(this._points)) this._points = [];
+      return this._points;
+    },
+    prune() {
+      const cutoff = Date.now() - EQUITY_MAX_AGE_MS;
+      this._points = this._points.filter((p) => (p.ts || 0) >= cutoff);
+    },
+    merge(entries) {
+      this.load();
+      const seen = new Set(this._points.map((p) => p.contractId || p.id));
+      (entries || []).forEach((e) => {
+        const key = e.contractId || e.id;
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        this._points.push({ id: e.id, contractId: e.contractId, ts: e.ts || Date.now(), profit: e.profit });
+      });
+      this.prune();
+      this.save();
+      return this._points;
+    },
+    save() {
+      try {
+        localStorage.setItem(BEST_TIMES_STORAGE_KEY, JSON.stringify(this._points));
+      } catch (_) {}
+    },
+  };
+
   const BEST_TIMES_MIN_TRADES = 3;
   function computeBestTradingHours(points) {
     const byHour = {}; // 0-23 -> { trades, wins, profit }
@@ -19741,7 +19794,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // Net P&L stat card instead of silently including probe-trade P&L that
     // card doesn't count.
     const curve = EquityStore.merge(allEntries.filter((e) => !e.isTest));
-    renderBestTimes(root, curve);
+    // Best Times reads from its own store (see comment above BestTimesStore)
+    // so it keeps ranking hours even after "RESET CURVE" or "CLEAR STATS".
+    const bestTimesPoints = BestTimesStore.merge(allEntries.filter((e) => !e.isTest));
+    renderBestTimes(root, bestTimesPoints);
 
     const equityWrap = el('dash-equity-wrap', root);
     renderEquityChart(equityWrap, curve);
@@ -20085,6 +20141,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           if (!eng) return;
           eng.clearStats && eng.clearStats();
         });
+        // Stats are back at zero, so re-arm the P&L gate latch too — it
+        // should only re-check from a clean slate, not immediately re-fire
+        // against whatever P&L tripped it last time.
+        if (window.resetPnlGateLatch) window.resetPnlGateLatch();
         render(root, engines);
       });
     }
@@ -22972,9 +23032,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       }
       // ── STAKE ADDITION bindings (shared terminal, all bots) ──────────
       window.bindStakeAdditionTerminal(engine, rootId, el, host, () => renderCenter(engine, rootId, engine.getSnapshot()));
-      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
-      el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
-      el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
+      const mgToggleEl = el(`${rootId}-mg-toggle`, host);
+      if (mgToggleEl) mgToggleEl.onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
+      const multEl = el(`${rootId}-mult`, host);
+      if (multEl) multEl.onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
+      const stopStepEl = el(`${rootId}-stop-step`, host);
+      if (stopStepEl) stopStepEl.onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
       // Recovery mode cards — instant (binary switches, not numeric)
       ['plain','altA','altB','altC','altR','smart'].forEach(mode => {
         const card = el(`${rootId}-rmode-${mode}`, host);
@@ -23214,7 +23277,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function hrGetPublicWsUrl() {
     const id = (window.HubStore && window.HubStore.getState().wsAppId) ||
       (function () { try { return localStorage.getItem('hub_ws_app_id') || ''; } catch (_) { return ''; } })() || '1089';
-    return 'wss://api.derivws.com/trading/v1/options/ws/public';
+    return `wss://ws.derivws.com/websockets/v3?app_id=${id}`;
   }
   const HR_MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
@@ -23449,6 +23512,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           break;
         }
         case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; break;
+        // Used by the TP popup's "Reload Take Profit" CTA — zero the P&L
+        // counter to start a fresh gate session WITHOUT touching the
+        // journal/win-loss history, unlike RESET_JOURNAL above.
+        case 'RESET_PROFIT_ONLY': s.totalProfit = 0; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'NOTIFY': {
           const id = Date.now().toString() + Math.random().toString(36).slice(2, 6);
@@ -23572,37 +23639,35 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
       try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) {}
       const _self = this;
-      (async () => {
+      (() => {
         const hub = window.HubStore.getState();
-        const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
-        // Shared DerivAuth singleton: single-flight accountId lookup and a
-        // queued/spaced OTP request, so this engine's connect doesn't stack
-        // a duplicate burst on top of HubStore's and every Titan bot's.
-        let accountId = hub.accountId;
-        if (!accountId) {
-          try {
-            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
-            accountId = resolved.accountId;
-          } catch (e) { _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' }); return; }
-        }
-        let wsUrl;
-        try {
-          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
-        } catch (e) { _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' }); return; }
-
-        const ws = new WebSocket(wsUrl);
+        const appId = hub.wsAppId || '1089';
+        // Real Deriv API flow: one WebSocket, {"authorize": token} as the
+        // first message — no REST accounts/OTP lookup (that endpoint never
+        // existed on api.derivws.com, which is what was causing the CORS
+        // errors and the connection failures).
+        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${appId}`);
         _self.socketT = ws;
         ws.onerror = () => { _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' }); };
         ws.onopen = () => {
-          _self._authDelay = 8000;
-          const bal = window.HubStore.getState().balanceUSD || 0;
-          _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
-          _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
-          try { ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) {}
+          try { ws.send(JSON.stringify({ authorize: token })); } catch (e) {}
         };
         ws.onmessage = (m) => {
           try {
             const d = JSON.parse(m.data);
+            if (d.error && !_self.state.isAuthenticated) {
+              _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+              _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${d.error.message || 'invalid token'}`, ntype: 'loss' });
+              return;
+            }
+            if (d.msg_type === 'authorize' && d.authorize) {
+              _self._authDelay = 8000;
+              const bal = (typeof d.authorize.balance === 'number') ? d.authorize.balance : (window.HubStore.getState().balanceUSD || 0);
+              _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
+              _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
+              try { ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) {}
+              return;
+            }
             if (d.msg_type === 'balance' && d.balance) { const bal = parseFloat(d.balance.balance); if (!isNaN(bal)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: bal }); }
             if (d.msg_type === 'proposal_open_contract') {
               const c = d.proposal_open_contract;
@@ -25124,16 +25189,56 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
   }
 
-  // Reset gate latch when all engines are stopped (allows re-arm after fixing)
-  function maybeResetGateLatch() {
-    if (!_gateTriggered) return;
-    const anyOn = BOT_IDS.some((id) => {
-      const eng = engines[id];
-      return eng && (id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
-    });
-    if (!anyOn) _gateTriggered = false;
-  }
+  // Explicit gate re-arm. This USED to auto-reset the latch the moment all
+  // engines were off — but terminateAllEngines() itself turns every engine
+  // off as part of firing the gate, so on the very next 3s tick the latch
+  // was already unlocked while total P&L was still sitting past the
+  // target/limit, so checkPnlGate() fired all over again: new popup,
+  // terminate-all again, latch cleared again — forever, every 3s, which is
+  // exactly the "popup keeps popping / flickers" behavior. The latch should
+  // only clear when the person has actually done something that changes the
+  // P&L picture — clearing stats, or explicitly reloading take profit to
+  // start a fresh counting session — never just because the bots are idle.
+  function resetPnlGateLatch() { _gateTriggered = false; }
+  window.resetPnlGateLatch = resetPnlGateLatch;
   // ── END P&L GATE ─────────────────────────────────────────────────────────
+
+  // ── RELOAD TAKE PROFIT ───────────────────────────────────────────────────
+  // Called from the "🔄 RELOAD TAKE PROFIT" CTA on the TP popup. The person
+  // hit their profit target but wants to keep trading right away instead of
+  // clearing everything: this zeroes out just the session profit counters
+  // that feed the TP/SL gate (so it starts counting fresh from $0), leaves
+  // every journal entry and stat history exactly as it was, re-arms the
+  // gate latch, and re-engages every bot — same effect as pressing
+  // "⚡ ENGAGE ALL" but triggered from the popup itself.
+  function reloadTakeProfitFresh() {
+    BOT_IDS.forEach((id) => {
+      const eng = engines[id];
+      if (!eng) return;
+      if (id === 'hotrepeat') {
+        eng.dispatch && eng.dispatch({ type: 'RESET_PROFIT_ONLY' });
+      } else if (eng.state && eng.state.stats) {
+        eng.state = { ...eng.state, stats: { ...eng.state.stats, profit: 0 } };
+        eng.emit && eng.emit();
+      }
+    });
+    resetPnlGateLatch();
+    const badge = document.getElementById('dash-pnl-gate-status');
+    if (badge) {
+      badge.textContent = 'Gate: +$0.00 (0%)';
+      badge.style.background = 'hsl(var(--bg)/0.5)';
+      badge.style.borderColor = 'hsl(var(--border)/0.5)';
+      badge.style.color = 'hsl(var(--muted-foreground))';
+    }
+    // Re-engage everything — the master toggle is already showing
+    // "⚡ ENGAGE ALL" at this point since the gate just terminated all
+    // engines, so a click on it runs the exact same engage flow (auth
+    // polling, cooldown clearing, arming) as pressing it by hand.
+    const masterBtn = document.getElementById('dash-master-toggle');
+    if (masterBtn) masterBtn.click();
+    queueDashboardRender();
+  }
+  window.reloadTakeProfitFresh = reloadTakeProfitFresh;
 
   function applyMasterTpSlToAllEngines() {
     const { tp, sl } = getMasterTpSl();
@@ -25454,7 +25559,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     } catch(e) { console.error('[Hub] ensureTitanEngine error:', e); }
     try { bindHubTabs(); } catch(e) { console.error('[Hub] bindHubTabs error:', e); }
     try { queueDashboardRender(); renderDashboard(); } catch(e) { console.error('[Hub] queueDashboardRender error:', e); }
-    setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); checkPnlGate(); maybeResetGateLatch(); } catch(e){} }, 3000);
+    setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); checkPnlGate(); } catch(e){} }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
