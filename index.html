@@ -643,7 +643,7 @@
     </section>
     </div>
 
-    <div class="modal-overlay" id="settings-modal" aria-hidden="true">
+    <div class="modal-overlay" id="settings-modal" aria-hidden="true" inert>
       <div class="modal-card glass-card-glow">
         <div class="modal-header">
           <h2 class="font-display">Settings</h2>
@@ -15169,7 +15169,31 @@ window.NexusStrategies=exports;
     connect(token) {
       token = (token || '').trim();
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
-      if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
+      // connect() gets called from several places in quick succession
+      // (master ENGAGE, the auto-refresh timer, the mid-chain reconnect
+      // retry...). If a previous call's socket is still mid-handshake
+      // (readyState CONNECTING) when a new call closes it, the browser
+      // logs "WebSocket is closed before the connection is established" —
+      // harmless but noisy, and it also meant every one of those repeat
+      // calls threw away a handshake that was about to succeed. Guard both
+      // cases: skip entirely if we're already open/connecting with this
+      // same token, and if we do need to replace a still-connecting socket
+      // for a different token, let it finish opening before closing it
+      // instead of closing it mid-handshake.
+      if (this.tradingSocket) {
+        const rs = this.tradingSocket.readyState;
+        if (this._connectingToken === token && (rs === WebSocket.CONNECTING || rs === WebSocket.OPEN)) {
+          return; // already connecting/connected with this token — nothing to do
+        }
+        if (rs === WebSocket.CONNECTING) {
+          const staleSocket = this.tradingSocket;
+          staleSocket.onclose = null;
+          staleSocket.addEventListener('open', () => { try { staleSocket.close(); } catch(_) {} }, { once: true });
+        } else {
+          try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {}
+        }
+      }
+      this._connectingToken = token;
 
       // Real Deriv API flow: one WebSocket, {"authorize": token} as the
       // first message sent once the socket opens — no REST accounts/OTP
@@ -24901,11 +24925,42 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     setInterval(() => { const c = document.getElementById('hub-clock'); if (c) c.textContent = new Date().toLocaleTimeString('en-US', { hour12: false }); }, 1000);
 
     const modal = document.getElementById('settings-modal');
-    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'false')));
-    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => modal && modal.setAttribute('aria-hidden', 'false'));
-    document.querySelectorAll('[data-close-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'true')));
-    document.getElementById('settings-close') && (document.getElementById('settings-close').onclick = () => modal && modal.setAttribute('aria-hidden', 'true'));
-    if (modal) modal.onclick = (e) => { if (e.target === modal) modal.setAttribute('aria-hidden', 'true'); };
+    // openSettingsModal/closeSettingsModal instead of setting aria-hidden
+    // directly: setting aria-hidden="true" on the modal while focus was
+    // still sitting inside it (e.g. on the just-clicked close button) is
+    // what triggers the browser's "Blocked aria-hidden on an element
+    // because its descendant retained focus" warning — assistive tech
+    // isn't allowed to have a focused element hidden from it. Fix is to
+    // move focus OUT of the modal first (back to whatever opened it, or a
+    // safe fallback), then hide it — and use `inert` alongside aria-hidden
+    // so focus/tab-order can't land back inside it while it's closed.
+    let _settingsOpener = null;
+    function openSettingsModal(openerEl) {
+      if (!modal) return;
+      _settingsOpener = openerEl || document.activeElement || null;
+      modal.removeAttribute('inert');
+      modal.setAttribute('aria-hidden', 'false');
+      const closeBtn = document.getElementById('settings-close');
+      if (closeBtn) closeBtn.focus();
+    }
+    function closeSettingsModal() {
+      if (!modal) return;
+      if (modal.contains(document.activeElement) && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+      modal.setAttribute('aria-hidden', 'true');
+      modal.setAttribute('inert', '');
+      if (_settingsOpener && typeof _settingsOpener.focus === 'function') {
+        _settingsOpener.focus();
+      }
+      _settingsOpener = null;
+    }
+    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => openSettingsModal(b)));
+    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => openSettingsModal(document.getElementById('hub-settings-btn')));
+    document.querySelectorAll('[data-close-settings]').forEach((b) => (b.onclick = () => closeSettingsModal()));
+    document.getElementById('settings-close') && (document.getElementById('settings-close').onclick = () => closeSettingsModal());
+    if (modal) modal.onclick = (e) => { if (e.target === modal) closeSettingsModal(); };
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal && modal.getAttribute('aria-hidden') === 'false') closeSettingsModal(); });
 
     // Single PAT auth — saved once here, shared by every engine via HubStore.
     const appIdInput = document.getElementById('settings-appid');
