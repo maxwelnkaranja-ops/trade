@@ -19,27 +19,6 @@
     }
   </script>
   <script>
-    // ── Back/forward-cache (bfcache) handling ────────────────────────────
-    // Browsers force-close every open WebSocket the instant a page enters
-    // the back/forward cache (navigating away, then back, with the tab
-    // frozen instead of reloaded). This app has a dozen-plus independent
-    // sockets — the dashboard status feed, each of the 13 Titan bots' own
-    // trading sockets, tick-history sockets — and every one of them has its
-    // own reconnect-on-close logic. On bfcache restore they'd all fire
-    // their reconnects at once; if the person then navigates back/forward
-    // again before those finish, the new sockets get frozen and killed too,
-    // producing the repeating "WebSocket ... failed: Page entered
-    // Back-Forward Cache" flood. Rather than teaching every one of those
-    // sockets to coordinate a clean bfcache-aware reconnect, the reliable
-    // fix is: if this exact page is ever resurrected from bfcache, just
-    // reload it. That guarantees every socket, every engine's state, and
-    // every UI listener comes back in one consistent, freshly-connected
-    // state instead of a dozen modules racing to reconnect independently.
-    window.addEventListener('pageshow', (e) => {
-      if (e.persisted) window.location.reload();
-    });
-  </script>
-  <script>
     // ── Dashboard Master Gate reader ─────────────────────────────────────
     // Single source of truth for the Dashboard's master Take Profit / Stop
     // Loss inputs (persisted to localStorage as dash_master_tp / _sl).
@@ -664,7 +643,7 @@
     </section>
     </div>
 
-    <div class="modal-overlay" id="settings-modal" aria-hidden="true" inert>
+    <div class="modal-overlay" id="settings-modal" aria-hidden="true">
       <div class="modal-card glass-card-glow">
         <div class="modal-header">
           <h2 class="font-display">Settings</h2>
@@ -11703,10 +11682,6 @@ window.NexusTrading = exports;
           break;
         }
         case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; this._tpSlLatched = false; this._pendingDigitCaptures = []; break;
-        // Used by the TP popup's "Reload Take Profit" CTA — zero the P&L
-        // counter to start a fresh gate session WITHOUT touching the
-        // journal/win-loss history, unlike RESET_JOURNAL above.
-        case 'RESET_PROFIT_ONLY': s.totalProfit = 0; this._tpSlLatched = false; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'SET_LUCKY': s.luckyNumber = action.value; break;
         case 'SET_RECOMMENDED_MARKET': s.recommendedMarket = action.market; s.analysisConfidence = action.confidence; break;
@@ -12773,73 +12748,128 @@ window.NexusStrategies=exports;
   function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
   const ANALYSIS_HOLD = 20;
 
-  // USD → KSH display rate, kept consistent with the rest of the Hub (see
-  // the balance pill and the equity-panel conversionRate, both 129.5).
-  const RESULT_POPUP_USD_TO_KSH = 129.5;
-  const fmtKsh = (usd) => Number(usd).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
   // Generalized TP/SL popup — kind: 'tp' (win/green) or 'sl' (loss/red).
   // Kept the old name as a thin wrapper so existing call sites keep working.
   //
-  // _resultPopupLock makes this a singleton: while one is on screen, further
-  // calls are ignored instead of tearing down and rebuilding the element.
-  // That rebuild-on-every-call was the source of the "flickering"/repeated
-  // popping — several things can call showResultPopup within moments of
-  // each other (per-bot TP/SL, the dashboard's master P&L gate, and — until
-  // the gate-latch bug was fixed — the gate re-firing every 3s on its own),
-  // and each call was yanking the popup out and re-inserting it, restarting
-  // the enter animation every time. Now only the FIRST call in a given
-  // "hit" gets to show; it fully owns the popup until it's dismissed.
-  let _resultPopupLock = false;
+  // Anti-flicker design: several independent bots can each hit their own
+  // gate within milliseconds of one another (or the same dashboard gate
+  // fires while a per-bot gate is also firing). The old version removed
+  // and recreated the DOM node on every single call, which — when two or
+  // three calls land back to back — looked like the popup flashing/
+  // blinking in and out. Now there is only ever ONE popup node: if one of
+  // the same kind is already on screen we just update its numbers in
+  // place instead of tearing it down and rebuilding it. A short
+  // "just dismissed" cooldown also stops it from instantly popping back
+  // up if another call for the same kind lands right after the user taps
+  // it away.
+  let _resultPopupEl = null;
+  let _resultPopupKind = null;
+  let _resultPopupDismissedAt = 0;
+  const RESULT_POPUP_DISMISS_COOLDOWN_MS = 4000;
+
+  // Approx. USD → KES so the popup can show the take-profit / stop-loss
+  // figures in Kenyan Shillings. Kept adjustable (without a code change)
+  // via localStorage in case the live rate drifts — falls back to a
+  // sensible current-market default.
+  function getUsdToKesRate() {
+    try {
+      const stored = parseFloat(localStorage.getItem('usd_to_kes_rate'));
+      if (!isNaN(stored) && stored > 0) return stored;
+    } catch (_) {}
+    return 129.25;
+  }
+  function formatKsh(usd) {
+    const rate = getUsdToKesRate();
+    const val = Number(usd || 0) * rate;
+    return `KSh ${val.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
   function showResultPopup(kind, target, netValue) {
-    if (_resultPopupLock || document.getElementById('benz-congrats-popup')) return;
-    _resultPopupLock = true;
     const isTp = kind !== 'sl';
+    const now = Date.now();
+    // Just-dismissed cooldown — swallow near-duplicate triggers instead of
+    // flashing the popup straight back up.
+    if (_resultPopupKind === kind && (now - _resultPopupDismissedAt) < RESULT_POPUP_DISMISS_COOLDOWN_MS && !document.getElementById('benz-congrats-popup')) {
+      return;
+    }
+
     const color = isTp ? '#48ffa7' : '#ff5c6a';
     const rgb = isTp ? '72,255,167' : '255,92,106';
     const icon = isTp ? '🏆' : '🛑';
     const title = isTp ? 'Take Profit Hit!' : 'Stop Loss Hit!';
     const bodyLabel = isTp ? 'Target' : 'Limit';
-    const targetUsd = Number(target);
-    const targetKsh = fmtKsh(targetUsd * RESULT_POPUP_USD_TO_KSH);
+    const targetKsh = formatKsh(target);
     const netTxt = (netValue !== undefined && netValue !== null)
-      ? ` · Net P/L: <b style="color:${color}">$${Number(netValue).toFixed(2)}</b> <span style="color:rgba(255,255,255,0.45)">(KSH ${fmtKsh(Number(netValue) * RESULT_POPUP_USD_TO_KSH)})</span>`
+      ? ` · Net P/L: <b style="color:${color}">${formatKsh(netValue)}</b>`
       : '';
+    const bodyHtml = `${bodyLabel} of <b style="color:${color}">${targetKsh}</b> reached${isTp ? ' 🎉' : ''}${netTxt}`;
+    const reloadBtnHtml = isTp
+      ? `<button id="benz-popup-reload-tp" style="margin-top:16px;padding:12px 22px;border-radius:12px;border:1px solid rgba(${rgb},0.55);background:rgba(${rgb},0.16);color:${color};font-family:Outfit,sans-serif;font-weight:900;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;width:100%">🔄 Reload Take Profit</button>
+         <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-top:8px;letter-spacing:0.5px;line-height:1.5">Starts the P&amp;L counter fresh &amp; re-engages your bots — journal stays intact</div>`
+      : '';
+
+    // Existing popup of the SAME kind on screen → just refresh its numbers,
+    // no rebuild, no re-triggered animation, no flicker.
+    if (_resultPopupEl && document.body.contains(_resultPopupEl) && _resultPopupKind === kind) {
+      const bodyEl = _resultPopupEl.querySelector('.benz-popup-body');
+      if (bodyEl) bodyEl.innerHTML = bodyHtml;
+      const ctaWrap = _resultPopupEl.querySelector('.benz-popup-cta');
+      if (ctaWrap) ctaWrap.innerHTML = reloadBtnHtml;
+      wireReloadBtn(_resultPopupEl);
+      return;
+    }
+
+    // Different (or no) popup currently showing → replace cleanly, once.
+    const existing = document.getElementById('benz-congrats-popup');
+    if (existing) existing.remove();
+
     const div = document.createElement('div');
     div.id = 'benz-congrats-popup';
-    div.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(${rgb},0.14),rgba(${rgb},0.09));border:1.5px solid rgba(${rgb},0.55);border-radius:26px;padding:44px 52px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 90px rgba(${rgb},0.25),0 24px 80px rgba(0,0,0,0.55);backdrop-filter:blur(28px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;min-width:360px;max-width:min(92vw,460px)`;
+    div.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(${rgb},0.14),rgba(${rgb},0.09));border:1px solid rgba(${rgb},0.5);border-radius:26px;padding:44px 52px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 80px rgba(${rgb},0.25),0 24px 70px rgba(0,0,0,0.55);backdrop-filter:blur(28px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;cursor:pointer;min-width:320px;max-width:min(92vw,420px)`;
     div.innerHTML = `
-      <div style="font-size:4rem;margin-bottom:14px;line-height:1">${icon}</div>
-      <div style="font-size:24px;font-weight:900;letter-spacing:3px;color:${color};text-transform:uppercase;margin-bottom:12px">${title}</div>
-      <div style="font-size:16px;color:rgba(255,255,255,0.7);margin-bottom:8px;line-height:1.5">
-        ${bodyLabel} of <b style="color:${color}">$${targetUsd.toFixed(2)}</b> <span style="color:rgba(255,255,255,0.45)">(KSH ${targetKsh})</span> reached${isTp ? ' 🎉' : ''}
-      </div>
-      <div style="font-size:14px;color:rgba(255,255,255,0.6);margin-bottom:20px">${netTxt}</div>
-      ${isTp ? `<button id="benz-reload-tp-btn" style="width:100%;padding:14px 20px;margin-bottom:14px;border-radius:14px;border:1px solid rgba(${rgb},0.6);background:rgba(${rgb},0.16);color:${color};font-family:Outfit,sans-serif;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:background .2s">🔄 Reload Take Profit</button>
-      <div style="font-size:9.5px;letter-spacing:0.5px;color:rgba(255,255,255,0.35);margin-bottom:16px;line-height:1.5">Starts the profit count fresh from $0 and re-engages the bots — journal &amp; history stay untouched</div>` : ''}
-      <div style="font-size:11px;letter-spacing:2px;color:rgba(255,255,255,0.4);text-transform:uppercase;cursor:pointer" id="benz-popup-dismiss">Session Stopped · Tap to dismiss</div>`;
+      <div style="font-size:3.6rem;margin-bottom:12px;line-height:1">${icon}</div>
+      <div style="font-size:22px;font-weight:900;letter-spacing:3px;color:${color};text-transform:uppercase;margin-bottom:12px">${title}</div>
+      <div class="benz-popup-body" style="font-size:15px;color:rgba(255,255,255,0.7);margin-bottom:6px;line-height:1.5">${bodyHtml}</div>
+      <div class="benz-popup-cta" style="cursor:default" onclick="event.stopPropagation()">${reloadBtnHtml}</div>
+      <div style="font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-top:16px">Session Stopped · Tap outside to dismiss</div>`;
     document.body.appendChild(div);
     requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translate(-50%,-50%) scale(1)'; });
-    let dismissTimer = null;
+
     const dismiss = () => {
-      if (dismissTimer) clearTimeout(dismissTimer);
-      div.style.opacity = '0'; div.style.transform = 'translate(-50%,-50%) scale(0.85)';
-      setTimeout(() => { try { div.remove(); } catch(_) {} _resultPopupLock = false; }, 350);
+      div.style.opacity = '0';
+      div.style.transform = 'translate(-50%,-50%) scale(0.85)';
+      _resultPopupDismissedAt = Date.now();
+      setTimeout(() => {
+        try { div.remove(); } catch (_) {}
+        if (_resultPopupEl === div) _resultPopupEl = null;
+      }, 350);
     };
-    dismissTimer = setTimeout(dismiss, 9000);
-    const dismissHit = div.querySelector('#benz-popup-dismiss');
-    if (dismissHit) dismissHit.onclick = dismiss;
-    const reloadBtn = div.querySelector('#benz-reload-tp-btn');
-    if (reloadBtn) {
-      reloadBtn.onmouseover = () => { reloadBtn.style.background = `rgba(${rgb},0.26)`; };
-      reloadBtn.onmouseout = () => { reloadBtn.style.background = `rgba(${rgb},0.16)`; };
-      reloadBtn.onclick = (e) => {
-        e.stopPropagation();
-        if (window.reloadTakeProfitFresh) window.reloadTakeProfitFresh();
-        dismiss();
-      };
-    }
+    // Tap anywhere on the card EXCEPT the reload CTA dismisses it.
+    div.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest('#benz-popup-reload-tp')) return;
+      dismiss();
+    });
+    div._dismiss = dismiss;
+    _resultPopupEl = div;
+    _resultPopupKind = kind;
+    wireReloadBtn(div);
+    // Safety auto-dismiss so it never sits on screen forever if the person
+    // walks away — long enough to actually read it and tap Reload first.
+    setTimeout(() => { if (_resultPopupEl === div) dismiss(); }, 15000);
   }
+
+  function wireReloadBtn(container) {
+    const btn = container.querySelector('#benz-popup-reload-tp');
+    if (!btn || btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (window.reloadTakeProfitSession) window.reloadTakeProfitSession();
+      if (container._dismiss) container._dismiss();
+      else { container.style.opacity = '0'; setTimeout(() => { try { container.remove(); } catch (_) {} }, 350); }
+    });
+  }
+
   function showCongratulationsPopup(target) { showResultPopup('tp', target); }
   window.showResultPopup = showResultPopup;
 
@@ -15190,31 +15220,7 @@ window.NexusStrategies=exports;
     connect(token) {
       token = (token || '').trim();
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
-      // connect() gets called from several places in quick succession
-      // (master ENGAGE, the auto-refresh timer, the mid-chain reconnect
-      // retry...). If a previous call's socket is still mid-handshake
-      // (readyState CONNECTING) when a new call closes it, the browser
-      // logs "WebSocket is closed before the connection is established" —
-      // harmless but noisy, and it also meant every one of those repeat
-      // calls threw away a handshake that was about to succeed. Guard both
-      // cases: skip entirely if we're already open/connecting with this
-      // same token, and if we do need to replace a still-connecting socket
-      // for a different token, let it finish opening before closing it
-      // instead of closing it mid-handshake.
-      if (this.tradingSocket) {
-        const rs = this.tradingSocket.readyState;
-        if (this._connectingToken === token && (rs === WebSocket.CONNECTING || rs === WebSocket.OPEN)) {
-          return; // already connecting/connected with this token — nothing to do
-        }
-        if (rs === WebSocket.CONNECTING) {
-          const staleSocket = this.tradingSocket;
-          staleSocket.onclose = null;
-          staleSocket.addEventListener('open', () => { try { staleSocket.close(); } catch(_) {} }, { once: true });
-        } else {
-          try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {}
-        }
-      }
-      this._connectingToken = token;
+      if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
 
       // Real Deriv API flow: one WebSocket, {"authorize": token} as the
       // first message sent once the socket opens — no REST accounts/OTP
@@ -19186,22 +19192,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
-  // ── BEST TRADING TIMES ─────────────────────────────────────────────────
-  // Buckets trade points by hour-of-day and ranks which hours have actually
-  // been most profitable/winning for THIS person's own trades — not a
-  // generic "best time to trade Deriv" claim, purely derived from their own
-  // history. Hours with too few trades are excluded so one lucky/unlucky
-  // trade at 3am doesn't look like a "best" or "worst" hour.
-  //
-  // This has its OWN persistent store, deliberately separate from
-  // EquityStore. It used to be fed straight off the equity curve, which
-  // meant hitting "RESET CURVE" (clear graph) wiped the Best Times pills
-  // too, and since it was rebuilt from each bot's live journal, hitting
-  // "CLEAR STATS" (clear journal) could empty it out as well. BestTimesStore
-  // only ever ADDS points (same de-dupe-by-id merge as EquityStore, keyed
-  // off contractId/id) and is never touched by either clear action, so the
-  // ranking survives both.
-  const BEST_TIMES_STORAGE_KEY = 'benz_best_times_curve';
+  // ── BEST TIMES store (independent of the equity chart) ──────────────────
+  // "Your Best Times" used to read straight off EquityStore, so tapping
+  // either "RESET CURVE" (Clear Graph) or "CLEAR STATS" (Clear Journal)
+  // made it vanish right along with the chart/journal, even though neither
+  // button is supposed to touch it. It now keeps its own always-on copy of
+  // the same closed-trade points, in its own localStorage key, that ONLY
+  // ever grows/prunes by age — nothing in the Clear Graph or Clear Journal
+  // handlers reaches in and wipes this key, so the Best Times pills survive
+  // both of those actions.
+  const BEST_TIMES_STORAGE_KEY = 'benz_best_times_history';
   const BestTimesStore = {
     _points: null,
     load() {
@@ -19222,7 +19222,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     merge(entries) {
       this.load();
       const seen = new Set(this._points.map((p) => p.contractId || p.id));
-      (entries || []).forEach((e) => {
+      entries.forEach((e) => {
         const key = e.contractId || e.id;
         if (!key || seen.has(key)) return;
         seen.add(key);
@@ -19233,12 +19233,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       return this._points;
     },
     save() {
-      try {
-        localStorage.setItem(BEST_TIMES_STORAGE_KEY, JSON.stringify(this._points));
-      } catch (_) {}
+      try { localStorage.setItem(BEST_TIMES_STORAGE_KEY, JSON.stringify(this._points)); } catch (_) {}
     },
   };
 
+  // ── BEST TRADING TIMES ─────────────────────────────────────────────────
+  // Buckets the same 24h equity-curve points by hour-of-day and ranks which
+  // hours have actually been most profitable/winning for THIS person's own
+  // trades — not a generic "best time to trade Deriv" claim, purely derived
+  // from their own history. Hours with too few trades are excluded so one
+  // lucky/unlucky trade at 3am doesn't look like a "best" or "worst" hour.
   const BEST_TIMES_MIN_TRADES = 3;
   function computeBestTradingHours(points) {
     const byHour = {}; // 0-23 -> { trades, wins, profit }
@@ -19839,8 +19843,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // Net P&L stat card instead of silently including probe-trade P&L that
     // card doesn't count.
     const curve = EquityStore.merge(allEntries.filter((e) => !e.isTest));
-    // Best Times reads from its own store (see comment above BestTimesStore)
-    // so it keeps ranking hours even after "RESET CURVE" or "CLEAR STATS".
+    // Best Times reads its own independent, never-cleared history (see
+    // BestTimesStore above) rather than `curve`, so it keeps showing even
+    // right after Clear Graph or Clear Journal is tapped.
     const bestTimesPoints = BestTimesStore.merge(allEntries.filter((e) => !e.isTest));
     renderBestTimes(root, bestTimesPoints);
 
@@ -20186,10 +20191,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           if (!eng) return;
           eng.clearStats && eng.clearStats();
         });
-        // Stats are back at zero, so re-arm the P&L gate latch too — it
-        // should only re-check from a clean slate, not immediately re-fire
-        // against whatever P&L tripped it last time.
-        if (window.resetPnlGateLatch) window.resetPnlGateLatch();
         render(root, engines);
       });
     }
@@ -23557,10 +23558,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           break;
         }
         case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; break;
-        // Used by the TP popup's "Reload Take Profit" CTA — zero the P&L
-        // counter to start a fresh gate session WITHOUT touching the
-        // journal/win-loss history, unlike RESET_JOURNAL above.
-        case 'RESET_PROFIT_ONLY': s.totalProfit = 0; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'NOTIFY': {
           const id = Date.now().toString() + Math.random().toString(36).slice(2, 6);
@@ -24946,42 +24943,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     setInterval(() => { const c = document.getElementById('hub-clock'); if (c) c.textContent = new Date().toLocaleTimeString('en-US', { hour12: false }); }, 1000);
 
     const modal = document.getElementById('settings-modal');
-    // openSettingsModal/closeSettingsModal instead of setting aria-hidden
-    // directly: setting aria-hidden="true" on the modal while focus was
-    // still sitting inside it (e.g. on the just-clicked close button) is
-    // what triggers the browser's "Blocked aria-hidden on an element
-    // because its descendant retained focus" warning — assistive tech
-    // isn't allowed to have a focused element hidden from it. Fix is to
-    // move focus OUT of the modal first (back to whatever opened it, or a
-    // safe fallback), then hide it — and use `inert` alongside aria-hidden
-    // so focus/tab-order can't land back inside it while it's closed.
-    let _settingsOpener = null;
-    function openSettingsModal(openerEl) {
-      if (!modal) return;
-      _settingsOpener = openerEl || document.activeElement || null;
-      modal.removeAttribute('inert');
-      modal.setAttribute('aria-hidden', 'false');
-      const closeBtn = document.getElementById('settings-close');
-      if (closeBtn) closeBtn.focus();
-    }
-    function closeSettingsModal() {
-      if (!modal) return;
-      if (modal.contains(document.activeElement) && document.activeElement.blur) {
-        document.activeElement.blur();
-      }
-      modal.setAttribute('aria-hidden', 'true');
-      modal.setAttribute('inert', '');
-      if (_settingsOpener && typeof _settingsOpener.focus === 'function') {
-        _settingsOpener.focus();
-      }
-      _settingsOpener = null;
-    }
-    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => openSettingsModal(b)));
-    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => openSettingsModal(document.getElementById('hub-settings-btn')));
-    document.querySelectorAll('[data-close-settings]').forEach((b) => (b.onclick = () => closeSettingsModal()));
-    document.getElementById('settings-close') && (document.getElementById('settings-close').onclick = () => closeSettingsModal());
-    if (modal) modal.onclick = (e) => { if (e.target === modal) closeSettingsModal(); };
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal && modal.getAttribute('aria-hidden') === 'false') closeSettingsModal(); });
+    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'false')));
+    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => modal && modal.setAttribute('aria-hidden', 'false'));
+    document.querySelectorAll('[data-close-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'true')));
+    document.getElementById('settings-close') && (document.getElementById('settings-close').onclick = () => modal && modal.setAttribute('aria-hidden', 'true'));
+    if (modal) modal.onclick = (e) => { if (e.target === modal) modal.setAttribute('aria-hidden', 'true'); };
 
     // Single PAT auth — saved once here, shared by every engine via HubStore.
     const appIdInput = document.getElementById('settings-appid');
@@ -25265,56 +25231,60 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
   }
 
-  // Explicit gate re-arm. This USED to auto-reset the latch the moment all
-  // engines were off — but terminateAllEngines() itself turns every engine
-  // off as part of firing the gate, so on the very next 3s tick the latch
-  // was already unlocked while total P&L was still sitting past the
-  // target/limit, so checkPnlGate() fired all over again: new popup,
-  // terminate-all again, latch cleared again — forever, every 3s, which is
-  // exactly the "popup keeps popping / flickers" behavior. The latch should
-  // only clear when the person has actually done something that changes the
-  // P&L picture — clearing stats, or explicitly reloading take profit to
-  // start a fresh counting session — never just because the bots are idle.
-  function resetPnlGateLatch() { _gateTriggered = false; }
-  window.resetPnlGateLatch = resetPnlGateLatch;
-  // ── END P&L GATE ─────────────────────────────────────────────────────────
+  // Reset gate latch when all engines are stopped (allows re-arm after fixing)
+  function maybeResetGateLatch() {
+    if (!_gateTriggered) return;
+    const anyOn = BOT_IDS.some((id) => {
+      const eng = engines[id];
+      return eng && (id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
+    });
+    if (!anyOn) _gateTriggered = false;
+  }
 
-  // ── RELOAD TAKE PROFIT ───────────────────────────────────────────────────
-  // Called from the "🔄 RELOAD TAKE PROFIT" CTA on the TP popup. The person
-  // hit their profit target but wants to keep trading right away instead of
-  // clearing everything: this zeroes out just the session profit counters
-  // that feed the TP/SL gate (so it starts counting fresh from $0), leaves
-  // every journal entry and stat history exactly as it was, re-arms the
-  // gate latch, and re-engages every bot — same effect as pressing
-  // "⚡ ENGAGE ALL" but triggered from the popup itself.
-  function reloadTakeProfitFresh() {
+  // "Reload Take Profit" — called from the CTA on the Take-Profit-hit
+  // popup when the person wants to keep trading right away instead of
+  // starting a whole new session. This is deliberately NOT the same as
+  // CLEAR STATS: it only zeroes each engine's live P&L counter (so the
+  // gate has to travel back up to the target again from $0/KSh 0) and
+  // then re-engages every bot — the journal/trade history is left exactly
+  // as it is.
+  function reloadTakeProfitSession() {
+    _gateTriggered = false;
     BOT_IDS.forEach((id) => {
       const eng = engines[id];
-      if (!eng) return;
-      if (id === 'hotrepeat') {
-        eng.dispatch && eng.dispatch({ type: 'RESET_PROFIT_ONLY' });
-      } else if (eng.state && eng.state.stats) {
-        eng.state = { ...eng.state, stats: { ...eng.state.stats, profit: 0 } };
-        eng.emit && eng.emit();
+      if (!eng || !eng.state) return;
+      if (id === 'differ' || id === 'hotrepeat') {
+        eng.state = { ...eng.state, totalProfit: 0 };
+      } else {
+        eng.state = { ...eng.state, stats: { win: 0, loss: 0, profit: 0 } };
       }
+      try { eng.addLog && eng.addLog('engine', 'RELOAD', 'Take Profit reloaded — P&L counter reset to fresh, journal kept.'); } catch (_) {}
+      try { eng.emit && eng.emit(); } catch (_) {}
     });
-    resetPnlGateLatch();
     const badge = document.getElementById('dash-pnl-gate-status');
     if (badge) {
-      badge.textContent = 'Gate: +$0.00 (0%)';
+      badge.textContent = 'Gate: +KSh 0.00 (0%)';
       badge.style.background = 'hsl(var(--bg)/0.5)';
       badge.style.borderColor = 'hsl(var(--border)/0.5)';
       badge.style.color = 'hsl(var(--muted-foreground))';
     }
-    // Re-engage everything — the master toggle is already showing
-    // "⚡ ENGAGE ALL" at this point since the gate just terminated all
-    // engines, so a click on it runs the exact same engage flow (auth
-    // polling, cooldown clearing, arming) as pressing it by hand.
-    const masterBtn = document.getElementById('dash-master-toggle');
-    if (masterBtn) masterBtn.click();
-    queueDashboardRender();
+    try { queueDashboardRender(); } catch (_) {}
+    // Re-engage everything — mirrors tapping ENGAGE ALL — once the state
+    // resets above have landed.
+    setTimeout(() => {
+      const btn = document.getElementById('dash-master-toggle');
+      const engagedCount = BOT_IDS.filter((id) => {
+        const eng = engines[id];
+        if (!eng) return false;
+        return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+      }).length;
+      // Only auto-click if engines are actually stopped — avoids toggling
+      // OFF a fleet that (for whatever reason) is still running.
+      if (btn && engagedCount === 0) btn.click();
+    }, 80);
   }
-  window.reloadTakeProfitFresh = reloadTakeProfitFresh;
+  window.reloadTakeProfitSession = reloadTakeProfitSession;
+  // ── END P&L GATE ─────────────────────────────────────────────────────────
 
   function applyMasterTpSlToAllEngines() {
     const { tp, sl } = getMasterTpSl();
@@ -25635,7 +25605,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     } catch(e) { console.error('[Hub] ensureTitanEngine error:', e); }
     try { bindHubTabs(); } catch(e) { console.error('[Hub] bindHubTabs error:', e); }
     try { queueDashboardRender(); renderDashboard(); } catch(e) { console.error('[Hub] queueDashboardRender error:', e); }
-    setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); checkPnlGate(); } catch(e){} }, 3000);
+    setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); checkPnlGate(); maybeResetGateLatch(); } catch(e){} }, 3000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
