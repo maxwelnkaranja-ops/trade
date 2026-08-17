@@ -168,31 +168,9 @@
         return (p1 - p2) / se >= Z_THRESHOLD;
       }
 
-      // Wilson score interval lower bound — a more honest "how confident
-      // are we" number than the raw hit rate for small samples. A raw
-      // 4/5 = 80% looks great but could easily be luck; Wilson pulls it
-      // down toward 50% until the sample size actually earns that
-      // confidence. Used for the UI display; the z-test above still
-      // gates whether a step is allowed to flip at all.
-      function wilsonLowerBound(hits, n, z = 1.645) {
-        if (!n) return 0;
-        const p = hits / n;
-        const denom = 1 + (z * z) / n;
-        const centre = p + (z * z) / (2 * n);
-        const margin = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * n)) / n);
-        return Math.max(0, (centre - margin) / denom);
-      }
-
       function buildDynamicPattern(data, winCheck) {
         const steps = {};
         for (let s = 1; s <= CYCLE; s++) steps[s] = { flipHits: 0, flipN: 0, stayHits: 0, stayN: 0 };
-        // Recency weighting: the most recent third of the window counts
-        // DOUBLE toward each step's tally. Plain backtests treat a tick
-        // from 150 samples ago identically to yesterday's tick, which
-        // makes the engine slow to notice a market's behaviour has
-        // shifted. Weighting recent data more lets it adapt faster
-        // without throwing the older data away entirely.
-        const recencyStart = Math.floor(data.length * (2 / 3));
         // Same historical tick feeds BOTH the "what if we flipped here"
         // and "what if we stayed here" tally for its step, so every step
         // accumulates two independent samples per pass through the
@@ -200,11 +178,10 @@
         for (let i = 0; i < data.length - 1; i++) {
           const step = (i % CYCLE) + 1;
           const bucket = steps[step];
-          const weight = i >= recencyStart ? 2 : 1;
-          const flipWin = winCheck(data[i + 1], true);
-          const stayWin = winCheck(data[i + 1], false);
-          bucket.flipHits += flipWin ? weight : 0; bucket.flipN += weight;
-          bucket.stayHits += stayWin ? weight : 0; bucket.stayN += weight;
+          if (winCheck(data[i + 1], true)) bucket.flipHits++;
+          bucket.flipN++;
+          if (winCheck(data[i + 1], false)) bucket.stayHits++;
+          bucket.stayN++;
         }
         const mask = {};
         const detail = {};
@@ -215,14 +192,7 @@
           if (eligible) gatedSteps++;
           const flip = eligible && flipSignificantlyBeatsStay(b.flipHits, b.flipN, b.stayHits, b.stayN);
           mask[s] = flip;
-          const flipRate = b.flipN ? b.flipHits / b.flipN : 0;
-          const stayRate = b.stayN ? b.stayHits / b.stayN : 0;
-          detail[s] = {
-            ...b, eligible, flip, flipRate, stayRate,
-            // Confidence shown in the UI: whichever side the mask picked,
-            // Wilson-adjusted so a thin sample can't look falsely certain.
-            confidence: wilsonLowerBound(flip ? b.flipHits : b.stayHits, flip ? b.flipN : b.stayN),
-          };
+          detail[s] = { ...b, eligible, flip, flipRate: b.flipN ? b.flipHits / b.flipN : 0, stayRate: b.stayN ? b.stayHits / b.stayN : 0 };
           if (flip) flippedSteps++;
         }
         return { mask, detail, flippedSteps, gatedSteps };
@@ -248,64 +218,11 @@
         };
       }
 
-      // ── Short-Span Contrarian ────────────────────────────────────────
-      // Requested fix for "Smart Rec is losing a lot": the Dynamic Pattern
-      // above deliberately looks back up to 160 ticks per step, which is
-      // stable but slow to notice the market's CURRENT short-term bias.
-      // This is the opposite instinct on purpose — look at only the last
-      // SHORT_SPAN ticks (no per-step split, no long memory), find whichever
-      // side (flip vs stay) has been the dominant/"most used" recent
-      // pattern, and bet directly against it. Simple streak-fade logic,
-      // recomputed fresh every tick so a regime change shows up almost
-      // immediately instead of being diluted by 140 older ticks.
-      const SHORT_SPAN_MIN_SAMPLES = 10;  // need at least this many ticks in the short window before trusting it
-      // Statistical significance gate, not a flat percentage-point bar.
-      // The old version required only an 8pp skew regardless of sample
-      // size — at n=10-20 that's easily hit by pure chance roughly a
-      // third of the time (a fair coin lands 6/4 or worse constantly),
-      // so it was reacting to noise as often as to a genuine bias, which
-      // is exactly the kind of thing that keeps a "smart" recovery
-      // performing no better than a coin flip. A z-test scales the bar
-      // with the sample size instead: it demands more evidence at n=10
-      // than at n=40, so it stays reactive on a real skew but stops
-      // firing on noise once there's actually enough data to tell them
-      // apart. 1.1 sits deliberately lower than the long-window pattern's
-      // 1.645 (~95%) — short-span exists to be FAST, so it accepts a
-      // little more false-positive risk (~86% one-tailed confidence) in
-      // exchange for reacting sooner than the slow long-window mask.
-      const SHORT_SPAN_MIN_Z = 1.1;
-      function buildShortSpanSignal(history, winCheck, span) {
-        const window = Math.max(6, span || 20);
-        const data = (history || []).slice(-window);
-        const empty = { ready: false, span: window, samples: Math.max(0, data.length - 1), dominant: null, dominantPct: 0.5, recommendFlip: false, z: 0 };
-        if (data.length - 1 < SHORT_SPAN_MIN_SAMPLES) return empty;
-        let stayCount = 0, flipCount = 0;
-        // stay/flip are complementary for every single digit (exactly one
-        // of the two bet directions is satisfied by any given outcome), so
-        // counting raw occurrences over the window IS "which side has been
-        // most used" — no simulated hit-rate needed, just a straight tally.
-        for (let i = 0; i < data.length - 1; i++) {
-          if (winCheck(data[i + 1], false)) stayCount++; else flipCount++;
-        }
-        const total = stayCount + flipCount;
-        const stayPct = total ? stayCount / total : 0.5;
-        const dominant = stayPct >= 0.5 ? 'stay' : 'flip';
-        const dominantPct = Math.max(stayPct, 1 - stayPct);
-        const se = total ? Math.sqrt(0.25 / total) : 0;
-        const z = se ? Math.abs(stayPct - 0.5) / se : 0;
-        const ready = z >= SHORT_SPAN_MIN_Z;
-        // Bet AGAINST whichever side has been most used: if "stay" has
-        // been dominant, recommend flipping away from it, and vice versa.
-        const recommendFlip = ready && dominant === 'stay';
-        return { ready, span: window, samples: total, dominant, dominantPct, stayCount, flipCount, recommendFlip, z };
-      }
-
-      function rank(history, winCheck, shortSpanWindow) {
+      function rank(history, winCheck) {
         const data = (history || []).slice(-160);
         const emptyReference = PATTERN_DEFS.map((p) => ({ id: p.id, label: p.label, icon: p.icon, rate: 0, hits: 0, attempts: 0 }));
         const emptyDynamic = { id: 'dynamic', label: 'Dynamic Pattern', icon: '🧬', rate: 0, hits: 0, attempts: 0 };
-        const shortSpan = buildShortSpanSignal(history, winCheck, shortSpanWindow);
-        const empty = { patterns: [...emptyReference, emptyDynamic], reference: emptyReference, best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null, shortSpan };
+        const empty = { patterns: [...emptyReference, emptyDynamic], reference: emptyReference, best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null };
         if (data.length < MIN_SAMPLES + 1) return empty;
 
         // Reference-only backtest of the 5 fixed patterns. Shown in the
@@ -332,92 +249,43 @@
         return {
           patterns: [...reference, dynamic], reference,
           best: ready ? dynamic.id : null, bestRate: ready ? dynamic.rate : 0,
-          ready, samples: data.length, dynamicMask: dynamic.mask, shortSpan,
+          ready, samples: data.length, dynamicMask: dynamic.mask,
         };
       }
 
       // Parity bots (Even/Odd, Even/Odd MR): base direction is a fixed
       // side (ODD or EVEN) that only flips when the pattern's own rule
       // fires for the current step.
-      function rankParity(history, isOddMode, shortSpanWindow) {
+      function rankParity(history, isOddMode) {
         return rank(history, (nextDigit, flip) => {
           const betOdd = flip ? !isOddMode : isOddMode;
           return betOdd === (nextDigit % 2 === 1);
-        }, shortSpanWindow);
+        });
       }
 
       // Threshold bots (Over/Under): base direction bets over/under a
       // barrier; a flip mirrors both the side AND the barrier (9 -
       // barrier), exactly like the live Alt A/B/C/R recovery logic does.
-      function rankThreshold(history, isUnderMode, barrier, shortSpanWindow) {
+      function rankThreshold(history, isUnderMode, barrier) {
         return rank(history, (nextDigit, flip) => {
           const useUnder = flip ? !isUnderMode : isUnderMode;
           const useBarrier = flip ? 9 - barrier : barrier;
           return useUnder ? nextDigit < useBarrier : nextDigit > useBarrier;
-        }, shortSpanWindow);
+        });
       }
 
-      // Applies the engine's live self-built signal to a given martingale
-      // step, returning whether THIS step should flip.
-      //
-      // PRIMARY driver is now the short-span contrarian read: it only
-      // needs ~10-20 ticks to become trustworthy, versus the long-window
-      // per-step mask below, which needs ~70+ ticks before a SPECIFIC
-      // step accumulates enough of its own samples (each step only gets
-      // hit every 9th tick). That gap was the real reason Smart Recovery
-      // kept losing — for most of a session, most steps just fell back to
-      // "stay" (repeat the base direction) not because that was the right
-      // call, just because the slow long-window mask hadn't gathered
-      // enough evidence yet to say anything else.
-      //
-      // Long-window mask is now only consulted as a fallback for the
-      // early window before the short span itself has enough ticks.
+      // Applies the engine's live self-built mask to a given martingale
+      // step, returning whether THIS step should flip. There's no longer
+      // a fixed-pattern branch here — the engine only ever drives off its
+      // own dynamicMask once ready, so this just reads that mask.
       function shouldFlipForStep(ranking, step) {
-        if (!ranking) return false;
-        if (ranking.shortSpan && ranking.shortSpan.ready) return !!ranking.shortSpan.recommendFlip;
-        if (!ranking.ready || !ranking.dynamicMask) return false;
+        if (!ranking || !ranking.ready || !ranking.dynamicMask) return false;
         const cycleStep = ((step - 1) % CYCLE) + 1;
         return !!ranking.dynamicMask[cycleStep];
       }
 
       return { rankParity, rankThreshold, shouldFlipForStep, PATTERN_DEFS };
     })();
-
-    // ══════════════════════════════════════════════════════════════════
-    // REGIME METER — classifies a market as TRENDING (digits are
-    // streaking/repeating more than random chance would) or CHOPPY
-    // (digits are alternating/reverting more than random chance would),
-    // purely from the same-parity persistence of consecutive ticks. A
-    // truly random feed sits at ~50% persistence; a z-test on the gap
-    // from 50% is what decides which side of neutral it's landed on and
-    // how confidently.
-    //
-    // Why this matters for rotation: momentum-style strategies (riding a
-    // dominant streak) want TRENDING markets; contrarian/mean-reversion
-    // approaches — Smart Recovery's short-span fade, specifically — want
-    // the opposite, CHOPPY markets, since fading the recent side only
-    // keeps winning where the market tends to swing back. One market
-    // being "good" or "bad" depends entirely on which kind of edge a bot
-    // is trying to run, so this returns the raw classification and lets
-    // each caller decide which regime it actually wants.
-    window.classifyRegime = function classifyRegime(history, windowSize = 50) {
-      const data = (history || []).slice(-windowSize);
-      const empty = { regime: 'WARMING', trendScore: 50, persistence: 0.5, z: 0, samples: 0, ready: false };
-      if (data.length < 15) return { ...empty, samples: Math.max(0, data.length - 1) };
-      let same = 0, total = 0;
-      for (let i = 1; i < data.length; i++) {
-        total++;
-        if ((data[i] % 2) === (data[i - 1] % 2)) same++;
-      }
-      const persistence = total ? same / total : 0.5;
-      const se = total ? Math.sqrt(0.25 / total) : 0;
-      const z = se ? (persistence - 0.5) / se : 0;
-      let regime = 'NEUTRAL';
-      if (z >= 1.28) regime = 'TRENDING';       // ~90% one-tailed confidence: repeats beat chance
-      else if (z <= -1.28) regime = 'CHOPPY';   // ~90% one-tailed confidence: alternation beats chance
-      const trendScore = Math.round(Math.max(0, Math.min(100, 50 + z * 15)));
-      return { regime, trendScore, persistence, z, samples: total, ready: true };
-    };
   </script>
   <div id="global-error-toast" class="global-error-toast" role="alert" aria-live="assertive"></div>
   <script>
@@ -6981,229 +6849,6 @@ html body #panel-dashboard .journal-entry {
 /* Stop Profit / Stop Loss inputs — tighter */
 #dash-master-tp,
 
-/* ══════════════════════════════════════════════════════════════
-   DASHBOARD STAKE POPUP — upgrade
-   ══════════════════════════════════════════════════════════════ */
-.dash-stake-trigger {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px; border-radius: 12px; cursor: pointer;
-  font-family: 'Outfit', sans-serif; color: hsl(var(--foreground)/0.9);
-  position: relative; overflow: hidden;
-  background: linear-gradient(150deg, hsl(var(--primary)/0.14), hsl(var(--muted)/0.35));
-  border: 1px solid hsl(var(--primary)/0.4);
-  box-shadow: 0 2px 14px hsl(var(--primary)/0.08);
-  transition: all .2s;
-}
-.dash-stake-trigger:hover {
-  border-color: hsl(var(--primary)/0.7);
-  box-shadow: 0 4px 20px hsl(var(--primary)/0.2);
-  transform: translateY(-1px);
-}
-.dash-stake-trigger-glow {
-  position: absolute; inset: -50%;
-  background: conic-gradient(from 0deg, transparent, hsl(var(--primary)/0.25), transparent 30%);
-  animation: cp-stake-spin 8s linear infinite;
-  opacity: .5; pointer-events: none;
-}
-.dash-stake-popup {
-  display: none; position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 60;
-  width: 310px; max-height: 400px; padding: 16px; border-radius: 18px;
-  background: radial-gradient(140% 100% at 100% 0%, hsl(var(--primary)/0.1), hsl(var(--card)/0.98) 55%);
-  border: 1px solid hsl(var(--primary)/0.35);
-  box-shadow: 0 0 0 1px hsl(var(--primary)/0.06), 0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 hsl(255 100% 100%/0.06);
-  backdrop-filter: blur(14px);
-  overflow: hidden;
-}
-.dash-stake-popup.open {
-  display: block;
-  animation: dash-stake-pop-in .28s cubic-bezier(.34,1.56,.64,1);
-}
-.dash-stake-popup-glow {
-  position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(120deg, transparent, hsl(var(--primary)/0.06), transparent 60%);
-}
-@keyframes dash-stake-pop-in {
-  from { opacity: 0; transform: scale(.92) translateY(8px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-.dash-stake-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 9px; border-radius: 10px;
-  background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.35);
-  transition: border-color .15s, background .15s;
-}
-.dash-stake-row:hover { border-color: hsl(var(--primary)/0.35); background: hsl(var(--bg)/0.6); }
-.dash-stake-input {
-  width: 78px; padding: 7px 8px; border-radius: 8px;
-  border: 1px solid hsl(var(--border)/0.5); background: hsl(var(--bg)/0.7);
-  color: hsl(var(--foreground)); font-family: 'DM Mono', monospace; font-size: 11.5px;
-  font-weight: 700; text-align: center; outline: none;
-  transition: border-color .15s, box-shadow .15s;
-}
-.dash-stake-input:focus {
-  border-color: hsl(var(--primary)/0.65);
-  box-shadow: 0 0 0 3px hsl(var(--primary)/0.12);
-}
-.dash-stake-save-btn {
-  position: relative; z-index: 1; width: 100%; margin-top: 12px; padding: 11px;
-  border: none; border-radius: 12px; cursor: pointer;
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)));
-  color: #fff; font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 900;
-  letter-spacing: 2px; box-shadow: 0 4px 16px hsl(var(--primary)/0.35);
-  transition: all .2s;
-}
-.dash-stake-save-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px hsl(var(--primary)/0.45); }
-.dash-stake-save-btn:active { transform: translateY(0); }
-@media (max-width: 480px) { .dash-stake-popup { width: min(310px, 90vw); right: -8px; } }
-
-/* ══════════════════════════════════════════════════════════════
-   STAKE ADDITION TERMINAL — big glowing "hacker terminal" block
-   ══════════════════════════════════════════════════════════════ */
-.sa-terminal {
-  position: relative; overflow: hidden;
-  border-radius: 16px; padding: 18px 18px 16px; margin-bottom: 12px;
-  background: linear-gradient(165deg, #0a0f0d, #0d1512 60%, #0a0f0d);
-  border: 1.5px solid hsl(var(--muted-foreground)/0.25);
-  box-shadow: inset 0 1px 0 hsl(255 100% 100% / 0.04), 0 10px 30px rgba(0,0,0,0.4);
-  font-family: 'DM Mono', monospace;
-  transition: border-color .3s, box-shadow .3s;
-}
-.sa-terminal.sa-armed {
-  border-color: hsl(140 85% 45% / 0.55);
-  box-shadow: inset 0 1px 0 hsl(255 100% 100% / 0.04), 0 0 0 1px hsl(140 85% 45% / 0.15), 0 0 34px hsl(140 85% 45% / 0.18), 0 10px 30px rgba(0,0,0,0.5);
-}
-.sa-terminal-scanlines {
-  position: absolute; inset: 0; pointer-events: none; opacity: .5;
-  background: repeating-linear-gradient(to bottom, transparent 0, transparent 2px, hsl(140 85% 60% / 0.025) 3px, transparent 4px);
-}
-.sa-terminal-topbar { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; }
-.sa-terminal-dot {
-  width: 9px; height: 9px; border-radius: 50%;
-  background: hsl(var(--muted-foreground)/0.4); flex-shrink: 0;
-}
-.sa-terminal-dot.sa-dot-on {
-  background: hsl(140 85% 55%); box-shadow: 0 0 10px hsl(140 85% 55%), 0 0 20px hsl(140 85% 55% / 0.6);
-  animation: sa-blink 1.4s ease-in-out infinite;
-}
-@keyframes sa-blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-.sa-terminal-title {
-  font-size: 12px; font-weight: 800; letter-spacing: 2px;
-  color: hsl(140 70% 80%); text-shadow: 0 0 12px hsl(140 85% 45% / 0.4);
-}
-.sa-terminal-status {
-  margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: 1.5px;
-  padding: 3px 9px; border-radius: 999px;
-  color: hsl(var(--muted-foreground)); background: hsl(var(--muted)/0.3);
-  border: 1px solid hsl(var(--border)/0.5);
-}
-.sa-terminal.sa-armed .sa-terminal-status {
-  color: hsl(140 85% 70%); background: hsl(140 85% 45% / 0.12); border-color: hsl(140 85% 45% / 0.4);
-}
-.sa-terminal-sub {
-  position: relative; z-index: 1; margin-top: 6px; font-size: 9px; line-height: 1.5;
-  color: hsl(var(--muted-foreground)/0.75); max-width: 480px;
-}
-.sa-terminal-grid {
-  position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-  margin-top: 14px;
-}
-.sa-terminal-cell {
-  background: hsl(0 0% 100% / 0.02); border: 1px solid hsl(140 40% 40% / 0.2);
-  border-radius: 10px; padding: 10px 12px;
-}
-.sa-terminal-label {
-  font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase;
-  color: hsl(var(--muted-foreground)/0.7); margin-bottom: 4px;
-}
-.sa-terminal-bignum {
-  font-size: 24px; font-weight: 800; color: hsl(0 0% 92%); letter-spacing: -0.5px;
-}
-.sa-terminal-bignum.sa-boosted { color: hsl(140 85% 60%); text-shadow: 0 0 14px hsl(140 85% 45% / 0.5); }
-.sa-terminal-caption { font-size: 8px; color: hsl(var(--muted-foreground)/0.6); margin-top: 2px; }
-.sa-terminal-input {
-  width: 100%; background: hsl(0 0% 100% / 0.03); border: 1px solid hsl(140 40% 40% / 0.3);
-  border-radius: 8px; padding: 7px 9px; font-family: 'DM Mono', monospace;
-  font-size: 20px; font-weight: 800; color: hsl(140 85% 75%); outline: none;
-  transition: border-color .15s, box-shadow .15s;
-}
-.sa-terminal-input:focus { border-color: hsl(140 85% 50%); box-shadow: 0 0 0 3px hsl(140 85% 45% / 0.15); }
-.sa-terminal-armbtn {
-  position: relative; z-index: 1; width: 100%; margin-top: 12px; padding: 13px;
-  border-radius: 12px; border: 1.5px solid hsl(140 60% 45% / 0.5); cursor: pointer;
-  background: hsl(140 85% 45% / 0.1); color: hsl(140 85% 75%);
-  font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 800; letter-spacing: 2px;
-  transition: all .18s;
-}
-.sa-terminal-armbtn:hover { background: hsl(140 85% 45% / 0.18); transform: translateY(-1px); }
-.sa-terminal-armbtn.sa-armed {
-  background: hsl(140 85% 45% / 0.22); box-shadow: 0 0 20px hsl(140 85% 45% / 0.3);
-}
-.sa-terminal-analysis {
-  position: relative; z-index: 1; margin-top: 12px; padding-top: 10px;
-  border-top: 1px dashed hsl(var(--border)/0.4);
-}
-.sa-terminal-analysis-row {
-  display: flex; justify-content: space-between; font-size: 9.5px;
-  color: hsl(var(--muted-foreground)/0.8); padding: 2px 0;
-}
-.sa-terminal-analysis-row b { color: hsl(0 0% 88%); font-size: 10px; }
-.sa-terminal-analysis-row b.sa-good { color: hsl(140 85% 60%); }
-.sa-terminal-suggestion {
-  margin-top: 8px; display: flex; align-items: center; gap: 10px;
-  padding: 9px 10px; border-radius: 9px;
-  background: hsl(45 90% 55% / 0.06); border: 1px solid hsl(45 90% 55% / 0.3);
-}
-.sa-terminal-suggestion.sa-conf-high { background: hsl(140 85% 45% / 0.08); border-color: hsl(140 85% 45% / 0.35); }
-.sa-terminal-suggestion.sa-conf-low { background: hsl(var(--muted)/0.2); border-color: hsl(var(--border)/0.5); }
-.sa-terminal-suggestion-text { flex: 1; font-size: 9px; line-height: 1.5; color: hsl(var(--foreground)/0.85); }
-.sa-conf-tag { font-size: 7.5px; text-transform: uppercase; letter-spacing: 1px; color: hsl(var(--muted-foreground)/0.7); }
-.sa-terminal-usebtn {
-  flex-shrink: 0; padding: 7px 12px; border-radius: 8px; border: 1px solid hsl(140 60% 45% / 0.5);
-  background: hsl(140 85% 45% / 0.15); color: hsl(140 85% 75%);
-  font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 800; letter-spacing: 1px; cursor: pointer;
-  transition: all .15s;
-}
-.sa-terminal-usebtn:hover { background: hsl(140 85% 45% / 0.28); }
-.sa-terminal-armed-banner {
-  position: relative; z-index: 1; margin-top: 10px; padding: 8px 10px; border-radius: 8px;
-  background: hsl(140 85% 45% / 0.1); border: 1px solid hsl(140 85% 45% / 0.3);
-  font-size: 9px; color: hsl(140 85% 75%); letter-spacing: .3px;
-}
-@media (max-width: 560px) { .sa-terminal-grid { grid-template-columns: 1fr; } }
-
-/* ══════════════════════════════════════════════════════════════
-   BEST TRADING TIMES — small rank strip in Equity Curve header
-   ══════════════════════════════════════════════════════════════ */
-.dash-best-times { margin-top: 8px; }
-.dash-best-times-label {
-  font-family: 'Outfit', sans-serif; font-size: 8px; font-weight: 800;
-  letter-spacing: 1.5px; text-transform: uppercase;
-  color: hsl(var(--muted-foreground)/0.75); margin-bottom: 5px;
-}
-.dash-best-times-empty {
-  font-family: 'DM Mono', monospace; font-size: 9px;
-  color: hsl(var(--muted-foreground)/0.5); max-width: 340px; line-height: 1.5;
-}
-.dash-best-times-pills { display: flex; flex-wrap: wrap; gap: 6px; }
-.dash-best-time-pill {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 9px 4px 7px; border-radius: 999px;
-  font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 700;
-  background: hsl(var(--bg)/0.55); border: 1px solid hsl(var(--border)/0.5);
-  color: hsl(var(--foreground)/0.85); cursor: default;
-  transition: transform .15s, box-shadow .15s;
-}
-.dash-best-time-pill:hover { transform: translateY(-1px); }
-.dash-best-time-medal { font-size: 11px; line-height: 1; }
-.dash-best-time-range { color: hsl(var(--foreground)/0.7); }
-.dash-best-time-profit { color: hsl(var(--win)); font-weight: 800; }
-.dash-best-time-pill.rank-1 {
-  border-color: hsl(45 90% 55% / 0.5); background: hsl(45 90% 55% / 0.08);
-  box-shadow: 0 0 12px hsl(45 90% 55% / 0.15);
-}
-.dash-best-time-pill.rank-2 { border-color: hsl(var(--border)); background: hsl(var(--muted)/0.4); }
-.dash-best-time-pill.rank-3 { border-color: hsl(25 60% 50% / 0.35); background: hsl(25 60% 50% / 0.06); }
-
 
 /* Luminous / Void theme overrides */
 html.luminous .cp-stat-pill { background: rgba(20,20,28,0.6) !important; border-color: rgba(0,242,254,0.1) !important; }
@@ -8196,7 +7841,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
   let statusSocket = null;
   let reconnectTimer = null;
   let reconnectDelay = 8000;
-  let statusListener = null;
 
   function connectAccount() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -8208,73 +7852,95 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
       emit();
       return;
     }
+    try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (e) { /* */ }
     state.connectionStatus = 'connecting';
     state.connectionError = '';
     emit();
 
-    // Shared trading/auth socket — see window.HubTradingSocket (defined
-    // later in the file, but this function only ever runs at runtime once
-    // the whole page has parsed, so the global is already available).
-    // Every bot engine authenticates against this same connection now;
-    // this just also listens in for the topbar's account/balance display.
-    function connectViaOtp() {
-      const ws = window.HubTradingSocket.connect(state.apiToken);
-      if (!ws) return;
+    // 2026 Deriv API flow:
+    // 1. REST POST /trading/v1/options/accounts/{accountId}/otp  → get OTP WebSocket URL
+    // 2. WebSocket connect to that URL (auth is embedded, no {authorize} message needed)
+    // We first fetch accounts to discover the accountId, then get the OTP.
+    let pingInterval = null;
+
+    async function connectViaOtp() {
+      // Step 1: resolve the accountId via the shared DerivAuth singleton so
+      // this doesn't fire its own duplicate /accounts request alongside
+      // every Titan/HotRepeat engine doing the same thing on page load.
+      let accountId = state.accountId;
+      const appId = state.appId || '33ADPhDZXR2F60qhPudXB';
+
+      if (!accountId) {
+        try {
+          const resolved = await window.DerivAuth.resolveAccountId(state.apiToken, appId, state.accountType);
+          accountId = resolved.accountId;
+          state.accountId = accountId;
+          state.currency = resolved.currency || state.currency;
+        } catch (e) {
+          state.isAuthenticated = false;
+          state.connectionStatus = 'disconnected';
+          state.connectionError = e.message || 'Could not fetch accounts — check your token and App ID';
+          emit();
+          return;
+        }
+      }
+
+      // Step 2: get an OTP-authenticated WebSocket URL. Goes through the
+      // shared queue in DerivAuth so it's spaced out from every other
+      // engine's OTP request instead of firing in the same tick.
+      let wsUrl;
+      try {
+        wsUrl = await window.DerivAuth.getOtpUrl(state.apiToken, appId, accountId);
+      } catch (e) {
+        state.isAuthenticated = false;
+        state.connectionStatus = 'disconnected';
+        state.connectionError = e.message || 'OTP request failed — check your App ID and token scopes';
+        emit();
+        return;
+      }
+
+      // Step 3: Connect to the authenticated WebSocket URL
+      try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (_) {}
+      const ws = new WebSocket(wsUrl);
       statusSocket = ws;
 
-      if (!statusListener) {
-        statusListener = (evtType, d) => {
-          statusSocket = window.HubTradingSocket.getSocket() || statusSocket;
-          if (evtType === 'error') {
-            state.connectionError = 'WebSocket connection failed — check your internet connection.';
-            emit();
-            return;
-          }
-          if (evtType === 'close') {
-            state.connectionStatus = 'disconnected';
-            state.isAuthenticated = false;
-            emit();
-            if (state.apiToken) {
-              reconnectTimer = setTimeout(connectAccount, reconnectDelay);
-              reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
-            }
-            return;
-          }
-          if (evtType !== 'message') return;
-          try {
-            if (d.error) {
-              state.isAuthenticated = false;
-              state.connectionStatus = 'disconnected';
-              state.connectionError = d.error.message || 'Authorization failed — check your API token.';
-              emit();
-              return;
-            }
-            if (d.msg_type === 'authorize' && d.authorize) {
-              reconnectDelay = 8000;
-              state.isAuthenticated = true;
-              state.connectionStatus = 'connected';
-              state.connectionError = '';
-              state.accountId = d.authorize.loginid || state.accountId;
-              state.currency = d.authorize.currency || state.currency;
-              if (typeof d.authorize.balance === 'number') state.balanceUSD = d.authorize.balance;
-              emit();
-              try { ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
-              return;
-            }
-            if (d.msg_type === 'balance' && d.balance) {
-              const bal = parseFloat(d.balance.balance);
-              if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
-            }
-          } catch (e) { /* */ }
-        };
-      }
-      window.HubTradingSocket.addListener(statusListener);
-      if (window.HubTradingSocket.isAuthorized(state.apiToken)) {
+      ws.onerror = () => {
+        state.connectionError = 'WebSocket connection failed — check your internet connection.';
+        emit();
+      };
+      ws.onopen = () => {
+        reconnectDelay = 8000;
         state.isAuthenticated = true;
         state.connectionStatus = 'connected';
         state.connectionError = '';
         emit();
-      }
+        // Subscribe to live balance updates + keep alive
+        try {
+          ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+          pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
+          }, 25000);
+        } catch (e) { /* */ }
+      };
+      ws.onmessage = (m) => {
+        try {
+          const d = JSON.parse(m.data);
+          if (d.msg_type === 'balance' && d.balance) {
+            const bal = parseFloat(d.balance.balance);
+            if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
+          }
+        } catch (e) { /* */ }
+      };
+      ws.onclose = () => {
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+        state.connectionStatus = 'disconnected';
+        state.isAuthenticated = false;
+        emit();
+        if (state.apiToken) {
+          reconnectTimer = setTimeout(connectAccount, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
+        }
+      };
     }
     connectViaOtp();
   }
@@ -9064,7 +8730,7 @@ window.EvenTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
 
   function isOdd(d) {
     return d % 2 !== 0;
@@ -9316,7 +8982,6 @@ window.EvenTrading = exports;
         const history = globalSocket.getHistory(symbol);
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
-        if (window.classifyRegime) market.regime = window.classifyRegime(market.history);
         if (market.history.length >= 10) {
           market.analysis = this.isOddStratScan
             ? analyzeOddStrategyCondition(market.history, this.tickPeriod)
@@ -10753,7 +10418,7 @@ window.NexusTrading = exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
 
   class GlobalSocketManager {
     constructor() {
@@ -10985,7 +10650,6 @@ window.NexusTrading = exports;
         const history = globalSocket.getHistory(symbol);
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
-        if (window.classifyRegime) market.regime = window.classifyRegime(market.history);
         if (market.history.length >= 10) {
           market.analysis = this.isOver3Scan
             ? analyzeOver3Condition(market.history, this.tickPeriod)
@@ -11058,7 +10722,7 @@ window.NexusTrading = exports;
   // always chosen once cooldown ends — unless it's the only viable market
   // left, in which case we allow staying rather than picking something with
   // no data at all.
-  window.BenzPickNextMarket = function BenzPickNextMarket(scanner, currentSymbol, preferredRegime) {
+  window.BenzPickNextMarket = function BenzPickNextMarket(scanner, currentSymbol) {
     if (!scanner) return null;
     const is1s = (sym) => typeof sym === 'string' && sym.startsWith('1HZ');
 
@@ -11075,19 +10739,7 @@ window.NexusTrading = exports;
     // Sort with 1s markets prioritised first, score as the tiebreaker within
     // each group — this keeps normal markets in the running (never dropped),
     // just ranked behind the 1s ones.
-    // REGIME METER: when the caller has a preference (TRENDING for
-    // momentum/streak strategies, CHOPPY for Smart Recovery's contrarian
-    // fade), a match on that regime outranks the 1s bonus — being on the
-    // right REGIME matters more than the market's tick speed. A market
-    // still in 'WARMING' (not enough data yet) or with no regime data at
-    // all is treated as neutral, never penalised, so this never starves
-    // the pool down to nothing on a cold scanner.
     pool = pool.slice().sort((a, b) => {
-      if (preferredRegime) {
-        const aMatch = a.regime && a.regime.regime === preferredRegime ? 1 : 0;
-        const bMatch = b.regime && b.regime.regime === preferredRegime ? 1 : 0;
-        if (aMatch !== bMatch) return bMatch - aMatch;
-      }
       const aBonus = is1s(a.symbol) ? 1 : 0;
       const bBonus = is1s(b.symbol) ? 1 : 0;
       if (aBonus !== bBonus) return bBonus - aBonus;
@@ -11308,7 +10960,7 @@ window.NexusTrading = exports;
 (function () {
   'use strict';
 
-  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
+  function getPublicWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
   const MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
     { value: '1HZ25V', label: '⚡ Volatility 25 (1s)' }, { value: 'R_25', label: 'Volatility 25' },
@@ -11886,67 +11538,74 @@ window.NexusTrading = exports;
       const token = window.HubStore.getState().apiToken;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
+      try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) { /* */ }
 
-      // Shared trading/auth socket — see window.HubTradingSocket, reused
-      // here instead of opening yet another independent connection to the
-      // same Deriv endpoint every other engine already authenticates
-      // against.
+      // 2026 Deriv API: REST OTP → authenticated WebSocket URL, via the
+      // shared DerivAuth singleton (see its definition near the top of the
+      // file) so this doesn't fire duplicate /accounts and /otp requests
+      // alongside HubStore's status socket and every Titan/HotRepeat bot.
       const _self = this;
-      const ws = window.HubTradingSocket.connect(token);
-      if (!ws) return;
-      _self.socketT = ws;
+      (async () => {
+        const hub = window.HubStore.getState();
+        const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
 
-      if (!_self._sharedTradingListener) {
-        _self._sharedTradingListener = (evtType, d) => {
-          _self.socketT = window.HubTradingSocket.getSocket() || _self.socketT;
-          if (evtType === 'error') {
-            _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
-            return;
-          }
-          if (evtType === 'close') {
+        // Resolve accountId
+        let accountId = hub.accountId;
+        if (!accountId) {
+          try {
+            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
+            accountId = resolved.accountId;
+          } catch (e) {
             _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+            _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' });
             return;
           }
-          if (evtType !== 'message') return;
-          _self._handleTradingMessage(d);
-        };
-      }
-      window.HubTradingSocket.addListener(_self._sharedTradingListener);
-      if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
+        }
 
-      _self._handleTradingMessage = (d) => {
+        // Get OTP WebSocket URL
+        let wsUrl;
         try {
-          if (d.error && !_self.state.isAuthenticated) {
-            _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-            _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${d.error.message || 'invalid token'}`, ntype: 'loss' });
-            return;
-          }
-          if (d.msg_type === 'authorize' && d.authorize) {
-            _self._authDelay = 8000;
-            const bal = (typeof d.authorize.balance === 'number') ? d.authorize.balance : (window.HubStore.getState().balanceUSD || 0);
-            _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
-            _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
-            try {
-              ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
-              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-            } catch (e) { /* */ }
-            return;
-          }
-          if (d.msg_type === 'balance' && d.balance) {
-            const bal = parseFloat(d.balance.balance);
-            if (!isNaN(bal)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: bal });
-          }
-          if (d.msg_type === 'proposal_open_contract') {
-            const c = d.proposal_open_contract;
-            if (c && c.is_sold) {
-              const balAfter = parseFloat(c.balance_after);
-              if (!isNaN(balAfter)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: balAfter });
-              if (!c.contract_id || !_self.ownContractIds.has(c.contract_id)) return;
-              _self.ownContractIds.delete(c.contract_id);
-              const isWin = c.status === 'won';
-              const profit = parseFloat(c.profit) || 0;
-              // ── DIGIT EXTRACTION (Differ) ───────────────────────────────
-              // exit_tick_display_value is a full price like "1234.56" — last char is the digit.
+          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
+        } catch (e) {
+          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+          _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' });
+          return;
+        }
+
+        const ws = new WebSocket(wsUrl);
+        _self.socketT = ws;
+
+        ws.onerror = () => {
+          _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
+        };
+        ws.onopen = () => {
+          _self._authDelay = 8000;
+          const bal = window.HubStore.getState().balanceUSD || 0;
+          _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
+          _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
+          try {
+            ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
+            ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+          } catch (e) { /* */ }
+        };
+        ws.onmessage = (m) => {
+          try {
+            const d = JSON.parse(m.data);
+            if (d.msg_type === 'balance' && d.balance) {
+              const bal = parseFloat(d.balance.balance);
+              if (!isNaN(bal)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: bal });
+            }
+            if (d.msg_type === 'proposal_open_contract') {
+              const c = d.proposal_open_contract;
+              if (c && c.is_sold) {
+                const balAfter = parseFloat(c.balance_after);
+                if (!isNaN(balAfter)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: balAfter });
+                if (!c.contract_id || !_self.ownContractIds.has(c.contract_id)) return;
+                _self.ownContractIds.delete(c.contract_id);
+                const isWin = c.status === 'won';
+                const profit = parseFloat(c.profit) || 0;
+                // ── DIGIT EXTRACTION (Differ) ───────────────────────────────
+                // exit_tick_display_value is a full price like "1234.56" — last char is the digit.
                 // entry digit: prefer API field, fall back to currentTick recorded at trigger.
                 // Multiple fallback fields tried in order of reliability.
                 function _lc(v) { const s = v?.toString().trim(); return (s && s.length && /\d/.test(s.slice(-1))) ? s.slice(-1) : null; }
@@ -12002,16 +11661,24 @@ window.NexusTrading = exports;
                 // every few seconds and stops ALL bots at once, Differ
                 // included. Keeping a second, separate TP/SL here just meant
                 // two different numbers to configure for the same outcome.
+              }
             }
-          }
-          if (d.msg_type === 'buy') {
-            if (d.error) {
-              _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+            if (d.msg_type === 'buy') {
+              if (d.error) {
+                _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+              }
+              else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
             }
-            else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
+          } catch (e) { /* */ }
+        };
+        ws.onclose = () => {
+          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+          if (window.HubStore.getState().apiToken) {
+            _self._authDelay = Math.min((_self._authDelay || 8000) * 1.5, 60000);
+            setTimeout(() => _self.authenticate(), _self._authDelay);
           }
-        } catch (e) { /* */ }
-      };
+        };
+      })();
     }
 
     _showDifferCooldownOverlay(duration) {
@@ -12743,7 +12410,7 @@ window.NexusStrategies=exports;
 
 (function () {
   'use strict';
-  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return `wss://ws.derivws.com/websockets/v3?app_id=${id}`; }
+  function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
   const ANALYSIS_HOLD = 20;
 
   // Generalized TP/SL popup — kind: 'tp' (win/green) or 'sl' (loss/red).
@@ -12771,67 +12438,6 @@ window.NexusStrategies=exports;
   function showCongratulationsPopup(target) { showResultPopup('tp', target); }
   window.showResultPopup = showResultPopup;
 
-  // ── Shared trading/auth WebSocket ────────────────────────────────────
-  // Every bot engine (13 TitanEngine instances, all instantiated eagerly
-  // at page load) used to call its own connect(token) and open its own
-  // `wss://ws.derivws.com/...` connection for trading/auth. With that many
-  // engines each independently reconnecting (on load, on stale-tick
-  // watchdog, on autoRefresh, on a failed bolt purchase), the page could
-  // fire off a dozen-plus near-simultaneous connection attempts to the
-  // same endpoint — exactly what produced repeated "WebSocket is closed
-  // before the connection is established" errors. This singleton opens
-  // ONE authenticated socket and lets every engine attach as a listener
-  // instead, the same sharing pattern EvenSocket/NexusSocket already use
-  // for the public analysis feed.
-  window.HubTradingSocket = (function () {
-    let socket = null;
-    let connecting = false;
-    let authorizedToken = null;
-    const listeners = new Set();
-    function getWsUrl() {
-      const hub = window.HubStore.getState();
-      const appId = hub.wsAppId || '1089';
-      return `wss://ws.derivws.com/websockets/v3?app_id=${appId}`;
-    }
-    function notify(type, data) {
-      listeners.forEach((fn) => { try { fn(type, data); } catch (e) { console.error('[HubTradingSocket] listener error:', e); } });
-    }
-    function connect(token) {
-      token = (token || '').trim();
-      if (!token) return null;
-      // Already open and authorized with this exact token — reuse as-is.
-      if (socket && socket.readyState === WebSocket.OPEN && authorizedToken === token) return socket;
-      // A connection attempt is already in flight — don't open a second one.
-      if (connecting) return socket;
-      if (socket) { try { socket.onclose = null; socket.close(); } catch (_) {} }
-      connecting = true;
-      authorizedToken = null;
-      socket = new WebSocket(getWsUrl());
-      socket.onopen = () => {
-        try { socket.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
-      };
-      socket.onmessage = (msg) => {
-        let data;
-        try { data = JSON.parse(msg.data); } catch (e) { return; }
-        if (data.msg_type === 'authorize' && data.authorize) {
-          connecting = false;
-          authorizedToken = token;
-        }
-        notify('message', data);
-      };
-      socket.onerror = () => { notify('error'); };
-      socket.onclose = () => { connecting = false; authorizedToken = null; notify('close'); };
-      return socket;
-    }
-    return {
-      connect,
-      getSocket() { return socket; },
-      isAuthorized(token) { return !!socket && socket.readyState === WebSocket.OPEN && authorizedToken === (token || '').trim(); },
-      addListener(fn) { listeners.add(fn); },
-      removeListener(fn) { listeners.delete(fn); },
-    };
-  })();
-
   class TitanEngine {
     constructor(opts) {
       this.id = opts.id;
@@ -12851,25 +12457,9 @@ window.NexusStrategies=exports;
       this.onUpdate = null;
 
       this.config = this.loadConfig();
-      // Stake Addition's "boosted" stake lives ONLY here — a plain instance
-      // property, never written into this.config, never persisted to
-      // localStorage. That's the whole trick: the ARMED switch and the
-      // Next-High-Stake value are normal config (persist, survive reload),
-      // but the actual elevated number in effect resets to nothing the
-      // instant the page reloads — see getEffectiveStake().
-      this.sessionStakeOverride = null;
-      // Rolling analytics for the Stake Addition terminal's suggestion —
-      // NOT persisted (deliberately; a fresh page load starts counting
-      // fresh, same spirit as the stake override itself).
-      this.sessionOutcomes = []; // array of booleans, most recent last
-      // Forward (out-of-sample) validation for the Recovery Pattern
-      // Engine's Dynamic Pattern — see handleContractResult. NOT
-      // persisted, same reasoning as sessionOutcomes.
-      this.dynamicMaskLiveStats = { hits: 0, attempts: 0, recent: [] };
-      this._dynamicMaskLivePending = false;
       this.state = {
         active: false, isLocked: false, isCooldown: false, history: [],
-        currentRuns: 0, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false,
+        currentRuns: 0, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false,
         stats: { win: 0, loss: 0, profit: 0 }, connected: false, balance: 0,
         currentDigit: -1, currentQuote: 0, streak: 0, lastTradedDigit: null,
       };
@@ -13073,15 +12663,6 @@ window.NexusStrategies=exports;
         //               regardless of whether that next tick still matches
         //               the entry condition on its own.
         firstTickMode: 'normal', firstTickStake: 0.35,
-        // ── STAKE ADDITION (Even/Odd classic bots only) ──────────────────
-        // Manual-only stake escalation, opt-in per run. When armed, the
-        // NEXT time a run finishes in a win (session resets — martingale
-        // recovered or a clean first-trade win, either way state.martingaleStep
-        // goes back to 0), Stake $ is bumped up to stakeAdditionNextStake and
-        // the arm switch flips itself off — one shot, not a standing rule.
-        // It NEVER lowers the stake or re-arms itself; only the operator can
-        // do either of those, by re-toggling it on before the next win.
-        stakeAdditionArmed: false, stakeAdditionNextStake: null,
       };
       // Even/Odd (Mean Reversion) — a completely separate, statistically
       // sound rebuild of the classic "wait for a streak of 4, bet the
@@ -13127,11 +12708,6 @@ window.NexusStrategies=exports;
         // implements this generically (mode-agnostic), Even/Odd MR was
         // just missing these two config defaults and its UI control.
         firstTickMode: 'normal', firstTickStake: 0.35,
-        // Stake Addition — same one-shot, win-session-only stake promotion
-        // as classic Even/Odd (see evenDefaults for the full explanation).
-        // Was only wired up for the classic bots; Even/Odd MR is one of
-        // the "even and odd bots" too, so it gets the same block.
-        stakeAdditionArmed: false, stakeAdditionNextStake: null,
       };
       const overDefaults = { ...evenDefaults, autoPilot: false, autoRefresh: false, tradeMode: undefined };
       // Under gets its own default barrier picks (Under 7 / recovery Under 6)
@@ -13215,17 +12791,7 @@ window.NexusStrategies=exports;
         // "hottest digit" condition from re-firing on the very next tick.
         matchesCooldownTicks: 3,
       };
-      const defaults = {
-        // Universal fallback so EVERY bot — not just Even/Odd — has Stake
-        // Addition available, even ones whose own defaults object above
-        // doesn't mention it explicitly.
-        stakeAdditionArmed: false, stakeAdditionNextStake: null,
-        // How many recent ticks the short-span contrarian read looks at
-        // (see RecoveryPatternEngine.buildShortSpanSignal). Smaller = more
-        // reactive/noisier, larger = steadier/slower to notice a shift.
-        smartRecoveryShortSpan: 20,
-        ...(this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : evenDefaults),
-      };
+      const defaults = this.isUnderMode ? underDefaults : this.isOU ? overDefaults : this.isMeanRevMode ? meanrevDefaults : this.isEvenOddMRMode ? evenoddmrDefaults : this.isPriceMode ? risefallDefaults : this.isMatchMode ? matchesDefaults : evenDefaults;
       try {
         const raw = localStorage.getItem(this.prefix + '_config');
         const merged = { ...defaults, ...(raw ? JSON.parse(raw) : {}) };
@@ -13266,78 +12832,6 @@ window.NexusStrategies=exports;
     addLog(type, title, message) {
       this.logs = [{ id: crypto.randomUUID(), timestamp: new Date(), type, title, message }, ...this.logs].slice(0, 100);
       this.emit();
-    }
-
-    // The stake actually used for the next trade/session: the Stake
-    // Addition boost if one is currently in effect, otherwise the plain
-    // Stake $ the operator set. The boost lives ONLY in-memory
-    // (this.sessionStakeOverride), so it is automatically gone — back to
-    // normal Stake $ — the moment the page reloads, with zero extra code
-    // needed anywhere else. Everywhere the engine used to read
-    // this.config.stake / cfg.stake as "what to trade with next," it now
-    // reads this instead.
-    getEffectiveStake() {
-      const v = this.sessionStakeOverride;
-      return (v != null && !isNaN(v) && v > 0) ? v : this.config.stake;
-    }
-
-    // ── REGIME METER preference ─────────────────────────────────────────
-    // Which market regime actually suits what this bot is about to do:
-    //  - Smart Recovery armed → this bot leans on the short-span
-    //    contrarian fade during recovery, which wins by betting AGAINST
-    //    whichever side has been dominant — that only works where the
-    //    market tends to swing back, i.e. CHOPPY conditions. A strong
-    //    persistent TREND is exactly what breaks a fade strategy (it
-    //    keeps betting against a streak that keeps extending).
-    //  - Otherwise → the base strategies (S1-S9) are mostly riding
-    //    dominance/streak continuation, so TRENDING markets suit them
-    //    better than a coin-flip-random CHOPPY one.
-    // Markets with no regime data yet, or still 'WARMING', are treated as
-    // neutral by BenzPickNextMarket — this preference only re-ranks
-    // among markets that actually have a confident read either way.
-    getPreferredRegime() {
-      return this.config.smartRecovery ? 'CHOPPY' : 'TRENDING';
-    }
-
-    // ── STAKE ADDITION ANALYSIS ─────────────────────────────────────────
-    // A step up from "guess a number": looks at your actual recent session
-    // results (win/loss per completed session, not per trade) and turns
-    // that into a concrete suggested Next High Stake, instead of leaving
-    // the field as a totally blind manual entry. Still just a suggestion —
-    // one click fills the field, it never applies itself.
-    getSessionWinStreak() {
-      let streak = 0;
-      for (let i = this.sessionOutcomes.length - 1; i >= 0; i--) {
-        if (this.sessionOutcomes[i]) streak++; else break;
-      }
-      return streak;
-    }
-    getRecentSessionStats(n = 10) {
-      const recent = this.sessionOutcomes.slice(-n);
-      const wins = recent.filter(Boolean).length;
-      return { sessions: recent.length, wins, losses: recent.length - wins, winRate: recent.length ? wins / recent.length : null };
-    }
-    getSuggestedNextStake() {
-      const base = this.getEffectiveStake();
-      const streak = this.getSessionWinStreak();
-      const { winRate, sessions } = this.getRecentSessionStats(10);
-      // Not enough history yet to say anything meaningful — a flat,
-      // conservative nudge instead of a confident-looking number.
-      if (sessions < 3) return { value: +(base * 1.2).toFixed(2), confidence: 'low', reason: `Only ${sessions} session${sessions === 1 ? '' : 's'} of history so far — trade a few more before trusting a suggestion here.` };
-      // Losing more than winning lately → don't suggest scaling up at all.
-      if (winRate !== null && winRate < 0.5) {
-        return { value: +base.toFixed(2), confidence: 'low', reason: `Last ${sessions} sessions won only ${(winRate * 100).toFixed(0)}% — not a good moment to be scaling up. Suggestion holds at your current stake.` };
-      }
-      // Scale with the live win streak, capped so a hot run can't suggest
-      // something absurd: +20% per consecutive winning session, max 5
-      // sessions' worth (2x), then hard-capped at 3x base regardless.
-      const bump = 1 + Math.min(streak, 5) * 0.2;
-      const value = Math.min(base * bump, base * 3);
-      const confidence = streak >= 3 ? 'high' : streak >= 1 ? 'medium' : 'low';
-      const reason = streak > 0
-        ? `${streak} winning session${streak === 1 ? '' : 's'} in a row, ${(winRate * 100).toFixed(0)}% win rate over the last ${sessions}.`
-        : `No active winning streak yet, but recent win rate (${(winRate * 100).toFixed(0)}% over ${sessions} sessions) supports a small step up.`;
-      return { value: +value.toFixed(2), confidence, reason };
     }
 
     setConfig(partial) {
@@ -13633,12 +13127,11 @@ window.NexusStrategies=exports;
         // just keeps the ranking itself always up to date so switching
         // to Smart Toggle mid-session doesn't start from a cold read.
         if (window.RecoveryPatternEngine) {
-          const shortSpanWindow = this.config.smartRecoveryShortSpan || 20;
           if (this.mode === 'evenodd' || this.isEvenOddMRMode) {
             const isOddMode = this.config.tradeMode === 'odd';
-            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankParity(fullHistory, isOddMode, shortSpanWindow);
+            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankParity(fullHistory, isOddMode);
           } else if (this.isOU) {
-            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankThreshold(fullHistory, this.isUnderMode, this.config.recoveryBarrier != null ? this.config.recoveryBarrier : this.config.overBarrier, shortSpanWindow);
+            this.smartRecoveryRanking = window.RecoveryPatternEngine.rankThreshold(fullHistory, this.isUnderMode, this.config.recoveryBarrier != null ? this.config.recoveryBarrier : this.config.overBarrier);
           }
         }
         // Feed any journal entries still waiting on their post-trade 3-tick
@@ -13826,7 +13319,7 @@ window.NexusStrategies=exports;
               const scannerBest = this.scanner && this.scanner.getBestMarket && this.scanner.getBestMarket();
               let candidate = scannerBest && scannerBest.symbol && scannerBest.symbol !== market ? scannerBest.symbol : null;
               if (!candidate && window.BenzPickNextMarket && this.scanner) {
-                const next = window.BenzPickNextMarket(this.scanner, market, this.getPreferredRegime());
+                const next = window.BenzPickNextMarket(this.scanner, market);
                 if (next && next.symbol && next.symbol !== market) candidate = next.symbol;
               }
               if (candidate) {
@@ -13884,7 +13377,7 @@ window.NexusStrategies=exports;
             this._altCooldownUntil = 0;
             this._altLastDomCheck = 0;
             if (this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, market, this.getPreferredRegime());
+              const best = window.BenzPickNextMarket(this.scanner, market);
               if (best && best.symbol && best.symbol !== market) {
                 this.addLog('engine', 'ALT-GATE', `🔁 Rotating to ${best.symbol}`);
                 this.changeMarket(best.symbol);
@@ -13951,7 +13444,7 @@ window.NexusStrategies=exports;
             // into whatever market is currently scoring best.
             if (!this._over3WaitStart) this._over3WaitStart = Date.now();
             if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -13989,7 +13482,7 @@ window.NexusStrategies=exports;
               : `Streak of ${streak} ended on digit ${lastDigit} — need 7 or 9`;
             if (!this._over3WaitStart) this._over3WaitStart = Date.now();
             if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -14051,7 +13544,7 @@ window.NexusStrategies=exports;
             // of sitting here indefinitely.
             if (!this._oddWaitStart) this._oddWaitStart = Date.now();
             if (Date.now() - this._oddWaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -14112,7 +13605,7 @@ window.NexusStrategies=exports;
             this.strategyPhase = 'waiting';
             if (!this._evenWaitStart) this._evenWaitStart = Date.now();
             if (Date.now() - this._evenWaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -14216,22 +13709,11 @@ window.NexusStrategies=exports;
             // flat "which side is starved" read.
             const step = st.martingaleStep;
             const ranking = this.smartRecoveryRanking;
-            // Gate on EITHER signal being ready — previously this only
-            // checked the slow long-window ranking.ready, so shortSpan
-            // (which is usually ready first) sat unused for the first
-            // several ticks even though shouldFlipForStep() below already
-            // prefers it once it IS available.
-            if (ranking && (ranking.ready || (ranking.shortSpan && ranking.shortSpan.ready))) {
+            if (ranking && ranking.ready) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
-              this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               contractType = flip ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD') : (isOddMode ? 'DIGITODD' : 'DIGITEVEN');
-              const ss = ranking.shortSpan;
-              if (ss && ss.ready) {
-                this.addLog('engine', 'SMART-REC', `Short-span: ${ss.dominant.toUpperCase()} dominant ${(ss.dominantPct*100).toFixed(0)}% of last ${ss.samples} ticks (z=${ss.z.toFixed(2)}) → fading it, betting ${contractType.replace('DIGIT','')}`);
-              } else {
-                const top = ranking.patterns.find((p) => p.id === ranking.best);
-                this.addLog('engine', 'SMART-REC', `Long-window fallback: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
-              }
+              const top = ranking.patterns.find((p) => p.id === ranking.best);
+              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
             } else {
               // Not enough tick history yet to rank patterns — fall back
               // to the original starved-side read until it warms up.
@@ -14352,17 +13834,11 @@ window.NexusStrategies=exports;
             // pattern's step-rule instead of a flat starved-side read.
             const step = st.martingaleStep;
             const ranking = this.smartRecoveryRanking;
-            if (ranking && (ranking.ready || (ranking.shortSpan && ranking.shortSpan.ready))) {
+            if (ranking && ranking.ready) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
-              this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               contractType = flip ? (isOddMode ? 'DIGITEVEN' : 'DIGITODD') : (isOddMode ? 'DIGITODD' : 'DIGITEVEN');
-              const ss = ranking.shortSpan;
-              if (ss && ss.ready) {
-                this.addLog('engine', 'SMART-REC', `Short-span: ${ss.dominant.toUpperCase()} dominant ${(ss.dominantPct*100).toFixed(0)}% of last ${ss.samples} ticks (z=${ss.z.toFixed(2)}) → fading it, betting ${contractType.replace('DIGIT','')}`);
-              } else {
-                const top = ranking.patterns.find((p) => p.id === ranking.best);
-                this.addLog('engine', 'SMART-REC', `Long-window fallback: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
-              }
+              const top = ranking.patterns.find((p) => p.id === ranking.best);
+              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType.replace('DIGIT','')}`);
             } else {
               const recent = st.history.slice(-20);
               const oddPct = recent.length ? recent.filter((d) => this.T.isOdd(d)).length / recent.length : 0.5;
@@ -14441,17 +13917,11 @@ window.NexusStrategies=exports;
             // a flat "which side is dominant" read.
             const step = st.martingaleStep;
             const ranking = this.smartRecoveryRanking;
-            if (ranking && (ranking.ready || (ranking.shortSpan && ranking.shortSpan.ready))) {
+            if (ranking && ranking.ready) {
               const flip = window.RecoveryPatternEngine.shouldFlipForStep(ranking, step);
-              this._dynamicMaskLivePending = true; // settle this on the next result — see handleContractResult
               if (flip) { contractType = flipCT; barrierValue = 9 - cfg.recoveryBarrier; }
-              const ss = ranking.shortSpan;
-              if (ss && ss.ready) {
-                this.addLog('engine', 'SMART-REC', `Short-span: ${ss.dominant === 'stay' ? baseWord : flipWord} dominant ${(ss.dominantPct*100).toFixed(0)}% of last ${ss.samples} ticks (z=${ss.z.toFixed(2)}) → fading it, betting ${contractType} ${barrierValue}`);
-              } else {
-                const top = ranking.patterns.find((p) => p.id === ranking.best);
-                this.addLog('engine', 'SMART-REC', `Long-window fallback: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType} ${barrierValue}`);
-              }
+              const top = ranking.patterns.find((p) => p.id === ranking.best);
+              this.addLog('engine', 'SMART-REC', `Smart: ${top.label} ranked #1 (${(top.rate*100).toFixed(0)}% · ${top.hits}/${top.attempts}) step ${step} → betting ${contractType} ${barrierValue}`);
             } else {
               // Not enough tick history yet to rank patterns — fall back
               // to the original dominant-side read until it warms up.
@@ -14698,36 +14168,6 @@ window.NexusStrategies=exports;
     completeSession(wonSession = true) {
       this.executionGuard = false; this.pendingTrade = null;
       this._skipArmed = false; this._isSacrificeTrade = false;
-      this.sessionOutcomes = [...this.sessionOutcomes, !!wonSession].slice(-20);
-      // ── STAKE ADDITION (all bots) ──────────────────────────────────────
-      // Fires exactly once per completed TRADING SESSION (this function —
-      // the point where the bot goes into cooldown), not per individual
-      // trade. wonSession === true covers both a clean run and a fully
-      // recovered martingale chain finishing the session in profit;
-      // wonSession === false covers stop-loss / martingale-stop-step /
-      // any other session-ending loss. Only a win-finished session ever
-      // promotes the stake, and only if the operator armed it — a lost
-      // session never touches the stake in any way, boosted or not.
-      //
-      // STANDING switch, not one-shot: arming it no longer auto-disarms
-      // after firing — it stays armed and keeps promoting the stake at
-      // the end of every winning session until the operator manually
-      // switches it off. The boost itself lives in this.sessionStakeOverride
-      // (see getEffectiveStake()), never in this.config, so it can never
-      // get written to disk — a page reload always drops back to the
-      // plain Stake $ value, armed or not, exactly like flipping a light
-      // switch that resets when the power cycles but stays flipped
-      // otherwise. Available on every bot, not just Even/Odd.
-      if (wonSession && this.config.stakeAdditionArmed) {
-        const nextHigh = parseFloat(this.config.stakeAdditionNextStake);
-        if (!isNaN(nextHigh) && nextHigh > 0) {
-          const fromStake = this.getEffectiveStake();
-          this.addLog('engine', 'STAKE-ADD', `Session finished in a WIN — Stake Addition promoting stake from $${fromStake.toFixed(2)} to $${nextHigh.toFixed(2)} for the next session. Still armed for the session after that too.`);
-          this.sessionStakeOverride = nextHigh;
-        } else {
-          this.addLog('engine', 'STAKE-ADD', `Stake Addition is armed but no valid Next High Stake was set — skipped this time.`);
-        }
-      }
       // Alt Automation: if this session ended in a loss (recovery exhausted,
       // stop-rule hit, or stop-loss hit) rather than a win, rotate to the
       // next recovery pattern for next session — only when the toggle is on
@@ -14740,7 +14180,7 @@ window.NexusStrategies=exports;
       // Reset martingale state so the NEXT session always starts from the base stake,
       // regardless of what step the current session ended on (stop-loss, max step, TP, etc.)
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false,
-        currentRuns: 0, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
+        currentRuns: 0, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
       const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
       this.cooldownTime = cd;
       this._cdMax = cd; // store for tab ring arc
@@ -14767,7 +14207,7 @@ window.NexusStrategies=exports;
           // HARD FORCE: stake/martingale step always snap back to the base
           // stake the instant cooldown ends, no matter what step/TP/SL/abort
           // path got us here, and regardless of whether Auto Pilot is on.
-          this.state = { ...this.state, isCooldown: false, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
+          this.state = { ...this.state, isCooldown: false, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
           this._hideCooldownOverlay();
           this._rerollShuffles();
           // Market switch: every cooldown, always rotate onto a new market —
@@ -14775,7 +14215,7 @@ window.NexusStrategies=exports;
           // stay in the fallback pool so they're still used whenever there's
           // no good 1s candidate available.
           if (this.scanner && window.BenzPickNextMarket && !this.fixedMarket) {
-            const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+            const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket);
             if (best && best.symbol) {
               const label = best._forcedSwitch ? `🔀 Switching to ${best.symbol}` : `↻ Staying on ${best.symbol} (only viable market)`;
               this.addLog('engine', 'MARKET', `${label} (score: ${best.score || '?'}${best._rank > 1 ? `, picked #${best._rank}` : ''})`);
@@ -14791,7 +14231,7 @@ window.NexusStrategies=exports;
                   active: true,
                   isLocked: false,
                   currentRuns: 0,
-                  currentStake: this.getEffectiveStake(),
+                  currentStake: this.config.stake,
                   martingaleStep: 0,
                   inRecovery: false,
                 };
@@ -14915,20 +14355,6 @@ window.NexusStrategies=exports;
       // rest of the session, which is a real-money safety issue.
       const profit = isNaN(profitRaw) ? 0 : profitRaw;
       if (isNaN(profitRaw)) this.addLog('error', 'DATA', 'Contract result had an unreadable profit value — treated as 0 for stats.');
-      // ── DYNAMIC PATTERN LIVE (FORWARD) TRACKING ───────────────────────
-      // The Recovery Pattern Engine's on-screen hit rate is a BACKTEST —
-      // it's measuring the mask against the same history it was built
-      // from, which is exactly the setup that makes overfitting invisible.
-      // This is the honest number: every time a real recovery trade
-      // actually used the live mask's flip decision, record whether it
-      // won. Tracked completely separately from the backtest rate so the
-      // two can be compared side by side in the terminal.
-      if (this._dynamicMaskLivePending) {
-        this._dynamicMaskLivePending = false;
-        this.dynamicMaskLiveStats.attempts++;
-        if (win) this.dynamicMaskLiveStats.hits++;
-        this.dynamicMaskLiveStats.recent = [...(this.dynamicMaskLiveStats.recent || []), win].slice(-20);
-      }
       // ── DIGIT EXTRACTION ────────────────────────────────────────────
       // Deriv sends exit_tick_display_value as a full price string e.g. "1234.56"
       // The last character IS the traded digit for all Digit contract types.
@@ -15011,9 +14437,9 @@ window.NexusStrategies=exports;
       if (this._isSacrificeTrade) {
         this._isSacrificeTrade = false;
         this.executionGuard = false;
-        this.state = { ...this.state, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
+        this.state = { ...this.state, currentStake: this.config.stake, martingaleStep: 0, inRecovery: false };
         if (win) {
-          this.addLog('win', 'TEST-STAKE', `Test stake WON (not counted) — firing real entry now at $${this.getEffectiveStake().toFixed(2)}.`);
+          this.addLog('win', 'TEST-STAKE', `Test stake WON (not counted) — firing real entry now at $${this.config.stake.toFixed(2)}.`);
           this.executeBoltPurchase();
         } else {
           this.addLog('loss', 'TEST-STAKE', `Test stake LOST (not counted) — signal rejected, real run skipped. Back to scouting for the next signal.`);
@@ -15026,7 +14452,7 @@ window.NexusStrategies=exports;
       const stats = { ...this.state.stats, profit: this.state.stats.profit + profit, win: this.state.stats.win + (win ? 1 : 0), loss: this.state.stats.loss + (win ? 0 : 1) };
       let ns = { ...this.state, stats };
       if (win) {
-        ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = this.getEffectiveStake();
+        ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = cfg.stake;
       } else {
         const nextStep = this.state.martingaleStep + 1;
         ns.martingaleStep = nextStep; ns.inRecovery = cfg.martingaleEnabled;
@@ -15168,7 +14594,7 @@ window.NexusStrategies=exports;
       // immediately re-fires the real run at the normal Stake once it settles.
       const useSacrifice = !forceFire && ftMode === 'sacrifice';
       this.state = { ...this.state, isLocked: true, martingaleStep: 0, inRecovery: false,
-        currentStake: useSacrifice ? (parseFloat(this.config.firstTickStake) || this.getEffectiveStake()) : this.getEffectiveStake() };
+        currentStake: useSacrifice ? (parseFloat(this.config.firstTickStake) || this.config.stake) : this.config.stake };
       this._isSacrificeTrade = useSacrifice;
       if (useSacrifice) {
         this.addLog('engine', 'TEST-STAKE', `🧪 Test stake $${this.state.currentStake.toFixed(2)} firing on the entry tick — result won't count toward Runs/stats; the real run fires right after.`);
@@ -15179,22 +14605,46 @@ window.NexusStrategies=exports;
     connect(token) {
       token = (token || '').trim();
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
+      if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
 
-      // Shared trading/auth socket: reuse the one connection every engine
-      // attaches to (see window.HubTradingSocket above) instead of each of
-      // the 13 engine instances opening its own WebSocket to Deriv.
+      // 2026 Deriv API: REST OTP → authenticated WebSocket URL, via the
+      // shared DerivAuth singleton. resolveAccountId() is single-flight, so
+      // even though every Titan bot (and HubStore, and HotRepeat) calls
+      // this on load, only ONE /accounts request actually goes out and
+      // everyone shares the result. getOtpUrl() is queued/spaced so 13
+      // simultaneous bot connects don't all POST /otp in the same tick.
       const _titan = this;
-      (() => {
+      (async () => {
         const hub = window.HubStore.getState();
-        const ws = window.HubTradingSocket.connect(token);
-        if (!ws) return;
-        _titan.tradingSocket = ws;
+        const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
 
-        // Runs once the server confirms the authorize call — with the real
-        // Deriv flow the socket is open (but not yet authenticated) before
-        // this fires, so the "ready to trade" setup lives here instead of
-        // in onopen.
-        _titan._onAuthorized = () => {
+        let accountId = hub.accountId;
+        if (!accountId) {
+          try {
+            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
+            accountId = resolved.accountId;
+          } catch (e) {
+            _titan.addLog('error', 'AUTH', `Accounts fetch failed: ${e.message}`);
+            _titan.state.connected = false; _titan.emit(); return;
+          }
+        }
+
+        // Get OTP WebSocket URL
+        let wsUrl;
+        try {
+          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
+        } catch (e) {
+          _titan.addLog('error', 'AUTH', `OTP failed: ${e.message}`);
+          _titan.state.connected = false; _titan.emit(); return;
+        }
+
+        _titan.tradingSocket = new WebSocket(wsUrl);
+
+        _titan.tradingSocket.onerror = () => {
+          _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
+          _titan.state.connected = false;
+        };
+        _titan.tradingSocket.onopen = () => {
           _titan.state.balance = hub.balanceUSD || 0;
           _titan.state.connected = true;
           _titan.sound.playConnect();
@@ -15224,43 +14674,12 @@ window.NexusStrategies=exports;
         // Digit contracts settle in 1 tick — result can arrive before buy ack
         if (!_titan._earlyResults) _titan._earlyResults = new Map();
 
-        // A single listener function per engine, registered once with the
-        // shared socket (Set-based, so re-registering on reconnect is a
-        // harmless no-op) instead of assigning ws.onmessage/.onerror/
-        // .onclose directly — those would only ever run for the LAST
-        // engine to call connect(), since all engines now share one
-        // underlying WebSocket object.
-        if (!_titan._sharedTradingListener) {
-          _titan._sharedTradingListener = (evtType, data) => {
-            _titan.tradingSocket = window.HubTradingSocket.getSocket() || _titan.tradingSocket;
-            if (evtType === 'error') {
-              _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
-              _titan.state.connected = false;
-              return;
-            }
-            if (evtType === 'close') {
-              _titan.state.connected = false;
-              _titan.emit();
-              return;
-            }
-            if (evtType !== 'message') return;
-            _titan._handleTradingMessage(data);
-          };
-        }
-        window.HubTradingSocket.addListener(_titan._sharedTradingListener);
-        // If the shared socket is already open & authorized (e.g. this is
-        // the 2nd+ engine to attach, after another engine connected first),
-        // the 'authorize' message already fired before we registered — run
-        // the ready-to-trade setup immediately instead of waiting forever.
-        if (window.HubTradingSocket.isAuthorized(token)) _titan._onAuthorized();
-
-        _titan._handleTradingMessage = (data) => {
-          if (data.error && !_titan.state.connected) {
-            _titan.addLog('error', 'AUTH', `Auth error: ${data.error.message || 'invalid token'}`);
-            _titan.state.connected = false; _titan.emit();
+        _titan.tradingSocket.onmessage = (msg) => {
+          let data;
+          try { data = JSON.parse(msg.data); } catch (e) {
+            _titan.addLog('error', 'NETWORK', 'Received malformed message from trading socket — ignored.');
             return;
           }
-          if (data.msg_type === 'authorize' && data.authorize) { _titan._onAuthorized(); return; }
           if (data.msg_type === 'balance') _titan.state.balance = data.balance.balance;
           // Cache each symbol's decimal precision from its pip size (e.g. pip
           // 0.001 → 3 decimals). Used to format offset barriers (mean-rev)
@@ -15467,6 +14886,10 @@ window.NexusStrategies=exports;
           }
           _titan.emit();
         };
+        _titan.tradingSocket.onclose = () => {
+          _titan.state.connected = false;
+          _titan.emit();
+        };
         if (_titan.pingInterval) clearInterval(_titan.pingInterval);
         _titan.pingInterval = setInterval(() => {
           if (_titan.tradingSocket?.readyState === WebSocket.OPEN) _titan.tradingSocket.send(JSON.stringify({ ping: 1 }));
@@ -15493,7 +14916,7 @@ window.NexusStrategies=exports;
           active: true,
           isLocked: false,
           currentRuns: 0,
-          currentStake: this.getEffectiveStake(),
+          currentStake: this.config.stake,
           martingaleStep: 0,
           inRecovery: false,
         };
@@ -15592,218 +15015,6 @@ window.NexusStrategies=exports;
 
   window.TitanEngine = TitanEngine;
 })();
-
-// ══════════════════════════════════════════════════════════════════════
-// STAKE ADDITION TERMINAL — shared big/glowing UI block + bindings.
-// One implementation, reused by every UI module (TitanUI, RiseFallUI,
-// MatchesUI, EvenOddReversionUI) so all bots get the exact same
-// behaviour instead of four hand-copied variants drifting apart.
-// ══════════════════════════════════════════════════════════════════════
-window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine, rootId, c) {
-  const armed = !!c.stakeAdditionArmed;
-  const effective = engine.getEffectiveStake ? engine.getEffectiveStake() : c.stake;
-  const boosted = effective > (c.stake || 0) + 0.001;
-  const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
-  const sug = engine.getSuggestedNextStake ? engine.getSuggestedNextStake() : null;
-  const streak = engine.getSessionWinStreak ? engine.getSessionWinStreak() : 0;
-  const stats = engine.getRecentSessionStats ? engine.getRecentSessionStats(10) : { sessions: 0, winRate: null };
-  return `
-  <div class="sa-terminal ${armed ? 'sa-armed' : ''}" id="${rootId}-sa-terminal">
-    <div class="sa-terminal-scanlines"></div>
-    <div class="sa-terminal-topbar">
-      <span class="sa-terminal-dot ${armed ? 'sa-dot-on' : ''}"></span>
-      <span class="sa-terminal-title">📈 STAKE&nbsp;ADDITION</span>
-      <span class="sa-terminal-status">${armed ? 'ARMED — STANDING' : 'OFF'}</span>
-    </div>
-    <div class="sa-terminal-sub">Promotes stake to Next High Stake at the end of every WINNING session. Stays on until YOU turn it off. Resets to normal Stake $ on page reload — never on a loss.</div>
-
-    <div class="sa-terminal-grid">
-      <div class="sa-terminal-cell">
-        <div class="sa-terminal-label">Currently trading at</div>
-        <div class="sa-terminal-bignum ${boosted ? 'sa-boosted' : ''}">$${effective.toFixed(2)}</div>
-        <div class="sa-terminal-caption">${boosted ? `boosted from base $${(c.stake||0).toFixed(2)}` : 'normal Stake $'}</div>
-      </div>
-      <div class="sa-terminal-cell">
-        <div class="sa-terminal-label">Next High Stake $</div>
-        <input class="sa-terminal-input" type="number" step="0.01" min="0.01" id="${rootId}-stakeadd-next" value="${nextVal}" placeholder="e.g. 5.00">
-      </div>
-    </div>
-
-    <button class="sa-terminal-armbtn ${armed ? 'sa-armed' : ''}" id="${rootId}-stakeadd">
-      ${armed ? '⏸ DISARM' : '▶ ARM STAKE ADDITION'}
-    </button>
-
-    <div class="sa-terminal-analysis">
-      <div class="sa-terminal-analysis-row">
-        <span>Session win streak</span><b class="${streak > 0 ? 'sa-good' : ''}">${streak}</b>
-      </div>
-      <div class="sa-terminal-analysis-row">
-        <span>Last ${stats.sessions} sessions win rate</span><b>${stats.winRate != null ? (stats.winRate * 100).toFixed(0) + '%' : '—'}</b>
-      </div>
-      ${sug ? `
-      <div class="sa-terminal-suggestion sa-conf-${sug.confidence}">
-        <div class="sa-terminal-suggestion-text"><b>Suggested: $${sug.value.toFixed(2)}</b> <span class="sa-conf-tag">${sug.confidence} confidence</span><br>${sug.reason}</div>
-        <button class="sa-terminal-usebtn" id="${rootId}-stakeadd-usesuggested" data-val="${sug.value}">USE</button>
-      </div>` : ''}
-    </div>
-
-    ${armed ? `<div class="sa-terminal-armed-banner">⏳ ARMED — waiting for a winning session to finish, then jumps to $${nextVal !== '' ? parseFloat(nextVal).toFixed(2) : '—'}.</div>` : ''}
-  </div>`;
-};
-
-// ══════════════════════════════════════════════════════════════════════
-// RECOVERY PATTERN ENGINE — analysis buff, appended to the existing
-// terminal panel in all three places it appears (TitanUI, EvenOddReversion
-// UI, Differ/BenzUI). Two new things the old panel never showed:
-//  1. LIVE (forward) accuracy — how the mask has actually performed on
-//     REAL recovery trades since being built, tracked completely
-//     separately from the backtest rate. Backtest rate is in-sample by
-//     definition and can look better than reality; this is the honest
-//     number, and the panel now shows both side by side so a gap between
-//     them is visible instead of hidden.
-//  2. Per-step breakdown — instead of one aggregate rate, a 9-row table
-//     of exactly what the engine decided at each recovery step and how
-//     confident (Wilson lower bound) that decision is, so it's not a
-//     black box anymore.
-// ══════════════════════════════════════════════════════════════════════
-window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(engine, ranking, rootId) {
-  const live = (engine && engine.dynamicMaskLiveStats) || { hits: 0, attempts: 0, recent: [] };
-  const liveRate = live.attempts ? live.hits / live.attempts : null;
-  const backtestRate = ranking.ready ? ranking.bestRate : null;
-  const gapWarn = liveRate != null && backtestRate != null && (backtestRate - liveRate) > 0.15 && live.attempts >= 5;
-  const recent = live.recent || [];
-  const recentHalf = Math.floor(recent.length / 2);
-  const olderRate = recentHalf ? recent.slice(0, recentHalf).filter(Boolean).length / recentHalf : null;
-  const newerRate = (recent.length - recentHalf) ? recent.slice(recentHalf).filter(Boolean).length / (recent.length - recentHalf) : null;
-  const trend = (olderRate != null && newerRate != null) ? (newerRate > olderRate + 0.05 ? 'up' : newerRate < olderRate - 0.05 ? 'down' : 'flat') : null;
-  const dynamicP = ranking.patterns && ranking.patterns.find((p) => p.id === 'dynamic');
-  const stepDetail = dynamicP && dynamicP.detail ? dynamicP.detail : null;
-  const ss = ranking.shortSpan || { ready: false, span: 20, samples: 0, dominant: null, dominantPct: 0.5, recommendFlip: false };
-  const cfgWindow = engine && engine.config ? engine.config.smartRecoveryShortSpan : null;
-  const editable = rootId && engine; // Differ's read-only call passes neither
-
-  return `
-  <div style="margin-top:14px;padding-top:14px;border-top:1px dashed hsl(var(--border)/0.4);position:relative">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-      <span style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground))">SHORT-SPAN CONTRARIAN — PRIMARY DRIVER</span>
-      <span style="font-size:7.5px;padding:2px 7px;border-radius:999px;background:${ss.ready ? 'hsl(var(--win)/0.15)' : 'hsl(var(--muted)/0.3)'};color:${ss.ready ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'};border:1px solid ${ss.ready ? 'hsl(var(--win)/0.4)' : 'hsl(var(--border)/0.5)'};letter-spacing:1px">${ss.ready ? '● DRIVING' : '○ WARMING UP'}</span>
-      <div style="flex:1"></div>
-      ${editable ? `
-      <label style="display:flex;align-items:center;gap:5px;font-size:8px;color:hsl(var(--muted-foreground))">
-        SPAN
-        <input type="number" min="6" max="100" id="${rootId}-shortspan" value="${cfgWindow != null ? cfgWindow : 20}" style="width:48px;padding:3px 5px;border-radius:6px;border:1px solid hsl(var(--border)/0.5);background:hsl(var(--bg)/0.7);color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:10px;text-align:center">
-        ticks
-      </label>` : ''}
-    </div>
-    <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.6;margin-bottom:10px">
-      Looks only at the last ${ss.span} ticks, finds whichever side has been most used recently, and bets the opposite — ready almost immediately instead of the ~70+ ticks a specific recovery step needs before the long-window pattern below can say anything about it. This is what actually drives live flips now; the long-window pattern only fills in before this has enough ticks.
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid ${ss.ready ? 'hsl(var(--win)/0.35)' : 'hsl(var(--border)/0.3)'}">
-        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">MOST-USED RECENTLY</div>
-        <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${ss.ready ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${ss.dominant ? (ss.dominant === 'stay' ? 'BASE SIDE' : 'FLIPPED SIDE') : '—'}</div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${ss.samples ? `${Math.round(ss.dominantPct * 100)}% of last ${ss.samples} ticks${ss.ready ? '' : ' — skew too thin to act on yet'}` : 'buffering…'}</div>
-      </div>
-      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
-        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">DECISION</div>
-        <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${ss.ready ? (ss.recommendFlip ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'}">${ss.ready ? (ss.recommendFlip ? 'FIRE OPPOSITE' : 'STAY BASE') : '—'}</div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">fading whichever side has been dominant</div>
-      </div>
-    </div>
-
-    <div style="margin-top:16px;font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">LIVE FORWARD ACCURACY (out-of-sample — the honest number)</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid ${gapWarn ? 'hsl(var(--loss)/0.4)' : 'hsl(var(--border)/0.3)'}">
-        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">REAL RECOVERY TRADES</div>
-        <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:${liveRate == null ? 'hsl(var(--muted-foreground))' : gapWarn ? 'hsl(var(--loss))' : 'hsl(var(--win))'}">${liveRate != null ? `${Math.round(liveRate * 100)}%` : '—'}</div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${live.attempts ? `${live.hits}/${live.attempts} actual trades${trend ? ` · trending ${trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'}` : ''}` : 'no live recovery trades yet this session'}</div>
-      </div>
-      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
-        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">LONG-WINDOW BACKTEST</div>
-        <div style="font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:hsl(var(--muted-foreground))">${backtestRate != null ? `${Math.round(backtestRate * 100)}%` : '—'}</div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">the slower fallback pattern — reference only now</div>
-      </div>
-    </div>
-    ${gapWarn ? `<div style="margin-top:8px;padding:9px 11px;background:hsl(var(--loss)/0.08);border:1px solid hsl(var(--loss)/0.3);border-radius:9px;font-size:9px;color:hsl(var(--loss));line-height:1.5">⚠ Live is running well below the backtest — a sign the backtest may be overfit to old data. Worth watching before leaning on this pattern harder.</div>` : ''}
-
-    ${stepDetail ? `
-    <div style="margin-top:16px;font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:8px">LONG-WINDOW PER-STEP BREAKDOWN (fallback only, recovery step 1–9)</div>
-    <div style="display:grid;grid-template-columns:repeat(9,1fr);gap:4px">
-      ${Object.keys(stepDetail).map((s) => {
-        const d = stepDetail[s];
-        const conf = Math.round((d.confidence || 0) * 100);
-        const bg = !d.eligible ? 'hsl(var(--muted)/0.25)' : d.flip ? 'hsl(var(--win)/0.15)' : 'hsl(var(--primary)/0.12)';
-        const border = !d.eligible ? 'hsl(var(--border)/0.3)' : d.flip ? 'hsl(var(--win)/0.4)' : 'hsl(var(--primary)/0.35)';
-        const txt = !d.eligible ? 'hsl(var(--muted-foreground)/0.6)' : d.flip ? 'hsl(var(--win))' : 'hsl(var(--primary))';
-        return `<div title="Step ${s}: ${!d.eligible ? 'not enough samples yet' : d.flip ? 'FLIP' : 'STAY'} · ${conf}% confidence · ${d.flipN}/${d.stayN} flip/stay samples" style="padding:7px 4px;border-radius:8px;background:${bg};border:1px solid ${border};text-align:center">
-          <div style="font-size:7px;color:hsl(var(--muted-foreground)/0.7);letter-spacing:0.5px">S${s}</div>
-          <div style="font-size:9px;font-weight:800;color:${txt};margin-top:2px">${!d.eligible ? '···' : d.flip ? 'FLIP' : 'STAY'}</div>
-          <div style="font-size:7px;color:${txt};margin-top:1px;opacity:0.8">${!d.eligible ? '' : conf + '%'}</div>
-        </div>`;
-      }).join('')}
-    </div>
-    <div style="margin-top:6px;font-size:8px;color:hsl(var(--muted-foreground)/0.55);line-height:1.5">Hover a step for its sample counts. Confidence is Wilson-adjusted. Grey = not enough data yet. Only used once the short span above isn't ready.</div>
-    ` : ''}
-  </div>`;
-};
-
-window.bindRecoveryPatternAnalysis = function bindRecoveryPatternAnalysis(engine, rootId, elFn, host, rerender) {
-  const el = elFn(`${rootId}-shortspan`, host);
-  if (el) {
-    el.onchange = (e) => {
-      const v = parseInt(e.target.value, 10);
-      engine.setConfig({ smartRecoveryShortSpan: (!isNaN(v) && v >= 6) ? v : 20 });
-      if (rerender) rerender();
-    };
-  }
-};
-
-window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, rootId, elFn, host, rerender) {
-  const toggle = elFn(`${rootId}-stakeadd`, host);
-  if (toggle) {
-    toggle.onclick = (e) => {
-      e.stopPropagation();
-      const arming = !engine.config.stakeAdditionArmed;
-      if (arming) {
-        const liveInput = elFn(`${rootId}-stakeadd-next`, host);
-        const liveVal = liveInput ? parseFloat(liveInput.value) : NaN;
-        if (isNaN(liveVal) || liveVal <= 0) {
-          if (liveInput) {
-            liveInput.style.borderColor = 'hsl(var(--loss))';
-            liveInput.style.boxShadow = '0 0 0 3px hsl(var(--loss)/0.15)';
-            liveInput.placeholder = 'Enter a stake first!';
-            liveInput.focus();
-            setTimeout(() => { liveInput.style.borderColor = ''; liveInput.style.boxShadow = ''; }, 1600);
-          }
-          engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
-          return;
-        }
-        engine.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: liveVal });
-      } else {
-        engine.setConfig({ stakeAdditionArmed: false });
-      }
-      rerender();
-    };
-  }
-  const nextEl = elFn(`${rootId}-stakeadd-next`, host);
-  if (nextEl) {
-    nextEl.onchange = (e) => {
-      const v = parseFloat(e.target.value);
-      engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
-    };
-  }
-  const useBtn = elFn(`${rootId}-stakeadd-usesuggested`, host);
-  if (useBtn) {
-    useBtn.onclick = (e) => {
-      e.stopPropagation();
-      const v = parseFloat(useBtn.dataset.val);
-      if (!isNaN(v) && v > 0) {
-        engine.setConfig({ stakeAdditionNextStake: v });
-        rerender();
-      }
-    };
-  }
-};
 
 (function (global) {
   'use strict';
@@ -16484,7 +15695,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               }).join('')}
             </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
           </div>
-          ${window.renderRecoveryPatternAnalysis(null, ranking)}
         </div>`;
       })()}
 
@@ -17291,19 +16501,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <button class="cp-mode-btn ${c.tradeMode==='even'?'active':''}" id="${rootId}-even">◈ EVEN</button>
       </div>`}
 
-      <!-- ── STAKE POPUP ─────────────────────────────────────────── -->
-      <div class="cp-stake-pop" id="${rootId}-stake-pop">
-        <div class="cp-stake-pop-glow"></div>
-        <div class="cp-stake-pop-label">💰 Stake</div>
-        <div class="cp-stake-pop-row">
-          <span class="cp-stake-pop-dollar">$</span>
-          <input class="cp-stake-pop-input" type="number" step="0.01" min="0.01" id="${rootId}-stake" value="${c.stake}">
-        </div>
-        <div class="cp-stake-pop-hint">tap to edit · applied on your next run</div>
-      </div>
-
       <div class="cp-section-label">Parameters</div>
       <div class="cp-input-row">
+        <div class="cp-input-group">
+          <span class="cp-input-label">Stake $</span>
+          <input class="cp-input" type="number" step="0.01" id="${rootId}-stake" value="${c.stake}">
+        </div>
         <div class="cp-input-group">
           <span class="cp-input-label">Target Runs</span>
           <input class="cp-input" type="number" id="${rootId}-runs-in" value="${c.targetRuns}">
@@ -17349,7 +16552,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
       </div>
     </div>
-    ${window.renderStakeAdditionTerminal(engine, rootId, c)}
     <!-- ── MARTINGALE ENGINE ─────────────────────────────────────── -->
     <div class="cp-card">
       <div class="cp-section-label">Martingale Engine</div>
@@ -17563,14 +16765,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           const signalVal = parseInt(el(`${rootId}-signal`)?.value);
           const streakVal = parseInt(el(`${rootId}-streak-in`)?.value);
           const multVal = parseFloat(el(`${rootId}-mult`)?.value);
-          if (!isNaN(stakeVal) && stakeVal > 0) {
-            patch.stake = Math.max(0.01, stakeVal);
-            // A manual edit to Stake $ always wins immediately, even if
-            // Stake Addition currently has a boost in effect — "only I
-            // should reduce stake" means a typed value overrides it on
-            // the spot, not just after the next reload.
-            engine.sessionStakeOverride = null;
-          }
+          if (!isNaN(stakeVal) && stakeVal > 0) patch.stake = Math.max(0.01, stakeVal);
           if (!isNaN(runsVal) && runsVal > 0) patch.targetRuns = Math.max(1, runsVal);
           if (!isNaN(signalVal)) patch.minSignal = Math.min(100, Math.max(0, signalVal));
           if (!isNaN(streakVal) && streakVal > 0) patch.minStreak = Math.max(1, streakVal);
@@ -17594,9 +16789,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         if (!isNaN(v) && v > 0) engine.setConfig({ firstTickStake: Math.max(0.01, v) });
       };
     }
-
-    // ── STAKE ADDITION bindings (shared terminal, all bots) ─────────────
-    window.bindStakeAdditionTerminal(engine, rootId, el, undefined, () => renderCenterConfig(engine, rootId, engine.getSnapshot()));
 
     el(`${rootId}-mart`).onclick = (e) => { e.stopPropagation(); const en = !c.martingaleEnabled; engine.setConfig({ martingaleEnabled: en }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     const martHeader = el(`${rootId}-mart-header`);
@@ -17999,62 +17191,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         color: hsl(var(--foreground)) !important;
       }
 
-      /* ── STAKE POPUP (hero stake card) ── */
-      .cp-stake-pop {
-        position: relative;
-        border-radius: 18px;
-        padding: 16px 16px 12px;
-        margin-bottom: 12px;
-        text-align: center;
-        overflow: hidden;
-        background: radial-gradient(120% 160% at 50% -10%, hsl(var(--primary)/0.22), hsl(var(--card)/0.94) 62%);
-        border: 1px solid hsl(var(--primary)/0.45);
-        box-shadow: 0 0 0 1px hsl(var(--primary)/0.08), 0 10px 30px hsl(var(--primary)/0.14), inset 0 1px 0 hsl(255 100% 100%/0.06);
-        animation: cp-stake-pop-in .4s cubic-bezier(.34,1.56,.64,1);
-      }
-      .cp-stake-pop-glow {
-        position: absolute; inset: -60%;
-        background: conic-gradient(from 0deg, transparent, hsl(var(--primary)/0.28), transparent 28%, transparent 72%, hsl(var(--secondary)/0.22), transparent);
-        animation: cp-stake-spin 7s linear infinite;
-        opacity: .55; pointer-events: none;
-      }
-      .cp-stake-pop::after {
-        content: ''; position: absolute; inset: 1.5px; border-radius: 16.5px;
-        background: linear-gradient(155deg, hsl(var(--card)/0.97), hsl(var(--bg-soft)/0.88));
-        z-index: 0;
-      }
-      .cp-stake-pop-label, .cp-stake-pop-row, .cp-stake-pop-hint { position: relative; z-index: 1; }
-      .cp-stake-pop-label {
-        font-family: 'Space Grotesk', sans-serif !important;
-        font-size: 9px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
-        color: hsl(var(--primary)/0.9);
-      }
-      .cp-stake-pop-row {
-        display: flex; align-items: baseline; justify-content: center; gap: 2px;
-        margin-top: 4px;
-      }
-      .cp-stake-pop-dollar {
-        font-family: 'Outfit', sans-serif; font-size: 24px; font-weight: 900;
-        color: hsl(var(--primary)); text-shadow: 0 0 16px hsl(var(--primary)/0.5);
-      }
-      .cp-stake-pop-input {
-        background: transparent !important; border: none !important; outline: none !important;
-        box-shadow: none !important; -webkit-appearance: none;
-        font-family: 'Outfit', sans-serif !important; font-size: 36px !important; font-weight: 900 !important;
-        color: hsl(var(--foreground)) !important; -webkit-text-fill-color: hsl(var(--foreground)) !important;
-        text-align: center; width: 150px; letter-spacing: -1px;
-        text-shadow: 0 0 20px hsl(var(--primary)/0.22);
-        transition: text-shadow .18s;
-      }
-      .cp-stake-pop-input:focus { text-shadow: 0 0 26px hsl(var(--primary)/0.55); }
-      .cp-stake-pop-hint {
-        font-family: 'DM Mono', monospace; font-size: 8px; letter-spacing: .5px;
-        color: hsl(var(--muted-foreground)/0.55); margin-top: 2px;
-      }
-      @keyframes cp-stake-pop-in { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-      @keyframes cp-stake-spin { to { transform: rotate(360deg); } }
-      @media (max-width: 820px) { .cp-stake-pop-input { font-size: 30px !important; } }
-
       /* ── TOGGLE ROW ── */
       .cp-toggle-row {
         display: flex; align-items: center; justify-content: space-between;
@@ -18406,7 +17542,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }).join('')}
           </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
         </div>
-        ${window.renderRecoveryPatternAnalysis(engine, ranking, rootId)}
       </div>`;
     })() : ''}
 
@@ -18481,7 +17616,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>`;
     if (global.setHtmlIfChanged(el(`${rootId}-right`), rightHtml)) {
       el(`${rootId}-clear`).onclick = () => engine.clearStats();
-      window.bindRecoveryPatternAnalysis(engine, rootId, el, undefined, () => renderRight(engine, rootId, engine.getSnapshot()));
     }
   }
 
@@ -18658,8 +17792,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           || sh.lastMartingaleMultiplier !== snap.config.martingaleMultiplier || sh.lastMartingaleStopStep !== snap.config.martingaleStopStep
           || sh.lastRecoveryBarrier !== snap.config.recoveryBarrier || sh.lastSmartRecovery !== snap.config.smartRecovery
           || sh.lastAlternatingRecovery !== snap.config.alternatingRecovery || sh.lastAlternatingRecoveryB !== snap.config.alternatingRecoveryB
-          || sh.lastAutoRefresh !== snap.config.autoRefresh || sh.lastAutoPilot !== snap.config.autoPilot
-          || sh.lastStakeAdditionArmed !== snap.config.stakeAdditionArmed || sh.lastStake !== snap.config.stake) {
+          || sh.lastAutoRefresh !== snap.config.autoRefresh || sh.lastAutoPilot !== snap.config.autoPilot) {
         renderCenterConfig(engine, rootId, snap);
         sh.lastStrategy = snap.config.currentStrategy;
         sh.lastOverBarrier = snap.config.overBarrier;
@@ -18674,8 +17807,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         sh.lastAlternatingRecoveryB = snap.config.alternatingRecoveryB;
         sh.lastAutoRefresh = snap.config.autoRefresh;
         sh.lastAutoPilot = snap.config.autoPilot;
-        sh.lastStakeAdditionArmed = snap.config.stakeAdditionArmed;
-        sh.lastStake = snap.config.stake;
       }
       renderRight(engine, rootId, snap);
       updateLive(rootId, snap);
@@ -18695,8 +17826,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           || sh.lastMartingaleMultiplier !== snap.config.martingaleMultiplier || sh.lastMartingaleStopStep !== snap.config.martingaleStopStep
           || sh.lastRecoveryBarrier !== snap.config.recoveryBarrier || sh.lastSmartRecovery !== snap.config.smartRecovery
           || sh.lastAlternatingRecovery !== snap.config.alternatingRecovery || sh.lastAlternatingRecoveryB !== snap.config.alternatingRecoveryB
-          || sh.lastAutoRefresh !== snap.config.autoRefresh || sh.lastAutoPilot !== snap.config.autoPilot
-          || sh.lastStakeAdditionArmed !== snap.config.stakeAdditionArmed || sh.lastStake !== snap.config.stake) {
+          || sh.lastAutoRefresh !== snap.config.autoRefresh || sh.lastAutoPilot !== snap.config.autoPilot) {
         renderCenterConfig(engine, rootId, snap);
         sh.lastStrategy = snap.config.currentStrategy;
         sh.lastOverBarrier = snap.config.overBarrier;
@@ -18711,8 +17841,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         sh.lastAlternatingRecoveryB = snap.config.alternatingRecoveryB;
         sh.lastAutoRefresh = snap.config.autoRefresh;
         sh.lastAutoPilot = snap.config.autoPilot;
-        sh.lastStakeAdditionArmed = snap.config.stakeAdditionArmed;
-        sh.lastStake = snap.config.stake;
       }
       if (!sh._lastLeftRender || (now - sh._lastLeftRender) >= 4000) {
         // Only rebuild if no dropdown is focused (avoid interrupting user interaction)
@@ -18950,25 +18078,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <input id="dash-pnl-gate-tp" type="hidden" value="50">
           <!-- Stake box: small collapsed control, opens a popup to view/adjust every bot's stake -->
           <div style="position:relative;align-self:flex-end">
-            <button id="dash-stake-box" type="button" title="Adjust any bot's stake" class="dash-stake-trigger">
-              <span class="dash-stake-trigger-glow"></span>
-              <span style="font-size:15px;line-height:1;position:relative;z-index:1">💰</span>
-              <span style="display:flex;flex-direction:column;align-items:flex-start;gap:1px;position:relative;z-index:1">
+            <button id="dash-stake-box" type="button" title="Adjust any bot's stake" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px;border:1px solid hsl(var(--border)/0.7);background:hsl(var(--muted)/0.35);color:hsl(var(--foreground)/0.85);cursor:pointer;font-family:'Outfit',sans-serif;transition:all .2s"
+              onmouseover="this.style.background='hsl(var(--muted)/0.55)';this.style.borderColor='hsl(var(--border))'"
+              onmouseout="this.style.background='hsl(var(--muted)/0.35)';this.style.borderColor='hsl(var(--border)/0.7)'">
+              <span style="font-size:14px;line-height:1">💰</span>
+              <span style="display:flex;flex-direction:column;align-items:flex-start;gap:1px">
                 <span style="font-size:8px;letter-spacing:2px;font-weight:800;text-transform:uppercase;color:hsl(var(--muted-foreground));white-space:nowrap">Stake</span>
                 <span style="font-size:11px;font-weight:800;font-family:'DM Mono',monospace;white-space:nowrap">Adjust</span>
               </span>
             </button>
-            <div id="dash-stake-popup" class="dash-stake-popup">
-              <div class="dash-stake-popup-glow"></div>
-              <div style="position:relative;z-index:1;display:flex;align-items:center;gap:6px;margin-bottom:12px">
-                <span style="font-size:16px;line-height:1">💰</span>
-                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:2px;color:hsl(var(--foreground)/0.9);text-transform:uppercase">Per-Bot Stake</span>
+            <div id="dash-stake-popup" style="display:none;position:absolute;bottom:calc(100% + 10px);right:0;z-index:60;width:300px;max-height:380px;padding:14px;border-radius:14px;background:hsl(var(--card)/0.98);border:1px solid hsl(var(--border)/0.6);box-shadow:0 12px 40px rgba(0,0,0,0.45);backdrop-filter:blur(10px)">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+                <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:2px;color:hsl(var(--foreground)/0.8);text-transform:uppercase">Per-Bot Stake</span>
                 <div style="flex:1"></div>
-                <button id="dash-stake-close" type="button" style="border:none;background:hsl(var(--muted)/0.5);color:hsl(var(--muted-foreground));cursor:pointer;font-size:12px;line-height:1;padding:6px 8px;border-radius:8px;transition:all .15s"
-                  onmouseover="this.style.background='hsl(var(--loss)/0.2)';this.style.color='hsl(var(--loss))'" onmouseout="this.style.background='hsl(var(--muted)/0.5)';this.style.color='hsl(var(--muted-foreground))'">✕</button>
+                <button id="dash-stake-close" type="button" style="border:none;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-size:14px;line-height:1;padding:2px 4px">✕</button>
               </div>
-              <div id="dash-stake-list" style="position:relative;z-index:1;display:flex;flex-direction:column;gap:6px;max-height:270px;overflow-y:auto;padding-right:2px"></div>
-              <button id="dash-stake-save" type="button" class="dash-stake-save-btn">💾 SAVE STAKES</button>
+              <div id="dash-stake-list" style="display:flex;flex-direction:column;gap:6px;max-height:270px;overflow-y:auto;padding-right:2px"></div>
+              <button id="dash-stake-save" type="button" style="width:100%;margin-top:10px;padding:9px;border:1px solid hsl(var(--border));border-radius:10px;background:hsl(var(--muted)/0.6);color:hsl(var(--foreground)/0.9);font-family:'Outfit',sans-serif;font-size:10px;font-weight:900;letter-spacing:2px;cursor:pointer;transition:all .2s"
+                onmouseover="this.style.background='hsl(var(--muted)/0.85)'" onmouseout="this.style.background='hsl(var(--muted)/0.6)'">💾 SAVE STAKES</button>
             </div>
           </div>
           <!-- Engage button -->
@@ -19018,7 +18145,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               <div>
                 <div class="section-divider" style="margin-bottom:2px">EQUITY CURVE</div>
                 <div class="text-muted" style="font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.5px">Cumulative P&amp;L · scroll up to 24h · hover for details</div>
-                <div id="dash-best-times" class="dash-best-times"></div>
               </div>
               <div style="display:flex;align-items:center;gap:12px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
                 <span class="eq-chart-live-badge" id="dash-equity-live-badge" style="display:none">LIVE</span>
@@ -19161,57 +18287,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (!ts) return '—';
     const d = new Date(ts);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }
-
-  // ── BEST TRADING TIMES ─────────────────────────────────────────────────
-  // Buckets the same 24h equity-curve points by hour-of-day and ranks which
-  // hours have actually been most profitable/winning for THIS person's own
-  // trades — not a generic "best time to trade Deriv" claim, purely derived
-  // from their own history. Hours with too few trades are excluded so one
-  // lucky/unlucky trade at 3am doesn't look like a "best" or "worst" hour.
-  const BEST_TIMES_MIN_TRADES = 3;
-  function computeBestTradingHours(points) {
-    const byHour = {}; // 0-23 -> { trades, wins, profit }
-    (points || []).forEach((p) => {
-      if (!p.ts) return;
-      const h = new Date(p.ts).getHours();
-      const b = byHour[h] || (byHour[h] = { trades: 0, wins: 0, profit: 0 });
-      b.trades++;
-      if ((p.profit || 0) > 0) b.wins++;
-      b.profit += (p.profit || 0);
-    });
-    const ranked = Object.keys(byHour)
-      .map((h) => ({ hour: parseInt(h, 10), ...byHour[h] }))
-      .filter((b) => b.trades >= BEST_TIMES_MIN_TRADES)
-      .map((b) => ({ ...b, winRate: b.wins / b.trades }))
-      .sort((a, b) => b.profit - a.profit);
-    return ranked;
-  }
-  function hourRangeLabel(h) {
-    const fmt = (n) => `${String(n % 24).padStart(2, '0')}:00`;
-    return `${fmt(h)}–${fmt(h + 1)}`;
-  }
-  function renderBestTimes(root, points) {
-    const wrap = el('dash-best-times', root);
-    if (!wrap) return;
-    const ranked = computeBestTradingHours(points);
-    if (!ranked.length) {
-      wrap.innerHTML = `<div class="dash-best-times-label">🕐 BEST TIMES</div><div class="dash-best-times-empty">Not enough trades yet in the last 24h to rank your best hours (need ${BEST_TIMES_MIN_TRADES}+ trades in an hour).</div>`;
-      return;
-    }
-    const top = ranked.slice(0, 3);
-    const rankClass = ['rank-1', 'rank-2', 'rank-3'];
-    wrap.innerHTML = `
-      <div class="dash-best-times-label">🕐 YOUR BEST TIMES (24H)</div>
-      <div class="dash-best-times-pills">
-        ${top.map((b, i) => `
-          <span class="dash-best-time-pill ${rankClass[i]}" title="${b.trades} trades · ${(b.winRate * 100).toFixed(0)}% win rate">
-            <span class="dash-best-time-medal">${['🥇','🥈','🥉'][i]}</span>
-            <span class="dash-best-time-range">${hourRangeLabel(b.hour)}</span>
-            <span class="dash-best-time-profit">${b.profit >= 0 ? '+' : ''}$${b.profit.toFixed(2)}</span>
-          </span>
-        `).join('')}
-      </div>`;
   }
 
   function formatEquityDate(ts) {
@@ -19769,7 +18844,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // Net P&L stat card instead of silently including probe-trade P&L that
     // card doesn't count.
     const curve = EquityStore.merge(allEntries.filter((e) => !e.isTest));
-    renderBestTimes(root, curve);
 
     const equityWrap = el('dash-equity-wrap', root);
     renderEquityChart(equityWrap, curve);
@@ -20969,7 +20043,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const history = globalSocket.getHistory(symbol);
         market.history = history.slice(-this.tickPeriod);
         market.health = globalSocket.getHealth(symbol);
-        if (window.classifyRegime) market.regime = window.classifyRegime(market.history);
         if (market.history.length >= 15 && window.MatchesAnalyzer) {
           market.analysis = window.MatchesAnalyzer.analyze(market.history, this.tickPeriod, { preset: 'auto' });
           market.score = this.calculateScore(market);
@@ -21553,8 +20626,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
 
-      ${window.renderStakeAdditionTerminal(engine, rootId, c)}
-
       ${engine.isMeanRevMode ? `
       <div class="cp-card">
         <div class="cp-section-label">Mean Reversion Parameters</div>
@@ -21626,8 +20697,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // change — only an explicit Save (below, or the navbar's global
       // "SAVE SETTINGS" button) persists anything to disk.
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
-      window.bindStakeAdditionTerminal(engine, rootId, el, host, () => renderCenter(engine, rootId, engine.getSnapshot()));
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
       const durationEl = el(`${rootId}-duration`, host);
       if (durationEl) durationEl.onchange = (e) => { engine.setConfig({ duration: Math.max(engine.isMeanRevMode ? 15 : 1, parseInt(e.target.value) || (engine.isMeanRevMode ? 15 : 5)) }); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
@@ -22244,8 +21314,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
 
-      ${window.renderStakeAdditionTerminal(engine, rootId, c)}
-
       <div class="cp-card">
         <div class="cp-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
           <div class="cp-section-label" style="margin:0">Martingale</div>
@@ -22309,12 +21377,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>`;
     if (shHtml(host, html)) {
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
       el(`${rootId}-ticks`, host).onchange = (e) => { engine.setConfig({ numTicks: Math.min(10, Math.max(1, parseInt(e.target.value) || 2)) }); };
       el(`${rootId}-tradegap`, host).onchange = (e) => { engine.setConfig({ matchesCooldownTicks: Math.min(20, Math.max(0, parseInt(e.target.value) || 0)) }); };
-      window.bindStakeAdditionTerminal(engine, rootId, el, host, () => renderCenter(engine, rootId, engine.getSnapshot()));
       el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
       el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
       el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
@@ -22866,9 +21933,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
 
-      ${window.renderStakeAdditionTerminal(engine, rootId, c)}
+      <div class="cp-card">
+        <div class="cp-toggle-row" style="margin-bottom:${c.martingaleEnabled?'8px':'0'}">
+          <div class="cp-section-label" style="margin:0">Martingale</div>
+          <button class="titan-toggle ${c.martingaleEnabled?'on':''}" id="${rootId}-mg-toggle"></button>
+        </div>
+        <div style="${c.martingaleEnabled?'':'display:none'}">
+          <div class="cp-input-row">
+            <div class="cp-input-group"><span class="cp-input-label">Multiplier</span><input class="cp-input" type="number" step="0.1" id="${rootId}-mult" value="${c.martingaleMultiplier}"></div>
+            <div class="cp-input-group"><span class="cp-input-label">Stop after N losses</span><input class="cp-input" type="number" min="1" max="10" id="${rootId}-stop-step" value="${c.martingaleStopStep}"></div>
+          </div>
 
-
+          <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
           <div style="display:flex;flex-direction:column;gap:5px">
             ${(() => {
               const base = (c.tradeMode || engine.fixedTradeMode) === 'odd' ? 'ODD' : 'EVEN';
@@ -22942,7 +22018,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>`;
     if (shHtml(host, html)) {
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       const signalEl = el(`${rootId}-signal`, host);
       if (signalEl) signalEl.onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
@@ -22998,14 +22074,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           if (!isNaN(v) && v > 0) engine.setConfig({ firstTickStake: Math.max(0.01, v) });
         };
       }
-      // ── STAKE ADDITION bindings (shared terminal, all bots) ──────────
-      window.bindStakeAdditionTerminal(engine, rootId, el, host, () => renderCenter(engine, rootId, engine.getSnapshot()));
-      const mgToggleEl = el(`${rootId}-mg-toggle`, host);
-      if (mgToggleEl) mgToggleEl.onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
-      const multEl = el(`${rootId}-mult`, host);
-      if (multEl) multEl.onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
-      const stopStepEl = el(`${rootId}-stop-step`, host);
-      if (stopStepEl) stopStepEl.onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
+      el(`${rootId}-mg-toggle`, host).onclick = () => { engine.setConfig({ martingaleEnabled: !c.martingaleEnabled }); renderCenter(engine, rootId, engine.getSnapshot()); };
+      el(`${rootId}-mult`, host).onchange = (e) => { engine.setConfig({ martingaleMultiplier: parseFloat(e.target.value) || 1.1 }); };
+      el(`${rootId}-stop-step`, host).onchange = (e) => { engine.setConfig({ martingaleStopStep: parseInt(e.target.value) || 3 }); };
       // Recovery mode cards — instant (binary switches, not numeric)
       ['plain','altA','altB','altC','altR','smart'].forEach(mode => {
         const card = el(`${rootId}-rmode-${mode}`, host);
@@ -23198,7 +22269,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }).join('')}
           </div>` : `<div style="text-align:center;padding:18px;color:hsl(var(--muted-foreground));font-size:10px">Buffering…</div>`}
         </div>
-        ${window.renderRecoveryPatternAnalysis(engine, ranking, rootId)}
       </div>`;
     })()}
 
@@ -23209,7 +22279,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>`;
     shHtml(host, html);
-    window.bindRecoveryPatternAnalysis(engine, rootId, el, host, () => renderRight(engine, rootId, engine.getSnapshot()));
   }
 
   function render(engine, rootId, label) {
@@ -23245,7 +22314,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function hrGetPublicWsUrl() {
     const id = (window.HubStore && window.HubStore.getState().wsAppId) ||
       (function () { try { return localStorage.getItem('hub_ws_app_id') || ''; } catch (_) { return ''; } })() || '1089';
-    return `wss://ws.derivws.com/websockets/v3?app_id=${id}`;
+    return 'wss://api.derivws.com/trading/v1/options/ws/public';
   }
   const HR_MARKETS = [
     { value: '1HZ10V', label: '⚡ Volatility 10 (1s)' }, { value: 'R_10', label: 'Volatility 10' },
@@ -23261,78 +22330,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     loss()     { try { window.Sounds.soundEngine.playLoss(); } catch (e) {} },
     abort()    { try { window.Sounds.soundEngine.playAbort(); } catch (e) {} },
   };
-
-  // ── MARKET ROTATION (avoid 1s + avoid streaky markets) ────────────────
-  // Hot Repeat was intentionally built with "no market scanner" (see the
-  // note above this IIFE) to stay simple — it only ever watched whatever
-  // market was picked in the dropdown, forever, with no awareness of the
-  // other 9. Rather than build a whole second scanner+socket stack just
-  // for this, it piggybacks on window.EvenSocket.globalSocket — the Even/
-  // Odd bots' socket, which is already open and already caching live tick
-  // history for all 10 markets in the background the moment the page
-  // loads (see init(), which spins up 'even'/'odd' engines immediately,
-  // regardless of which tab is open). Zero new connections.
-  const HR_STREAK_LIMIT = 3; // 3+ identical digits back-to-back counts as "streaky"
-  function hrTrailingStreak(history) {
-    if (!history || history.length < 2) return 0;
-    const last = history[history.length - 1];
-    let streak = 1;
-    for (let i = history.length - 2; i >= 0 && history[i] === last; i--) streak++;
-    return streak;
-  }
-  function hrLongestStreak(history, windowSize = 20) {
-    const data = (history || []).slice(-windowSize);
-    let longest = 0, cur = 1;
-    for (let i = 1; i < data.length; i++) {
-      cur = data[i] === data[i - 1] ? cur + 1 : 1;
-      if (cur > longest) longest = cur;
-    }
-    return longest;
-  }
-  // Ranks the 5 non-1s markets by "how calm/healthy is this right now,"
-  // heavily penalising (not hard-excluding — always leaves something to
-  // rotate into even on a rough day everywhere) any market currently
-  // showing a run of repeated digits. Returns null only if the shared
-  // socket genuinely has no data yet (e.g. right at page load).
-  function hrPickNextMarket(currentSymbol) {
-    const gs = window.EvenSocket && window.EvenSocket.globalSocket;
-    if (!gs) return null;
-    // 1s markets are excluded from AUTO-rotation entirely — still pickable
-    // by hand from the dropdown, just never chosen automatically.
-    const candidates = HR_MARKETS.filter((m) => !m.value.startsWith('1HZ'));
-    const scored = candidates.map((m) => {
-      const history = gs.getHistory(m.value) || [];
-      const health = gs.getHealth(m.value);
-      const trailing = hrTrailingStreak(history);
-      const longest = hrLongestStreak(history);
-      const worstStreak = Math.max(trailing, longest);
-      const regime = window.classifyRegime ? window.classifyRegime(history) : null;
-      let score = 50;
-      if (health) {
-        if (health.longTerm === 'HEALTHY') score += 20;
-        else if (health.longTerm === 'MODERATE') score += 8;
-        else if (health.longTerm === 'POOR') score -= 20;
-      }
-      score -= worstStreak * 12;
-      // REGIME METER: Hot Repeat is hunting for the SAME digit twice in a
-      // row, so a market that generally tends to produce runs (TRENDING)
-      // is the better hunting ground — as long as it isn't ALREADY
-      // topped-out on one right now, which the streak penalty above
-      // already handles separately. A CHOPPY (alternates more than
-      // chance) market gets a small penalty since that's the opposite of
-      // what a repeat-hunting bot wants.
-      if (regime && regime.ready) {
-        if (regime.regime === 'TRENDING') score += 12;
-        else if (regime.regime === 'CHOPPY') score -= 8;
-      }
-      return { symbol: m.value, label: m.label, score, isStreaky: worstStreak >= HR_STREAK_LIMIT, streak: worstStreak, ticks: history.length, regime };
-    }).sort((a, b) => b.score - a.score);
-    if (!scored.length) return null;
-    let pool = scored.filter((m) => m.symbol !== currentSymbol);
-    if (!pool.length) pool = scored;
-    const best = pool[0];
-    return { ...best, _forcedSwitch: best.symbol !== currentSymbol };
-  }
 
   class HotRepeatEngine {
     constructor() {
@@ -23555,16 +22552,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         if (remaining <= 0) {
           clearInterval(this.sessionCooldownTimer);
           this.sessionCooldownTimer = null;
-          // Rotate onto a new market every session cooldown — never onto a
-          // 1s market, and steered away from whichever market is currently
-          // showing a repeat streak. See hrPickNextMarket above.
-          const next = hrPickNextMarket(this.state.primaryMarket);
-          if (next && next._forcedSwitch) {
-            this.dispatch({ type: 'SET_MARKET', market: next.symbol });
-            this.connectAnalysis();
-            const streakNote = next.isStreaky ? ` (still its calmest healthy option — every market's a bit streaky right now)` : '';
-            this.dispatch({ type: 'NOTIFY', message: `🔀 Rotated to ${next.label || next.symbol}${streakNote}`, ntype: 'info' });
-          }
           this.dispatch({ type: 'SESSION_COOLDOWN_END' });
           if (this.state.isArmed) this.dispatch({ type: 'NOTIFY', message: '▶ Cooldown over — watching the stream again.', ntype: 'info' });
         } else {
@@ -23601,48 +22588,39 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const token = window.HubStore.getState().apiToken;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
+      try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) {}
       const _self = this;
-      (() => {
-        // Shared trading/auth socket — see window.HubTradingSocket, reused
-        // here instead of opening a second independent connection to the
-        // same endpoint every TitanEngine already authenticates against.
-        const ws = window.HubTradingSocket.connect(token);
-        if (!ws) return;
-        _self.socketT = ws;
-
-        if (!_self._sharedTradingListener) {
-          _self._sharedTradingListener = (evtType, d) => {
-            _self.socketT = window.HubTradingSocket.getSocket() || _self.socketT;
-            if (evtType === 'error') {
-              _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
-              return;
-            }
-            if (evtType === 'close') {
-              _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-              return;
-            }
-            if (evtType !== 'message') return;
-            _self._handleTradingMessage(d);
-          };
-        }
-        window.HubTradingSocket.addListener(_self._sharedTradingListener);
-        if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
-
-        _self._handleTradingMessage = (d) => {
+      (async () => {
+        const hub = window.HubStore.getState();
+        const appId = hub.appId || '33ADPhDZXR2F60qhPudXB';
+        // Shared DerivAuth singleton: single-flight accountId lookup and a
+        // queued/spaced OTP request, so this engine's connect doesn't stack
+        // a duplicate burst on top of HubStore's and every Titan bot's.
+        let accountId = hub.accountId;
+        if (!accountId) {
           try {
-            if (d.error && !_self.state.isAuthenticated) {
-              _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-              _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${d.error.message || 'invalid token'}`, ntype: 'loss' });
-              return;
-            }
-            if (d.msg_type === 'authorize' && d.authorize) {
-              _self._authDelay = 8000;
-              const bal = (typeof d.authorize.balance === 'number') ? d.authorize.balance : (window.HubStore.getState().balanceUSD || 0);
-              _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
-              _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
-              try { ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) {}
-              return;
-            }
+            const resolved = await window.DerivAuth.resolveAccountId(token, appId, hub.accountType);
+            accountId = resolved.accountId;
+          } catch (e) { _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' }); return; }
+        }
+        let wsUrl;
+        try {
+          wsUrl = await window.DerivAuth.getOtpUrl(token, appId, accountId);
+        } catch (e) { _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' }); _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${e.message}`, ntype: 'loss' }); return; }
+
+        const ws = new WebSocket(wsUrl);
+        _self.socketT = ws;
+        ws.onerror = () => { _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' }); };
+        ws.onopen = () => {
+          _self._authDelay = 8000;
+          const bal = window.HubStore.getState().balanceUSD || 0;
+          _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
+          _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
+          try { ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) {}
+        };
+        ws.onmessage = (m) => {
+          try {
+            const d = JSON.parse(m.data);
             if (d.msg_type === 'balance' && d.balance) { const bal = parseFloat(d.balance.balance); if (!isNaN(bal)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: bal }); }
             if (d.msg_type === 'proposal_open_contract') {
               const c = d.proposal_open_contract;
@@ -23688,6 +22666,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
             }
           } catch (e) {}
+        };
+        ws.onclose = () => {
+          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+          if (window.HubStore.getState().apiToken) { _self._authDelay = Math.min((_self._authDelay || 8000) * 1.5, 60000); setTimeout(() => _self.authenticate(), _self._authDelay); }
         };
       })();
     }
@@ -24028,17 +23010,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const eng = window._hotRepeatEngineRef;
     if (!eng) return;
     const marketSel = el('hotrepeat-market', root);
-    if (marketSel && !marketSel._bound) {
-      marketSel._bound = true;
-      marketSel.onchange = () => {
-        // Dispatching alone only updated the label — the live tick socket
-        // stayed subscribed to whatever market connectAnalysis() last
-        // opened. Reconnecting here makes a manual market change actually
-        // take effect immediately instead of silently keeping the old feed.
-        eng.dispatch({ type: 'SET_MARKET', market: marketSel.value });
-        eng.connectAnalysis();
-      };
-    }
+    if (marketSel && !marketSel._bound) { marketSel._bound = true; marketSel.onchange = () => eng.dispatch({ type: 'SET_MARKET', market: marketSel.value }); }
     const stakeInp = el('hotrepeat-stake', root);
     if (stakeInp && !stakeInp._bound) { stakeInp._bound = true; stakeInp.onchange = () => eng.dispatch({ type: 'SET_STAKE', value: Math.max(0.35, parseFloat(stakeInp.value) || 1) }); }
     const cdInp = el('hotrepeat-cooldown', root);
@@ -25401,15 +24373,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function populateStakePopup() {
     const list = document.getElementById('dash-stake-list');
     if (!list) return;
-    list.innerHTML = STAKE_IDS.map((id, i) => {
+    list.innerHTML = STAKE_IDS.map((id) => {
       const eng = getStakeEngine(id);
       const val = getStakeValue(eng, id);
       const meta = window.BOT_META && window.BOT_META[id] || { label: id, dot: 'hsl(var(--muted-foreground))' };
-      return `<div class="dash-stake-row" style="animation:dash-stake-pop-in .22s ease ${i * 0.02}s both">
+      return `<div style="display:flex;align-items:center;gap:8px">
         <span class="bot-card-dot" style="background:${meta.dot};flex-shrink:0"></span>
         <span style="flex:1;font-size:10.5px;font-family:'DM Mono',monospace;color:hsl(var(--foreground)/0.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${meta.label}</span>
-        <span style="font-size:10px;color:hsl(var(--muted-foreground)/0.6);font-family:'DM Mono',monospace">$</span>
-        <input type="number" min="0.35" step="0.01" data-stake-id="${id}" value="${val != null ? val : ''}" placeholder="—" class="dash-stake-input">
+        <input type="number" min="0.35" step="0.01" data-stake-id="${id}" value="${val != null ? val : ''}" placeholder="—" style="width:74px;padding:6px 8px;border-radius:8px;border:1px solid hsl(var(--border)/0.5);background:hsl(var(--bg)/0.6);color:hsl(var(--foreground));font-family:'DM Mono',monospace;font-size:11px;text-align:center;outline:none">
       </div>`;
     }).join('');
   }
@@ -25425,14 +24396,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (!popup) return;
       if (box) {
         e.stopPropagation();
-        const willOpen = !popup.classList.contains('open');
+        const willOpen = popup.style.display === 'none';
         if (willOpen) populateStakePopup();
-        popup.classList.toggle('open', willOpen);
+        popup.style.display = willOpen ? 'block' : 'none';
         return;
       }
       if (e.target.closest('#dash-stake-close')) {
         e.stopPropagation();
-        popup.classList.remove('open');
+        popup.style.display = 'none';
         return;
       }
       const saveBtn = e.target.closest('#dash-stake-save');
@@ -25457,13 +24428,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           toast.classList.add('show');
           setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 2500);
         }
-        popup.classList.remove('open');
+        popup.style.display = 'none';
         return;
       }
       // Click was inside the open popup itself (e.g. an input) — keep it open.
       if (e.target.closest('#dash-stake-popup')) return;
       // Click anywhere else on the page — close the popup if it's open.
-      popup.classList.remove('open');
+      if (popup.style.display !== 'none') popup.style.display = 'none';
     });
   }
 
