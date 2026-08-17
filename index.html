@@ -12773,6 +12773,67 @@ window.NexusStrategies=exports;
   function showCongratulationsPopup(target) { showResultPopup('tp', target); }
   window.showResultPopup = showResultPopup;
 
+  // ── Shared trading/auth WebSocket ────────────────────────────────────
+  // Every bot engine (13 TitanEngine instances, all instantiated eagerly
+  // at page load) used to call its own connect(token) and open its own
+  // `wss://ws.derivws.com/...` connection for trading/auth. With that many
+  // engines each independently reconnecting (on load, on stale-tick
+  // watchdog, on autoRefresh, on a failed bolt purchase), the page could
+  // fire off a dozen-plus near-simultaneous connection attempts to the
+  // same endpoint — exactly what produced repeated "WebSocket is closed
+  // before the connection is established" errors. This singleton opens
+  // ONE authenticated socket and lets every engine attach as a listener
+  // instead, the same sharing pattern EvenSocket/NexusSocket already use
+  // for the public analysis feed.
+  window.HubTradingSocket = (function () {
+    let socket = null;
+    let connecting = false;
+    let authorizedToken = null;
+    const listeners = new Set();
+    function getWsUrl() {
+      const hub = window.HubStore.getState();
+      const appId = hub.wsAppId || '1089';
+      return `wss://ws.derivws.com/websockets/v3?app_id=${appId}`;
+    }
+    function notify(type, data) {
+      listeners.forEach((fn) => { try { fn(type, data); } catch (e) { console.error('[HubTradingSocket] listener error:', e); } });
+    }
+    function connect(token) {
+      token = (token || '').trim();
+      if (!token) return null;
+      // Already open and authorized with this exact token — reuse as-is.
+      if (socket && socket.readyState === WebSocket.OPEN && authorizedToken === token) return socket;
+      // A connection attempt is already in flight — don't open a second one.
+      if (connecting) return socket;
+      if (socket) { try { socket.onclose = null; socket.close(); } catch (_) {} }
+      connecting = true;
+      authorizedToken = null;
+      socket = new WebSocket(getWsUrl());
+      socket.onopen = () => {
+        try { socket.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
+      };
+      socket.onmessage = (msg) => {
+        let data;
+        try { data = JSON.parse(msg.data); } catch (e) { return; }
+        if (data.msg_type === 'authorize' && data.authorize) {
+          connecting = false;
+          authorizedToken = token;
+        }
+        notify('message', data);
+      };
+      socket.onerror = () => { notify('error'); };
+      socket.onclose = () => { connecting = false; authorizedToken = null; notify('close'); };
+      return socket;
+    }
+    return {
+      connect,
+      getSocket() { return socket; },
+      isAuthorized(token) { return !!socket && socket.readyState === WebSocket.OPEN && authorizedToken === (token || '').trim(); },
+      addListener(fn) { listeners.add(fn); },
+      removeListener(fn) { listeners.delete(fn); },
+    };
+  })();
+
   class TitanEngine {
     constructor(opts) {
       this.id = opts.id;
@@ -15120,26 +15181,17 @@ window.NexusStrategies=exports;
     connect(token) {
       token = (token || '').trim();
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
-      if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
 
-      // Real Deriv API flow: one WebSocket, {"authorize": token} as the
-      // first message sent once the socket opens — no REST accounts/OTP
-      // lookup (that endpoint never existed on api.derivws.com, which is
-      // what was causing the CORS errors and the connection failures).
+      // Shared trading/auth socket: reuse the one connection every engine
+      // attaches to (see window.HubTradingSocket above) instead of each of
+      // the 13 engine instances opening its own WebSocket to Deriv.
       const _titan = this;
       (() => {
         const hub = window.HubStore.getState();
-        const appId = hub.wsAppId || '1089';
-        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${appId}`);
+        const ws = window.HubTradingSocket.connect(token);
+        if (!ws) return;
         _titan.tradingSocket = ws;
 
-        ws.onerror = () => {
-          _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
-          _titan.state.connected = false;
-        };
-        ws.onopen = () => {
-          try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
-        };
         // Runs once the server confirms the authorize call — with the real
         // Deriv flow the socket is open (but not yet authenticated) before
         // this fires, so the "ready to trade" setup lives here instead of
@@ -15174,12 +15226,37 @@ window.NexusStrategies=exports;
         // Digit contracts settle in 1 tick — result can arrive before buy ack
         if (!_titan._earlyResults) _titan._earlyResults = new Map();
 
-        _titan.tradingSocket.onmessage = (msg) => {
-          let data;
-          try { data = JSON.parse(msg.data); } catch (e) {
-            _titan.addLog('error', 'NETWORK', 'Received malformed message from trading socket — ignored.');
-            return;
-          }
+        // A single listener function per engine, registered once with the
+        // shared socket (Set-based, so re-registering on reconnect is a
+        // harmless no-op) instead of assigning ws.onmessage/.onerror/
+        // .onclose directly — those would only ever run for the LAST
+        // engine to call connect(), since all engines now share one
+        // underlying WebSocket object.
+        if (!_titan._sharedTradingListener) {
+          _titan._sharedTradingListener = (evtType, data) => {
+            _titan.tradingSocket = window.HubTradingSocket.getSocket() || _titan.tradingSocket;
+            if (evtType === 'error') {
+              _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
+              _titan.state.connected = false;
+              return;
+            }
+            if (evtType === 'close') {
+              _titan.state.connected = false;
+              _titan.emit();
+              return;
+            }
+            if (evtType !== 'message') return;
+            _titan._handleTradingMessage(data);
+          };
+        }
+        window.HubTradingSocket.addListener(_titan._sharedTradingListener);
+        // If the shared socket is already open & authorized (e.g. this is
+        // the 2nd+ engine to attach, after another engine connected first),
+        // the 'authorize' message already fired before we registered — run
+        // the ready-to-trade setup immediately instead of waiting forever.
+        if (window.HubTradingSocket.isAuthorized(token)) _titan._onAuthorized();
+
+        _titan._handleTradingMessage = (data) => {
           if (data.error && !_titan.state.connected) {
             _titan.addLog('error', 'AUTH', `Auth error: ${data.error.message || 'invalid token'}`);
             _titan.state.connected = false; _titan.emit();
@@ -15390,10 +15467,6 @@ window.NexusStrategies=exports;
               }
             }
           }
-          _titan.emit();
-        };
-        _titan.tradingSocket.onclose = () => {
-          _titan.state.connected = false;
           _titan.emit();
         };
         if (_titan.pingInterval) clearInterval(_titan.pingInterval);
