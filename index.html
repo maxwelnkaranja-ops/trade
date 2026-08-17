@@ -8196,6 +8196,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
   let statusSocket = null;
   let reconnectTimer = null;
   let reconnectDelay = 8000;
+  let statusListener = null;
 
   function connectAccount() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -8207,78 +8208,73 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
       emit();
       return;
     }
-    try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (e) { /* */ }
     state.connectionStatus = 'connecting';
     state.connectionError = '';
     emit();
 
-    // Real Deriv API flow (the "2026 REST OTP" version below this used to
-    // implement doesn't exist — there's no /trading/v1/options/accounts or
-    // /otp REST endpoint on api.derivws.com; that's what was causing the
-    // CORS failures and the WebSocket connecting to a URL that was never
-    // valid in the first place). The actual flow is one step: open the
-    // same public WebSocket every analysis socket already uses, then send
-    // {"authorize": "<token>"} as the first message. The authorize
-    // response itself carries the account id, balance and currency —
-    // no separate accounts lookup needed.
-    let pingInterval = null;
-
+    // Shared trading/auth socket — see window.HubTradingSocket (defined
+    // later in the file, but this function only ever runs at runtime once
+    // the whole page has parsed, so the global is already available).
+    // Every bot engine authenticates against this same connection now;
+    // this just also listens in for the topbar's account/balance display.
     function connectViaOtp() {
-      const numericAppId = state.wsAppId || '1089';
-      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${numericAppId}`);
+      const ws = window.HubTradingSocket.connect(state.apiToken);
+      if (!ws) return;
       statusSocket = ws;
 
-      ws.onerror = () => {
-        state.connectionError = 'WebSocket connection failed — check your internet connection.';
-        emit();
-      };
-      ws.onopen = () => {
-        try { ws.send(JSON.stringify({ authorize: state.apiToken })); } catch (e) { /* */ }
-      };
-      ws.onmessage = (m) => {
-        try {
-          const d = JSON.parse(m.data);
-          if (d.error) {
-            state.isAuthenticated = false;
+      if (!statusListener) {
+        statusListener = (evtType, d) => {
+          statusSocket = window.HubTradingSocket.getSocket() || statusSocket;
+          if (evtType === 'error') {
+            state.connectionError = 'WebSocket connection failed — check your internet connection.';
+            emit();
+            return;
+          }
+          if (evtType === 'close') {
             state.connectionStatus = 'disconnected';
-            state.connectionError = d.error.message || 'Authorization failed — check your API token.';
+            state.isAuthenticated = false;
             emit();
-            try { ws.close(); } catch (e) { /* */ }
+            if (state.apiToken) {
+              reconnectTimer = setTimeout(connectAccount, reconnectDelay);
+              reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
+            }
             return;
           }
-          if (d.msg_type === 'authorize' && d.authorize) {
-            reconnectDelay = 8000;
-            state.isAuthenticated = true;
-            state.connectionStatus = 'connected';
-            state.connectionError = '';
-            state.accountId = d.authorize.loginid || state.accountId;
-            state.currency = d.authorize.currency || state.currency;
-            if (typeof d.authorize.balance === 'number') state.balanceUSD = d.authorize.balance;
-            emit();
-            try {
-              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-              pingInterval = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
-              }, 25000);
-            } catch (e) { /* */ }
-            return;
-          }
-          if (d.msg_type === 'balance' && d.balance) {
-            const bal = parseFloat(d.balance.balance);
-            if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
-          }
-        } catch (e) { /* */ }
-      };
-      ws.onclose = () => {
-        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
-        state.connectionStatus = 'disconnected';
-        state.isAuthenticated = false;
+          if (evtType !== 'message') return;
+          try {
+            if (d.error) {
+              state.isAuthenticated = false;
+              state.connectionStatus = 'disconnected';
+              state.connectionError = d.error.message || 'Authorization failed — check your API token.';
+              emit();
+              return;
+            }
+            if (d.msg_type === 'authorize' && d.authorize) {
+              reconnectDelay = 8000;
+              state.isAuthenticated = true;
+              state.connectionStatus = 'connected';
+              state.connectionError = '';
+              state.accountId = d.authorize.loginid || state.accountId;
+              state.currency = d.authorize.currency || state.currency;
+              if (typeof d.authorize.balance === 'number') state.balanceUSD = d.authorize.balance;
+              emit();
+              try { ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
+              return;
+            }
+            if (d.msg_type === 'balance' && d.balance) {
+              const bal = parseFloat(d.balance.balance);
+              if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
+            }
+          } catch (e) { /* */ }
+        };
+      }
+      window.HubTradingSocket.addListener(statusListener);
+      if (window.HubTradingSocket.isAuthorized(state.apiToken)) {
+        state.isAuthenticated = true;
+        state.connectionStatus = 'connected';
+        state.connectionError = '';
         emit();
-        if (state.apiToken) {
-          reconnectTimer = setTimeout(connectAccount, reconnectDelay);
-          reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
-        }
-      };
+      }
     }
     connectViaOtp();
   }
@@ -11890,27 +11886,36 @@ window.NexusTrading = exports;
       const token = window.HubStore.getState().apiToken;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
-      try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) { /* */ }
 
-      // Real Deriv API flow: one WebSocket, {"authorize": token} as the
-      // first message — no REST accounts/OTP lookup (that endpoint never
-      // existed on api.derivws.com, which is what was causing the CORS
-      // errors and the connection failures).
+      // Shared trading/auth socket — see window.HubTradingSocket, reused
+      // here instead of opening yet another independent connection to the
+      // same Deriv endpoint every other engine already authenticates
+      // against.
       const _self = this;
-      const hub = window.HubStore.getState();
-      const numericAppId = hub.wsAppId || '1089';
-      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${numericAppId}`);
+      const ws = window.HubTradingSocket.connect(token);
+      if (!ws) return;
       _self.socketT = ws;
 
-      ws.onerror = () => {
-        _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
-      };
-      ws.onopen = () => {
-        try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
-      };
-      ws.onmessage = (m) => {
+      if (!_self._sharedTradingListener) {
+        _self._sharedTradingListener = (evtType, d) => {
+          _self.socketT = window.HubTradingSocket.getSocket() || _self.socketT;
+          if (evtType === 'error') {
+            _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
+            return;
+          }
+          if (evtType === 'close') {
+            _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+            return;
+          }
+          if (evtType !== 'message') return;
+          _self._handleTradingMessage(d);
+        };
+      }
+      window.HubTradingSocket.addListener(_self._sharedTradingListener);
+      if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
+
+      _self._handleTradingMessage = (d) => {
         try {
-          const d = JSON.parse(m.data);
           if (d.error && !_self.state.isAuthenticated) {
             _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
             _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${d.error.message || 'invalid token'}`, ntype: 'loss' });
@@ -11997,23 +12002,16 @@ window.NexusTrading = exports;
                 // every few seconds and stops ALL bots at once, Differ
                 // included. Keeping a second, separate TP/SL here just meant
                 // two different numbers to configure for the same outcome.
-              }
             }
-            if (d.msg_type === 'buy') {
-              if (d.error) {
-                _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
-              }
-              else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
-            }
-          } catch (e) { /* */ }
-        };
-        ws.onclose = () => {
-          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-          if (window.HubStore.getState().apiToken) {
-            _self._authDelay = Math.min((_self._authDelay || 8000) * 1.5, 60000);
-            setTimeout(() => _self.authenticate(), _self._authDelay);
           }
-        };
+          if (d.msg_type === 'buy') {
+            if (d.error) {
+              _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+            }
+            else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
+          }
+        } catch (e) { /* */ }
+      };
     }
 
     _showDifferCooldownOverlay(duration) {
@@ -23603,24 +23601,35 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const token = window.HubStore.getState().apiToken;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
-      try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) {}
       const _self = this;
       (() => {
-        const hub = window.HubStore.getState();
-        const appId = hub.wsAppId || '1089';
-        // Real Deriv API flow: one WebSocket, {"authorize": token} as the
-        // first message — no REST accounts/OTP lookup (that endpoint never
-        // existed on api.derivws.com, which is what was causing the CORS
-        // errors and the connection failures).
-        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${appId}`);
+        // Shared trading/auth socket — see window.HubTradingSocket, reused
+        // here instead of opening a second independent connection to the
+        // same endpoint every TitanEngine already authenticates against.
+        const ws = window.HubTradingSocket.connect(token);
+        if (!ws) return;
         _self.socketT = ws;
-        ws.onerror = () => { _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' }); };
-        ws.onopen = () => {
-          try { ws.send(JSON.stringify({ authorize: token })); } catch (e) {}
-        };
-        ws.onmessage = (m) => {
+
+        if (!_self._sharedTradingListener) {
+          _self._sharedTradingListener = (evtType, d) => {
+            _self.socketT = window.HubTradingSocket.getSocket() || _self.socketT;
+            if (evtType === 'error') {
+              _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
+              return;
+            }
+            if (evtType === 'close') {
+              _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+              return;
+            }
+            if (evtType !== 'message') return;
+            _self._handleTradingMessage(d);
+          };
+        }
+        window.HubTradingSocket.addListener(_self._sharedTradingListener);
+        if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
+
+        _self._handleTradingMessage = (d) => {
           try {
-            const d = JSON.parse(m.data);
             if (d.error && !_self.state.isAuthenticated) {
               _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
               _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${d.error.message || 'invalid token'}`, ntype: 'loss' });
@@ -23679,10 +23688,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
             }
           } catch (e) {}
-        };
-        ws.onclose = () => {
-          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-          if (window.HubStore.getState().apiToken) { _self._authDelay = Math.min((_self._authDelay || 8000) * 1.5, 60000); setTimeout(() => _self.authenticate(), _self._authDelay); }
         };
       })();
     }
