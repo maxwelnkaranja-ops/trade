@@ -654,43 +654,41 @@
             <label class="settings-label font-display">Deriv App ID <span style="font-size:10px;opacity:0.6;">(REST / Trading)</span></label>
             <p class="settings-hint">Your <strong>alphanumeric</strong> App ID from <strong>developers.deriv.com</strong> → Dashboard → Applications (e.g. <code>33ADPhDZXR2F60qhPudXB</code>). Used in REST API headers for trading authentication. Register a PAT-type app if you don't have one.</p>
             <div class="settings-row">
-              <div class="settings-input-wrap">
-                <input type="text" class="input-field font-mono" id="settings-appid" placeholder="e.g. 33ADPhDZXR2F60qhPudXB">
-                <button type="button" class="settings-eye-btn" id="settings-appid-eye" title="Show/Hide" aria-label="Show or hide App ID">👁</button>
-              </div>
-              <button type="button" class="settings-mini-btn" id="settings-appid-paste" title="Paste from clipboard">Paste</button>
-              <button type="button" class="settings-mini-btn" id="settings-appid-clear" title="Clear field">Clear</button>
+              <input type="text" class="input-field font-mono" id="settings-appid" placeholder="e.g. 33ADPhDZXR2F60qhPudXB">
+              <span class="settings-icon-group">
+                <button type="button" class="btn-icon" id="settings-appid-paste" title="Paste from clipboard">📋</button>
+                <button type="button" class="btn-icon" id="settings-appid-clear" title="Clear">✕</button>
+              </span>
               <button type="button" class="btn-primary font-display" id="settings-appid-save">Save</button>
             </div>
-            <span class="settings-dup-msg" id="settings-appid-msg"></span>
+            <p class="settings-inline-note" id="settings-appid-note"></p>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">WS App ID <span style="font-size:10px;opacity:0.6;">(Analysis / Digits)</span></label>
             <p class="settings-hint">No longer required — Deriv's public analysis feed (<code>wss://api.derivws.com/trading/v1/options/ws/public</code>) doesn't take an App ID. This field is kept for backward compatibility only and has no effect on live digits.</p>
             <div class="settings-row">
-              <div class="settings-input-wrap">
-                <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
-                <button type="button" class="settings-eye-btn" id="settings-wsappid-eye" title="Show/Hide" aria-label="Show or hide WS App ID">👁</button>
-              </div>
-              <button type="button" class="settings-mini-btn" id="settings-wsappid-paste" title="Paste from clipboard">Paste</button>
-              <button type="button" class="settings-mini-btn" id="settings-wsappid-clear" title="Clear field">Clear</button>
+              <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
+              <span class="settings-icon-group">
+                <button type="button" class="btn-icon" id="settings-wsappid-paste" title="Paste from clipboard">📋</button>
+                <button type="button" class="btn-icon" id="settings-wsappid-clear" title="Clear">✕</button>
+              </span>
               <button type="button" class="btn-primary font-display" id="settings-wsappid-save">Save</button>
             </div>
-            <span class="settings-dup-msg" id="settings-wsappid-msg"></span>
+            <p class="settings-inline-note" id="settings-wsappid-note"></p>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">Deriv API Token</label>
             <p class="settings-hint">Your Personal Access Token (PAT) from <strong>developers.deriv.com</strong> → Dashboard → API tokens. Create a PAT with <em>trade</em> and <em>account_manage</em> scopes. This is used as a Bearer token to authenticate all REST and WebSocket calls.</p>
             <div class="settings-row">
-              <div class="settings-input-wrap">
-                <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token…">
-                <button type="button" class="settings-eye-btn" id="settings-token-eye" title="Show/Hide" aria-label="Show or hide API token">👁</button>
-              </div>
-              <button type="button" class="settings-mini-btn" id="settings-token-paste" title="Paste from clipboard">Paste</button>
-              <button type="button" class="settings-mini-btn" id="settings-token-clear" title="Clear field">Clear</button>
+              <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token…">
+              <span class="settings-icon-group">
+                <button type="button" class="btn-icon" id="settings-token-toggle" title="Show token">👁</button>
+                <button type="button" class="btn-icon" id="settings-token-paste" title="Paste from clipboard">📋</button>
+                <button type="button" class="btn-icon" id="settings-token-clear" title="Clear">✕</button>
+              </span>
               <button type="button" class="btn-primary font-display" id="settings-save">Save &amp; Connect</button>
             </div>
-            <span class="settings-dup-msg" id="settings-token-msg"></span>
+            <p class="settings-inline-note" id="settings-token-note"></p>
             <p class="settings-status" id="settings-status">Checking…</p>
             <div class="syslog-header">
               <span class="settings-label font-display" style="margin:0;">System Log</span>
@@ -761,7 +759,13 @@
 .syslog-line.level-error { color: #ff6b6b; }
 .syslog-line.level-warn { color: #ffb454; }
 .syslog-line.level-info { color: #6bcfff; }
-.syslog-line.level-success { color: #6bff9e; }
+.settings-icon-group { display: flex; gap: 7px; flex: 0 0 auto; }
+.btn-icon { flex: 0 0 auto; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: rgba(255,255,255,0.75); font-size: 14px; cursor: pointer; padding: 0; }
+.btn-icon:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.btn-icon:active { transform: scale(0.94); }
+.settings-inline-note { font-size: 11px; margin: 4px 0 0; min-height: 14px; opacity: 0.85; }
+.settings-inline-note.same { color: #ffb454; }
+.settings-inline-note.saved { color: #6bff9e; }
 
 /* Current digit box — huge digit, generous padding */
 .digit-pad {
@@ -2461,34 +2465,8 @@ html.light .settings-section { background: hsl(var(--muted) / .3); }
   letter-spacing: 0.1em; text-transform: uppercase; color: hsl(var(--primary)); margin-bottom: 1px;
 }
 .settings-hint { font-size: 11.5px; color: hsl(var(--muted-foreground)); line-height: 1.6; }
-.settings-row { display: flex; gap: 7px; flex-wrap: wrap; }
+.settings-row { display: flex; gap: 7px; }
 .settings-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.settings-input-wrap { position: relative; flex: 1; min-width: 140px; display: flex; }
-.settings-input-wrap .input-field { padding-right: 34px; }
-.settings-eye-btn {
-  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
-  background: none; border: none; cursor: pointer; padding: 0;
-  color: hsl(var(--muted-foreground)); font-size: 13px; border-radius: 6px;
-  transition: color .15s ease, background .15s ease;
-}
-.settings-eye-btn:hover { color: hsl(var(--foreground)); background: hsl(var(--primary) / .1); }
-.settings-mini-btn {
-  background: hsl(var(--bg)); border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
-  font-family: 'Outfit', sans-serif; font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
-  padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; transition: all .15s ease;
-  white-space: nowrap;
-}
-.settings-mini-btn:hover { color: hsl(var(--foreground)); border-color: hsl(var(--primary) / .4); background: hsl(var(--primary) / .08); }
-.settings-mini-btn:active { transform: scale(.96); }
-.settings-dup-msg {
-  display: block; font-size: 10.5px; font-family: 'DM Mono', monospace;
-  color: hsl(38 92% 55%); min-height: 14px; margin-top: 3px;
-}
-.settings-dup-msg:empty { margin-top: 0; }
-@media (max-width: 880px) {
-  html body .settings-row .settings-mini-btn { flex: 1 1 auto; }
-}
 .settings-status {
   font-size: 11px; font-family: 'DM Mono', monospace;
   color: hsl(var(--muted-foreground)); padding: 3px 0;
@@ -25013,118 +24991,103 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const syslogClearBtn = document.getElementById('settings-syslog-clear');
     if (syslogClearBtn) syslogClearBtn.onclick = () => window.SysLog && window.SysLog.clear();
 
-    // ── Shared helper: wires Paste / Clear / Show-Hide / duplicate-aware
-    // Save for a settings API field (App ID, WS App ID, Token). Keeps the
-    // three fields below in sync without repeating the same wiring thrice.
-    function wireApiField({ inputId, eyeId, pasteId, clearId, saveId, msgId, hiddenByDefault, getStored, onSave, savedLabel }) {
-      const input = document.getElementById(inputId);
-      const eyeBtn = document.getElementById(eyeId);
-      const pasteBtn = document.getElementById(pasteId);
-      const clearBtn = document.getElementById(clearId);
-      const saveBtn = document.getElementById(saveId);
-      const msgEl = document.getElementById(msgId);
-      if (!input) return;
-
-      // Show/Hide toggle — 👁 means "click to reveal" (currently masked),
-      // 🙈 means "click to hide" (currently visible in plain text).
-      if (eyeBtn) {
-        eyeBtn.textContent = input.type === 'password' ? '👁' : '🙈';
-        eyeBtn.onclick = () => {
-          const willShow = input.type === 'password';
-          input.type = willShow ? 'text' : 'password';
-          eyeBtn.textContent = willShow ? '🙈' : '👁';
-          eyeBtn.title = willShow ? 'Hide' : 'Show';
-        };
-      }
-
-      // Paste from clipboard straight into the field.
-      if (pasteBtn) pasteBtn.onclick = async () => {
-        try {
-          const text = await navigator.clipboard.readText();
-          if (text) { input.value = text.trim(); input.focus(); if (msgEl) msgEl.textContent = ''; }
-        } catch (e) {
-          console.error(`[Settings] Clipboard paste failed for ${inputId}:`, e);
-          if (msgEl) { msgEl.textContent = 'Could not read clipboard — paste manually (Ctrl/Cmd+V).'; setTimeout(() => { msgEl.textContent = ''; }, 3000); }
-          input.focus();
-        }
-      };
-
-      // Clear the field (does not touch the saved value until Save is pressed).
-      if (clearBtn) clearBtn.onclick = () => {
-        input.value = '';
-        if (msgEl) msgEl.textContent = '';
-        input.focus();
-      };
-
-      // Save — but if the value matches what's already stored, say so
-      // instead of re-saving/reconnecting for no reason.
-      if (saveBtn) {
-        const defaultLabel = saveBtn.textContent;
-        saveBtn.onclick = () => {
-          const v = (input.value || '').trim();
-          const existing = (getStored() || '').trim();
-          if (msgEl) msgEl.textContent = '';
-          if (v && existing && v === existing) {
-            if (msgEl) { msgEl.textContent = 'This API is the same as the one already saved.'; setTimeout(() => { msgEl.textContent = ''; }, 3000); }
-            return;
-          }
-          onSave(v);
-          if (v) {
-            saveBtn.textContent = savedLabel || 'Saved ✓';
-            setTimeout(() => { saveBtn.textContent = defaultLabel; }, 2000);
-          }
-        };
-      }
-    }
-
     // Single PAT auth — saved once here, shared by every engine via HubStore.
     const appIdInput = document.getElementById('settings-appid');
+    const appIdSaveBtn = document.getElementById('settings-appid-save');
+    const appIdNote = document.getElementById('settings-appid-note');
     function refreshAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (appIdInput && hub.appId && document.activeElement !== appIdInput) appIdInput.value = hub.appId;
+      if (appIdInput && hub.appId) appIdInput.value = hub.appId;
     }
-    wireApiField({
-      inputId: 'settings-appid', eyeId: 'settings-appid-eye', pasteId: 'settings-appid-paste',
-      clearId: 'settings-appid-clear', saveId: 'settings-appid-save', msgId: 'settings-appid-msg',
-      getStored: () => (window.HubStore ? window.HubStore.getState().appId : ''),
-      onSave: (v) => { if (window.HubStore) window.HubStore.setAppId(v); },
-    });
+    if (appIdSaveBtn) appIdSaveBtn.onclick = () => {
+      const v = (appIdInput && appIdInput.value || '').trim();
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (v && hub.appId && v === hub.appId) {
+        if (appIdNote) { appIdNote.textContent = 'Same as existing App ID — no change made.'; appIdNote.className = 'settings-inline-note same'; }
+        return;
+      }
+      if (window.HubStore) window.HubStore.setAppId(v);
+      if (appIdNote) { appIdNote.textContent = 'Saved.'; appIdNote.className = 'settings-inline-note saved'; }
+      appIdSaveBtn.textContent = 'Saved ✓';
+      setTimeout(() => { appIdSaveBtn.textContent = 'Save'; if (appIdNote) appIdNote.textContent = ''; }, 2000);
+    };
+    const appIdPasteBtn = document.getElementById('settings-appid-paste');
+    if (appIdPasteBtn) appIdPasteBtn.onclick = async () => {
+      try { const text = await navigator.clipboard.readText(); if (text && appIdInput) appIdInput.value = text.trim(); }
+      catch (e) { if (appIdNote) { appIdNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; appIdNote.className = 'settings-inline-note same'; } }
+    };
+    const appIdClearBtn = document.getElementById('settings-appid-clear');
+    if (appIdClearBtn) appIdClearBtn.onclick = () => { if (appIdInput) { appIdInput.value = ''; appIdInput.focus(); } if (appIdNote) appIdNote.textContent = ''; };
     refreshAppId();
     if (window.HubStore) window.HubStore.subscribe(refreshAppId);
 
     const wsAppIdInput = document.getElementById('settings-wsappid');
+    const wsAppIdSaveBtn = document.getElementById('settings-wsappid-save');
+    const wsAppIdNote = document.getElementById('settings-wsappid-note');
     function refreshWsAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (wsAppIdInput && hub.wsAppId && document.activeElement !== wsAppIdInput) wsAppIdInput.value = hub.wsAppId;
+      if (wsAppIdInput && hub.wsAppId) wsAppIdInput.value = hub.wsAppId;
     }
-    wireApiField({
-      inputId: 'settings-wsappid', eyeId: 'settings-wsappid-eye', pasteId: 'settings-wsappid-paste',
-      clearId: 'settings-wsappid-clear', saveId: 'settings-wsappid-save', msgId: 'settings-wsappid-msg',
-      getStored: () => (window.HubStore ? window.HubStore.getState().wsAppId : ''),
-      onSave: (v) => { if (window.HubStore) window.HubStore.setWsAppId(v); },
-    });
+    if (wsAppIdSaveBtn) wsAppIdSaveBtn.onclick = () => {
+      const v = (wsAppIdInput && wsAppIdInput.value || '').trim();
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (v && hub.wsAppId && v === hub.wsAppId) {
+        if (wsAppIdNote) { wsAppIdNote.textContent = 'Same as existing WS App ID — no change made.'; wsAppIdNote.className = 'settings-inline-note same'; }
+        return;
+      }
+      if (window.HubStore) window.HubStore.setWsAppId(v);
+      if (wsAppIdNote) { wsAppIdNote.textContent = 'Saved.'; wsAppIdNote.className = 'settings-inline-note saved'; }
+      wsAppIdSaveBtn.textContent = 'Saved ✓';
+      setTimeout(() => { wsAppIdSaveBtn.textContent = 'Save'; if (wsAppIdNote) wsAppIdNote.textContent = ''; }, 2000);
+    };
+    const wsAppIdPasteBtn = document.getElementById('settings-wsappid-paste');
+    if (wsAppIdPasteBtn) wsAppIdPasteBtn.onclick = async () => {
+      try { const text = await navigator.clipboard.readText(); if (text && wsAppIdInput) wsAppIdInput.value = text.trim(); }
+      catch (e) { if (wsAppIdNote) { wsAppIdNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; wsAppIdNote.className = 'settings-inline-note same'; } }
+    };
+    const wsAppIdClearBtn = document.getElementById('settings-wsappid-clear');
+    if (wsAppIdClearBtn) wsAppIdClearBtn.onclick = () => { if (wsAppIdInput) { wsAppIdInput.value = ''; wsAppIdInput.focus(); } if (wsAppIdNote) wsAppIdNote.textContent = ''; };
     refreshWsAppId();
     if (window.HubStore) window.HubStore.subscribe(refreshWsAppId);
 
     const tokenInput = document.getElementById('settings-token');
     const statusEl = document.getElementById('settings-status');
+    const saveBtn = document.getElementById('settings-save');
+    const tokenNote = document.getElementById('settings-token-note');
     function refreshAuthStatus() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (tokenInput && hub.apiToken && document.activeElement !== tokenInput) tokenInput.value = hub.apiToken;
+      if (tokenInput && hub.apiToken) tokenInput.value = hub.apiToken;
       if (statusEl) {
         statusEl.textContent = hub.connectionStatus === 'connected' ? `✓ Connected${hub.accountId ? ' — ' + hub.accountId : ''}`
           : hub.connectionStatus === 'connecting' ? '⏳ Connecting…'
           : hub.apiToken ? `✗ ${hub.connectionError || 'Not connected — check your token'}` : 'No token set — paste your Deriv API token to trade';
       }
     }
-    wireApiField({
-      inputId: 'settings-token', eyeId: 'settings-token-eye', pasteId: 'settings-token-paste',
-      clearId: 'settings-token-clear', saveId: 'settings-save', msgId: 'settings-token-msg',
-      hiddenByDefault: true,
-      getStored: () => (window.HubStore ? window.HubStore.getState().apiToken : ''),
-      onSave: (v) => { if (v && window.HubStore) window.HubStore.setToken(v); },
-      savedLabel: 'Connecting…',
-    });
+    if (saveBtn) saveBtn.onclick = () => {
+      const v = (tokenInput && tokenInput.value || '').trim();
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (v && hub.apiToken && v === hub.apiToken) {
+        if (tokenNote) { tokenNote.textContent = 'API token is the same as the existing one — no change made.'; tokenNote.className = 'settings-inline-note same'; }
+        return;
+      }
+      if (tokenNote) tokenNote.textContent = '';
+      if (v && window.HubStore) window.HubStore.setToken(v);
+    };
+    const tokenPasteBtn = document.getElementById('settings-token-paste');
+    if (tokenPasteBtn) tokenPasteBtn.onclick = async () => {
+      try { const text = await navigator.clipboard.readText(); if (text && tokenInput) tokenInput.value = text.trim(); if (tokenNote) tokenNote.textContent = ''; }
+      catch (e) { if (tokenNote) { tokenNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; tokenNote.className = 'settings-inline-note same'; } }
+    };
+    const tokenClearBtn = document.getElementById('settings-token-clear');
+    if (tokenClearBtn) tokenClearBtn.onclick = () => { if (tokenInput) { tokenInput.value = ''; tokenInput.focus(); } if (tokenNote) tokenNote.textContent = ''; };
+    const tokenToggleBtn = document.getElementById('settings-token-toggle');
+    if (tokenToggleBtn) tokenToggleBtn.onclick = () => {
+      if (!tokenInput) return;
+      const showing = tokenInput.type === 'text';
+      tokenInput.type = showing ? 'password' : 'text';
+      tokenToggleBtn.textContent = showing ? '👁' : '🙈';
+      tokenToggleBtn.title = showing ? 'Show token' : 'Hide token';
+    };
     refreshAuthStatus();
     if (window.HubStore) window.HubStore.subscribe(refreshAuthStatus);
 
