@@ -12875,10 +12875,22 @@ window.NexusStrategies=exports;
       authorizedToken = null;
       if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
       const url = getWsUrl();
+      // ⚠️ TEMP DEBUG — logs the exact App ID and the token being sent so
+      // you can confirm it's really what you pasted (not a stale/cached
+      // value from before). Token is partially masked (first 4 + last 4
+      // chars) rather than fully hidden so you can still eyeball-match it
+      // against what's in the field, without dumping the whole secret into
+      // a log box. Remove this whole block once the connection is fixed.
+      const _maskedToken = token.length > 10 ? `${token.slice(0, 4)}…${token.slice(-4)} (${token.length} chars)` : `${token} (${token.length} chars — looks short for a real PAT)`;
+      window.SysLog.add('warn', `[DEBUG] Connecting with App ID "${(window.HubStore.getState().wsAppId || '1089')}" and token ${_maskedToken}`);
       window.SysLog.add('info', `Connecting → ${url}`);
       socket = new WebSocket(url);
       socket.onopen = () => {
         window.SysLog.add('info', 'Socket open — sending authorize…');
+        // ⚠️ TEMP DEBUG — shows the literal authorize payload being sent
+        // over the wire, so you can compare it byte-for-byte against what
+        // works in the API Playground. Remove once the connection is fixed.
+        window.SysLog.add('warn', `[DEBUG] → ${JSON.stringify({ authorize: token })}`);
         try { socket.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
       };
       socket.onmessage = (msg) => {
@@ -12888,10 +12900,18 @@ window.NexusStrategies=exports;
           // Pull the symbol/contract type back out of echo_req when the
           // server includes it, so errors like "no contract available for
           // this symbol" show exactly which market/contract triggered them
-          // instead of just the bare message.
+          // instead of just the bare message. Different request types name
+          // the symbol field differently — contracts_for's symbol is the
+          // VALUE of the contracts_for key itself, proposal/buy use
+          // symbol/contract_type — so check all of them, not just symbol.
           const req = data.echo_req || {};
-          const ctx = [req.symbol, req.contract_type].filter(Boolean).join(' ');
-          window.SysLog.add('error', `[${data.msg_type || 'error'}]${ctx ? ' ' + ctx : ''} — ${data.error.message || data.error.code || 'unknown error'}`);
+          const symbolFromReq = req.symbol || req.contracts_for || req.ticks || (typeof req.contracts_for === 'string' ? req.contracts_for : null);
+          const ctx = [symbolFromReq, req.contract_type].filter(Boolean).join(' ');
+          window.SysLog.add('error', `[${data.msg_type || 'error'}]${ctx ? ' ' + ctx : ' (no symbol in echo_req — see raw below)'} — ${data.error.message || data.error.code || 'unknown error'}`);
+          // ⚠️ TEMP DEBUG — full raw error payload including echo_req, so
+          // if a request type's symbol field isn't caught by the mapping
+          // above, you can still see exactly what was actually sent.
+          window.SysLog.add('warn', `[DEBUG] raw echo_req: ${JSON.stringify(req)}`);
         }
         if (data.msg_type === 'authorize' && data.authorize) {
           connecting = false;
@@ -13519,6 +13539,11 @@ window.NexusStrategies=exports;
     // it's a light lookup request, not a subscription.
     requestContractsFor(symbol) {
       if (!symbol || !this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) return;
+      // ⚠️ TEMP DEBUG — shows which engine asked, and what market it read
+      // from its own localStorage config (this.mode + '_config') — if this
+      // symbol looks wrong/stale, that's the saved market for THIS bot,
+      // untouched by pasting a new token. Remove once confirmed/fixed.
+      if (window.SysLog) window.SysLog.add('info', `[DEBUG] ${this.mode || this.prefix || 'engine'} → contracts_for "${symbol}" (from ${this.prefix}_config in localStorage)`);
       try { this.tradingSocket.send(JSON.stringify({ contracts_for: symbol })); } catch (e) { /* */ }
     }
 
