@@ -654,25 +654,43 @@
             <label class="settings-label font-display">Deriv App ID <span style="font-size:10px;opacity:0.6;">(REST / Trading)</span></label>
             <p class="settings-hint">Your <strong>alphanumeric</strong> App ID from <strong>developers.deriv.com</strong> → Dashboard → Applications (e.g. <code>33ADPhDZXR2F60qhPudXB</code>). Used in REST API headers for trading authentication. Register a PAT-type app if you don't have one.</p>
             <div class="settings-row">
-              <input type="text" class="input-field font-mono" id="settings-appid" placeholder="e.g. 33ADPhDZXR2F60qhPudXB">
+              <div class="settings-input-wrap">
+                <input type="text" class="input-field font-mono" id="settings-appid" placeholder="e.g. 33ADPhDZXR2F60qhPudXB">
+                <button type="button" class="settings-eye-btn" id="settings-appid-eye" title="Show/Hide" aria-label="Show or hide App ID">👁</button>
+              </div>
+              <button type="button" class="settings-mini-btn" id="settings-appid-paste" title="Paste from clipboard">Paste</button>
+              <button type="button" class="settings-mini-btn" id="settings-appid-clear" title="Clear field">Clear</button>
               <button type="button" class="btn-primary font-display" id="settings-appid-save">Save</button>
             </div>
+            <span class="settings-dup-msg" id="settings-appid-msg"></span>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">WS App ID <span style="font-size:10px;opacity:0.6;">(Analysis / Digits)</span></label>
             <p class="settings-hint">No longer required — Deriv's public analysis feed (<code>wss://api.derivws.com/trading/v1/options/ws/public</code>) doesn't take an App ID. This field is kept for backward compatibility only and has no effect on live digits.</p>
             <div class="settings-row">
-              <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
+              <div class="settings-input-wrap">
+                <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
+                <button type="button" class="settings-eye-btn" id="settings-wsappid-eye" title="Show/Hide" aria-label="Show or hide WS App ID">👁</button>
+              </div>
+              <button type="button" class="settings-mini-btn" id="settings-wsappid-paste" title="Paste from clipboard">Paste</button>
+              <button type="button" class="settings-mini-btn" id="settings-wsappid-clear" title="Clear field">Clear</button>
               <button type="button" class="btn-primary font-display" id="settings-wsappid-save">Save</button>
             </div>
+            <span class="settings-dup-msg" id="settings-wsappid-msg"></span>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">Deriv API Token</label>
             <p class="settings-hint">Your Personal Access Token (PAT) from <strong>developers.deriv.com</strong> → Dashboard → API tokens. Create a PAT with <em>trade</em> and <em>account_manage</em> scopes. This is used as a Bearer token to authenticate all REST and WebSocket calls.</p>
             <div class="settings-row">
-              <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token…">
+              <div class="settings-input-wrap">
+                <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token…">
+                <button type="button" class="settings-eye-btn" id="settings-token-eye" title="Show/Hide" aria-label="Show or hide API token">👁</button>
+              </div>
+              <button type="button" class="settings-mini-btn" id="settings-token-paste" title="Paste from clipboard">Paste</button>
+              <button type="button" class="settings-mini-btn" id="settings-token-clear" title="Clear field">Clear</button>
               <button type="button" class="btn-primary font-display" id="settings-save">Save &amp; Connect</button>
             </div>
+            <span class="settings-dup-msg" id="settings-token-msg"></span>
             <p class="settings-status" id="settings-status">Checking…</p>
             <div class="syslog-header">
               <span class="settings-label font-display" style="margin:0;">System Log</span>
@@ -2443,8 +2461,34 @@ html.light .settings-section { background: hsl(var(--muted) / .3); }
   letter-spacing: 0.1em; text-transform: uppercase; color: hsl(var(--primary)); margin-bottom: 1px;
 }
 .settings-hint { font-size: 11.5px; color: hsl(var(--muted-foreground)); line-height: 1.6; }
-.settings-row { display: flex; gap: 7px; }
+.settings-row { display: flex; gap: 7px; flex-wrap: wrap; }
 .settings-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.settings-input-wrap { position: relative; flex: 1; min-width: 140px; display: flex; }
+.settings-input-wrap .input-field { padding-right: 34px; }
+.settings-eye-btn {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer; padding: 0;
+  color: hsl(var(--muted-foreground)); font-size: 13px; border-radius: 6px;
+  transition: color .15s ease, background .15s ease;
+}
+.settings-eye-btn:hover { color: hsl(var(--foreground)); background: hsl(var(--primary) / .1); }
+.settings-mini-btn {
+  background: hsl(var(--bg)); border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
+  font-family: 'Outfit', sans-serif; font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
+  padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; transition: all .15s ease;
+  white-space: nowrap;
+}
+.settings-mini-btn:hover { color: hsl(var(--foreground)); border-color: hsl(var(--primary) / .4); background: hsl(var(--primary) / .08); }
+.settings-mini-btn:active { transform: scale(.96); }
+.settings-dup-msg {
+  display: block; font-size: 10.5px; font-family: 'DM Mono', monospace;
+  color: hsl(38 92% 55%); min-height: 14px; margin-top: 3px;
+}
+.settings-dup-msg:empty { margin-top: 0; }
+@media (max-width: 880px) {
+  html body .settings-row .settings-mini-btn { flex: 1 1 auto; }
+}
 .settings-status {
   font-size: 11px; font-family: 'DM Mono', monospace;
   color: hsl(var(--muted-foreground)); padding: 3px 0;
@@ -24969,53 +25013,118 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const syslogClearBtn = document.getElementById('settings-syslog-clear');
     if (syslogClearBtn) syslogClearBtn.onclick = () => window.SysLog && window.SysLog.clear();
 
+    // ── Shared helper: wires Paste / Clear / Show-Hide / duplicate-aware
+    // Save for a settings API field (App ID, WS App ID, Token). Keeps the
+    // three fields below in sync without repeating the same wiring thrice.
+    function wireApiField({ inputId, eyeId, pasteId, clearId, saveId, msgId, hiddenByDefault, getStored, onSave, savedLabel }) {
+      const input = document.getElementById(inputId);
+      const eyeBtn = document.getElementById(eyeId);
+      const pasteBtn = document.getElementById(pasteId);
+      const clearBtn = document.getElementById(clearId);
+      const saveBtn = document.getElementById(saveId);
+      const msgEl = document.getElementById(msgId);
+      if (!input) return;
+
+      // Show/Hide toggle — 👁 means "click to reveal" (currently masked),
+      // 🙈 means "click to hide" (currently visible in plain text).
+      if (eyeBtn) {
+        eyeBtn.textContent = input.type === 'password' ? '👁' : '🙈';
+        eyeBtn.onclick = () => {
+          const willShow = input.type === 'password';
+          input.type = willShow ? 'text' : 'password';
+          eyeBtn.textContent = willShow ? '🙈' : '👁';
+          eyeBtn.title = willShow ? 'Hide' : 'Show';
+        };
+      }
+
+      // Paste from clipboard straight into the field.
+      if (pasteBtn) pasteBtn.onclick = async () => {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text) { input.value = text.trim(); input.focus(); if (msgEl) msgEl.textContent = ''; }
+        } catch (e) {
+          console.error(`[Settings] Clipboard paste failed for ${inputId}:`, e);
+          if (msgEl) { msgEl.textContent = 'Could not read clipboard — paste manually (Ctrl/Cmd+V).'; setTimeout(() => { msgEl.textContent = ''; }, 3000); }
+          input.focus();
+        }
+      };
+
+      // Clear the field (does not touch the saved value until Save is pressed).
+      if (clearBtn) clearBtn.onclick = () => {
+        input.value = '';
+        if (msgEl) msgEl.textContent = '';
+        input.focus();
+      };
+
+      // Save — but if the value matches what's already stored, say so
+      // instead of re-saving/reconnecting for no reason.
+      if (saveBtn) {
+        const defaultLabel = saveBtn.textContent;
+        saveBtn.onclick = () => {
+          const v = (input.value || '').trim();
+          const existing = (getStored() || '').trim();
+          if (msgEl) msgEl.textContent = '';
+          if (v && existing && v === existing) {
+            if (msgEl) { msgEl.textContent = 'This API is the same as the one already saved.'; setTimeout(() => { msgEl.textContent = ''; }, 3000); }
+            return;
+          }
+          onSave(v);
+          if (v) {
+            saveBtn.textContent = savedLabel || 'Saved ✓';
+            setTimeout(() => { saveBtn.textContent = defaultLabel; }, 2000);
+          }
+        };
+      }
+    }
+
     // Single PAT auth — saved once here, shared by every engine via HubStore.
     const appIdInput = document.getElementById('settings-appid');
-    const appIdSaveBtn = document.getElementById('settings-appid-save');
     function refreshAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (appIdInput && hub.appId) appIdInput.value = hub.appId;
+      if (appIdInput && hub.appId && document.activeElement !== appIdInput) appIdInput.value = hub.appId;
     }
-    if (appIdSaveBtn) appIdSaveBtn.onclick = () => {
-      const v = (appIdInput && appIdInput.value || '').trim();
-      if (window.HubStore) window.HubStore.setAppId(v);
-      appIdSaveBtn.textContent = 'Saved ✓';
-      setTimeout(() => { appIdSaveBtn.textContent = 'Save'; }, 2000);
-    };
+    wireApiField({
+      inputId: 'settings-appid', eyeId: 'settings-appid-eye', pasteId: 'settings-appid-paste',
+      clearId: 'settings-appid-clear', saveId: 'settings-appid-save', msgId: 'settings-appid-msg',
+      getStored: () => (window.HubStore ? window.HubStore.getState().appId : ''),
+      onSave: (v) => { if (window.HubStore) window.HubStore.setAppId(v); },
+    });
     refreshAppId();
     if (window.HubStore) window.HubStore.subscribe(refreshAppId);
 
     const wsAppIdInput = document.getElementById('settings-wsappid');
-    const wsAppIdSaveBtn = document.getElementById('settings-wsappid-save');
     function refreshWsAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (wsAppIdInput && hub.wsAppId) wsAppIdInput.value = hub.wsAppId;
+      if (wsAppIdInput && hub.wsAppId && document.activeElement !== wsAppIdInput) wsAppIdInput.value = hub.wsAppId;
     }
-    if (wsAppIdSaveBtn) wsAppIdSaveBtn.onclick = () => {
-      const v = (wsAppIdInput && wsAppIdInput.value || '').trim();
-      if (window.HubStore) window.HubStore.setWsAppId(v);
-      wsAppIdSaveBtn.textContent = 'Saved ✓';
-      setTimeout(() => { wsAppIdSaveBtn.textContent = 'Save'; }, 2000);
-    };
+    wireApiField({
+      inputId: 'settings-wsappid', eyeId: 'settings-wsappid-eye', pasteId: 'settings-wsappid-paste',
+      clearId: 'settings-wsappid-clear', saveId: 'settings-wsappid-save', msgId: 'settings-wsappid-msg',
+      getStored: () => (window.HubStore ? window.HubStore.getState().wsAppId : ''),
+      onSave: (v) => { if (window.HubStore) window.HubStore.setWsAppId(v); },
+    });
     refreshWsAppId();
     if (window.HubStore) window.HubStore.subscribe(refreshWsAppId);
 
     const tokenInput = document.getElementById('settings-token');
     const statusEl = document.getElementById('settings-status');
-    const saveBtn = document.getElementById('settings-save');
     function refreshAuthStatus() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (tokenInput && hub.apiToken) tokenInput.value = hub.apiToken;
+      if (tokenInput && hub.apiToken && document.activeElement !== tokenInput) tokenInput.value = hub.apiToken;
       if (statusEl) {
         statusEl.textContent = hub.connectionStatus === 'connected' ? `✓ Connected${hub.accountId ? ' — ' + hub.accountId : ''}`
           : hub.connectionStatus === 'connecting' ? '⏳ Connecting…'
           : hub.apiToken ? `✗ ${hub.connectionError || 'Not connected — check your token'}` : 'No token set — paste your Deriv API token to trade';
       }
     }
-    if (saveBtn) saveBtn.onclick = () => {
-      const v = (tokenInput && tokenInput.value || '').trim();
-      if (v && window.HubStore) window.HubStore.setToken(v);
-    };
+    wireApiField({
+      inputId: 'settings-token', eyeId: 'settings-token-eye', pasteId: 'settings-token-paste',
+      clearId: 'settings-token-clear', saveId: 'settings-save', msgId: 'settings-token-msg',
+      hiddenByDefault: true,
+      getStored: () => (window.HubStore ? window.HubStore.getState().apiToken : ''),
+      onSave: (v) => { if (v && window.HubStore) window.HubStore.setToken(v); },
+      savedLabel: 'Connecting…',
+    });
     refreshAuthStatus();
     if (window.HubStore) window.HubStore.subscribe(refreshAuthStatus);
 
