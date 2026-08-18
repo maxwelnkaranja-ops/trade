@@ -674,6 +674,11 @@
               <button type="button" class="btn-primary font-display" id="settings-save">Save &amp; Connect</button>
             </div>
             <p class="settings-status" id="settings-status">Checking…</p>
+            <div class="syslog-header">
+              <span class="settings-label font-display" style="margin:0;">System Log</span>
+              <button type="button" class="syslog-clear" id="settings-syslog-clear">Clear</button>
+            </div>
+            <div class="syslog-box" id="settings-syslog"><div class="syslog-empty">No events yet — connect your token to see live connection, auth, and trade events here.</div></div>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">Account Type</label>
@@ -727,6 +732,18 @@
 /* ══════════════════════════════════════════════════════════════════
    FINAL FIXES — LAYOUT + UX IMPROVEMENTS
    ══════════════════════════════════════════════════════════════════ */
+
+.syslog-header { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; margin-bottom: 4px; }
+.syslog-clear { background: none; border: 1px solid rgba(255,255,255,0.15); color: rgba(255,255,255,0.6); font-size: 11px; padding: 2px 8px; border-radius: 6px; cursor: pointer; }
+.syslog-clear:hover { color: rgba(255,255,255,0.9); border-color: rgba(255,255,255,0.3); }
+.syslog-box { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 11px; line-height: 1.5; max-height: 180px; overflow-y: auto; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; }
+.syslog-empty { opacity: 0.45; padding: 4px 0; }
+.syslog-line { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+.syslog-line .syslog-ts { opacity: 0.4; margin-right: 6px; }
+.syslog-line.level-error { color: #ff6b6b; }
+.syslog-line.level-warn { color: #ffb454; }
+.syslog-line.level-info { color: #6bcfff; }
+.syslog-line.level-success { color: #6bff9e; }
 
 /* Current digit box — huge digit, generous padding */
 .digit-pad {
@@ -12770,6 +12787,34 @@ window.NexusStrategies=exports;
   function showCongratulationsPopup(target) { showResultPopup('tp', target); }
   window.showResultPopup = showResultPopup;
 
+  // ── System log (Settings → System Log panel) ──────────────────────────
+  // A single, always-on feed of connection/auth/trade events read straight
+  // off the shared trading socket, so issues like "no contract available
+  // for this symbol" are visible with their raw error text, the
+  // symbol/contract that triggered them, and a timestamp — instead of only
+  // showing up as a toast that disappears.
+  window.SysLog = (function () {
+    const entries = [];
+    const MAX = 200;
+    function render() {
+      const box = document.getElementById('settings-syslog');
+      if (!box) return;
+      if (!entries.length) { box.innerHTML = '<div class="syslog-empty">No events yet — connect your token to see live connection, auth, and trade events here.</div>'; return; }
+      box.innerHTML = entries.map((e) => {
+        const t = new Date(e.ts).toLocaleTimeString();
+        return `<div class="syslog-line level-${e.level}"><span class="syslog-ts">${t}</span>${e.text.replace(/</g, '&lt;')}</div>`;
+      }).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+    function add(level, text) {
+      entries.push({ ts: Date.now(), level, text });
+      if (entries.length > MAX) entries.shift();
+      render();
+    }
+    function clear() { entries.length = 0; render(); }
+    return { add, clear, render, get entries() { return entries.slice(); } };
+  })();
+
   // ── Shared trading/auth WebSocket ────────────────────────────────────
   // Every bot engine (13 TitanEngine instances, all instantiated eagerly
   // at page load) used to call its own connect(token) and open its own
@@ -12807,16 +12852,29 @@ window.NexusStrategies=exports;
       connecting = true;
       authorizedToken = null;
       if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-      socket = new WebSocket(getWsUrl());
+      const url = getWsUrl();
+      window.SysLog.add('info', `Connecting → ${url}`);
+      socket = new WebSocket(url);
       socket.onopen = () => {
+        window.SysLog.add('info', 'Socket open — sending authorize…');
         try { socket.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
       };
       socket.onmessage = (msg) => {
         let data;
-        try { data = JSON.parse(msg.data); } catch (e) { return; }
+        try { data = JSON.parse(msg.data); } catch (e) { window.SysLog.add('warn', 'Received malformed (non-JSON) message — ignored.'); return; }
+        if (data.error) {
+          // Pull the symbol/contract type back out of echo_req when the
+          // server includes it, so errors like "no contract available for
+          // this symbol" show exactly which market/contract triggered them
+          // instead of just the bare message.
+          const req = data.echo_req || {};
+          const ctx = [req.symbol, req.contract_type].filter(Boolean).join(' ');
+          window.SysLog.add('error', `[${data.msg_type || 'error'}]${ctx ? ' ' + ctx : ''} — ${data.error.message || data.error.code || 'unknown error'}`);
+        }
         if (data.msg_type === 'authorize' && data.authorize) {
           connecting = false;
           authorizedToken = token;
+          window.SysLog.add('success', `Authorized — ${data.authorize.loginid || 'account'} (${data.authorize.currency || ''} ${typeof data.authorize.balance === 'number' ? data.authorize.balance.toFixed(2) : ''})`);
           // Subscribe ONCE for the whole shared connection — every engine
           // used to send its own balance/proposal_open_contract subscribe
           // on authorize, so with up to 15 engines attached that meant up
@@ -12835,13 +12893,17 @@ window.NexusStrategies=exports;
             if (socket && socket.readyState === WebSocket.OPEN) { try { socket.send(JSON.stringify({ ping: 1 })); } catch (e) { /* */ } }
           }, 25000);
         }
+        if (data.msg_type === 'buy' && data.buy && data.buy.contract_id) {
+          window.SysLog.add('success', `Bought contract #${data.buy.contract_id} — stake ${data.buy.buy_price}`);
+        }
         notify('message', data);
       };
-      socket.onerror = () => { notify('error'); };
-      socket.onclose = () => {
+      socket.onerror = () => { window.SysLog.add('error', 'WebSocket error — could not reach Deriv\'s servers.'); notify('error'); };
+      socket.onclose = (ev) => {
         connecting = false;
         authorizedToken = null;
         if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+        window.SysLog.add('warn', `Socket closed${ev && ev.code ? ` (code ${ev.code}${ev.reason ? ': ' + ev.reason : ''})` : ''}`);
         notify('close');
       };
       return socket;
@@ -24899,11 +24961,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     setInterval(() => { const c = document.getElementById('hub-clock'); if (c) c.textContent = new Date().toLocaleTimeString('en-US', { hour12: false }); }, 1000);
 
     const modal = document.getElementById('settings-modal');
-    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'false')));
-    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => modal && modal.setAttribute('aria-hidden', 'false'));
+    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => { modal && modal.setAttribute('aria-hidden', 'false'); window.SysLog && window.SysLog.render(); }));
+    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => { modal && modal.setAttribute('aria-hidden', 'false'); window.SysLog && window.SysLog.render(); });
     document.querySelectorAll('[data-close-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'true')));
     document.getElementById('settings-close') && (document.getElementById('settings-close').onclick = () => modal && modal.setAttribute('aria-hidden', 'true'));
     if (modal) modal.onclick = (e) => { if (e.target === modal) modal.setAttribute('aria-hidden', 'true'); };
+    const syslogClearBtn = document.getElementById('settings-syslog-clear');
+    if (syslogClearBtn) syslogClearBtn.onclick = () => window.SysLog && window.SysLog.clear();
 
     // Single PAT auth — saved once here, shared by every engine via HubStore.
     const appIdInput = document.getElementById('settings-appid');
