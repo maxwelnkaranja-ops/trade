@@ -12911,55 +12911,33 @@ window.NexusStrategies=exports;
     // always gets a real, fresh connection attempt.
     let knownInvalidToken = null;
     const listeners = new Set();
-    // ── New API endpoints (replaces the old wss://ws.derivws.com/websockets/v3
-    // Legacy flow). Deriv's new developers.deriv.com platform issues App IDs
-    // and PATs in a different format than Legacy, and Deriv's own docs are
-    // explicit that "the new API isn't compatible with the Legacy API" — a
-    // token/App ID generated on developers.deriv.com will always be
-    // rejected by the Legacy authorize call, no matter how correctly it's
-    // copied. This connects to the platform those credentials actually
-    // belong to instead, via window.DerivAuth (defined earlier in the
-    // file) — it already handles request deduplication and OTP
-    // rate-limiting across every engine sharing this one socket.
-    function getAppId() {
+    // ── Real Deriv WebSocket auth ────────────────────────────────────────
+    // Deriv's API is WebSocket-only: connect to
+    // wss://ws.derivws.com/websockets/v3?app_id=<numeric app id>, then send
+    // {"authorize": "<token>"}. The server replies with
+    // {msg_type:'authorize', authorize:{loginid, currency, balance, ...}}
+    // once the token is validated — that reply is what every downstream
+    // listener in this file (HubStore, TitanEngine, HotRepeat, etc.) is
+    // already written to expect, so no changes are needed anywhere else.
+    // (A previous revision of this file replaced this with a two-step
+    // REST "resolve account, then fetch an OTP URL" flow against
+    // api.derivws.com/trading/v1/options/accounts — that endpoint isn't
+    // part of Deriv's real API, which is why the socket could still open
+    // and "connect" while balance silently stayed 0: the fake REST call
+    // never returned a usable balance to seed the synthesized authorize
+    // message with.)
+    function getWsAppId() {
       const hub = window.HubStore.getState();
-      // Prefer the alphanumeric App ID field (the new platform's App ID
-      // format, e.g. "349jtsX41SI4JAQSMTC0a") — fall back to WS App ID
-      // only if that's all that's been set.
-      return hub.appId || hub.wsAppId || '';
+      return (hub.wsAppId || '1089').toString().trim() || '1089';
     }
     function notify(type, data) {
       listeners.forEach((fn) => { try { fn(type, data); } catch (e) { console.error('[HubTradingSocket] listener error:', e); } });
     }
-    function wireSocket(ws, token, accountMeta) {
+    function wireSocket(ws, token) {
       socket = ws;
       ws.onopen = () => {
-        // No authorize message under the new API — the OTP baked into the
-        // connection URL already authenticates the session, so treat
-        // "open" as "authorized" immediately using the account info we
-        // already pulled from the REST /accounts call.
         connecting = false;
-        authorizedToken = token;
-        knownInvalidToken = null;
-        window.SysLog.add('success', `Authorized — ${accountMeta.accountId} (${accountMeta.currency || ''})`);
-        try {
-          ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-          ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
-        } catch (e) { /* */ }
-        if (pingTimer) clearInterval(pingTimer);
-        pingTimer = setInterval(() => {
-          if (socket && socket.readyState === WebSocket.OPEN) { try { socket.send(JSON.stringify({ ping: 1 })); } catch (e) { /* */ } }
-        }, 25000);
-        // Every engine's _onAuthorized / connected-state transition (and
-        // the topbar's connectAccount status) was written against the OLD
-        // flow — they all specifically wait for an incoming
-        // {msg_type: 'authorize', authorize: {...}} message before
-        // flipping out of "connecting". The new API never sends one (the
-        // OTP already did the authenticating), so without this they'd sit
-        // on "Connecting…" forever even on a fully working connection —
-        // this synthesizes that message once, right here, so every
-        // existing listener fires exactly as it did under the old flow.
-        notify('message', { msg_type: 'authorize', authorize: { loginid: accountMeta.accountId, currency: accountMeta.currency, balance: accountMeta.balance } });
+        try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
       };
       ws.onmessage = (msg) => {
         let data;
@@ -12970,6 +12948,28 @@ window.NexusStrategies=exports;
           const ctx = [symbolFromReq, req.contract_type].filter(Boolean).join(' ');
           window.SysLog.add('error', `[${data.msg_type || 'error'}]${ctx ? ' ' + ctx : ' (no symbol in echo_req — see raw below)'} — ${data.error.message || data.error.code || 'unknown error'}`);
           window.SysLog.add('warn', `[DEBUG] raw echo_req: ${JSON.stringify(req)}`);
+          if (data.msg_type === 'authorize') {
+            connecting = false;
+            authorizedToken = null;
+            if (/InvalidToken|Unauthorized/i.test(data.error.code || '')) {
+              knownInvalidToken = token;
+              window.SysLog.add('error', '⛔ Token confirmed invalid by Deriv — pausing reconnect attempts. Paste a fresh token in Settings to try again (this pause clears automatically the moment you save a different token).');
+            }
+          }
+        }
+        if (data.msg_type === 'authorize' && data.authorize && !data.error) {
+          connecting = false;
+          authorizedToken = token;
+          knownInvalidToken = null;
+          window.SysLog.add('success', `Authorized — ${data.authorize.loginid} (${data.authorize.currency || ''})`);
+          try {
+            ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+            ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
+          } catch (e) { /* */ }
+          if (pingTimer) clearInterval(pingTimer);
+          pingTimer = setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) { try { socket.send(JSON.stringify({ ping: 1 })); } catch (e) { /* */ } }
+          }, 25000);
         }
         if (data.msg_type === 'buy' && data.buy && data.buy.contract_id) {
           window.SysLog.add('success', `Bought contract #${data.buy.contract_id} — stake ${data.buy.buy_price}`);
@@ -13000,36 +13000,12 @@ window.NexusStrategies=exports;
       if (socket) { try { socket.onclose = null; socket.close(); } catch (_) {} }
       authorizedToken = null;
       if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-      const appId = getAppId();
-      const accountType = (window.HubStore.getState().accountType === 'real') ? 'real' : 'demo';
+      const wsAppId = getWsAppId();
       const _maskedToken = token.length > 10 ? `${token.slice(0, 4)}…${token.slice(-4)} (${token.length} chars)` : `${token} (${token.length} chars)`;
-      window.SysLog.add('warn', `[DEBUG] Connecting via new API — App ID "${appId || '(none set)'}" and token ${_maskedToken}`);
-      (async () => {
-        try {
-          if (!appId) throw new Error('No App ID set — paste your alphanumeric App ID (from developers.deriv.com) into Settings → App ID.');
-          window.SysLog.add('info', `[REST] Resolving ${accountType} account…`);
-          const { accountId, currency, balance } = await window.DerivAuth.resolveAccountId(token, appId, accountType);
-          window.SysLog.add('success', `[REST] Account resolved — ${accountId} (${currency || ''})`);
-          window.SysLog.add('info', '[REST] Requesting OTP…');
-          const url = await window.DerivAuth.getOtpUrl(token, appId, accountId);
-          window.SysLog.add('info', `Connecting → ${url.replace(/otp=.*/, 'otp=…')}`);
-          const ws = new WebSocket(url);
-          wireSocket(ws, token, { accountId, currency, balance });
-        } catch (e) {
-          connecting = false;
-          const msg = (e && e.message) || String(e);
-          window.SysLog.add('error', `[connect] ${msg}`);
-          // Same invalid-token guard as before — an auth failure at the
-          // REST step (401/InvalidToken/"No accounts found") means this
-          // token will never work, so stop the watchdog hammering it
-          // every ~15s.
-          if (/unauthorized|invalid.*token|401|no accounts found/i.test(msg)) {
-            knownInvalidToken = token;
-            window.SysLog.add('error', '⛔ Token confirmed invalid by Deriv — pausing reconnect attempts. Paste a fresh token in Settings to try again (this pause clears automatically the moment you save a different token).');
-          }
-        }
-      })();
-      return null;
+      window.SysLog.add('warn', `[DEBUG] Connecting — App ID "${wsAppId}" and token ${_maskedToken}`);
+      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${wsAppId}`);
+      wireSocket(ws, token);
+      return ws;
     }
     return {
       connect,
