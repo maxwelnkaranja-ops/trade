@@ -12905,6 +12905,16 @@ window.NexusStrategies=exports;
         pingTimer = setInterval(() => {
           if (socket && socket.readyState === WebSocket.OPEN) { try { socket.send(JSON.stringify({ ping: 1 })); } catch (e) { /* */ } }
         }, 25000);
+        // Every engine's _onAuthorized / connected-state transition (and
+        // the topbar's connectAccount status) was written against the OLD
+        // flow — they all specifically wait for an incoming
+        // {msg_type: 'authorize', authorize: {...}} message before
+        // flipping out of "connecting". The new API never sends one (the
+        // OTP already did the authenticating), so without this they'd sit
+        // on "Connecting…" forever even on a fully working connection —
+        // this synthesizes that message once, right here, so every
+        // existing listener fires exactly as it did under the old flow.
+        notify('message', { msg_type: 'authorize', authorize: { loginid: accountMeta.accountId, currency: accountMeta.currency, balance: accountMeta.balance } });
       };
       ws.onmessage = (msg) => {
         let data;
