@@ -8258,8 +8258,17 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
     // this just also listens in for the topbar's account/balance display.
     function connectViaOtp() {
       const ws = window.HubTradingSocket.connect(state.apiToken);
-      if (!ws) return;
-      statusSocket = ws;
+      // NOTE: ws can be null here even though a connection IS in progress —
+      // HubTradingSocket is single-flight, so if an engine (Titan/HotRepeat)
+      // already kicked off the same connect() a moment earlier, this caller
+      // just loses the race and gets null back. We must NOT bail out in that
+      // case (the old code did `if (!ws) return;` here), or the topbar's
+      // statusListener never gets registered and connectionStatus sits on
+      // 'connecting' forever even after the shared socket authorizes fine.
+      // Registering the listener unconditionally means we still catch the
+      // synthesized 'authorize' notify() once whichever caller's async
+      // connect() chain finishes.
+      statusSocket = ws || window.HubTradingSocket.getSocket();
 
       if (!statusListener) {
         statusListener = (evtType, d) => {
