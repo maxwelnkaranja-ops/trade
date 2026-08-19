@@ -78,7 +78,7 @@
             ? accounts.find((a) => !a.is_virtual) || accounts[0]
             : accounts.find((a) => a.is_virtual) || accounts[0];
           if (!preferred) throw new Error('No accounts found for this token');
-          return { accountId: preferred.account_id, currency: preferred.currency };
+          return { accountId: preferred.account_id, currency: preferred.currency, balance: preferred.balance };
         })();
         accountLookup = { key, promise };
         // Don't cache a rejected lookup — let the next caller retry cleanly.
@@ -8304,7 +8304,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
               state.connectionError = '';
               state.accountId = d.authorize.loginid || state.accountId;
               state.currency = d.authorize.currency || state.currency;
-              if (typeof d.authorize.balance === 'number') state.balanceUSD = d.authorize.balance;
+              { const b = parseFloat(d.authorize.balance); if (!isNaN(b)) state.balanceUSD = b; }
               emit();
               // balance subscription is handled once, for the whole shared
               // socket, by window.HubTradingSocket itself.
@@ -11941,9 +11941,14 @@ window.NexusTrading = exports;
       // same Deriv endpoint every other engine already authenticates
       // against.
       const _self = this;
+      // NOTE: ws can be null even though a connection IS in progress —
+      // HubTradingSocket is single-flight across all 13+ engines, so
+      // whichever engine loses the race to be first just gets null back.
+      // We must NOT bail out here (old code did `if (!ws) return;`), or
+      // this engine never registers its listener and sits stuck on
+      // "connecting" forever even after the shared socket authorizes.
       const ws = window.HubTradingSocket.connect(token);
-      if (!ws) return;
-      _self.socketT = ws;
+      _self.socketT = ws || window.HubTradingSocket.getSocket();
 
       if (!_self._sharedTradingListener) {
         _self._sharedTradingListener = (evtType, d) => {
@@ -12973,13 +12978,13 @@ window.NexusStrategies=exports;
         try {
           if (!appId) throw new Error('No App ID set — paste your alphanumeric App ID (from developers.deriv.com) into Settings → App ID.');
           window.SysLog.add('info', `[REST] Resolving ${accountType} account…`);
-          const { accountId, currency } = await window.DerivAuth.resolveAccountId(token, appId, accountType);
+          const { accountId, currency, balance } = await window.DerivAuth.resolveAccountId(token, appId, accountType);
           window.SysLog.add('success', `[REST] Account resolved — ${accountId} (${currency || ''})`);
           window.SysLog.add('info', '[REST] Requesting OTP…');
           const url = await window.DerivAuth.getOtpUrl(token, appId, accountId);
           window.SysLog.add('info', `Connecting → ${url.replace(/otp=.*/, 'otp=…')}`);
           const ws = new WebSocket(url);
-          wireSocket(ws, token, { accountId, currency });
+          wireSocket(ws, token, { accountId, currency, balance });
         } catch (e) {
           connecting = false;
           const msg = (e && e.message) || String(e);
@@ -15364,9 +15369,15 @@ window.NexusStrategies=exports;
       const _titan = this;
       (() => {
         const hub = window.HubStore.getState();
+        // NOTE: ws can be null even though a connection IS in progress —
+        // HubTradingSocket is single-flight across all 13+ engines, so
+        // whichever engine loses the race to be first just gets null back.
+        // We must NOT bail out here (old code did `if (!ws) return;`), or
+        // this engine never registers its listener and sits stuck on
+        // "connecting" forever — never firing _onAuthorized, never pulling
+        // ticks, never trading — even after the shared socket authorizes.
         const ws = window.HubTradingSocket.connect(token);
-        if (!ws) return;
-        _titan.tradingSocket = ws;
+        _titan.tradingSocket = ws || window.HubTradingSocket.getSocket();
 
         // Runs once the server confirms the authorize call — with the real
         // Deriv flow the socket is open (but not yet authenticated) before
@@ -23787,9 +23798,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // Shared trading/auth socket — see window.HubTradingSocket, reused
         // here instead of opening a second independent connection to the
         // same endpoint every TitanEngine already authenticates against.
+        // NOTE: ws can be null even though a connection IS in progress —
+        // HubTradingSocket is single-flight across all 13+ engines, so
+        // whichever engine loses the race to be first just gets null back.
+        // We must NOT bail out here (old code did `if (!ws) return;`), or
+        // this engine never registers its listener and sits stuck on
+        // "connecting" forever even after the shared socket authorizes.
         const ws = window.HubTradingSocket.connect(token);
-        if (!ws) return;
-        _self.socketT = ws;
+        _self.socketT = ws || window.HubTradingSocket.getSocket();
 
         if (!_self._sharedTradingListener) {
           _self._sharedTradingListener = (evtType, d) => {
