@@ -9188,17 +9188,22 @@ window.EvenTrading = exports;
             console.error('[GlobalSocket] Parse error:', e);
           }
         };
-        this.socket.onerror = () => { this.isConnecting = false; };
+        this.socket.onerror = () => {
+          this.isConnecting = false;
+          if (window.SysLog) window.SysLog.add('error', '[GlobalSocket] Could not reach the public market-data feed (wss://ws.derivws.com) — check your network/firewall, or the numeric App ID in Settings.');
+        };
         this.socket.onclose = () => {
           this.isConnecting = false;
           if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
+            if (window.SysLog) window.SysLog.add('warn', `[GlobalSocket] Market feed closed — reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})…`);
             const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
             setTimeout(() => this.connect(), delay);
           } else {
             // Reconnect budget exhausted — surface this instead of leaving
             // the tab silently showing stale tick data with no explanation.
+            if (window.SysLog) window.SysLog.add('error', '[GlobalSocket] Lost the market feed and could not reconnect after several attempts. Reload the page.');
             const el = document.getElementById('global-error-toast');
             if (el) {
               el.textContent = '⚠ Lost connection to the live market feed and could not reconnect after several attempts. Reload the page to restore live ticks.';
@@ -10822,9 +10827,28 @@ window.NexusTrading = exports;
       return new Promise((resolve) => {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) { resolve(); return; }
         if (this.isConnecting) { setTimeout(() => resolve(), 500); return; }
+        // NOTE: without a hard timeout fallback here, a failed FIRST
+        // connection attempt (error/close before onopen ever fires) left
+        // this promise unresolved forever — every engine sharing this
+        // socket (nexus/under/meanrev/risemr/fallmr/matches/oldrisefall)
+        // does `await globalSocket.connect()` before starting its scanner
+        // or subscribing to any market, so a single bad first attempt
+        // permanently froze all of them at startup with no digits, no
+        // scanning, nothing — and no error shown anywhere. Mirrors the
+        // same settle()-with-timeout pattern the Even/Odd socket already
+        // had.
+        let settled = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          this.isConnecting = false;
+          resolve();
+        };
+        const timeoutId = setTimeout(() => { settle(); }, 12000);
         this.isConnecting = true;
         this.socket = new WebSocket(getWsUrl());
         this.socket.onopen = () => {
+          clearTimeout(timeoutId);
           this.isConnecting = false;
           this.reconnectAttempts = 0;
           if (this.pingInterval) clearInterval(this.pingInterval);
@@ -10836,7 +10860,7 @@ window.NexusTrading = exports;
           this.subscriptions.forEach((_, symbol) => {
             if (this.socket) this.socket.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
           });
-          resolve();
+          settle();
         };
         this.socket.onmessage = (msg) => {
           try {
@@ -10854,16 +10878,22 @@ window.NexusTrading = exports;
             }
           } catch (e) { console.error('[GlobalSocket] Parse error:', e); }
         };
-        this.socket.onerror = () => { this.isConnecting = false; };
+        this.socket.onerror = () => {
+          this.isConnecting = false;
+          if (window.SysLog) window.SysLog.add('error', '[GlobalSocket] Could not reach the public market-data feed (wss://ws.derivws.com) — check your network/firewall, or the numeric App ID in Settings.');
+        };
         this.socket.onclose = () => {
+          settle();
           this.isConnecting = false;
           if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
+            if (window.SysLog) window.SysLog.add('warn', `[GlobalSocket] Market feed closed — reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})…`);
             setTimeout(() => this.connect(), Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000));
           } else {
             // Reconnect budget exhausted — surface this instead of leaving
             // the tab silently showing stale tick data with no explanation.
+            if (window.SysLog) window.SysLog.add('error', '[GlobalSocket] Lost the market feed and could not reconnect after several attempts. Reload the page.');
             const el = document.getElementById('global-error-toast');
             if (el) {
               el.textContent = '⚠ Lost connection to the live market feed and could not reconnect after several attempts. Reload the page to restore live ticks.';
