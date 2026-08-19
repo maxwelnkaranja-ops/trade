@@ -12854,6 +12854,17 @@ window.NexusStrategies=exports;
     let connecting = false;
     let authorizedToken = null;
     let pingTimer = null;
+    // The moment Deriv's own authorize response confirms a token is
+    // invalid, remember it here. Every engine's watchdog/reconnect logic
+    // calls connect(token) repeatedly and unconditionally (that's by
+    // design — it's how a genuinely dropped connection recovers), so
+    // without this guard a bad token gets retried every ~15s forever,
+    // each retry re-opening a socket, re-sending contracts_for on it, and
+    // logging a fresh-looking error that's actually the same root cause
+    // as the very first attempt. Cleared automatically the moment a
+    // different token is passed in — the user pasting a fresh token
+    // always gets a real, fresh connection attempt.
+    let knownInvalidToken = null;
     const listeners = new Set();
     function getWsUrl() {
       const hub = window.HubStore.getState();
@@ -12866,6 +12877,7 @@ window.NexusStrategies=exports;
     function connect(token) {
       token = (token || '').trim();
       if (!token) return null;
+      if (token === knownInvalidToken) return null;
       // Already open and authorized with this exact token — reuse as-is.
       if (socket && socket.readyState === WebSocket.OPEN && authorizedToken === token) return socket;
       // A connection attempt is already in flight — don't open a second one.
@@ -12912,10 +12924,23 @@ window.NexusStrategies=exports;
           // if a request type's symbol field isn't caught by the mapping
           // above, you can still see exactly what was actually sent.
           window.SysLog.add('warn', `[DEBUG] raw echo_req: ${JSON.stringify(req)}`);
+          // Deriv confirmed the token itself is bad (as opposed to some
+          // other per-request error) — remember it and stop retrying, so
+          // every engine's watchdog stops silently re-hammering a
+          // connection that can never succeed with this token, and
+          // stops filing 15 near-duplicate "no contract available"
+          // errors every ~15s that are really just this one root cause.
+          if (data.msg_type === 'authorize' && (data.error.code === 'InvalidToken' || /token is invalid/i.test(data.error.message || ''))) {
+            knownInvalidToken = token;
+            connecting = false;
+            window.SysLog.add('error', '⛔ Token confirmed invalid by Deriv — pausing reconnect attempts. Paste a fresh token in Settings to try again (this pause clears automatically the moment you save a different token).');
+            try { socket.close(); } catch (e) { /* */ }
+          }
         }
         if (data.msg_type === 'authorize' && data.authorize) {
           connecting = false;
           authorizedToken = token;
+          knownInvalidToken = null;
           window.SysLog.add('success', `Authorized — ${data.authorize.loginid || 'account'} (${data.authorize.currency || ''} ${typeof data.authorize.balance === 'number' ? data.authorize.balance.toFixed(2) : ''})`);
           // Subscribe ONCE for the whole shared connection — every engine
           // used to send its own balance/proposal_open_contract subscribe
@@ -25022,7 +25047,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const appIdNote = document.getElementById('settings-appid-note');
     function refreshAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (appIdInput && hub.appId) appIdInput.value = hub.appId;
+      if (appIdInput && hub.appId && document.activeElement !== appIdInput) appIdInput.value = hub.appId;
     }
     if (appIdSaveBtn) appIdSaveBtn.onclick = () => {
       const v = (appIdInput && appIdInput.value || '').trim();
@@ -25038,7 +25063,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     };
     const appIdPasteBtn = document.getElementById('settings-appid-paste');
     if (appIdPasteBtn) appIdPasteBtn.onclick = async () => {
-      try { const text = await navigator.clipboard.readText(); if (text && appIdInput) appIdInput.value = text.trim(); }
+      try { const text = await navigator.clipboard.readText(); if (text && appIdInput) { appIdInput.value = text.trim(); appIdInput.focus(); } }
       catch (e) { if (appIdNote) { appIdNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; appIdNote.className = 'settings-inline-note same'; } }
     };
     const appIdClearBtn = document.getElementById('settings-appid-clear');
@@ -25051,7 +25076,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const wsAppIdNote = document.getElementById('settings-wsappid-note');
     function refreshWsAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (wsAppIdInput && hub.wsAppId) wsAppIdInput.value = hub.wsAppId;
+      if (wsAppIdInput && hub.wsAppId && document.activeElement !== wsAppIdInput) wsAppIdInput.value = hub.wsAppId;
     }
     if (wsAppIdSaveBtn) wsAppIdSaveBtn.onclick = () => {
       const v = (wsAppIdInput && wsAppIdInput.value || '').trim();
@@ -25067,7 +25092,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     };
     const wsAppIdPasteBtn = document.getElementById('settings-wsappid-paste');
     if (wsAppIdPasteBtn) wsAppIdPasteBtn.onclick = async () => {
-      try { const text = await navigator.clipboard.readText(); if (text && wsAppIdInput) wsAppIdInput.value = text.trim(); }
+      try { const text = await navigator.clipboard.readText(); if (text && wsAppIdInput) { wsAppIdInput.value = text.trim(); wsAppIdInput.focus(); } }
       catch (e) { if (wsAppIdNote) { wsAppIdNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; wsAppIdNote.className = 'settings-inline-note same'; } }
     };
     const wsAppIdClearBtn = document.getElementById('settings-wsappid-clear');
@@ -25081,7 +25106,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const tokenNote = document.getElementById('settings-token-note');
     function refreshAuthStatus() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (tokenInput && hub.apiToken) tokenInput.value = hub.apiToken;
+      // Only auto-sync the field from the store when it's NOT the
+      // currently-focused element — this fires on every background store
+      // update (balance ticks, connection status changes, etc.), and
+      // without this guard it would silently overwrite a token you just
+      // pasted but hadn't clicked Save on yet, reverting it back to the
+      // old stored value before Save could ever see the new one.
+      if (tokenInput && hub.apiToken && document.activeElement !== tokenInput) tokenInput.value = hub.apiToken;
       if (statusEl) {
         statusEl.textContent = hub.connectionStatus === 'connected' ? `✓ Connected${hub.accountId ? ' — ' + hub.accountId : ''}`
           : hub.connectionStatus === 'connecting' ? '⏳ Connecting…'
@@ -25100,7 +25131,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     };
     const tokenPasteBtn = document.getElementById('settings-token-paste');
     if (tokenPasteBtn) tokenPasteBtn.onclick = async () => {
-      try { const text = await navigator.clipboard.readText(); if (text && tokenInput) tokenInput.value = text.trim(); if (tokenNote) tokenNote.textContent = ''; }
+      try { const text = await navigator.clipboard.readText(); if (text && tokenInput) { tokenInput.value = text.trim(); tokenInput.focus(); } if (tokenNote) tokenNote.textContent = ''; }
       catch (e) { if (tokenNote) { tokenNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; tokenNote.className = 'settings-inline-note same'; } }
     };
     const tokenClearBtn = document.getElementById('settings-token-clear');
