@@ -11952,7 +11952,6 @@ window.NexusTrading = exports;
         };
       }
       window.HubTradingSocket.addListener(_self._sharedTradingListener);
-      if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
 
       _self._handleTradingMessage = (d) => {
         try {
@@ -12050,6 +12049,8 @@ window.NexusTrading = exports;
           }
         } catch (e) { /* */ }
       };
+
+      if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
     }
 
     _showDifferCooldownOverlay(duration) {
@@ -23797,7 +23798,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           };
         }
         window.HubTradingSocket.addListener(_self._sharedTradingListener);
-        if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
 
         _self._handleTradingMessage = (d) => {
           try {
@@ -23861,6 +23861,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
           } catch (e) {}
         };
+
+        if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
       })();
     }
 
