@@ -74,10 +74,23 @@
           }
           const data = await resp.json();
           const accounts = data.data || [];
-          const preferred = accountType === 'real'
-            ? accounts.find((a) => !a.is_virtual) || accounts[0]
-            : accounts.find((a) => a.is_virtual) || accounts[0];
+          // BUG FIX: Deriv's /accounts response gives each account an
+          // `account_type: "demo" | "real"` string field — there is no
+          // `is_virtual` boolean in the actual payload. The old check
+          // (`!a.is_virtual` / `a.is_virtual`) always evaluated against
+          // `undefined`, so the "real" branch matched the FIRST account
+          // in the list unconditionally and the "demo" branch never
+          // matched anything and also fell through to the first account.
+          // In other words: it never actually picked based on account
+          // type, it just always grabbed accounts[0] — whichever account
+          // happens to come first in the array (often the demo one, or
+          // a real account with a stale/zero balance), regardless of the
+          // Real/Demo toggle in Settings.
+          const preferred = accounts.find((a) => a.account_type === accountType) || accounts[0];
           if (!preferred) throw new Error('No accounts found for this token');
+          if (typeof preferred.balance !== 'number') {
+            window.SysLog && window.SysLog.add('warn', `[DEBUG] /accounts returned no numeric balance for ${preferred.account_id} — raw: ${JSON.stringify(preferred)}`);
+          }
           return { accountId: preferred.account_id, currency: preferred.currency, balance: preferred.balance };
         })();
         accountLookup = { key, promise };
@@ -8304,7 +8317,11 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
               state.connectionError = '';
               state.accountId = d.authorize.loginid || state.accountId;
               state.currency = d.authorize.currency || state.currency;
-              { const b = parseFloat(d.authorize.balance); if (!isNaN(b)) state.balanceUSD = b; }
+              {
+                const b = parseFloat(d.authorize.balance);
+                if (!isNaN(b)) state.balanceUSD = b;
+                else window.SysLog && window.SysLog.add('warn', `[DEBUG] authorize message had no usable balance (got: ${JSON.stringify(d.authorize.balance)}) — waiting on live balance subscription instead.`);
+              }
               emit();
               // balance subscription is handled once, for the whole shared
               // socket, by window.HubTradingSocket itself.
