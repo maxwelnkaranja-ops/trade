@@ -19323,7 +19323,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           </div>
         </div>
 
-
+        <!-- ═══ ROW 4: Live Market Digits — starts populating the moment the
+             public analysis sockets connect (see init(), which starts them
+             regardless of active tab), independent of any bot being armed
+             or a real-money connection existing at all. ═══ -->
+        <div class="dash-row-full" style="margin-top:10px">
+          <div class="glass-panel" style="padding:14px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">LIVE MARKET DIGITS</div>
+              <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">LAST 20 TICKS</div>
+            </div>
+            <div id="dash-live-digits" style="display:flex;flex-direction:column;gap:8px"></div>
+          </div>
+        </div>
 
       </div>`;
   }
@@ -20377,6 +20389,50 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         row.addEventListener('click', () => window.UnifiedHub.switchApp(botId));
       }
     });
+
+    // ── LIVE MARKET DIGITS ────────────────────────────────────────────────
+    // Reads straight from the shared public-analysis tick history
+    // (window.EvenSocket.globalSocket.getHistory), which init() already
+    // starts connecting on page load regardless of which tab is open or
+    // whether any bot is armed/connected to a real account. This is
+    // intentionally independent of balance/auth state — it should show
+    // ticks even before a token is entered in Settings.
+    (function renderLiveDigits() {
+      const wrap = el('dash-live-digits', root);
+      if (!wrap) return;
+      const gs = global.EvenSocket && global.EvenSocket.globalSocket;
+      const symbols = [
+        { symbol: 'R_10', name: 'V10' }, { symbol: 'R_25', name: 'V25' },
+        { symbol: 'R_50', name: 'V50' }, { symbol: 'R_75', name: 'V75' },
+        { symbol: 'R_100', name: 'V100' },
+      ];
+      if (!gs || typeof gs.getHistory !== 'function') {
+        global.setHtmlIfChanged(wrap, '<div class="exec-empty">Connecting to live market feed…</div>');
+        return;
+      }
+      const rowsHtml = symbols.map(({ symbol, name }) => {
+        const hist = (gs.getHistory(symbol) || []).slice(-20);
+        if (!hist.length) {
+          return `<div style="display:flex;align-items:center;gap:10px">
+            <span style="width:44px;flex-shrink:0;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:hsl(var(--muted-foreground))">${name}</span>
+            <span style="font-family:'DM Mono',monospace;font-size:10px;color:hsl(var(--muted-foreground)/0.6)">waiting for ticks…</span>
+          </div>`;
+        }
+        const chips = hist.map((d, i) => {
+          const isLast = i === hist.length - 1;
+          const isOdd = d % 2 === 1;
+          const color = isOdd ? 'hsl(var(--win))' : 'hsl(var(--primary))';
+          return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${isLast ? 22 : 18}px;height:${isLast ? 22 : 18}px;border-radius:5px;font-family:'DM Mono',monospace;font-weight:${isLast ? 800 : 600};font-size:${isLast ? 11 : 10}px;color:${color};background:hsl(var(--bg)/0.6);border:1px solid ${isLast ? color : 'hsl(var(--border)/0.5)'};${isLast ? `box-shadow:0 0 10px ${color}66;` : ''}flex-shrink:0">${d}</span>`;
+        }).join('');
+        const oddPct = Math.round((hist.filter((d) => d % 2 === 1).length / hist.length) * 100);
+        return `<div style="display:flex;align-items:center;gap:10px;overflow-x:auto">
+          <span style="width:44px;flex-shrink:0;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:hsl(var(--foreground)/0.8)">${name}</span>
+          <div style="display:flex;gap:4px;flex-shrink:0">${chips}</div>
+          <span style="margin-left:auto;flex-shrink:0;font-family:'DM Mono',monospace;font-size:9px;color:hsl(var(--muted-foreground))">${oddPct}% odd</span>
+        </div>`;
+      }).join('');
+      global.setHtmlIfChanged(wrap, rowsHtml);
+    })();
   }
 
   global.DashboardUI = { render };
