@@ -74,11 +74,24 @@
           }
           const data = await resp.json();
           const accounts = data.data || [];
-          const preferred = accountType === 'real'
-            ? accounts.find((a) => !a.is_virtual) || accounts[0]
-            : accounts.find((a) => a.is_virtual) || accounts[0];
+          // BUG FIX: Deriv's /accounts response gives each account an
+          // `account_type: "demo" | "real"` string field — there is no
+          // `is_virtual` boolean in the actual payload. The old check
+          // (`!a.is_virtual` / `a.is_virtual`) always evaluated against
+          // `undefined`, so the "real" branch matched the FIRST account
+          // in the list unconditionally and the "demo" branch never
+          // matched anything and also fell through to the first account.
+          // In other words: it never actually picked based on account
+          // type, it just always grabbed accounts[0] — whichever account
+          // happens to come first in the array (often the demo one, or
+          // a real account with a stale/zero balance), regardless of the
+          // Real/Demo toggle in Settings.
+          const preferred = accounts.find((a) => a.account_type === accountType) || accounts[0];
           if (!preferred) throw new Error('No accounts found for this token');
-          return { accountId: preferred.account_id, currency: preferred.currency };
+          if (typeof preferred.balance !== 'number') {
+            window.SysLog && window.SysLog.add('warn', `[DEBUG] /accounts returned no numeric balance for ${preferred.account_id} — raw: ${JSON.stringify(preferred)}`);
+          }
+          return { accountId: preferred.account_id, currency: preferred.currency, balance: preferred.balance };
         })();
         accountLookup = { key, promise };
         // Don't cache a rejected lookup — let the next caller retry cleanly.
@@ -655,25 +668,46 @@
             <p class="settings-hint">Your <strong>alphanumeric</strong> App ID from <strong>developers.deriv.com</strong> → Dashboard → Applications (e.g. <code>33ADPhDZXR2F60qhPudXB</code>). Used in REST API headers for trading authentication. Register a PAT-type app if you don't have one.</p>
             <div class="settings-row">
               <input type="text" class="input-field font-mono" id="settings-appid" placeholder="e.g. 33ADPhDZXR2F60qhPudXB">
+              <span class="settings-icon-group">
+                <button type="button" class="btn-icon" id="settings-appid-paste" title="Paste from clipboard">📋</button>
+                <button type="button" class="btn-icon" id="settings-appid-clear" title="Clear">✕</button>
+              </span>
               <button type="button" class="btn-primary font-display" id="settings-appid-save">Save</button>
             </div>
+            <p class="settings-inline-note" id="settings-appid-note"></p>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">WS App ID <span style="font-size:10px;opacity:0.6;">(Analysis / Digits)</span></label>
             <p class="settings-hint">No longer required — Deriv's public analysis feed (<code>wss://api.derivws.com/trading/v1/options/ws/public</code>) doesn't take an App ID. This field is kept for backward compatibility only and has no effect on live digits.</p>
             <div class="settings-row">
               <input type="text" class="input-field font-mono" id="settings-wsappid" placeholder="e.g. 1089">
+              <span class="settings-icon-group">
+                <button type="button" class="btn-icon" id="settings-wsappid-paste" title="Paste from clipboard">📋</button>
+                <button type="button" class="btn-icon" id="settings-wsappid-clear" title="Clear">✕</button>
+              </span>
               <button type="button" class="btn-primary font-display" id="settings-wsappid-save">Save</button>
             </div>
+            <p class="settings-inline-note" id="settings-wsappid-note"></p>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">Deriv API Token</label>
             <p class="settings-hint">Your Personal Access Token (PAT) from <strong>developers.deriv.com</strong> → Dashboard → API tokens. Create a PAT with <em>trade</em> and <em>account_manage</em> scopes. This is used as a Bearer token to authenticate all REST and WebSocket calls.</p>
             <div class="settings-row">
               <input type="password" class="input-field font-mono" id="settings-token" placeholder="Paste your Deriv API token…">
+              <span class="settings-icon-group">
+                <button type="button" class="btn-icon" id="settings-token-toggle" title="Show token">👁</button>
+                <button type="button" class="btn-icon" id="settings-token-paste" title="Paste from clipboard">📋</button>
+                <button type="button" class="btn-icon" id="settings-token-clear" title="Clear">✕</button>
+              </span>
               <button type="button" class="btn-primary font-display" id="settings-save">Save &amp; Connect</button>
             </div>
+            <p class="settings-inline-note" id="settings-token-note"></p>
             <p class="settings-status" id="settings-status">Checking…</p>
+            <div class="syslog-header">
+              <span class="settings-label font-display" style="margin:0;">System Log</span>
+              <button type="button" class="syslog-clear" id="settings-syslog-clear">Clear</button>
+            </div>
+            <div class="syslog-box" id="settings-syslog"><div class="syslog-empty">No events yet — connect your token to see live connection, auth, and trade events here.</div></div>
           </div>
           <div class="settings-section">
             <label class="settings-label font-display">Account Type</label>
@@ -727,6 +761,24 @@
 /* ══════════════════════════════════════════════════════════════════
    FINAL FIXES — LAYOUT + UX IMPROVEMENTS
    ══════════════════════════════════════════════════════════════════ */
+
+.syslog-header { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; margin-bottom: 4px; }
+.syslog-clear { background: none; border: 1px solid rgba(255,255,255,0.15); color: rgba(255,255,255,0.6); font-size: 11px; padding: 2px 8px; border-radius: 6px; cursor: pointer; }
+.syslog-clear:hover { color: rgba(255,255,255,0.9); border-color: rgba(255,255,255,0.3); }
+.syslog-box { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 11px; line-height: 1.5; max-height: 180px; overflow-y: auto; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; }
+.syslog-empty { opacity: 0.45; padding: 4px 0; }
+.syslog-line { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+.syslog-line .syslog-ts { opacity: 0.4; margin-right: 6px; }
+.syslog-line.level-error { color: #ff6b6b; }
+.syslog-line.level-warn { color: #ffb454; }
+.syslog-line.level-info { color: #6bcfff; }
+.settings-icon-group { display: flex; gap: 7px; flex: 0 0 auto; }
+.btn-icon { flex: 0 0 auto; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: rgba(255,255,255,0.75); font-size: 14px; cursor: pointer; padding: 0; }
+.btn-icon:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.btn-icon:active { transform: scale(0.94); }
+.settings-inline-note { font-size: 11px; margin: 4px 0 0; min-height: 14px; opacity: 0.85; }
+.settings-inline-note.same { color: #ffb454; }
+.settings-inline-note.saved { color: #6bff9e; }
 
 /* Current digit box — huge digit, generous padding */
 .digit-pad {
@@ -8196,6 +8248,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
   let statusSocket = null;
   let reconnectTimer = null;
   let reconnectDelay = 8000;
+  let statusListener = null;
 
   function connectAccount() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -8207,78 +8260,87 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
       emit();
       return;
     }
-    try { if (statusSocket) { statusSocket.onclose = null; statusSocket.close(); } } catch (e) { /* */ }
     state.connectionStatus = 'connecting';
     state.connectionError = '';
     emit();
 
-    // Real Deriv API flow (the "2026 REST OTP" version below this used to
-    // implement doesn't exist — there's no /trading/v1/options/accounts or
-    // /otp REST endpoint on api.derivws.com; that's what was causing the
-    // CORS failures and the WebSocket connecting to a URL that was never
-    // valid in the first place). The actual flow is one step: open the
-    // same public WebSocket every analysis socket already uses, then send
-    // {"authorize": "<token>"} as the first message. The authorize
-    // response itself carries the account id, balance and currency —
-    // no separate accounts lookup needed.
-    let pingInterval = null;
-
+    // Shared trading/auth socket — see window.HubTradingSocket (defined
+    // later in the file, but this function only ever runs at runtime once
+    // the whole page has parsed, so the global is already available).
+    // Every bot engine authenticates against this same connection now;
+    // this just also listens in for the topbar's account/balance display.
     function connectViaOtp() {
-      const numericAppId = state.wsAppId || '1089';
-      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${numericAppId}`);
-      statusSocket = ws;
+      const ws = window.HubTradingSocket.connect(state.apiToken);
+      // NOTE: ws can be null here even though a connection IS in progress —
+      // HubTradingSocket is single-flight, so if an engine (Titan/HotRepeat)
+      // already kicked off the same connect() a moment earlier, this caller
+      // just loses the race and gets null back. We must NOT bail out in that
+      // case (the old code did `if (!ws) return;` here), or the topbar's
+      // statusListener never gets registered and connectionStatus sits on
+      // 'connecting' forever even after the shared socket authorizes fine.
+      // Registering the listener unconditionally means we still catch the
+      // synthesized 'authorize' notify() once whichever caller's async
+      // connect() chain finishes.
+      statusSocket = ws || window.HubTradingSocket.getSocket();
 
-      ws.onerror = () => {
-        state.connectionError = 'WebSocket connection failed — check your internet connection.';
-        emit();
-      };
-      ws.onopen = () => {
-        try { ws.send(JSON.stringify({ authorize: state.apiToken })); } catch (e) { /* */ }
-      };
-      ws.onmessage = (m) => {
-        try {
-          const d = JSON.parse(m.data);
-          if (d.error) {
-            state.isAuthenticated = false;
+      if (!statusListener) {
+        statusListener = (evtType, d) => {
+          statusSocket = window.HubTradingSocket.getSocket() || statusSocket;
+          if (evtType === 'error') {
+            state.connectionError = 'WebSocket connection failed — check your internet connection.';
+            emit();
+            return;
+          }
+          if (evtType === 'close') {
             state.connectionStatus = 'disconnected';
-            state.connectionError = d.error.message || 'Authorization failed — check your API token.';
+            state.isAuthenticated = false;
             emit();
-            try { ws.close(); } catch (e) { /* */ }
+            if (state.apiToken) {
+              reconnectTimer = setTimeout(connectAccount, reconnectDelay);
+              reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
+            }
             return;
           }
-          if (d.msg_type === 'authorize' && d.authorize) {
-            reconnectDelay = 8000;
-            state.isAuthenticated = true;
-            state.connectionStatus = 'connected';
-            state.connectionError = '';
-            state.accountId = d.authorize.loginid || state.accountId;
-            state.currency = d.authorize.currency || state.currency;
-            if (typeof d.authorize.balance === 'number') state.balanceUSD = d.authorize.balance;
-            emit();
-            try {
-              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-              pingInterval = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ ping: 1 }));
-              }, 25000);
-            } catch (e) { /* */ }
-            return;
-          }
-          if (d.msg_type === 'balance' && d.balance) {
-            const bal = parseFloat(d.balance.balance);
-            if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
-          }
-        } catch (e) { /* */ }
-      };
-      ws.onclose = () => {
-        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
-        state.connectionStatus = 'disconnected';
-        state.isAuthenticated = false;
+          if (evtType !== 'message') return;
+          try {
+            if (d.error) {
+              state.isAuthenticated = false;
+              state.connectionStatus = 'disconnected';
+              state.connectionError = d.error.message || 'Authorization failed — check your API token.';
+              emit();
+              return;
+            }
+            if (d.msg_type === 'authorize' && d.authorize) {
+              reconnectDelay = 8000;
+              state.isAuthenticated = true;
+              state.connectionStatus = 'connected';
+              state.connectionError = '';
+              state.accountId = d.authorize.loginid || state.accountId;
+              state.currency = d.authorize.currency || state.currency;
+              {
+                const b = parseFloat(d.authorize.balance);
+                if (!isNaN(b)) state.balanceUSD = b;
+                else window.SysLog && window.SysLog.add('warn', `[DEBUG] authorize message had no usable balance (got: ${JSON.stringify(d.authorize.balance)}) — waiting on live balance subscription instead.`);
+              }
+              emit();
+              // balance subscription is handled once, for the whole shared
+              // socket, by window.HubTradingSocket itself.
+              return;
+            }
+            if (d.msg_type === 'balance' && d.balance) {
+              const bal = parseFloat(d.balance.balance);
+              if (!isNaN(bal)) { state.balanceUSD = bal; state.currency = d.balance.currency || state.currency; emit(); }
+            }
+          } catch (e) { /* */ }
+        };
+      }
+      window.HubTradingSocket.addListener(statusListener);
+      if (window.HubTradingSocket.isAuthorized(state.apiToken)) {
+        state.isAuthenticated = true;
+        state.connectionStatus = 'connected';
+        state.connectionError = '';
         emit();
-        if (state.apiToken) {
-          reconnectTimer = setTimeout(connectAccount, reconnectDelay);
-          reconnectDelay = Math.min(reconnectDelay * 1.5, 60000);
-        }
-      };
+      }
     }
     connectViaOtp();
   }
@@ -9114,6 +9176,7 @@ window.EvenTrading = exports;
           clearTimeout(timeoutId);
           this.isConnecting = false;
           this.reconnectAttempts = 0;
+          window.SysLog && window.SysLog.add('success', '[GlobalSocket] Public market feed connected (Even/Odd/Matches).');
           if (this.pingInterval) clearInterval(this.pingInterval);
           this.pingInterval = setInterval(() => {
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
@@ -9128,6 +9191,10 @@ window.EvenTrading = exports;
         this.socket.onmessage = (msg) => {
           try {
             const data = JSON.parse(msg.data);
+            if (data.error) {
+              window.SysLog && window.SysLog.add('error', `[GlobalSocket] Server rejected request — ${data.error.message || data.error.code || 'unknown error'}`);
+              return;
+            }
             if (data.msg_type === 'tick' && data.tick) {
               const symbol = data.tick.symbol;
               const quote = data.tick.quote;
@@ -9136,6 +9203,16 @@ window.EvenTrading = exports;
               const tickData = { symbol, digit, quote, timestamp: Date.now() };
               this.updateHistory(symbol, digit);
               this.calculateHealth(symbol);
+              // One-time confirmation per symbol so it's obvious in SysLog
+              // that real ticks are actually arriving, not just that the
+              // socket opened (opening ≠ receiving data — a bad/expired
+              // app_id or an unrecognized symbol can open fine and then
+              // never send a single tick, with nothing else to show it).
+              if (!this._confirmedSymbols) this._confirmedSymbols = new Set();
+              if (!this._confirmedSymbols.has(symbol)) {
+                this._confirmedSymbols.add(symbol);
+                window.SysLog && window.SysLog.add('success', `[GlobalSocket] First tick received for ${symbol} — digit ${digit}.`);
+              }
               const callbacks = this.subscriptions.get(symbol);
               if (callbacks) callbacks.forEach((cb) => cb(tickData));
             }
@@ -9143,17 +9220,32 @@ window.EvenTrading = exports;
             console.error('[GlobalSocket] Parse error:', e);
           }
         };
-        this.socket.onerror = () => { this.isConnecting = false; };
+        this.socket.onerror = () => {
+          this.isConnecting = false;
+          if (window.SysLog) window.SysLog.add('error', '[GlobalSocket] Could not reach the public market-data feed (wss://ws.derivws.com) — check your network/firewall, or the numeric App ID in Settings.');
+          // BUG FIX: settle() used to only be called from onopen and the
+          // 12s timeout — never from onerror. If the socket errored out
+          // immediately (e.g. blocked host), every caller doing
+          // `await globalSocket.connect()` (every engine's _init and every
+          // MarketScanner.start()) still sat frozen for the full 12s doing
+          // nothing before falling through, even though the failure was
+          // already known. Settling immediately here means callers can
+          // react (and the reconnect loop in onclose still runs after).
+          settle();
+        };
         this.socket.onclose = () => {
+
           this.isConnecting = false;
           if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
+            if (window.SysLog) window.SysLog.add('warn', `[GlobalSocket] Market feed closed — reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})…`);
             const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
             setTimeout(() => this.connect(), delay);
           } else {
             // Reconnect budget exhausted — surface this instead of leaving
             // the tab silently showing stale tick data with no explanation.
+            if (window.SysLog) window.SysLog.add('error', '[GlobalSocket] Lost the market feed and could not reconnect after several attempts. Reload the page.');
             const el = document.getElementById('global-error-toast');
             if (el) {
               el.textContent = '⚠ Lost connection to the live market feed and could not reconnect after several attempts. Reload the page to restore live ticks.';
@@ -10777,9 +10869,28 @@ window.NexusTrading = exports;
       return new Promise((resolve) => {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) { resolve(); return; }
         if (this.isConnecting) { setTimeout(() => resolve(), 500); return; }
+        // NOTE: without a hard timeout fallback here, a failed FIRST
+        // connection attempt (error/close before onopen ever fires) left
+        // this promise unresolved forever — every engine sharing this
+        // socket (nexus/under/meanrev/risemr/fallmr/matches/oldrisefall)
+        // does `await globalSocket.connect()` before starting its scanner
+        // or subscribing to any market, so a single bad first attempt
+        // permanently froze all of them at startup with no digits, no
+        // scanning, nothing — and no error shown anywhere. Mirrors the
+        // same settle()-with-timeout pattern the Even/Odd socket already
+        // had.
+        let settled = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          this.isConnecting = false;
+          resolve();
+        };
+        const timeoutId = setTimeout(() => { settle(); }, 12000);
         this.isConnecting = true;
         this.socket = new WebSocket(getWsUrl());
         this.socket.onopen = () => {
+          clearTimeout(timeoutId);
           this.isConnecting = false;
           this.reconnectAttempts = 0;
           if (this.pingInterval) clearInterval(this.pingInterval);
@@ -10788,14 +10899,19 @@ window.NexusTrading = exports;
               this.socket.send(JSON.stringify({ ping: 1 }));
             }
           }, 25000);
+          window.SysLog && window.SysLog.add('success', '[GlobalSocket] Public market feed connected (Nexus/Over/Under/RiseFall/MeanRev).');
           this.subscriptions.forEach((_, symbol) => {
             if (this.socket) this.socket.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
           });
-          resolve();
+          settle();
         };
         this.socket.onmessage = (msg) => {
           try {
             const data = JSON.parse(msg.data);
+            if (data.error) {
+              window.SysLog && window.SysLog.add('error', `[GlobalSocket] Server rejected request — ${data.error.message || data.error.code || 'unknown error'}`);
+              return;
+            }
             if (data.msg_type === 'tick' && data.tick) {
               const symbol = data.tick.symbol;
               const quote = data.tick.quote;
@@ -10804,21 +10920,33 @@ window.NexusTrading = exports;
               const tickData = { symbol, digit, quote, timestamp: Date.now() };
               this.updateHistory(symbol, digit);
               this.calculateHealth(symbol);
+              if (!this._confirmedSymbols) this._confirmedSymbols = new Set();
+              if (!this._confirmedSymbols.has(symbol)) {
+                this._confirmedSymbols.add(symbol);
+                window.SysLog && window.SysLog.add('success', `[GlobalSocket] First tick received for ${symbol} — digit ${digit}.`);
+              }
               const callbacks = this.subscriptions.get(symbol);
               if (callbacks) callbacks.forEach((cb) => cb(tickData));
             }
           } catch (e) { console.error('[GlobalSocket] Parse error:', e); }
         };
-        this.socket.onerror = () => { this.isConnecting = false; };
+        this.socket.onerror = () => {
+          this.isConnecting = false;
+          if (window.SysLog) window.SysLog.add('error', '[GlobalSocket] Could not reach the public market-data feed (wss://ws.derivws.com) — check your network/firewall, or the numeric App ID in Settings.');
+          settle();
+        };
         this.socket.onclose = () => {
+          settle();
           this.isConnecting = false;
           if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
+            if (window.SysLog) window.SysLog.add('warn', `[GlobalSocket] Market feed closed — reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})…`);
             setTimeout(() => this.connect(), Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000));
           } else {
             // Reconnect budget exhausted — surface this instead of leaving
             // the tab silently showing stale tick data with no explanation.
+            if (window.SysLog) window.SysLog.add('error', '[GlobalSocket] Lost the market feed and could not reconnect after several attempts. Reload the page.');
             const el = document.getElementById('global-error-toast');
             if (el) {
               el.textContent = '⚠ Lost connection to the live market feed and could not reconnect after several attempts. Reload the page to restore live ticks.';
@@ -11890,27 +12018,40 @@ window.NexusTrading = exports;
       const token = window.HubStore.getState().apiToken;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
-      try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) { /* */ }
 
-      // Real Deriv API flow: one WebSocket, {"authorize": token} as the
-      // first message — no REST accounts/OTP lookup (that endpoint never
-      // existed on api.derivws.com, which is what was causing the CORS
-      // errors and the connection failures).
+      // Shared trading/auth socket — see window.HubTradingSocket, reused
+      // here instead of opening yet another independent connection to the
+      // same Deriv endpoint every other engine already authenticates
+      // against.
       const _self = this;
-      const hub = window.HubStore.getState();
-      const numericAppId = hub.wsAppId || '1089';
-      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${numericAppId}`);
-      _self.socketT = ws;
+      // NOTE: ws can be null even though a connection IS in progress —
+      // HubTradingSocket is single-flight across all 13+ engines, so
+      // whichever engine loses the race to be first just gets null back.
+      // We must NOT bail out here (old code did `if (!ws) return;`), or
+      // this engine never registers its listener and sits stuck on
+      // "connecting" forever even after the shared socket authorizes.
+      const ws = window.HubTradingSocket.connect(token);
+      _self.socketT = ws || window.HubTradingSocket.getSocket();
 
-      ws.onerror = () => {
-        _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
-      };
-      ws.onopen = () => {
-        try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
-      };
-      ws.onmessage = (m) => {
+      if (!_self._sharedTradingListener) {
+        _self._sharedTradingListener = (evtType, d) => {
+          _self.socketT = window.HubTradingSocket.getSocket() || _self.socketT;
+          if (evtType === 'error') {
+            _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
+            return;
+          }
+          if (evtType === 'close') {
+            _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+            return;
+          }
+          if (evtType !== 'message') return;
+          _self._handleTradingMessage(d);
+        };
+      }
+      window.HubTradingSocket.addListener(_self._sharedTradingListener);
+
+      _self._handleTradingMessage = (d) => {
         try {
-          const d = JSON.parse(m.data);
           if (d.error && !_self.state.isAuthenticated) {
             _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
             _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${d.error.message || 'invalid token'}`, ntype: 'loss' });
@@ -11921,10 +12062,8 @@ window.NexusTrading = exports;
             const bal = (typeof d.authorize.balance === 'number') ? d.authorize.balance : (window.HubStore.getState().balanceUSD || 0);
             _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
             _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
-            try {
-              ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
-              ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-            } catch (e) { /* */ }
+            // balance/proposal_open_contract subscriptions are handled
+            // once, for the whole shared socket, by window.HubTradingSocket.
             return;
           }
           if (d.msg_type === 'balance' && d.balance) {
@@ -11997,23 +12136,18 @@ window.NexusTrading = exports;
                 // every few seconds and stops ALL bots at once, Differ
                 // included. Keeping a second, separate TP/SL here just meant
                 // two different numbers to configure for the same outcome.
-              }
             }
-            if (d.msg_type === 'buy') {
-              if (d.error) {
-                _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
-              }
-              else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
-            }
-          } catch (e) { /* */ }
-        };
-        ws.onclose = () => {
-          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-          if (window.HubStore.getState().apiToken) {
-            _self._authDelay = Math.min((_self._authDelay || 8000) * 1.5, 60000);
-            setTimeout(() => _self.authenticate(), _self._authDelay);
           }
-        };
+          if (d.msg_type === 'buy') {
+            if (d.error) {
+              _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+            }
+            else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
+          }
+        } catch (e) { /* */ }
+      };
+
+      if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
     }
 
     _showDifferCooldownOverlay(duration) {
@@ -12773,6 +12907,192 @@ window.NexusStrategies=exports;
   function showCongratulationsPopup(target) { showResultPopup('tp', target); }
   window.showResultPopup = showResultPopup;
 
+  // ── System log (Settings → System Log panel) ──────────────────────────
+  // A single, always-on feed of connection/auth/trade events read straight
+  // off the shared trading socket, so issues like "no contract available
+  // for this symbol" are visible with their raw error text, the
+  // symbol/contract that triggered them, and a timestamp — instead of only
+  // showing up as a toast that disappears.
+  window.SysLog = (function () {
+    const entries = [];
+    const MAX = 200;
+    function render() {
+      const box = document.getElementById('settings-syslog');
+      if (!box) return;
+      if (!entries.length) { box.innerHTML = '<div class="syslog-empty">No events yet — connect your token to see live connection, auth, and trade events here.</div>'; return; }
+      box.innerHTML = entries.map((e) => {
+        const t = new Date(e.ts).toLocaleTimeString();
+        return `<div class="syslog-line level-${e.level}"><span class="syslog-ts">${t}</span>${e.text.replace(/</g, '&lt;')}</div>`;
+      }).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+    function add(level, text) {
+      entries.push({ ts: Date.now(), level, text });
+      if (entries.length > MAX) entries.shift();
+      render();
+    }
+    function clear() { entries.length = 0; render(); }
+    return { add, clear, render, get entries() { return entries.slice(); } };
+  })();
+
+  // ── Shared trading/auth WebSocket ────────────────────────────────────
+  // Every bot engine (13 TitanEngine instances, all instantiated eagerly
+  // at page load) used to call its own connect(token) and open its own
+  // `wss://ws.derivws.com/...` connection for trading/auth. With that many
+  // engines each independently reconnecting (on load, on stale-tick
+  // watchdog, on autoRefresh, on a failed bolt purchase), the page could
+  // fire off a dozen-plus near-simultaneous connection attempts to the
+  // same endpoint — exactly what produced repeated "WebSocket is closed
+  // before the connection is established" errors. This singleton opens
+  // ONE authenticated socket and lets every engine attach as a listener
+  // instead, the same sharing pattern EvenSocket/NexusSocket already use
+  // for the public analysis feed.
+  window.HubTradingSocket = (function () {
+    let socket = null;
+    let connecting = false;
+    let authorizedToken = null;
+    let pingTimer = null;
+    // The moment Deriv's own authorize response confirms a token is
+    // invalid, remember it here. Every engine's watchdog/reconnect logic
+    // calls connect(token) repeatedly and unconditionally (that's by
+    // design — it's how a genuinely dropped connection recovers), so
+    // without this guard a bad token gets retried every ~15s forever,
+    // each retry re-opening a socket, re-sending contracts_for on it, and
+    // logging a fresh-looking error that's actually the same root cause
+    // as the very first attempt. Cleared automatically the moment a
+    // different token is passed in — the user pasting a fresh token
+    // always gets a real, fresh connection attempt.
+    let knownInvalidToken = null;
+    const listeners = new Set();
+    // ── New API endpoints (replaces the old wss://ws.derivws.com/websockets/v3
+    // Legacy flow). Deriv's new developers.deriv.com platform issues App IDs
+    // and PATs in a different format than Legacy, and Deriv's own docs are
+    // explicit that "the new API isn't compatible with the Legacy API" — a
+    // token/App ID generated on developers.deriv.com will always be
+    // rejected by the Legacy authorize call, no matter how correctly it's
+    // copied. This connects to the platform those credentials actually
+    // belong to instead, via window.DerivAuth (defined earlier in the
+    // file) — it already handles request deduplication and OTP
+    // rate-limiting across every engine sharing this one socket.
+    function getAppId() {
+      const hub = window.HubStore.getState();
+      // Prefer the alphanumeric App ID field (the new platform's App ID
+      // format, e.g. "349jtsX41SI4JAQSMTC0a") — fall back to WS App ID
+      // only if that's all that's been set.
+      return hub.appId || hub.wsAppId || '';
+    }
+    function notify(type, data) {
+      listeners.forEach((fn) => { try { fn(type, data); } catch (e) { console.error('[HubTradingSocket] listener error:', e); } });
+    }
+    function wireSocket(ws, token, accountMeta) {
+      socket = ws;
+      ws.onopen = () => {
+        // No authorize message under the new API — the OTP baked into the
+        // connection URL already authenticates the session, so treat
+        // "open" as "authorized" immediately using the account info we
+        // already pulled from the REST /accounts call.
+        connecting = false;
+        authorizedToken = token;
+        knownInvalidToken = null;
+        window.SysLog.add('success', `Authorized — ${accountMeta.accountId} (${accountMeta.currency || ''})`);
+        try {
+          ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+          ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
+        } catch (e) { /* */ }
+        if (pingTimer) clearInterval(pingTimer);
+        pingTimer = setInterval(() => {
+          if (socket && socket.readyState === WebSocket.OPEN) { try { socket.send(JSON.stringify({ ping: 1 })); } catch (e) { /* */ } }
+        }, 25000);
+        // Every engine's _onAuthorized / connected-state transition (and
+        // the topbar's connectAccount status) was written against the OLD
+        // flow — they all specifically wait for an incoming
+        // {msg_type: 'authorize', authorize: {...}} message before
+        // flipping out of "connecting". The new API never sends one (the
+        // OTP already did the authenticating), so without this they'd sit
+        // on "Connecting…" forever even on a fully working connection —
+        // this synthesizes that message once, right here, so every
+        // existing listener fires exactly as it did under the old flow.
+        notify('message', { msg_type: 'authorize', authorize: { loginid: accountMeta.accountId, currency: accountMeta.currency, balance: accountMeta.balance } });
+      };
+      ws.onmessage = (msg) => {
+        let data;
+        try { data = JSON.parse(msg.data); } catch (e) { window.SysLog.add('warn', 'Received malformed (non-JSON) message — ignored.'); return; }
+        if (data.error) {
+          const req = data.echo_req || {};
+          const symbolFromReq = req.symbol || req.contracts_for || req.ticks || (typeof req.contracts_for === 'string' ? req.contracts_for : null);
+          const ctx = [symbolFromReq, req.contract_type].filter(Boolean).join(' ');
+          window.SysLog.add('error', `[${data.msg_type || 'error'}]${ctx ? ' ' + ctx : ' (no symbol in echo_req — see raw below)'} — ${data.error.message || data.error.code || 'unknown error'}`);
+          window.SysLog.add('warn', `[DEBUG] raw echo_req: ${JSON.stringify(req)}`);
+        }
+        if (data.msg_type === 'buy' && data.buy && data.buy.contract_id) {
+          window.SysLog.add('success', `Bought contract #${data.buy.contract_id} — stake ${data.buy.buy_price}`);
+        }
+        notify('message', data);
+      };
+      ws.onerror = () => { window.SysLog.add('error', 'WebSocket error — could not reach Deriv\'s servers.'); notify('error'); };
+      ws.onclose = (ev) => {
+        connecting = false;
+        authorizedToken = null;
+        if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+        window.SysLog.add('warn', `Socket closed${ev && ev.code ? ` (code ${ev.code}${ev.reason ? ': ' + ev.reason : ''})` : ''}`);
+        notify('close');
+      };
+    }
+    function connect(token) {
+      token = (token || '').trim();
+      if (!token) return null;
+      if (token === knownInvalidToken) return null;
+      // Already open and authorized with this exact token — reuse as-is.
+      if (socket && socket.readyState === WebSocket.OPEN && authorizedToken === token) return socket;
+      // A connection attempt is already in flight — don't kick off a
+      // second one; callers get null back and their own watchdog/retry
+      // loop naturally picks up the real socket a few seconds later once
+      // this async chain finishes, same pattern the old sync version used.
+      if (connecting) return socket;
+      connecting = true;
+      if (socket) { try { socket.onclose = null; socket.close(); } catch (_) {} }
+      authorizedToken = null;
+      if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+      const appId = getAppId();
+      const accountType = (window.HubStore.getState().accountType === 'real') ? 'real' : 'demo';
+      const _maskedToken = token.length > 10 ? `${token.slice(0, 4)}…${token.slice(-4)} (${token.length} chars)` : `${token} (${token.length} chars)`;
+      window.SysLog.add('warn', `[DEBUG] Connecting via new API — App ID "${appId || '(none set)'}" and token ${_maskedToken}`);
+      (async () => {
+        try {
+          if (!appId) throw new Error('No App ID set — paste your alphanumeric App ID (from developers.deriv.com) into Settings → App ID.');
+          window.SysLog.add('info', `[REST] Resolving ${accountType} account…`);
+          const { accountId, currency, balance } = await window.DerivAuth.resolveAccountId(token, appId, accountType);
+          window.SysLog.add('success', `[REST] Account resolved — ${accountId} (${currency || ''})`);
+          window.SysLog.add('info', '[REST] Requesting OTP…');
+          const url = await window.DerivAuth.getOtpUrl(token, appId, accountId);
+          window.SysLog.add('info', `Connecting → ${url.replace(/otp=.*/, 'otp=…')}`);
+          const ws = new WebSocket(url);
+          wireSocket(ws, token, { accountId, currency, balance });
+        } catch (e) {
+          connecting = false;
+          const msg = (e && e.message) || String(e);
+          window.SysLog.add('error', `[connect] ${msg}`);
+          // Same invalid-token guard as before — an auth failure at the
+          // REST step (401/InvalidToken/"No accounts found") means this
+          // token will never work, so stop the watchdog hammering it
+          // every ~15s.
+          if (/unauthorized|invalid.*token|401|no accounts found/i.test(msg)) {
+            knownInvalidToken = token;
+            window.SysLog.add('error', '⛔ Token confirmed invalid by Deriv — pausing reconnect attempts. Paste a fresh token in Settings to try again (this pause clears automatically the moment you save a different token).');
+          }
+        }
+      })();
+      return null;
+    }
+    return {
+      connect,
+      getSocket() { return socket; },
+      isAuthorized(token) { return !!socket && socket.readyState === WebSocket.OPEN && authorizedToken === (token || '').trim(); },
+      addListener(fn) { listeners.add(fn); },
+      removeListener(fn) { listeners.delete(fn); },
+    };
+  })();
+
   class TitanEngine {
     constructor(opts) {
       this.id = opts.id;
@@ -13353,6 +13673,11 @@ window.NexusStrategies=exports;
     // it's a light lookup request, not a subscription.
     requestContractsFor(symbol) {
       if (!symbol || !this.tradingSocket || this.tradingSocket.readyState !== WebSocket.OPEN) return;
+      // ⚠️ TEMP DEBUG — shows which engine asked, and what market it read
+      // from its own localStorage config (this.mode + '_config') — if this
+      // symbol looks wrong/stale, that's the saved market for THIS bot,
+      // untouched by pasting a new token. Remove once confirmed/fixed.
+      if (window.SysLog) window.SysLog.add('info', `[DEBUG] ${this.mode || this.prefix || 'engine'} → contracts_for "${symbol}" (from ${this.prefix}_config in localStorage)`);
       try { this.tradingSocket.send(JSON.stringify({ contracts_for: symbol })); } catch (e) { /* */ }
     }
 
@@ -15120,26 +15445,23 @@ window.NexusStrategies=exports;
     connect(token) {
       token = (token || '').trim();
       if (!token) { this.addLog('error', 'ERROR', 'API Token Required'); return; }
-      if (this.tradingSocket) { try { this.tradingSocket.onclose = null; this.tradingSocket.close(); } catch(_) {} }
 
-      // Real Deriv API flow: one WebSocket, {"authorize": token} as the
-      // first message sent once the socket opens — no REST accounts/OTP
-      // lookup (that endpoint never existed on api.derivws.com, which is
-      // what was causing the CORS errors and the connection failures).
+      // Shared trading/auth socket: reuse the one connection every engine
+      // attaches to (see window.HubTradingSocket above) instead of each of
+      // the 13 engine instances opening its own WebSocket to Deriv.
       const _titan = this;
       (() => {
         const hub = window.HubStore.getState();
-        const appId = hub.wsAppId || '1089';
-        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${appId}`);
-        _titan.tradingSocket = ws;
+        // NOTE: ws can be null even though a connection IS in progress —
+        // HubTradingSocket is single-flight across all 13+ engines, so
+        // whichever engine loses the race to be first just gets null back.
+        // We must NOT bail out here (old code did `if (!ws) return;`), or
+        // this engine never registers its listener and sits stuck on
+        // "connecting" forever — never firing _onAuthorized, never pulling
+        // ticks, never trading — even after the shared socket authorizes.
+        const ws = window.HubTradingSocket.connect(token);
+        _titan.tradingSocket = ws || window.HubTradingSocket.getSocket();
 
-        ws.onerror = () => {
-          _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
-          _titan.state.connected = false;
-        };
-        ws.onopen = () => {
-          try { ws.send(JSON.stringify({ authorize: token })); } catch (e) { /* */ }
-        };
         // Runs once the server confirms the authorize call — with the real
         // Deriv flow the socket is open (but not yet authenticated) before
         // this fires, so the "ready to trade" setup lives here instead of
@@ -15149,8 +15471,11 @@ window.NexusStrategies=exports;
           _titan.state.connected = true;
           _titan.sound.playConnect();
           _titan.addLog('win', 'AUTH', 'Ready to trade');
-          try { _titan.tradingSocket.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) { /* */ }
-          try { _titan.tradingSocket.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); } catch (e) { /* */ }
+          // balance/proposal_open_contract subscriptions are handled once,
+          // for the whole shared socket, by window.HubTradingSocket itself
+          // — sending them again per engine here would just create
+          // duplicate subscriptions (up to 13x) all echoing the same
+          // updates back.
           // Fetch each symbol's real pip size so mean-rev's offset barrier can be
           // formatted at the correct decimal precision per market (see the
           // "Invalid barrier" fix note in executeBoltPurchase — hardcoding 2
@@ -15174,12 +15499,37 @@ window.NexusStrategies=exports;
         // Digit contracts settle in 1 tick — result can arrive before buy ack
         if (!_titan._earlyResults) _titan._earlyResults = new Map();
 
-        _titan.tradingSocket.onmessage = (msg) => {
-          let data;
-          try { data = JSON.parse(msg.data); } catch (e) {
-            _titan.addLog('error', 'NETWORK', 'Received malformed message from trading socket — ignored.');
-            return;
-          }
+        // A single listener function per engine, registered once with the
+        // shared socket (Set-based, so re-registering on reconnect is a
+        // harmless no-op) instead of assigning ws.onmessage/.onerror/
+        // .onclose directly — those would only ever run for the LAST
+        // engine to call connect(), since all engines now share one
+        // underlying WebSocket object.
+        if (!_titan._sharedTradingListener) {
+          _titan._sharedTradingListener = (evtType, data) => {
+            _titan.tradingSocket = window.HubTradingSocket.getSocket() || _titan.tradingSocket;
+            if (evtType === 'error') {
+              _titan.addLog('error', 'NETWORK', 'Could not reach Deriv\'s servers.');
+              _titan.state.connected = false;
+              return;
+            }
+            if (evtType === 'close') {
+              _titan.state.connected = false;
+              _titan.emit();
+              return;
+            }
+            if (evtType !== 'message') return;
+            _titan._handleTradingMessage(data);
+          };
+        }
+        window.HubTradingSocket.addListener(_titan._sharedTradingListener);
+        // If the shared socket is already open & authorized (e.g. this is
+        // the 2nd+ engine to attach, after another engine connected first),
+        // the 'authorize' message already fired before we registered — run
+        // the ready-to-trade setup immediately instead of waiting forever.
+        if (window.HubTradingSocket.isAuthorized(token)) _titan._onAuthorized();
+
+        _titan._handleTradingMessage = (data) => {
           if (data.error && !_titan.state.connected) {
             _titan.addLog('error', 'AUTH', `Auth error: ${data.error.message || 'invalid token'}`);
             _titan.state.connected = false; _titan.emit();
@@ -15392,14 +15742,10 @@ window.NexusStrategies=exports;
           }
           _titan.emit();
         };
-        _titan.tradingSocket.onclose = () => {
-          _titan.state.connected = false;
-          _titan.emit();
-        };
-        if (_titan.pingInterval) clearInterval(_titan.pingInterval);
-        _titan.pingInterval = setInterval(() => {
-          if (_titan.tradingSocket?.readyState === WebSocket.OPEN) _titan.tradingSocket.send(JSON.stringify({ ping: 1 }));
-        }, 25000);
+        // Heartbeat is handled once, for the whole shared socket, by
+        // window.HubTradingSocket — no per-engine ping timer needed here
+        // anymore (this used to mean up to 13 duplicate ping timers on
+        // the same connection).
         _titan.connectRef = _titan.connect.bind(_titan);
       })();
     }
@@ -19013,7 +19359,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           </div>
         </div>
 
-
+        <!-- ═══ ROW 4: Live Market Digits — starts populating the moment the
+             public analysis sockets connect (see init(), which starts them
+             regardless of active tab), independent of any bot being armed
+             or a real-money connection existing at all. ═══ -->
+        <div class="dash-row-full" style="margin-top:10px">
+          <div class="glass-panel" style="padding:14px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="section-divider" style="margin-bottom:0;flex:1">LIVE MARKET DIGITS</div>
+              <div style="font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground));letter-spacing:1px">LAST 20 TICKS</div>
+            </div>
+            <div id="dash-live-digits" style="display:flex;flex-direction:column;gap:8px"></div>
+          </div>
+        </div>
 
       </div>`;
   }
@@ -20067,6 +20425,50 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         row.addEventListener('click', () => window.UnifiedHub.switchApp(botId));
       }
     });
+
+    // ── LIVE MARKET DIGITS ────────────────────────────────────────────────
+    // Reads straight from the shared public-analysis tick history
+    // (window.EvenSocket.globalSocket.getHistory), which init() already
+    // starts connecting on page load regardless of which tab is open or
+    // whether any bot is armed/connected to a real account. This is
+    // intentionally independent of balance/auth state — it should show
+    // ticks even before a token is entered in Settings.
+    (function renderLiveDigits() {
+      const wrap = el('dash-live-digits', root);
+      if (!wrap) return;
+      const gs = global.EvenSocket && global.EvenSocket.globalSocket;
+      const symbols = [
+        { symbol: 'R_10', name: 'V10' }, { symbol: 'R_25', name: 'V25' },
+        { symbol: 'R_50', name: 'V50' }, { symbol: 'R_75', name: 'V75' },
+        { symbol: 'R_100', name: 'V100' },
+      ];
+      if (!gs || typeof gs.getHistory !== 'function') {
+        global.setHtmlIfChanged(wrap, '<div class="exec-empty">Connecting to live market feed…</div>');
+        return;
+      }
+      const rowsHtml = symbols.map(({ symbol, name }) => {
+        const hist = (gs.getHistory(symbol) || []).slice(-20);
+        if (!hist.length) {
+          return `<div style="display:flex;align-items:center;gap:10px">
+            <span style="width:44px;flex-shrink:0;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:hsl(var(--muted-foreground))">${name}</span>
+            <span style="font-family:'DM Mono',monospace;font-size:10px;color:hsl(var(--muted-foreground)/0.6)">waiting for ticks…</span>
+          </div>`;
+        }
+        const chips = hist.map((d, i) => {
+          const isLast = i === hist.length - 1;
+          const isOdd = d % 2 === 1;
+          const color = isOdd ? 'hsl(var(--win))' : 'hsl(var(--primary))';
+          return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${isLast ? 22 : 18}px;height:${isLast ? 22 : 18}px;border-radius:5px;font-family:'DM Mono',monospace;font-weight:${isLast ? 800 : 600};font-size:${isLast ? 11 : 10}px;color:${color};background:hsl(var(--bg)/0.6);border:1px solid ${isLast ? color : 'hsl(var(--border)/0.5)'};${isLast ? `box-shadow:0 0 10px ${color}66;` : ''}flex-shrink:0">${d}</span>`;
+        }).join('');
+        const oddPct = Math.round((hist.filter((d) => d % 2 === 1).length / hist.length) * 100);
+        return `<div style="display:flex;align-items:center;gap:10px;overflow-x:auto">
+          <span style="width:44px;flex-shrink:0;font-family:'DM Mono',monospace;font-size:10px;font-weight:700;color:hsl(var(--foreground)/0.8)">${name}</span>
+          <div style="display:flex;gap:4px;flex-shrink:0">${chips}</div>
+          <span style="margin-left:auto;flex-shrink:0;font-family:'DM Mono',monospace;font-size:9px;color:hsl(var(--muted-foreground))">${oddPct}% odd</span>
+        </div>`;
+      }).join('');
+      global.setHtmlIfChanged(wrap, rowsHtml);
+    })();
   }
 
   global.DashboardUI = { render };
@@ -23530,24 +23932,39 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const token = window.HubStore.getState().apiToken;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
-      try { if (this.socketT) { this.socketT.onclose = null; this.socketT.close(); } } catch (e) {}
       const _self = this;
       (() => {
-        const hub = window.HubStore.getState();
-        const appId = hub.wsAppId || '1089';
-        // Real Deriv API flow: one WebSocket, {"authorize": token} as the
-        // first message — no REST accounts/OTP lookup (that endpoint never
-        // existed on api.derivws.com, which is what was causing the CORS
-        // errors and the connection failures).
-        const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${appId}`);
-        _self.socketT = ws;
-        ws.onerror = () => { _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' }); };
-        ws.onopen = () => {
-          try { ws.send(JSON.stringify({ authorize: token })); } catch (e) {}
-        };
-        ws.onmessage = (m) => {
+        // Shared trading/auth socket — see window.HubTradingSocket, reused
+        // here instead of opening a second independent connection to the
+        // same endpoint every TitanEngine already authenticates against.
+        // NOTE: ws can be null even though a connection IS in progress —
+        // HubTradingSocket is single-flight across all 13+ engines, so
+        // whichever engine loses the race to be first just gets null back.
+        // We must NOT bail out here (old code did `if (!ws) return;`), or
+        // this engine never registers its listener and sits stuck on
+        // "connecting" forever even after the shared socket authorizes.
+        const ws = window.HubTradingSocket.connect(token);
+        _self.socketT = ws || window.HubTradingSocket.getSocket();
+
+        if (!_self._sharedTradingListener) {
+          _self._sharedTradingListener = (evtType, d) => {
+            _self.socketT = window.HubTradingSocket.getSocket() || _self.socketT;
+            if (evtType === 'error') {
+              _self.dispatch({ type: 'NOTIFY', message: 'Could not reach Deriv\'s servers.', ntype: 'loss' });
+              return;
+            }
+            if (evtType === 'close') {
+              _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
+              return;
+            }
+            if (evtType !== 'message') return;
+            _self._handleTradingMessage(d);
+          };
+        }
+        window.HubTradingSocket.addListener(_self._sharedTradingListener);
+
+        _self._handleTradingMessage = (d) => {
           try {
-            const d = JSON.parse(m.data);
             if (d.error && !_self.state.isAuthenticated) {
               _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
               _self.dispatch({ type: 'NOTIFY', message: `Auth error: ${d.error.message || 'invalid token'}`, ntype: 'loss' });
@@ -23558,7 +23975,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               const bal = (typeof d.authorize.balance === 'number') ? d.authorize.balance : (window.HubStore.getState().balanceUSD || 0);
               _self.dispatch({ type: 'AUTHENTICATED', balance: bal });
               _self.dispatch({ type: 'NOTIFY', message: '✓ SYNCHRONIZED — System Online', ntype: 'info' });
-              try { ws.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 })); ws.send(JSON.stringify({ balance: 1, subscribe: 1 })); } catch (e) {}
+              // balance/proposal_open_contract subscriptions are handled
+              // once, for the whole shared socket, by window.HubTradingSocket.
               return;
             }
             if (d.msg_type === 'balance' && d.balance) { const bal = parseFloat(d.balance.balance); if (!isNaN(bal)) _self.dispatch({ type: 'UPDATE_BALANCE', balance: bal }); }
@@ -23607,10 +24025,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
           } catch (e) {}
         };
-        ws.onclose = () => {
-          _self.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'disconnected' });
-          if (window.HubStore.getState().apiToken) { _self._authDelay = Math.min((_self._authDelay || 8000) * 1.5, 60000); setTimeout(() => _self.authenticate(), _self._authDelay); }
-        };
+
+        if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
       })();
     }
 
@@ -24794,49 +25210,86 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     setInterval(() => { const c = document.getElementById('hub-clock'); if (c) c.textContent = new Date().toLocaleTimeString('en-US', { hour12: false }); }, 1000);
 
     const modal = document.getElementById('settings-modal');
-    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'false')));
-    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => modal && modal.setAttribute('aria-hidden', 'false'));
+    document.querySelectorAll('[data-open-settings]').forEach((b) => (b.onclick = () => { modal && modal.setAttribute('aria-hidden', 'false'); window.SysLog && window.SysLog.render(); }));
+    document.getElementById('hub-settings-btn') && (document.getElementById('hub-settings-btn').onclick = () => { modal && modal.setAttribute('aria-hidden', 'false'); window.SysLog && window.SysLog.render(); });
     document.querySelectorAll('[data-close-settings]').forEach((b) => (b.onclick = () => modal && modal.setAttribute('aria-hidden', 'true')));
     document.getElementById('settings-close') && (document.getElementById('settings-close').onclick = () => modal && modal.setAttribute('aria-hidden', 'true'));
     if (modal) modal.onclick = (e) => { if (e.target === modal) modal.setAttribute('aria-hidden', 'true'); };
+    const syslogClearBtn = document.getElementById('settings-syslog-clear');
+    if (syslogClearBtn) syslogClearBtn.onclick = () => window.SysLog && window.SysLog.clear();
 
     // Single PAT auth — saved once here, shared by every engine via HubStore.
     const appIdInput = document.getElementById('settings-appid');
     const appIdSaveBtn = document.getElementById('settings-appid-save');
+    const appIdNote = document.getElementById('settings-appid-note');
     function refreshAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (appIdInput && hub.appId) appIdInput.value = hub.appId;
+      if (appIdInput && hub.appId && document.activeElement !== appIdInput) appIdInput.value = hub.appId;
     }
     if (appIdSaveBtn) appIdSaveBtn.onclick = () => {
       const v = (appIdInput && appIdInput.value || '').trim();
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (v && hub.appId && v === hub.appId) {
+        if (appIdNote) { appIdNote.textContent = 'Same as existing App ID — no change made.'; appIdNote.className = 'settings-inline-note same'; }
+        return;
+      }
       if (window.HubStore) window.HubStore.setAppId(v);
+      if (appIdNote) { appIdNote.textContent = 'Saved.'; appIdNote.className = 'settings-inline-note saved'; }
       appIdSaveBtn.textContent = 'Saved ✓';
-      setTimeout(() => { appIdSaveBtn.textContent = 'Save'; }, 2000);
+      setTimeout(() => { appIdSaveBtn.textContent = 'Save'; if (appIdNote) appIdNote.textContent = ''; }, 2000);
     };
+    const appIdPasteBtn = document.getElementById('settings-appid-paste');
+    if (appIdPasteBtn) appIdPasteBtn.onclick = async () => {
+      try { const text = await navigator.clipboard.readText(); if (text && appIdInput) { appIdInput.value = text.trim(); appIdInput.focus(); } }
+      catch (e) { if (appIdNote) { appIdNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; appIdNote.className = 'settings-inline-note same'; } }
+    };
+    const appIdClearBtn = document.getElementById('settings-appid-clear');
+    if (appIdClearBtn) appIdClearBtn.onclick = () => { if (appIdInput) { appIdInput.value = ''; appIdInput.focus(); } if (appIdNote) appIdNote.textContent = ''; };
     refreshAppId();
     if (window.HubStore) window.HubStore.subscribe(refreshAppId);
 
     const wsAppIdInput = document.getElementById('settings-wsappid');
     const wsAppIdSaveBtn = document.getElementById('settings-wsappid-save');
+    const wsAppIdNote = document.getElementById('settings-wsappid-note');
     function refreshWsAppId() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (wsAppIdInput && hub.wsAppId) wsAppIdInput.value = hub.wsAppId;
+      if (wsAppIdInput && hub.wsAppId && document.activeElement !== wsAppIdInput) wsAppIdInput.value = hub.wsAppId;
     }
     if (wsAppIdSaveBtn) wsAppIdSaveBtn.onclick = () => {
       const v = (wsAppIdInput && wsAppIdInput.value || '').trim();
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (v && hub.wsAppId && v === hub.wsAppId) {
+        if (wsAppIdNote) { wsAppIdNote.textContent = 'Same as existing WS App ID — no change made.'; wsAppIdNote.className = 'settings-inline-note same'; }
+        return;
+      }
       if (window.HubStore) window.HubStore.setWsAppId(v);
+      if (wsAppIdNote) { wsAppIdNote.textContent = 'Saved.'; wsAppIdNote.className = 'settings-inline-note saved'; }
       wsAppIdSaveBtn.textContent = 'Saved ✓';
-      setTimeout(() => { wsAppIdSaveBtn.textContent = 'Save'; }, 2000);
+      setTimeout(() => { wsAppIdSaveBtn.textContent = 'Save'; if (wsAppIdNote) wsAppIdNote.textContent = ''; }, 2000);
     };
+    const wsAppIdPasteBtn = document.getElementById('settings-wsappid-paste');
+    if (wsAppIdPasteBtn) wsAppIdPasteBtn.onclick = async () => {
+      try { const text = await navigator.clipboard.readText(); if (text && wsAppIdInput) { wsAppIdInput.value = text.trim(); wsAppIdInput.focus(); } }
+      catch (e) { if (wsAppIdNote) { wsAppIdNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; wsAppIdNote.className = 'settings-inline-note same'; } }
+    };
+    const wsAppIdClearBtn = document.getElementById('settings-wsappid-clear');
+    if (wsAppIdClearBtn) wsAppIdClearBtn.onclick = () => { if (wsAppIdInput) { wsAppIdInput.value = ''; wsAppIdInput.focus(); } if (wsAppIdNote) wsAppIdNote.textContent = ''; };
     refreshWsAppId();
     if (window.HubStore) window.HubStore.subscribe(refreshWsAppId);
 
     const tokenInput = document.getElementById('settings-token');
     const statusEl = document.getElementById('settings-status');
     const saveBtn = document.getElementById('settings-save');
+    const tokenNote = document.getElementById('settings-token-note');
     function refreshAuthStatus() {
       const hub = window.HubStore ? window.HubStore.getState() : {};
-      if (tokenInput && hub.apiToken) tokenInput.value = hub.apiToken;
+      // Only auto-sync the field from the store when it's NOT the
+      // currently-focused element — this fires on every background store
+      // update (balance ticks, connection status changes, etc.), and
+      // without this guard it would silently overwrite a token you just
+      // pasted but hadn't clicked Save on yet, reverting it back to the
+      // old stored value before Save could ever see the new one.
+      if (tokenInput && hub.apiToken && document.activeElement !== tokenInput) tokenInput.value = hub.apiToken;
       if (statusEl) {
         statusEl.textContent = hub.connectionStatus === 'connected' ? `✓ Connected${hub.accountId ? ' — ' + hub.accountId : ''}`
           : hub.connectionStatus === 'connecting' ? '⏳ Connecting…'
@@ -24845,7 +25298,28 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
     if (saveBtn) saveBtn.onclick = () => {
       const v = (tokenInput && tokenInput.value || '').trim();
+      const hub = window.HubStore ? window.HubStore.getState() : {};
+      if (v && hub.apiToken && v === hub.apiToken) {
+        if (tokenNote) { tokenNote.textContent = 'API token is the same as the existing one — no change made.'; tokenNote.className = 'settings-inline-note same'; }
+        return;
+      }
+      if (tokenNote) tokenNote.textContent = '';
       if (v && window.HubStore) window.HubStore.setToken(v);
+    };
+    const tokenPasteBtn = document.getElementById('settings-token-paste');
+    if (tokenPasteBtn) tokenPasteBtn.onclick = async () => {
+      try { const text = await navigator.clipboard.readText(); if (text && tokenInput) { tokenInput.value = text.trim(); tokenInput.focus(); } if (tokenNote) tokenNote.textContent = ''; }
+      catch (e) { if (tokenNote) { tokenNote.textContent = 'Clipboard access blocked — paste manually (Ctrl/Cmd+V).'; tokenNote.className = 'settings-inline-note same'; } }
+    };
+    const tokenClearBtn = document.getElementById('settings-token-clear');
+    if (tokenClearBtn) tokenClearBtn.onclick = () => { if (tokenInput) { tokenInput.value = ''; tokenInput.focus(); } if (tokenNote) tokenNote.textContent = ''; };
+    const tokenToggleBtn = document.getElementById('settings-token-toggle');
+    if (tokenToggleBtn) tokenToggleBtn.onclick = () => {
+      if (!tokenInput) return;
+      const showing = tokenInput.type === 'text';
+      tokenInput.type = showing ? 'password' : 'text';
+      tokenToggleBtn.textContent = showing ? '👁' : '🙈';
+      tokenToggleBtn.title = showing ? 'Show token' : 'Hide token';
     };
     refreshAuthStatus();
     if (window.HubStore) window.HubStore.subscribe(refreshAuthStatus);
