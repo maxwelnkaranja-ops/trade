@@ -11590,6 +11590,13 @@ window.NexusTrading = exports;
       // engine's journal. Every contract_id is added on buy confirmation and
       // removed once its result has been recorded.
       this.ownContractIds = new Set();
+      // req_ids of buy requests THIS engine has sent and is still waiting
+      // on a response for. The trading socket is shared account-wide, so
+      // every engine's listener sees every buy response fired by every
+      // bot — this set is how Differ tells "a buy I fired" apart from
+      // "some other bot's buy that happened to arrive on my listener".
+      // See window.HubReqId's comment for the full story.
+      this._pendingBuyReqIds = new Set();
       // Tiny post-trade "what came next" readout: after a trade settles, we
       // watch the next 3 live ticks on the primary market and stash them on
       // the journal entry once collected (see 'ADD_JOURNAL' / 'TICK_P' below).
@@ -11907,8 +11914,14 @@ window.NexusTrading = exports;
       window.HubStore.notifyTelegram(`🔥 ${msg}`);
       let firedCount = 0;
       const fireOne = () => {
+        const buyReqId = window.HubReqId.next();
+        this._pendingBuyReqIds.add(buyReqId);
+        // Bound the same way ownContractIds/earlyResults already are —
+        // a request that never gets answered (dropped message, dead
+        // socket) shouldn't sit in this set forever.
+        if (this._pendingBuyReqIds.size > 200) this._pendingBuyReqIds.delete(this._pendingBuyReqIds.values().next().value);
         this.socketT.send(JSON.stringify({
-          buy: '1', price: stake,
+          buy: '1', price: stake, req_id: buyReqId,
           parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
         }));
       };
@@ -12139,10 +12152,19 @@ window.NexusTrading = exports;
             }
           }
           if (d.msg_type === 'buy') {
-            if (d.error) {
-              _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+            // OWNERSHIP GATE: this listener sees every buy response from
+            // every bot on the shared trading socket, not just Differ's
+            // own. Only react if the echoed req_id matches one Differ
+            // actually sent — otherwise this is another bot's trade and
+            // must be left completely untouched. See window.HubReqId.
+            const mine = d.req_id != null && _self._pendingBuyReqIds.has(d.req_id);
+            if (mine) {
+              _self._pendingBuyReqIds.delete(d.req_id);
+              if (d.error) {
+                _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+              }
+              else if (d.buy && d.buy.contract_id) { _self.ownContractIds.add(d.buy.contract_id); window.HubContractRegistry.claim(d.buy.contract_id, 'differ'); }
             }
-            else if (d.buy && d.buy.contract_id) { _self.ownContractIds.add(d.buy.contract_id); window.HubContractRegistry.claim(d.buy.contract_id, 'differ'); }
           }
         } catch (e) { /* */ }
       };
@@ -12956,6 +12978,28 @@ window.NexusStrategies=exports;
   // writes an unmissable, timestamped SysLog entry naming both bots and the
   // contract_id — turning "these numbers look suspiciously identical" into
   // hard proof one way or the other, instead of guessing from static code.
+  // ── Cross-engine buy-ownership tagging ────────────────────────────────
+  // Root cause of the "one trade shows up in every bot's journal" leak:
+  // window.HubTradingSocket is ONE account-wide WebSocket shared by all
+  // 13+ Titan bots + Differ + Hot Repeat (see HubTradingSocket below). Its
+  // notify() broadcasts every message — including every 'buy' confirmation
+  // — to EVERY engine's listener, with nothing in the payload saying which
+  // engine's request it actually answers. Every engine's buy-response
+  // handler used to just unconditionally do
+  // `ownContractIds.add(data.buy.contract_id)` for ANY buy message it saw,
+  // so whichever bot happened to buy a contract, ALL OTHER bots silently
+  // adopted that same contract_id as their own — and then all journaled,
+  // counted, and martingale-stepped on its result too. Tagging every buy
+  // request with a unique req_id (Deriv's API echoes req_id back verbatim
+  // on the matching response, error or success) lets each engine check
+  // "is this actually a response to a buy I sent?" before touching any
+  // state — see the _pendingBuyReqIds gates in BenzEngine, HotRepeatEngine
+  // and TitanEngine's buy handlers.
+  window.HubReqId = (function () {
+    let n = 0;
+    return { next() { n += 1; return n; } };
+  })();
+
   window.HubContractRegistry = (function () {
     const claimedBy = new Map(); // contract_id -> botId
     function claim(contractId, botId) {
@@ -13210,6 +13254,17 @@ window.NexusStrategies=exports;
       // plain Rise/Fall instead (see handleMrDurationRejection).
       this._mrRiseFallDegrade = {};
       this.ownContractIds = new Set();
+      // req_ids of buy requests THIS engine instance has sent and is still
+      // awaiting a response for. window.HubTradingSocket is ONE account-
+      // wide socket shared by every Titan bot (Even, Odd, Over, Under,
+      // Higher/Lower, all Mean-Rev variants, Matches, etc.) plus Differ and
+      // Hot Repeat — its buy responses are broadcast to every engine's
+      // listener, not just the one that fired the trade. Without checking
+      // the echoed req_id against a request THIS engine actually sent,
+      // every bot would blindly adopt every OTHER bot's bought contract as
+      // its own — the root cause of trades leaking into every bot's
+      // journal/stats. See window.HubReqId and the buy handler below.
+      this._pendingBuyReqIds = new Set();
       this.cooldownTimer = null; this.pingInterval = null; this.analysisTimer = null;
       this.modeSwitchTimer = null; this.stuckMonitor = null;
       this.executionGuard = false; this.pendingTrade = null;
@@ -14921,7 +14976,12 @@ window.NexusStrategies=exports;
         this._pendingProposal = { reqId, contractType };
         this.tradingSocket.send(JSON.stringify({ proposal: 1, subscribe: 1, req_id: reqId, ...params }));
       } else {
-        this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: st.currentStake, parameters: params }));
+        const buyReqId = window.HubReqId.next();
+        this._pendingBuyReqIds.add(buyReqId);
+        // Bound the same way ownContractIds/earlyResults already are — a
+        // request that never gets answered shouldn't sit here forever.
+        if (this._pendingBuyReqIds.size > 200) this._pendingBuyReqIds.delete(this._pendingBuyReqIds.values().next().value);
+        this.tradingSocket.send(JSON.stringify({ buy: '1', subscribe: 1, price: st.currentStake, parameters: params, req_id: buyReqId }));
       }
       // Stuck-trade watchdog: if neither a buy error nor a contract result
       // arrives within 20s (dropped message, server hiccup, dead socket),
@@ -15726,7 +15786,10 @@ window.NexusStrategies=exports;
               _titan.addLog('engine', 'PROPOSAL', `Proposal #${data.proposal.id} accepted — ask=${data.proposal.ask_price}`);
               _titan._pendingProposal = null;
               try {
-                _titan.tradingSocket.send(JSON.stringify({ buy: data.proposal.id, price: data.proposal.ask_price }));
+                const buyReqId = window.HubReqId.next();
+                _titan._pendingBuyReqIds.add(buyReqId);
+                if (_titan._pendingBuyReqIds.size > 200) _titan._pendingBuyReqIds.delete(_titan._pendingBuyReqIds.values().next().value);
+                _titan.tradingSocket.send(JSON.stringify({ buy: data.proposal.id, price: data.proposal.ask_price, req_id: buyReqId }));
                 // Forget the streaming proposal only AFTER buy has consumed
                 // it — forgetting first invalidates the proposal id
                 // server-side, which made every buy fail with
@@ -15743,6 +15806,18 @@ window.NexusStrategies=exports;
           }
 
           if (data.msg_type === 'buy') {
+            // OWNERSHIP GATE: window.HubTradingSocket is one account-wide
+            // socket shared by every bot, so this listener sees EVERY
+            // bot's buy response, not just this engine's own. Before this
+            // check existed, every engine unconditionally reacted to any
+            // buy message it saw — claiming other bots' contracts into its
+            // own ownContractIds (so their results later landed in this
+            // engine's journal/stats too) and even resetting its own
+            // pendingTrade/isLocked on another bot's buy ERROR. Only
+            // proceed if the echoed req_id matches one THIS engine sent.
+            const mine = data.req_id != null && _titan._pendingBuyReqIds.has(data.req_id);
+            if (mine) {
+            _titan._pendingBuyReqIds.delete(data.req_id);
             if (data.error) {
               {
                 // Deriv's top-level error.message for InputValidationFailed is
@@ -15793,6 +15868,7 @@ window.NexusStrategies=exports;
                 // Normal: wait for proposal_open_contract
                 _titan.ownContractIds.add(data.buy.contract_id);
               }
+            }
             }
           }
           _titan.emit();
@@ -23726,6 +23802,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.socketP = null; this.socketT = null;
       this.reconnectTimer = null; this.tickIndex = 0; this.abortFlag = false;
       this.ownContractIds = new Set();
+      // req_ids of buy requests THIS engine has sent and is awaiting a
+      // response for — see window.HubReqId. The trading socket is shared
+      // account-wide, so without this, Hot Repeat's buy handler reacts to
+      // every OTHER bot's buy confirmation too.
+      this._pendingBuyReqIds = new Set();
       this._eligibleFromTick = 0;
       this._toFire = null;
       this.state = this.loadInitialState();
@@ -23898,8 +23979,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const batch = Math.max(1, s.batchSize);
       const speed = s.speed;
       const sendOne = () => {
+        const buyReqId = window.HubReqId.next();
+        this._pendingBuyReqIds.add(buyReqId);
+        if (this._pendingBuyReqIds.size > 200) this._pendingBuyReqIds.delete(this._pendingBuyReqIds.values().next().value);
         this.socketT && this.socketT.send(JSON.stringify({
-          buy: '1', price: stake,
+          buy: '1', price: stake, req_id: buyReqId,
           parameters: { amount: stake, basis: 'stake', contract_type: 'DIGITDIFF', barrier, underlying_symbol: s.primaryMarket, duration: 1, duration_unit: 't', currency: window.HubStore.getState().currency || 'USD' },
         }));
       };
@@ -24075,8 +24159,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               }
             }
             if (d.msg_type === 'buy') {
-              if (d.error) _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
-              else if (d.buy && d.buy.contract_id) { _self.ownContractIds.add(d.buy.contract_id); window.HubContractRegistry.claim(d.buy.contract_id, 'hotrepeat'); }
+              // OWNERSHIP GATE — see window.HubReqId's comment. Without
+              // this, Hot Repeat adopted every other bot's bought
+              // contract as its own too.
+              const mine = d.req_id != null && _self._pendingBuyReqIds.has(d.req_id);
+              if (mine) {
+                _self._pendingBuyReqIds.delete(d.req_id);
+                if (d.error) _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
+                else if (d.buy && d.buy.contract_id) { _self.ownContractIds.add(d.buy.contract_id); window.HubContractRegistry.claim(d.buy.contract_id, 'hotrepeat'); }
+              }
             }
           } catch (e) {}
         };
