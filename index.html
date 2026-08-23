@@ -12142,7 +12142,7 @@ window.NexusTrading = exports;
             if (d.error) {
               _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
             }
-            else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
+            else if (d.buy && d.buy.contract_id) { _self.ownContractIds.add(d.buy.contract_id); window.HubContractRegistry.claim(d.buy.contract_id, 'differ'); }
           }
         } catch (e) { /* */ }
       };
@@ -12947,6 +12947,31 @@ window.NexusStrategies=exports;
   // ONE authenticated socket and lets every engine attach as a listener
   // instead, the same sharing pattern EvenSocket/NexusSocket already use
   // for the public analysis feed.
+  // ── Cross-engine contract-ownership tripwire ─────────────────────────
+  // Every bot filters proposal_open_contract by its own ownContractIds set,
+  // so under normal operation no contract_id should ever be claimed by two
+  // different bots. If that ever happens anyway (a real leak, as opposed to
+  // two bots just independently landing on the same dollar total from
+  // shared default settings), this catches it the instant it occurs and
+  // writes an unmissable, timestamped SysLog entry naming both bots and the
+  // contract_id — turning "these numbers look suspiciously identical" into
+  // hard proof one way or the other, instead of guessing from static code.
+  window.HubContractRegistry = (function () {
+    const claimedBy = new Map(); // contract_id -> botId
+    function claim(contractId, botId) {
+      if (contractId == null) return;
+      const prior = claimedBy.get(contractId);
+      if (prior && prior !== botId) {
+        window.SysLog && window.SysLog.add('error',
+          `[LEAK] Contract #${contractId} claimed by BOTH "${prior}" and "${botId}" — a real result is leaking across bots, not a coincidence.`);
+      }
+      claimedBy.set(contractId, botId);
+      // Keep this bounded the same way the per-engine dedupe sets are.
+      if (claimedBy.size > 2000) claimedBy.delete(claimedBy.keys().next().value);
+    }
+    return { claim };
+  })();
+
   window.HubTradingSocket = (function () {
     let socket = null;
     let connecting = false;
@@ -15758,6 +15783,7 @@ window.NexusStrategies=exports;
               // out from under it.
               if (_titan.stuckWatchdog) { clearTimeout(_titan.stuckWatchdog); _titan.stuckWatchdog = null; }
               // Check if we already got the result (early result race condition)
+              window.HubContractRegistry.claim(data.buy.contract_id, _titan.id);
               if (_titan._earlyResults && _titan._earlyResults.has(cid)) {
                 const earlyResult = _titan._earlyResults.get(cid);
                 _titan._earlyResults.delete(cid);
@@ -24050,7 +24076,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
             if (d.msg_type === 'buy') {
               if (d.error) _self.dispatch({ type: 'NOTIFY', message: `Buy error: ${d.error.message} (code: ${d.error.code})`, ntype: 'loss' });
-              else if (d.buy && d.buy.contract_id) _self.ownContractIds.add(d.buy.contract_id);
+              else if (d.buy && d.buy.contract_id) { _self.ownContractIds.add(d.buy.contract_id); window.HubContractRegistry.claim(d.buy.contract_id, 'hotrepeat'); }
             }
           } catch (e) {}
         };
