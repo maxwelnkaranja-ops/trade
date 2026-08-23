@@ -15234,6 +15234,13 @@ window.NexusStrategies=exports;
       if (contractKey) {
         if (this._processedContracts.has(contractKey)) return;
         this._processedContracts.add(contractKey);
+        // Dedupe guard only needs to remember recent contracts, not every
+        // contract ever traded in the session — without a cap this Set
+        // grows by one entry per trade for the life of the page, forever.
+        // Mirrors the 500-entry cap already used on this.journal.
+        if (this._processedContracts.size > 500) {
+          this._processedContracts.delete(this._processedContracts.values().next().value);
+        }
       }
       const journalEntry = {
         id: (contract.contract_id || Date.now()).toString() + Math.random().toString(36).slice(2, 5),
@@ -15617,9 +15624,31 @@ window.NexusStrategies=exports;
                 _titan.ownContractIds.delete(_c.contract_id);
                 _titan.handleContractResult(_c);
               } else if (_titan.pendingTrade) {
-                // Race condition: result arrived before buy confirmation
-                // Queue it — will be processed when buy ack comes in
-                _titan._earlyResults.set(_c.contract_id.toString(), _c);
+                // Race condition: result arrived before buy confirmation.
+                // IMPORTANT: `pendingTrade` only proves THIS engine has a
+                // trade in flight — it says nothing about whether THIS
+                // particular contract_id is that trade. proposal_open_contract
+                // is one account-wide stream shared by all 13+ Titan bots, so
+                // whenever more than one bot has a trade in flight at the same
+                // moment, every one of them used to grab a copy of every other
+                // bot's settling contract here and never release it — an
+                // unbounded per-engine memory leak (see the identical leak
+                // note on the Differ/HotRepeat engines' ownContractIds check,
+                // which this branch was missing). We still can't know for
+                // certain this contract is ours until the buy ack names its
+                // real id, so we still queue it (needed to not lose a
+                // legitimately-early result for a 1-tick contract) — but now
+                // bounded: capped size + time-boxed, so entries that never
+                // get claimed (because they were never ours) fall off instead
+                // of accumulating for the life of the session.
+                const now = Date.now();
+                for (const [k, v] of _titan._earlyResults) {
+                  if (now - (v._queuedAt || 0) > 15000) _titan._earlyResults.delete(k);
+                }
+                while (_titan._earlyResults.size >= 10) {
+                  _titan._earlyResults.delete(_titan._earlyResults.keys().next().value);
+                }
+                _titan._earlyResults.set(_c.contract_id.toString(), { ..._c, _queuedAt: now });
                 _titan.addLog('engine', 'QUEUE', `Early result queued for contract #${_c.contract_id}`);
               }
             } else if (_c && !_c.is_sold && _titan.state.openTrade) {
