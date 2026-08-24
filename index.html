@@ -7058,55 +7058,102 @@ html body #panel-dashboard .journal-entry {
   opacity: .5; pointer-events: none;
 }
 .dash-stake-popup {
-  display: none; position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 60;
-  width: 310px; max-height: 400px; padding: 16px; border-radius: 18px;
-  background: radial-gradient(140% 100% at 100% 0%, hsl(var(--primary)/0.1), hsl(var(--card)/0.98) 55%);
-  border: 1px solid hsl(var(--primary)/0.35);
-  box-shadow: 0 0 0 1px hsl(var(--primary)/0.06), 0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 hsl(255 100% 100%/0.06);
-  backdrop-filter: blur(14px);
+  display: none; position: absolute; bottom: calc(100% + 14px); right: 0; z-index: 60;
+  width: 336px; max-height: 460px; padding: 3px; border-radius: 22px;
+  background: conic-gradient(from var(--dsp-angle,0deg), hsl(var(--primary)/0.7), hsl(var(--accent)/0.5), hsl(var(--primary-2)/0.6), hsl(var(--primary)/0.7));
+  box-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 0 40px hsl(var(--primary)/0.18);
   overflow: hidden;
+  animation: dsp-rotate 6s linear infinite paused;
 }
-.dash-stake-popup.open {
-  display: block;
-  animation: dash-stake-pop-in .28s cubic-bezier(.34,1.56,.64,1);
+.dash-stake-popup.open { display: block; animation-play-state: running, running; }
+@keyframes dsp-rotate { to { --dsp-angle: 360deg; } }
+.dash-stake-popup-inner {
+  position: relative; z-index: 1; border-radius: 19px; padding: 18px;
+  max-height: 454px; overflow-y: auto;
+  background: radial-gradient(140% 100% at 100% 0%, hsl(var(--primary)/0.14), hsl(var(--card)/0.99) 55%);
+  backdrop-filter: blur(16px);
+}
+.dash-stake-popup.open .dash-stake-popup-inner {
+  animation: dash-stake-pop-in .32s cubic-bezier(.34,1.56,.64,1);
 }
 .dash-stake-popup-glow {
-  position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(120deg, transparent, hsl(var(--primary)/0.06), transparent 60%);
+  position: absolute; inset: 0; pointer-events: none; z-index: 0; border-radius: 19px;
+  background: linear-gradient(120deg, transparent, hsl(var(--primary)/0.08), transparent 60%);
 }
 @keyframes dash-stake-pop-in {
-  from { opacity: 0; transform: scale(.92) translateY(8px); }
+  from { opacity: 0; transform: scale(.9) translateY(10px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
-.dash-stake-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 9px; border-radius: 10px;
-  background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.35);
-  transition: border-color .15s, background .15s;
+.dash-stake-total {
+  position: relative; display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px; padding: 10px 12px; border-radius: 12px;
+  background: linear-gradient(135deg, hsl(var(--primary)/0.14), hsl(var(--primary-2)/0.08));
+  border: 1px solid hsl(var(--primary)/0.3);
+  overflow: hidden;
 }
-.dash-stake-row:hover { border-color: hsl(var(--primary)/0.35); background: hsl(var(--bg)/0.6); }
+.dash-stake-total::after {
+  content: ''; position: absolute; inset: -60% -20%;
+  background: conic-gradient(from 0deg, transparent, hsl(var(--primary)/0.18), transparent 30%);
+  animation: cp-stake-spin 7s linear infinite; pointer-events: none;
+}
+.dash-stake-total-label {
+  position: relative; z-index: 1; font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase;
+  color: hsl(var(--muted-foreground)/0.8); font-weight: 800;
+}
+.dash-stake-total-value {
+  position: relative; z-index: 1; font-family: 'DM Mono', monospace; font-size: 17px; font-weight: 800;
+  color: hsl(var(--primary)); text-shadow: 0 0 16px hsl(var(--primary)/0.4);
+}
+.dash-stake-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; border-radius: 12px; margin-bottom: 6px;
+  background: hsl(var(--bg)/0.45); border: 1px solid hsl(var(--border)/0.35);
+  transition: border-color .18s, background .18s, transform .18s;
+}
+.dash-stake-row:hover {
+  border-color: hsl(var(--primary)/0.45); background: hsl(var(--bg)/0.7);
+  transform: translateX(2px);
+}
+.dash-stake-row-icon {
+  width: 26px; height: 26px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; font-family: 'DM Mono', monospace;
+  color: hsl(var(--bg)); background: var(--dsr-color, hsl(var(--primary)));
+  box-shadow: 0 0 10px var(--dsr-color, hsl(var(--primary))/0.6);
+}
+.dash-stake-row-label {
+  flex: 1; font-size: 10.5px; font-family: 'DM Mono', monospace; font-weight: 600;
+  color: hsl(var(--foreground)/0.88); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dash-stake-dollar { font-size: 10px; color: hsl(var(--muted-foreground)/0.65); font-family: 'DM Mono', monospace; }
 .dash-stake-input {
-  width: 78px; padding: 7px 8px; border-radius: 8px;
-  border: 1px solid hsl(var(--border)/0.5); background: hsl(var(--bg)/0.7);
+  width: 76px; padding: 7px 8px; border-radius: 9px;
+  border: 1px solid hsl(var(--border)/0.55); background: hsl(var(--bg)/0.75);
   color: hsl(var(--foreground)); font-family: 'DM Mono', monospace; font-size: 11.5px;
   font-weight: 700; text-align: center; outline: none;
-  transition: border-color .15s, box-shadow .15s;
+  transition: border-color .15s, box-shadow .15s, background .15s;
 }
 .dash-stake-input:focus {
-  border-color: hsl(var(--primary)/0.65);
-  box-shadow: 0 0 0 3px hsl(var(--primary)/0.12);
+  border-color: hsl(var(--primary)/0.7);
+  box-shadow: 0 0 0 3px hsl(var(--primary)/0.15);
+  background: hsl(var(--bg)/0.95);
 }
 .dash-stake-save-btn {
-  position: relative; z-index: 1; width: 100%; margin-top: 12px; padding: 11px;
-  border: none; border-radius: 12px; cursor: pointer;
+  position: relative; z-index: 1; width: 100%; margin-top: 12px; padding: 12px;
+  border: none; border-radius: 13px; cursor: pointer; overflow: hidden;
   background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)));
   color: #fff; font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 900;
-  letter-spacing: 2px; box-shadow: 0 4px 16px hsl(var(--primary)/0.35);
+  letter-spacing: 2px; box-shadow: 0 4px 18px hsl(var(--primary)/0.4);
   transition: all .2s;
 }
-.dash-stake-save-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px hsl(var(--primary)/0.45); }
+.dash-stake-save-btn::after {
+  content: ''; position: absolute; inset: -60% -20%;
+  background: conic-gradient(from 0deg, transparent, hsl(255 100% 100%/0.35), transparent 25%);
+  animation: cp-stake-spin 3.5s linear infinite;
+}
+.dash-stake-save-btn:hover { transform: translateY(-1.5px); box-shadow: 0 8px 24px hsl(var(--primary)/0.5); }
 .dash-stake-save-btn:active { transform: translateY(0); }
-@media (max-width: 480px) { .dash-stake-popup { width: min(310px, 90vw); right: -8px; } }
+@media (max-width: 480px) { .dash-stake-popup { width: min(336px, 92vw); right: -8px; } }
 
 /* ══════════════════════════════════════════════════════════════
    STAKE ADDITION TERMINAL — big glowing "hacker terminal" block
@@ -11817,6 +11864,12 @@ window.NexusTrading = exports;
           break;
         }
         case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; this._tpSlLatched = false; this._pendingDigitCaptures = []; break;
+        // Resets ONLY the running P&L figure the master TP/SL gate measures
+        // (totalProfit) — journal, win/loss counts and plHistory are left
+        // untouched. Powers the result popup's "Reload Take Profit / Stop
+        // Loss" button, which is meant to let a fresh session start counting
+        // from zero again without wiping any trade history.
+        case 'RESET_PNL_ONLY': s.totalProfit = 0; this._tpSlLatched = false; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'SET_LUCKY': s.luckyNumber = action.value; break;
         case 'SET_RECOMMENDED_MARKET': s.recommendedMarket = action.market; s.analysisConfidence = action.confidence; break;
@@ -12904,27 +12957,57 @@ window.NexusStrategies=exports;
   function getWsUrl() { const id = (window.HubStore && window.HubStore.getState().wsAppId) || (function(){ try { return localStorage.getItem('hub_ws_app_id') || ''; } catch(_){ return ''; } })() || '1089'; return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
   const ANALYSIS_HOLD = 20;
 
+  // Converts a USD figure to whatever the dashboard's own currency switch
+  // (top bar USD/KSH toggle, window.HubStore displayCurrency) is currently
+  // set to, so the popup always agrees with the rest of the dashboard.
+  function _fmtGateAmount(usd) {
+    const hub = window.HubStore && window.HubStore.getState ? window.HubStore.getState() : {};
+    const cur = hub.displayCurrency || 'USD';
+    if (cur === 'KSH') return `KSH ${(Number(usd) * 129.5).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `$${Number(usd).toFixed(2)}`;
+  }
+
   // Generalized TP/SL popup — kind: 'tp' (win/green) or 'sl' (loss/red).
   // Kept the old name as a thin wrapper so existing call sites keep working.
+  //
+  // Pops exactly ONCE per hit: if one is already on screen, later calls are
+  // ignored instead of tearing it down and rebuilding it (that
+  // remove-then-recreate cycle, happening every time any bot's own TP/SL
+  // check fired around the same few seconds, was the visible "flicker").
+  // It also no longer needs to reappear on its own — see the P&L gate latch
+  // fix — so once you dismiss it, it stays dismissed until a genuinely new
+  // hit occurs.
   function showResultPopup(kind, target, netValue) {
-    const existing = document.getElementById('benz-congrats-popup');
-    if (existing) existing.remove();
+    if (document.getElementById('benz-congrats-popup')) return;
     const isTp = kind !== 'sl';
     const color = isTp ? '#48ffa7' : '#ff5c6a';
     const rgb = isTp ? '72,255,167' : '255,92,106';
     const icon = isTp ? '🏆' : '🛑';
     const title = isTp ? 'Take Profit Hit!' : 'Stop Loss Hit!';
     const bodyLabel = isTp ? 'Target' : 'Limit';
-    const netTxt = (netValue !== undefined && netValue !== null) ? ` · Net P/L: <b style="color:${color}">$${Number(netValue).toFixed(2)}</b>` : '';
+    const netTxt = (netValue !== undefined && netValue !== null) ? ` · Net P/L: <b style="color:${color}">${_fmtGateAmount(netValue)}</b>` : '';
+    const reloadLabel = isTp ? '🔄 Reload Take Profit' : '🔄 Reload Stop Loss';
     const div = document.createElement('div');
     div.id = 'benz-congrats-popup';
-    div.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(${rgb},0.12),rgba(${rgb},0.08));border:1px solid rgba(${rgb},0.5);border-radius:20px;padding:32px 40px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 60px rgba(${rgb},0.2),0 20px 60px rgba(0,0,0,0.5);backdrop-filter:blur(24px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;cursor:pointer;min-width:260px`;
-    div.innerHTML = `<div style="font-size:2.8rem;margin-bottom:10px">${icon}</div><div style="font-size:18px;font-weight:900;letter-spacing:3px;color:${color};text-transform:uppercase;margin-bottom:8px">${title}</div><div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:14px">${bodyLabel} of <b style="color:${color}">$${Number(target).toFixed(2)}</b> reached${isTp ? ' 🎉' : ''}${netTxt}</div><div style="font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.4);text-transform:uppercase">Session Stopped · Tap to dismiss</div>`;
+    div.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.7);z-index:9999;background:linear-gradient(135deg,rgba(${rgb},0.14),rgba(${rgb},0.08));border:1.5px solid rgba(${rgb},0.55);border-radius:26px;padding:44px 52px;text-align:center;font-family:Outfit,sans-serif;box-shadow:0 0 90px rgba(${rgb},0.25),0 30px 80px rgba(0,0,0,0.55);backdrop-filter:blur(26px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1),opacity 0.35s;opacity:0;min-width:340px;max-width:min(92vw,420px)`;
+    div.innerHTML = `
+      <div style="font-size:4rem;margin-bottom:14px;line-height:1">${icon}</div>
+      <div style="font-size:23px;font-weight:900;letter-spacing:3px;color:${color};text-transform:uppercase;margin-bottom:12px;text-shadow:0 0 20px rgba(${rgb},0.5)">${title}</div>
+      <div style="font-size:15px;color:rgba(255,255,255,0.7);margin-bottom:20px;line-height:1.6">${bodyLabel} of <b style="color:${color};font-size:17px">${_fmtGateAmount(target)}</b> reached${isTp ? ' 🎉' : ''}${netTxt}</div>
+      <button id="benz-popup-reload" style="width:100%;padding:14px;margin-bottom:10px;border-radius:14px;border:1.5px solid rgba(${rgb},0.6);cursor:pointer;background:rgba(${rgb},0.16);color:${color};font-family:'Outfit',sans-serif;font-size:12px;font-weight:900;letter-spacing:1.5px;transition:all .18s">${reloadLabel}</button>
+      <div id="benz-popup-dismiss" style="font-size:10.5px;letter-spacing:2px;color:rgba(255,255,255,0.45);text-transform:uppercase;cursor:pointer;padding:6px">Session Stopped · Tap to dismiss</div>`;
     document.body.appendChild(div);
     requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translate(-50%,-50%) scale(1)'; });
     const dismiss = () => { div.style.opacity = '0'; div.style.transform = 'translate(-50%,-50%) scale(0.85)'; setTimeout(() => { try { div.remove(); } catch(_) {} }, 350); };
-    setTimeout(dismiss, 6000);
-    div.onclick = dismiss;
+    const reloadBtn = div.querySelector('#benz-popup-reload');
+    if (reloadBtn) {
+      reloadBtn.onmouseover = () => { reloadBtn.style.background = `rgba(${rgb},0.28)`; reloadBtn.style.transform = 'translateY(-1px)'; };
+      reloadBtn.onmouseout = () => { reloadBtn.style.background = `rgba(${rgb},0.16)`; reloadBtn.style.transform = 'translateY(0)'; };
+      reloadBtn.onclick = (e) => { e.stopPropagation(); if (window.reloadGateAndKeepTrading) window.reloadGateAndKeepTrading(kind); dismiss(); };
+    }
+    const dismissRow = div.querySelector('#benz-popup-dismiss');
+    if (dismissRow) dismissRow.onclick = dismiss;
+    setTimeout(dismiss, 9000);
   }
   function showCongratulationsPopup(target) { showResultPopup('tp', target); }
   window.showResultPopup = showResultPopup;
@@ -19365,16 +19448,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               </span>
             </button>
             <div id="dash-stake-popup" class="dash-stake-popup">
-              <div class="dash-stake-popup-glow"></div>
-              <div style="position:relative;z-index:1;display:flex;align-items:center;gap:6px;margin-bottom:12px">
-                <span style="font-size:16px;line-height:1">💰</span>
-                <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:2px;color:hsl(var(--foreground)/0.9);text-transform:uppercase">Per-Bot Stake</span>
-                <div style="flex:1"></div>
-                <button id="dash-stake-close" type="button" style="border:none;background:hsl(var(--muted)/0.5);color:hsl(var(--muted-foreground));cursor:pointer;font-size:12px;line-height:1;padding:6px 8px;border-radius:8px;transition:all .15s"
-                  onmouseover="this.style.background='hsl(var(--loss)/0.2)';this.style.color='hsl(var(--loss))'" onmouseout="this.style.background='hsl(var(--muted)/0.5)';this.style.color='hsl(var(--muted-foreground))'">✕</button>
+              <div class="dash-stake-popup-inner">
+                <div class="dash-stake-popup-glow"></div>
+                <div style="position:relative;z-index:1;display:flex;align-items:center;gap:6px;margin-bottom:12px">
+                  <span style="font-size:16px;line-height:1">💰</span>
+                  <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:900;letter-spacing:2px;color:hsl(var(--foreground)/0.9);text-transform:uppercase">Per-Bot Stake</span>
+                  <div style="flex:1"></div>
+                  <button id="dash-stake-close" type="button" style="border:none;background:hsl(var(--muted)/0.5);color:hsl(var(--muted-foreground));cursor:pointer;font-size:12px;line-height:1;padding:6px 8px;border-radius:8px;transition:all .15s"
+                    onmouseover="this.style.background='hsl(var(--loss)/0.2)';this.style.color='hsl(var(--loss))'" onmouseout="this.style.background='hsl(var(--muted)/0.5)';this.style.color='hsl(var(--muted-foreground))'">✕</button>
+                </div>
+                <div id="dash-stake-total" class="dash-stake-total">
+                  <span class="dash-stake-total-label">Total Stake Exposure</span>
+                  <span class="dash-stake-total-value" id="dash-stake-total-value">$0.00</span>
+                </div>
+                <div id="dash-stake-list" style="position:relative;z-index:1;max-height:270px;overflow-y:auto;padding-right:2px"></div>
+                <button id="dash-stake-save" type="button" class="dash-stake-save-btn">💾 SAVE STAKES</button>
               </div>
-              <div id="dash-stake-list" style="position:relative;z-index:1;display:flex;flex-direction:column;gap:6px;max-height:270px;overflow-y:auto;padding-right:2px"></div>
-              <button id="dash-stake-save" type="button" class="dash-stake-save-btn">💾 SAVE STAKES</button>
             </div>
           </div>
           <!-- Engage button -->
@@ -19429,7 +19518,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               <div style="display:flex;align-items:center;gap:12px;font-size:9px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground))">
                 <span class="eq-chart-live-badge" id="dash-equity-live-badge" style="display:none">LIVE</span>
                 <span id="dash-equity-meta" style="opacity:0.65"></span>
-                <button id="dash-reset-equity" title="Clears only the equity curve — trade stats/journal are untouched" style="flex-shrink:0;padding:3px 10px;border-radius:6px;
+                <button id="dash-reset-equity" title="Clears only the equity curve chart — trade stats, journal, and Best Times are untouched" style="flex-shrink:0;padding:3px 10px;border-radius:6px;
                   border:1px solid hsl(var(--loss)/0.25);background:transparent;
                   color:hsl(var(--loss)/0.5);font-family:'DM Mono',monospace;font-size:8px;font-weight:700;
                   letter-spacing:1.5px;cursor:pointer;transition:all .15s"
@@ -19459,7 +19548,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                 CLEAR STATS
               </button>
             </div>
-            <div class="journal-tabs" id="dash-journal-tabs" style="padding:8px 16px 0;flex-shrink:0"></div>
             <div class="journal-list" id="dash-journal-list" style="flex:1;overflow-y:auto;padding:8px 16px 16px"></div>
           </div>
         </div>
@@ -19571,6 +19659,52 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         running += p.profit || 0;
         return { ...p, cumulative: running };
       });
+    },
+  };
+
+  // ── BEST TIMES — its OWN persistent store, separate from the equity
+  // curve ──────────────────────────────────────────────────────────────
+  // Best Times used to be computed straight off EquityStore's points, so
+  // clicking "Clear Graph" (which explicitly resets EquityStore) wiped the
+  // Best Times pills too, even though that button only claims to touch the
+  // chart. This is an independent append-only store with its own
+  // localStorage key — merged from the exact same trade entries, but never
+  // touched by EquityStore.reset(), the per-bot "Clear Journal" buttons, or
+  // "Clear All Stats" (all of which also leave the equity curve itself
+  // alone already). Only its own 24h age-based pruning ever removes points.
+  const BEST_TIMES_STORAGE_KEY = 'benz_best_times_history';
+  const BestTimesStore = {
+    _points: null,
+    load() {
+      if (this._points) return this._points;
+      try {
+        const raw = localStorage.getItem(BEST_TIMES_STORAGE_KEY);
+        this._points = raw ? JSON.parse(raw) : [];
+      } catch (_) {
+        this._points = [];
+      }
+      if (!Array.isArray(this._points)) this._points = [];
+      return this._points;
+    },
+    prune() {
+      const cutoff = Date.now() - EQUITY_MAX_AGE_MS;
+      this._points = this._points.filter((p) => (p.ts || 0) >= cutoff);
+    },
+    save() {
+      try { localStorage.setItem(BEST_TIMES_STORAGE_KEY, JSON.stringify(this._points)); } catch (_) {}
+    },
+    merge(entries) {
+      this.load();
+      const seen = new Set(this._points.map((p) => p.contractId || p.id));
+      entries.forEach((e) => {
+        const key = e.contractId || e.id;
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        this._points.push({ id: e.id, contractId: e.contractId, ts: e.ts || Date.now(), profit: e.profit });
+      });
+      this.prune();
+      this.save();
+      return this._points;
     },
   };
 
@@ -20187,7 +20321,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // Net P&L stat card instead of silently including probe-trade P&L that
     // card doesn't count.
     const curve = EquityStore.merge(allEntries.filter((e) => !e.isTest));
-    renderBestTimes(root, curve);
+    // Fed from the same live entries, but kept in its own store (see
+    // BestTimesStore above) so clearing the graph never empties this.
+    const bestTimesPoints = BestTimesStore.merge(allEntries.filter((e) => !e.isTest));
+    renderBestTimes(root, bestTimesPoints);
 
     const equityWrap = el('dash-equity-wrap', root);
     renderEquityChart(equityWrap, curve);
@@ -20419,19 +20556,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       });
     }
 
-    if (!el('dash-journal-tabs', root).childElementCount) {
-      const tabs = [{ id: 'all', label: 'All' }, ...botIds.map((id) => ({ id, label: BOT_META[id].label }))];
-      el('dash-journal-tabs', root).innerHTML = tabs.map((t, i) => `<button class="journal-tab ${i === 0 ? 'active' : ''}" data-jtab="${t.id}">${t.label}</button>`).join('');
-      el('dash-journal-tabs', root).querySelectorAll('[data-jtab]').forEach((btn) => {
-        btn.onclick = () => {
-          el('dash-journal-tabs', root).querySelectorAll('.journal-tab').forEach((b) => b.classList.remove('active'));
-          btn.classList.add('active');
-          global._dashJournalFilter = btn.dataset.jtab;
-          render(root, engines);
-        };
-      });
-    }
-    const filter = global._dashJournalFilter || 'all';
+    // Journal filter tabs (All / per-bot) were removed — the Trade Journal
+    // now always shows every bot's trades merged together, most recent
+    // first, exactly like the "All" tab used to.
+    const filter = 'all';
     // Merge live session entries with Deriv historical entries
     const derivHistory = (global.HubStore.getDerivHistory ? global.HubStore.getDerivHistory() : []);
     let allWithHistory = [...allEntries];
@@ -20529,7 +20657,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         botIds.forEach((id) => {
           const eng = engines[id];
           if (!eng) return;
-          eng.clearStats && eng.clearStats();
+          if (eng.clearStats) {
+            // Titan-class bots (Even, Odd, Over, Under, MR variants, etc.)
+            eng.clearStats();
+          } else if (eng.dispatch) {
+            // Hot Repeat (and Differ) are Redux-style stores with no
+            // clearStats() method at all — `eng.clearStats && eng.clearStats()`
+            // was silently skipping them, which is why CLEAR STATS visibly
+            // cleared every other bot but left Hot Repeat's journal/stats
+            // untouched. RESET_JOURNAL is their own reducer action that does
+            // the same job (wipes journal, win/loss counts, and profit).
+            eng.dispatch({ type: 'RESET_JOURNAL' });
+          }
         });
         render(root, engines);
       });
@@ -20541,7 +20680,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (resetEquityBtn && !resetEquityBtn._bound) {
       resetEquityBtn._bound = true;
       resetEquityBtn.addEventListener('click', () => {
-        if (!confirm('Reset the equity curve?\n\nThis only clears the chart history — trade stats and journal entries are kept.')) return;
+        if (!confirm('Reset the equity curve?\n\nThis only clears the chart history — trade stats, journal entries, and your Best Times are all kept.')) return;
         EquityStore.reset();
         const equityWrap = el('dash-equity-wrap', root);
         if (equityWrap) equityWrap._eqChartData = [];
@@ -23947,6 +24086,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           break;
         }
         case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; break;
+        case 'RESET_PNL_ONLY': s.totalProfit = 0; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'NOTIFY': {
           const id = Date.now().toString() + Math.random().toString(36).slice(2, 6);
@@ -25702,15 +25842,58 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
   }
 
-  // Reset gate latch when all engines are stopped (allows re-arm after fixing)
-  function maybeResetGateLatch() {
-    if (!_gateTriggered) return;
-    const anyOn = BOT_IDS.some((id) => {
+  // Reset gate latch — MANUAL ONLY. This used to auto-clear itself the
+  // moment every engine was off, which is exactly what terminateAllEngines()
+  // just did on the very same tick — so on the *next* 3s interval tick,
+  // checkPnlGate() saw the same still-over-target P&L, fired all over again,
+  // terminated everything again, un-latched again... forever. That loop was
+  // the cause of the TP/SL popup repeatedly reappearing/"flickering" and
+  // engines re-terminating every few seconds. Now the latch only clears when
+  // the operator does something about it — pressing ENGAGE ALL, or the
+  // result popup's Reload button — never just because engines went idle.
+  function maybeResetGateLatch() { /* intentionally inert — kept so the interval call site below doesn't need touching */ }
+  function resetPnlGateLatch() { _gateTriggered = false; }
+  window.resetPnlGateLatch = resetPnlGateLatch;
+
+  // "Keep trading" reload — called from the result popup's Reload button.
+  // Zeroes out ONLY the running P&L figure the gate measures for every bot
+  // (never the journal/trade history, never win/loss counts elsewhere),
+  // clears the gate latch, then re-engages every bot through the exact same
+  // path as pressing ENGAGE ALL — so a fresh session starts counting from
+  // zero immediately, with your journal fully intact.
+  function reloadGateAndKeepTrading() {
+    BOT_IDS.forEach((id) => {
       const eng = engines[id];
-      return eng && (id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
+      if (!eng) return;
+      if (id === 'differ' || id === 'hotrepeat') {
+        eng.dispatch && eng.dispatch({ type: 'RESET_PNL_ONLY' });
+      } else {
+        try {
+          eng.state = { ...eng.state, stats: { win: 0, loss: 0, profit: 0 } };
+          eng.emit && eng.emit();
+        } catch (_) {}
+      }
     });
-    if (!anyOn) _gateTriggered = false;
+    resetPnlGateLatch();
+    const engagedCount = BOT_IDS.filter((id) => {
+      const eng = engines[id];
+      if (!eng) return false;
+      return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+    }).length;
+    const masterBtn = document.getElementById('dash-master-toggle');
+    if (engagedCount < BOT_IDS.length && masterBtn) masterBtn.click();
+    queueDashboardRender();
+    const toast = document.getElementById('global-error-toast');
+    if (toast) {
+      toast.textContent = '🔄 Session P&L reset — trading resumed, journal kept.';
+      toast.style.background = 'hsl(var(--win)/0.15)';
+      toast.style.borderColor = 'hsl(var(--win)/0.5)';
+      toast.style.color = 'hsl(var(--win))';
+      toast.classList.add('show');
+      setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 4000);
+    }
   }
+  window.reloadGateAndKeepTrading = reloadGateAndKeepTrading;
   // ── END P&L GATE ─────────────────────────────────────────────────────────
 
   function applyMasterTpSlToAllEngines() {
@@ -25743,7 +25926,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
       }).length;
       const turnOn = engagedCount < BOT_IDS.length;
-      if (turnOn) applyMasterTpSlToAllEngines();
+      if (turnOn) { applyMasterTpSlToAllEngines(); resetPnlGateLatch(); }
       BOT_IDS.forEach((id) => {
         const eng = ensureTitanOrDifferForControl(id);
         if (!eng) return;
@@ -25779,8 +25962,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
         } else {
-          // Consider an engine "on" only if actively running or locked (in the middle of a chain).
-          // Cooldown is treated as stopped so that master ENGAGE will clear cooldowns and restart fresh.
+          // Consider an engine "on" for the ENGAGE decision only if actively
+          // running or locked — cooldown is treated as stopped there so
+          // ENGAGE ALL clears cooldowns and restarts fresh.
           const isOn = eng.state.active || eng.state.isLocked;
           if (turnOn) {
             // If engine is in cooldown, clear it and reset martingale state before starting
@@ -25796,7 +25980,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
             if (!isOn) eng.toggleEngine();
           } else {
-            if (isOn) {
+            // TERMINATE must ALSO catch engines that are merely cooling down
+            // between runs, not just ones actively trading. isOn above
+            // deliberately excludes cooldown (that's correct for the ENGAGE
+            // decision), but reusing it here meant a bot sitting in its
+            // between-runs cooldown was silently skipped entirely — it kept
+            // its cooldown timer running and quietly resumed trading once
+            // that timer finished, even though you'd just hit Terminate.
+            // That was the whole "Terminate doesn't terminate" bug.
+            if (isOn || eng.state.isCooldown) {
               if (eng.state.isCooldown) {
                 try {
                   if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
@@ -25943,17 +26135,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function populateStakePopup() {
     const list = document.getElementById('dash-stake-list');
     if (!list) return;
+    let total = 0;
     list.innerHTML = STAKE_IDS.map((id, i) => {
       const eng = getStakeEngine(id);
       const val = getStakeValue(eng, id);
+      if (typeof val === 'number' && !isNaN(val)) total += val;
       const meta = window.BOT_META && window.BOT_META[id] || { label: id, dot: 'hsl(var(--muted-foreground))' };
+      const initial = (meta.label || id).trim().charAt(0).toUpperCase();
       return `<div class="dash-stake-row" style="animation:dash-stake-pop-in .22s ease ${i * 0.02}s both">
-        <span class="bot-card-dot" style="background:${meta.dot};flex-shrink:0"></span>
-        <span style="flex:1;font-size:10.5px;font-family:'DM Mono',monospace;color:hsl(var(--foreground)/0.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${meta.label}</span>
-        <span style="font-size:10px;color:hsl(var(--muted-foreground)/0.6);font-family:'DM Mono',monospace">$</span>
+        <span class="dash-stake-row-icon" style="--dsr-color:${meta.dot}">${initial}</span>
+        <span class="dash-stake-row-label">${meta.label}</span>
+        <span class="dash-stake-dollar">$</span>
         <input type="number" min="0.35" step="0.01" data-stake-id="${id}" value="${val != null ? val : ''}" placeholder="—" class="dash-stake-input">
       </div>`;
     }).join('');
+    const totalEl = document.getElementById('dash-stake-total-value');
+    if (totalEl) totalEl.textContent = `$${total.toFixed(2)}`;
   }
 
   // Delegated on `document` (not bound to the panel's own elements) because
@@ -26006,6 +26203,20 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (e.target.closest('#dash-stake-popup')) return;
       // Click anywhere else on the page — close the popup if it's open.
       popup.classList.remove('open');
+    });
+    // Live-recalculate the total exposure strip as the user edits any stake
+    // field, so it always reflects what's currently typed, not the last save.
+    document.addEventListener('input', (e) => {
+      if (!e.target.matches('#dash-stake-popup [data-stake-id]')) return;
+      const popup = document.getElementById('dash-stake-popup');
+      if (!popup) return;
+      let total = 0;
+      popup.querySelectorAll('[data-stake-id]').forEach((input) => {
+        const v = parseFloat(input.value);
+        if (!isNaN(v)) total += v;
+      });
+      const totalEl = document.getElementById('dash-stake-total-value');
+      if (totalEl) totalEl.textContent = `$${total.toFixed(2)}`;
     });
   }
 
