@@ -522,6 +522,11 @@
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 8.4-7 9-4-.6-7-4.6-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg></span>
           <span class="hub-tab-label">Fair Bot</span>
         </button>
+        <button type="button" class="hub-tab" data-app="market" data-label="Market Intel" title="Market Intel Terminal — cross-bot market scoring matrix and rotation log">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg></span>
+          <span class="hub-tab-label">Market Intel</span>
+          <span class="dot live" id="market-tab-dot" style="display:none"></span>
+        </button>
         <div class="hub-nav-label">Mean Reversion</div>
         <button type="button" class="hub-tab" data-app="risemr" data-label="Rise MR" title="Rise (Mean Reversion) — HIGHER-only ADX/Bollinger/RSI/Stochastic/ATR offset-barrier bot, split from Rise &amp; Fall MR">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l7-10 5 6 4-9"/><path d="M14 5h6v6"/></svg></span>
@@ -627,6 +632,10 @@
 
     <section id="panel-fairbot" class="app-panel" aria-label="Fair Bot — provably fair round verifier">
       <div id="fairbot-root" class="app-root"></div>
+    </section>
+
+    <section id="panel-market" class="app-panel" aria-label="Market Intel Terminal">
+      <div id="market-root" class="app-root"></div>
     </section>
 
     <section id="panel-risemr" class="app-panel" aria-label="Rise Mean Reversion dashboard">
@@ -9397,6 +9406,312 @@ window.EvenTrading = exports;
   }
 
   window.EvenSocket = { globalSocket: new GlobalSocketManager() };
+})();
+
+// ═══════════════════════════════════════════════════════════════════════
+// MARKET INTELLIGENCE TERMINAL — 4-layer shared market analysis
+// ═══════════════════════════════════════════════════════════════════════
+// LAYER 1 (tick bus): rides on window.EvenSocket.globalSocket's EXISTING
+// connection/subscriptions rather than opening a new one — that socket is
+// already kept subscribed to all 10 markets in the background by
+// EvenScanner (see createMarketScanner below), so subscribing here just
+// adds a second callback per symbol, zero new WebSocket traffic. We keep
+// our own small timestamped ring buffer per symbol (EvenSocket's own
+// tickHistory is digit-only, no timestamps, so it can't drive velocity).
+//
+// LAYER 2 (micro metrics): exponentially-decayed lookback — last 15 ticks
+// carry 60% of the weight, next 20 carry 30%, next 15 carry 10%, anything
+// older is dropped. A hot bias that died 5 ticks ago disappears from the
+// score almost immediately instead of lingering for minutes.
+//
+// LAYER 3 (fitness registry): each bot TYPE registers its own definition
+// of "good market for me" — the Terminal doesn't invent one universal
+// score, it runs every registered bot's own criteria against every
+// market, live. See registerFitness() below. Only 'hotrepeat' and the
+// even/odd/over/under family have real fitness functions right now
+// (parityFitness, shared as a starting point across that family) — the
+// remaining bot IDs fall back to parityFitness until each gets its own.
+//
+// LAYER 4 (orchestration): cross-bot exposure guard (no more than
+// MAX_BOTS_PER_MARKET bots parked on one symbol at once), a hysteresis
+// buffer so a bot won't jump for a marginal improvement, a minimum
+// residency so it can't whipsaw every few ticks, and a realized win/loss
+// feedback loop so an actual losing streak on a market outweighs what the
+// statistics alone say about it.
+//
+// MASTER SWITCH: everything above only ever produces RECOMMENDATIONS.
+// getRecommendation() returns null whenever the Terminal is OFF
+// (isActive() === false), and every call site (Hot Repeat's arm/rotation/
+// live-recheck logic, and any future bot wired the same way) is written
+// to fall straight back to its own original, pre-Terminal logic when it
+// gets null back. Turning the Terminal off is not a "pause" that leaves
+// bots stranded — it's a full handoff back to each bot's own picker, with
+// zero difference in behavior from before the Terminal existed.
+window.MarketIntelTerminal = (function () {
+  'use strict';
+  const MARKETS = [
+    { value: '1HZ10V', label: 'V10 (1s)', is1s: true }, { value: 'R_10', label: 'V10' },
+    { value: '1HZ25V', label: 'V25 (1s)', is1s: true }, { value: 'R_25', label: 'V25' },
+    { value: '1HZ50V', label: 'V50 (1s)', is1s: true }, { value: 'R_50', label: 'V50' },
+    { value: '1HZ75V', label: 'V75 (1s)', is1s: true }, { value: 'R_75', label: 'V75' },
+    { value: '1HZ100V', label: 'V100 (1s)', is1s: true }, { value: 'R_100', label: 'V100' },
+  ];
+  const BUFFER_MAX = 60;         // enough for the 50-tick decay window + margin
+  const MAX_BOTS_PER_MARKET = 2; // exposure guard
+  const HYSTERESIS = 0.15;       // alternative must beat current by 15% to trigger a switch
+  const MIN_RESIDENCY_TICKS = 30;
+  const PENALTY_PER_LOSS = 15;
+  const PENALTY_CAP = 40;
+  const PENALTY_DECAY_PER_WIN = 20;
+  const ROTATION_LOG_MAX = 100;
+
+  const tickBuffers = new Map();   // symbol -> [{digit, ts}, ...]
+  const fitnessFns = new Map();    // botType -> (metrics, symbol, opts) => {score, reasons}
+  const allocations = new Map();   // symbol -> Set(botId)
+  const residency = new Map();     // botId -> { symbol, sinceTs }
+  const penalties = new Map();     // `${botId}|${symbol}` -> number
+  const rotationLog = [];
+  const listeners = new Set();
+  let subscribed = false;
+
+  let active = false;
+  try { active = localStorage.getItem('mit_active') === '1'; } catch (e) {}
+
+  function notify() { listeners.forEach((cb) => { try { cb(); } catch (e) {} }); }
+  function onUpdate(cb) { listeners.add(cb); return () => listeners.delete(cb); }
+
+  function ensureSubscribed() {
+    if (subscribed) return;
+    const gs = window.EvenSocket && window.EvenSocket.globalSocket;
+    if (!gs) return;
+    subscribed = true;
+    MARKETS.forEach((m) => {
+      gs.subscribe(m.value, (tickData) => {
+        let buf = tickBuffers.get(m.value);
+        if (!buf) { buf = []; tickBuffers.set(m.value, buf); }
+        buf.push({ digit: tickData.digit, ts: tickData.timestamp || Date.now() });
+        if (buf.length > BUFFER_MAX) buf.shift();
+      });
+    });
+  }
+
+  // ── LAYER 2: micro-lookback metric engine ──────────────────────────
+  function weightFor(idxFromEnd) {
+    if (idxFromEnd < 15) return 0.60 / 15;
+    if (idxFromEnd < 35) return 0.30 / 20;
+    if (idxFromEnd < 50) return 0.10 / 15;
+    return 0;
+  }
+
+  function computeMicroMetrics(symbol) {
+    const buf = tickBuffers.get(symbol) || [];
+    const n = buf.length;
+    if (n < 15) return { ready: false, symbol, ticks: n };
+    const digits = buf.map((t) => t.digit);
+    const weighted = new Array(10).fill(0);
+    let totalWeight = 0;
+    for (let i = 0; i < n; i++) {
+      const w = weightFor(n - 1 - i);
+      if (w <= 0) continue;
+      weighted[digits[i]] += w;
+      totalWeight += w;
+    }
+    const weightedPct = weighted.map((w) => (totalWeight > 0 ? (w / totalWeight) * 100 : 10));
+    // Shared σ-based hot/cold classifier (see the earlier fixed-15%/8%
+    // discussion) — relative to observed spread, not an absolute cutoff.
+    const mean = 10;
+    const variance = weightedPct.reduce((a, p) => a + (p - mean) ** 2, 0) / 10;
+    const sigma = Math.sqrt(variance);
+    const hotDigits = weightedPct.map((p, d) => ({ digit: d, pct: p })).filter((x) => x.pct > mean + 1.5 * sigma).map((x) => x.digit);
+    const coldDigits = weightedPct.map((p, d) => ({ digit: d, pct: p })).filter((x) => x.pct < mean - 1.5 * sigma).map((x) => x.digit);
+    // Entropy — 100 = digits landing uniformly random, 0 = fully clustered.
+    const probs = weightedPct.map((p) => p / 100).filter((p) => p > 0);
+    const entropyRaw = -probs.reduce((a, p) => a + p * Math.log2(p), 0);
+    const entropyScore = Math.round((entropyRaw / Math.log2(10)) * 100);
+    // Velocity — average ms between the last up-to-20 ticks; a sudden
+    // speed-up can distort what the digit distribution "means" right now.
+    const recent = buf.slice(-20);
+    let avgGapMs = null, velocitySpike = false;
+    if (recent.length >= 5) {
+      let gaps = [];
+      for (let i = 1; i < recent.length; i++) gaps.push(recent[i].ts - recent[i - 1].ts);
+      gaps = gaps.filter((g) => g > 0 && g < 30000); // drop reconnect gaps
+      if (gaps.length >= 3) {
+        avgGapMs = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+        const older = gaps.slice(0, Math.floor(gaps.length / 2));
+        const newer = gaps.slice(Math.floor(gaps.length / 2));
+        const olderAvg = older.reduce((a, b) => a + b, 0) / (older.length || 1);
+        const newerAvg = newer.reduce((a, b) => a + b, 0) / (newer.length || 1);
+        velocitySpike = olderAvg > 0 && newerAvg < olderAvg * 0.5;
+      }
+    }
+    // Micro-streak health — same idea as Hot Repeat's own streak checks,
+    // generalized here so any bot's fitness fn can read it.
+    const last = digits[n - 1];
+    let trailing = 1;
+    for (let i = n - 2; i >= 0 && digits[i] === last; i--) trailing++;
+    let longest = 1, cur = 1;
+    for (let i = 1; i < n; i++) { cur = digits[i] === digits[i - 1] ? cur + 1 : 1; if (cur > longest) longest = cur; }
+    const streakHealth = Math.max(0, 100 - (Math.max(trailing, longest) - 1) * 20);
+    // Transition map — P(next digit | current digit), purely descriptive.
+    const transCounts = new Array(10).fill(0);
+    let transN = 0;
+    for (let i = 0; i < n - 1; i++) { if (digits[i] === last) { transCounts[digits[i + 1]]++; transN++; } }
+    const transitionProbs = transN > 0 ? transCounts.map((c) => Math.round((c / transN) * 100)) : null;
+    return {
+      ready: true, symbol, ticks: n, weightedPct, hotDigits, coldDigits, sigma: Math.round(sigma * 10) / 10,
+      entropyScore, avgGapMs: avgGapMs != null ? Math.round(avgGapMs) : null, velocitySpike,
+      trailingStreak: trailing, longestStreak: longest, streakHealth: Math.round(streakHealth),
+      lastDigit: last, transitionProbs, lastUpdate: buf[n - 1].ts,
+    };
+  }
+
+  // ── LAYER 3: bot-specific fitness evaluators ───────────────────────
+  function registerFitness(botType, fn) { fitnessFns.set(botType, fn); }
+
+  // Hot Repeat: wants a market NOT currently mid-streak (avoid entering on
+  // an already-exhausted run) and mildly favors lower entropy (more
+  // clustering-prone markets are the better long-run hunting ground for a
+  // repeat-trigger, same reasoning hrPickNextMarket originally used via
+  // classifyRegime's TRENDING/CHOPPY split — this is a finer-grained,
+  // continuous version of the same idea).
+  function hotRepeatFitness(m) {
+    if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
+    let score = 50 + (m.streakHealth - 50) * 0.4 + (50 - m.entropyScore) * 0.2;
+    const reasons = [`streak health ${m.streakHealth}`, `entropy ${m.entropyScore}`];
+    if (m.trailingStreak >= 3) { score -= 15; reasons.push(`already on a ${m.trailingStreak}-streak`); }
+    if (m.velocitySpike) { score -= 10; reasons.push('tick velocity spike'); }
+    return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
+  }
+
+  // Even/Odd/Over/Under family — placeholder shared default until each
+  // gets its own fitness fn wired to its real gate logic (hot/cold %,
+  // parity shape, etc.). Favors higher entropy (more room for a parity
+  // gate to trigger) and a clear hot/cold structure, penalizes velocity
+  // spikes the same way.
+  function parityFitness(m) {
+    if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
+    let score = 50 + (m.entropyScore - 50) * 0.3 + Math.min(20, (m.hotDigits.length + m.coldDigits.length) * 4);
+    const reasons = [`entropy ${m.entropyScore}`, `${m.hotDigits.length} hot / ${m.coldDigits.length} cold digits`];
+    if (m.velocitySpike) { score -= 10; reasons.push('tick velocity spike'); }
+    return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
+  }
+
+  registerFitness('hotrepeat', hotRepeatFitness);
+  ['even', 'odd', 'nexus', 'under', 'oldeven', 'oldodd'].forEach((id) => registerFitness(id, parityFitness));
+
+  function evaluate(botType, botId) {
+    return MARKETS.map((m) => {
+      const metrics = computeMicroMetrics(m.value);
+      const fn = fitnessFns.get(botType) || parityFitness;
+      const { score, reasons } = fn(metrics, m.value, {});
+      const penalty = penalties.get(`${botId}|${m.value}`) || 0;
+      const finalScore = Math.max(0, Math.min(100, score - penalty));
+      const occupants = allocations.get(m.value);
+      return {
+        symbol: m.value, label: m.label, is1s: m.is1s, score: finalScore, rawScore: score, penalty, reasons,
+        metrics, occupantCount: occupants ? occupants.size : 0,
+        stale: metrics.ready ? (Date.now() - metrics.lastUpdate > 8000) : true,
+      };
+    }).sort((a, b) => b.score - a.score);
+  }
+
+  // ── LAYER 4: orchestration ──────────────────────────────────────────
+  function recordOutcome(botId, symbol, isWin) {
+    const key = `${botId}|${symbol}`;
+    const cur = penalties.get(key) || 0;
+    penalties.set(key, isWin ? Math.max(0, cur - PENALTY_DECAY_PER_WIN) : Math.min(PENALTY_CAP, cur + PENALTY_PER_LOSS));
+  }
+
+  function claim(botId, symbol) {
+    allocations.forEach((set) => set.delete(botId));
+    if (!allocations.has(symbol)) allocations.set(symbol, new Set());
+    allocations.get(symbol).add(botId);
+    residency.set(botId, { symbol, sinceTs: Date.now(), sinceTick: 0 });
+  }
+
+  function logRotation(botId, from, to, reason) {
+    rotationLog.unshift({ ts: Date.now(), botId, from, to, reason });
+    if (rotationLog.length > ROTATION_LOG_MAX) rotationLog.length = ROTATION_LOG_MAX;
+  }
+
+  // getRecommendation() — the only entry point bots call. Returns null
+  // whenever the Terminal is off, OR whenever it's on but has nothing
+  // useful to say yet (not enough tick history) — both cases mean "use
+  // your own logic," by design.
+  function getRecommendation(botId, botType, currentSymbol, opts) {
+    opts = opts || {};
+    if (!active) return null;
+    ensureSubscribed();
+    const ranked = evaluate(botType, botId).filter((r) => !r.is1s || opts.allow1s);
+    if (!ranked.length || !ranked[0].metrics.ready) return null;
+
+    const res = residency.get(botId);
+    const tooSoon = !opts.force && res && res.symbol === currentSymbol && (Date.now() - res.sinceTs) < 1000; // debounce
+    const currentEntry = ranked.find((r) => r.symbol === currentSymbol);
+    const currentScore = currentEntry ? currentEntry.score : 0;
+
+    // Exposure guard — deprioritize markets already hosting
+    // MAX_BOTS_PER_MARKET OTHER bots (this bot's own current market never
+    // counts against itself).
+    const candidates = ranked.filter((r) => {
+      const occupants = allocations.get(r.symbol);
+      const hostedByOthers = occupants ? [...occupants].filter((id) => id !== botId).length : 0;
+      return r.symbol === currentSymbol || hostedByOthers < MAX_BOTS_PER_MARKET;
+    });
+    const best = candidates[0] || ranked[0];
+
+    if (best.symbol === currentSymbol) { claim(botId, currentSymbol); return { symbol: currentSymbol, label: best.label, score: best.score, reasons: best.reasons, switched: false }; }
+
+    // Minimum residency — won't move a bot off a market it just settled
+    // into unless this is a forced rotation (e.g. the loss-streak breaker).
+    if (!opts.force && res && res.symbol === currentSymbol && (opts.ticksResident || 0) < MIN_RESIDENCY_TICKS) {
+      return { symbol: currentSymbol, label: currentEntry ? currentEntry.label : currentSymbol, score: currentScore, reasons: ['holding — minimum residency not yet met'], switched: false };
+    }
+
+    // Hysteresis — the alternative must beat the current market by a
+    // real margin, not a rounding difference, or a forced rotation.
+    if (!opts.force && currentEntry && best.score < currentScore * (1 + HYSTERESIS)) {
+      return { symbol: currentSymbol, label: currentEntry.label, score: currentScore, reasons: ['holding — no alternative clears the switch threshold'], switched: false };
+    }
+
+    if (tooSoon) return { symbol: currentSymbol, label: currentEntry ? currentEntry.label : currentSymbol, score: currentScore, reasons: ['holding'], switched: false };
+
+    claim(botId, best.symbol);
+    logRotation(botId, currentSymbol, best.symbol, opts.force ? (opts.reason || 'forced') : 'fitness switch');
+    notify();
+    return { symbol: best.symbol, label: best.label, score: best.score, reasons: best.reasons, switched: true };
+  }
+
+  function isActive() { return active; }
+  function setActive(v) {
+    active = !!v;
+    try { localStorage.setItem('mit_active', active ? '1' : '0'); } catch (e) {}
+    if (active) ensureSubscribed();
+    notify();
+  }
+
+  function getMatrix(botTypes) {
+    ensureSubscribed();
+    const types = botTypes && botTypes.length ? botTypes : [...fitnessFns.keys()];
+    return types.map((botType) => ({ botType, ranked: evaluate(botType, `__preview_${botType}`) }));
+  }
+
+  function getRotationLog() { return rotationLog.slice(0, 30); }
+
+  // Exposed for the console UI's live digit strip — read-only, most-recent
+  // `n` ticks for a market (oldest first), same buffer the fitness engine
+  // itself reads from.
+  function getRecentDigits(symbol, n) {
+    ensureSubscribed();
+    const buf = tickBuffers.get(symbol) || [];
+    return n ? buf.slice(-n) : buf.slice();
+  }
+
+  return {
+    isActive, setActive, registerFitness, getRecommendation, recordOutcome,
+    getMatrix, getRotationLog, getRecentDigits, computeMicroMetrics, onUpdate, MARKETS,
+  };
 })();
 
 (function () {
@@ -23935,6 +24250,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     return { ...best, _forcedSwitch: best.symbol !== currentSymbol };
   }
 
+  // ── Terminal adapter ─────────────────────────────────────────────────
+  // Every rotation decision goes through here instead of calling
+  // hrPickNextMarket directly. When the Market Intel Terminal is OFF
+  // (the common case, and the default) window.MarketIntelTerminal.
+  // getRecommendation() returns null immediately and this falls straight
+  // through to Hot Repeat's own original hrPickNextMarket — byte-for-byte
+  // the same behavior as before the Terminal existed. When it's ON, the
+  // Terminal's cross-bot exposure guard, hysteresis, and residency rules
+  // apply on top of (not instead of) Hot Repeat's own streak/regime logic
+  // — hotRepeatFitness inside the Terminal is a continuous version of the
+  // exact same reasoning hrPickNextMarket uses.
+  function hrPickNextMarketViaTerminal(currentSymbol, opts) {
+    const mit = window.MarketIntelTerminal;
+    if (mit && mit.isActive()) {
+      const rec = mit.getRecommendation('hotrepeat', 'hotrepeat', currentSymbol, opts || {});
+      if (rec) {
+        const meta = HR_MARKETS.find((m) => m.value === rec.symbol);
+        return { symbol: rec.symbol, label: (meta && meta.label) || rec.label, score: rec.score,
+          isStreaky: false, _forcedSwitch: rec.switched, _viaTerminal: true, reasons: rec.reasons };
+      }
+    }
+    return hrPickNextMarket(currentSymbol);
+  }
+
   class HotRepeatEngine {
     constructor() {
       this.onUpdate = null;
@@ -23948,6 +24287,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this._pendingBuyReqIds = new Set();
       this._eligibleFromTick = 0;
       this._toFire = null;
+      // Set by the loss-streak breaker (see ADD_JOURNAL/_handleTradingMessage)
+      // to force the NEXT rotation off the current market even if its
+      // streak/health score still looks fine — a run of real losses is a
+      // signal hrPickNextMarket's digit-streak scoring alone can't see.
+      this._forceRotateNext = false;
       this.state = this.loadInitialState();
       ['armSystem', 'disarmSystem', 'abortTrades', 'authenticate', 'connectAnalysis'].forEach((m) => { this[m] = this[m].bind(this); });
       this.connectAnalysis();
@@ -23996,6 +24340,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         autoMode: bool(saved.autoMode, true),
         takeProfit: Math.max(0, num(saved.takeProfit, 20)), stopLoss: Math.max(0, num(saved.stopLoss, 15)),
         abortOnLoss: bool(saved.abortOnLoss, false),
+        // Auto market selection — reuses hrPickNextMarket (avoid-1s,
+        // avoid-streaky, prefer-HEALTHY scoring) at the moments that
+        // actually matter: the instant you hit Arm (so you never start on
+        // a stale/manual pick) and once mid-watch if the market visibly
+        // degrades before any trade has fired. Previously this scoring
+        // only ever ran between sessions, after a trade had already
+        // completed a full cooldown.
+        autoSelectMarket: bool(saved.autoSelectMarket, true),
+        // Consecutive-LOSS circuit breaker — distinct from abortOnLoss
+        // (which reacts to any single loss). This tracks a run of losses
+        // in a row and, once it hits lossStreakLimit, forces a real rest
+        // + a forced market rotation on the next arm, rather than letting
+        // the bot keep re-firing the same repeat pattern on a market
+        // that's currently cold for it.
+        lossStreakLimit: Math.min(9, Math.max(2, int(saved.lossStreakLimit, 3))),
+        consecutiveLosses: 0,
         journal: [], totalWins: 0, totalLoss: 0, totalProfit: 0,
         notifications: [], connectionStatus: 'disconnected', plHistory: [],
       };
@@ -24009,6 +24369,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           clusterCap: s.clusterCap, filtersActive: s.filtersActive, autoMode: s.autoMode,
           takeProfit: s.takeProfit, stopLoss: s.stopLoss, abortOnLoss: s.abortOnLoss,
           minStreak: s.minStreak, batchSize: s.batchSize, speed: s.speed,
+          autoSelectMarket: s.autoSelectMarket, lossStreakLimit: s.lossStreakLimit,
         }));
       } catch (e) {}
     }
@@ -24056,6 +24417,34 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           }
           s.isCooldown = this.tickIndex < this._eligibleFromTick && !s.armToFireOnNextTick;
           s.cooldownRemaining = Math.max(0, this._eligibleFromTick - this.tickIndex);
+          // LIVE HEALTH RE-CHECK — hrPickNextMarket previously only ever
+          // re-ran between sessions, so a market that was calm when Arm
+          // was hit but turns streaky 40 ticks later just kept getting
+          // watched until a trade eventually fired and lost. This re-runs
+          // the same scoring every 40 ticks while armed-and-idle (never
+          // mid-fire, never mid-cooldown, both already excluded above) and
+          // rotates immediately if the CURRENT market itself is now
+          // streaky — not swapping just because a fractionally-better
+          // option exists elsewhere, only when this one has gone bad.
+          if (s.autoSelectMarket && s.isArmed && !s.armToFireOnNextTick && !s.isSessionCooldown
+              && this.tickIndex % 40 === 0) {
+            const check = hrPickNextMarketViaTerminal(s.primaryMarket, { ticksResident: this.tickIndex - (this._eligibleFromTick || 0) });
+            const gs = window.EvenSocket && window.EvenSocket.globalSocket;
+            const ownStreak = gs ? Math.max(hrTrailingStreak(gs.getHistory(s.primaryMarket) || []), hrLongestStreak(gs.getHistory(s.primaryMarket) || [])) : 0;
+            if (check && ownStreak >= HR_STREAK_LIMIT && check.symbol !== s.primaryMarket) {
+              const prevSymbol = s.primaryMarket;
+              s.primaryMarket = check.symbol; s.history = []; s.armToFireOnNextTick = false; s.fireBarrier = null;
+              this._eligibleFromTick = this.tickIndex + 1;
+              // Pushed directly (not via this.dispatch) since we're already
+              // inside a dispatch call for TICK — avoids re-entrant dispatch.
+              const id = Date.now().toString() + Math.random().toString(36).slice(2, 6);
+              s.notifications = [...s.notifications, { id, message: `🔀 Live rotate: ${prevSymbol} → ${check.label || check.symbol} (turned streaky mid-watch)`, type: 'info', time: new Date().toLocaleTimeString() }].slice(-50);
+              // connectAnalysis() opens a fresh socket subscribed to the
+              // new market; deferred a tick so we don't close the socket
+              // we're currently inside the onmessage handler of.
+              setTimeout(() => this.connectAnalysis(), 0);
+            }
+          }
           break;
         }
         case 'SET_STAKE': s.stake = action.value; break;
@@ -24076,6 +24465,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         case 'SET_TP': s.takeProfit = action.value; break;
         case 'SET_SL': s.stopLoss = action.value; break;
         case 'TOGGLE_ABORT_ON_LOSS': s.abortOnLoss = !s.abortOnLoss; break;
+        case 'TOGGLE_AUTO_SELECT_MARKET': s.autoSelectMarket = !s.autoSelectMarket; break;
+        case 'SET_LOSS_STREAK_LIMIT': s.lossStreakLimit = Math.min(9, Math.max(2, action.value)); break;
         case 'ADD_JOURNAL': {
           const entry = action.entry;
           const isWin = entry.type === 'win';
@@ -24083,9 +24474,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           s.journal = [entry, ...s.journal].slice(0, 500);
           s.totalWins += isWin ? 1 : 0; s.totalLoss += isWin ? 0 : 1;
           s.plHistory = [...s.plHistory, { time: entry.time, profit: entry.profit, cumulative: s.totalProfit }].slice(-200);
+          // Consecutive-loss circuit breaker (see lossStreakLimit above) —
+          // any win resets the streak; a loss extends it. The breaker
+          // itself fires from _handleTradingMessage right after this
+          // dispatch, once totalLoss/totalWins bookkeeping is settled.
+          s.consecutiveLosses = isWin ? 0 : s.consecutiveLosses + 1;
           break;
         }
-        case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; break;
+        case 'RESET_JOURNAL': s.journal = []; s.totalWins = 0; s.totalLoss = 0; s.totalProfit = 0; s.plHistory = []; s.consecutiveLosses = 0; break;
         case 'RESET_PNL_ONLY': s.totalProfit = 0; break;
         case 'UPDATE_BALANCE': if (!isNaN(action.balance)) s.balanceUSD = action.balance; break;
         case 'NOTIFY': {
@@ -24168,13 +24564,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           // Rotate onto a new market every session cooldown — never onto a
           // 1s market, and steered away from whichever market is currently
           // showing a repeat streak. See hrPickNextMarket above.
-          const next = hrPickNextMarket(this.state.primaryMarket);
-          if (next && next._forcedSwitch) {
-            this.dispatch({ type: 'SET_MARKET', market: next.symbol });
-            this.connectAnalysis();
-            const streakNote = next.isStreaky ? ` (still its calmest healthy option — every market's a bit streaky right now)` : '';
-            this.dispatch({ type: 'NOTIFY', message: `🔀 Rotated to ${next.label || next.symbol}${streakNote}`, ntype: 'info' });
+          const next = hrPickNextMarketViaTerminal(this.state.primaryMarket, { force: this._forceRotateNext, reason: this._forceRotateNext ? 'loss-streak breaker' : undefined });
+          const mustRotate = this._forceRotateNext;
+          if (next && (next._forcedSwitch || mustRotate)) {
+            // On a forced rotation (loss-streak breaker), don't fall back
+            // onto the same symbol just because it scored best of the
+            // "-currentSymbol" pool coincidentally matching current — grab
+            // the top-scoring OTHER market explicitly.
+            const target = (mustRotate && next.symbol === this.state.primaryMarket) ? null : next;
+            if (target) {
+              this.dispatch({ type: 'SET_MARKET', market: target.symbol });
+              this.connectAnalysis();
+              const streakNote = target.isStreaky ? ` (still its calmest healthy option — every market's a bit streaky right now)` : '';
+              const causeNote = mustRotate ? ' after a losing streak' : '';
+              this.dispatch({ type: 'NOTIFY', message: `🔀 Rotated to ${target.label || target.symbol}${causeNote}${streakNote}`, ntype: 'info' });
+            }
           }
+          this._forceRotateNext = false;
+          this.state.consecutiveLosses = 0;
           this.dispatch({ type: 'SESSION_COOLDOWN_END' });
           if (this.state.isArmed) this.dispatch({ type: 'NOTIFY', message: '▶ Cooldown over — watching the stream again.', ntype: 'info' });
         } else {
@@ -24289,10 +24696,29 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                 _self.dispatch({ type: 'NOTIFY', message: tradeMsg, ntype: isWin ? 'win' : 'loss' });
                 const cs = _self.state;
                 window.HubStore.notifyTelegram(`${isWin ? '✅' : '❌'} ${tradeMsg}\n💰 Balance: ${(isNaN(balAfter) ? cs.balanceUSD : balAfter).toFixed(2)} | Net P/L: ${cs.totalProfit.toFixed(2)}`);
+                // Feed the Terminal's realized-performance layer regardless
+                // of whether it's currently active — so the moment someone
+                // flips it on, it already has real outcome history instead
+                // of starting cold.
+                if (window.MarketIntelTerminal) window.MarketIntelTerminal.recordOutcome('hotrepeat', cs.primaryMarket, isWin);
                 if (isWin) hrAudio.win();
                 else {
                   hrAudio.loss();
                   if (_self.state.abortOnLoss && _self.state.isArmed) { _self.abortFlag = true; hrAudio.abort(); _self.dispatch({ type: 'DISARM' }); _self.dispatch({ type: 'NOTIFY', message: '⛔ Disarmed — loss + Abort-on-loss active', ntype: 'loss' }); }
+                  // LOSS-STREAK BREAKER — independent of abortOnLoss above
+                  // (which only ever looks at the single most recent
+                  // trade). This looks at a RUN of losses. Hitting the
+                  // limit forces the market marked "next" as _forcedSwitch
+                  // regardless of health score, on the theory that
+                  // whatever's currently happening on this market/pattern
+                  // combo isn't working right now — plus a full session
+                  // cooldown, same rest either flow uses.
+                  else if (_self.state.consecutiveLosses >= _self.state.lossStreakLimit) {
+                    _self.dispatch({ type: 'NOTIFY', message: `🧯 ${_self.state.consecutiveLosses} losses in a row on ${_self.state.primaryMarket} — pausing and rotating markets.`, ntype: 'loss' });
+                    _self._forceRotateNext = true;
+                    if (_self.state.isArmed) { _self.abortFlag = true; _self.dispatch({ type: 'DISARM' }); }
+                    _self.startSessionCooldown();
+                  }
                 }
                 // TP/SL: enforced globally by the Dashboard's master P&L gate,
                 // same as Differ — not duplicated here.
@@ -24321,8 +24747,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (!window.HubStore.isBotEnabled('hotrepeat')) { this.dispatch({ type: 'NOTIFY', message: 'Hot Repeat bot is disabled — enable it from the Dashboard first', ntype: 'loss' }); return; }
       if (!s.isAuthenticated) { this.dispatch({ type: 'NOTIFY', message: 'Add your API token in Settings first', ntype: 'loss' }); return; }
       if (s.isSessionCooldown) { this.dispatch({ type: 'NOTIFY', message: `Still cooling down — ${Math.floor(s.sessionCooldownRemaining / 60)}m ${s.sessionCooldownRemaining % 60}s left.`, ntype: 'info' }); return; }
+      // Auto-select market ON ARM — previously hrPickNextMarket only ever
+      // ran between sessions (after a trade's own cooldown), so hitting
+      // Arm for the very first time — or after manually picking a market
+      // by hand — watched whatever was in the dropdown with zero analysis.
+      // This closes that gap: same avoid-1s / avoid-streaky / prefer-
+      // HEALTHY scoring, just also applied at the moment you actually
+      // start watching.
+      if (s.autoSelectMarket) {
+        const best = hrPickNextMarketViaTerminal(s.primaryMarket, { force: true, reason: 'arm' });
+        if (best && best.symbol !== s.primaryMarket) {
+          this.dispatch({ type: 'SET_MARKET', market: best.symbol });
+          this.connectAnalysis();
+          const streakNote = best.isStreaky ? ` (calmest option — every market's a bit streaky right now)` : '';
+          const viaNote = best._viaTerminal ? ' via Market Intel' : '';
+          this.dispatch({ type: 'NOTIFY', message: `🎯 Auto-selected ${best.label || best.symbol}${streakNote}${viaNote}`, ntype: 'info' });
+        }
+      }
       this.dispatch({ type: 'ARM' });
-      this.dispatch({ type: 'NOTIFY', message: `⚡ ARMED — watching for X→X on ${s.primaryMarket}`, ntype: 'info' });
+      this.dispatch({ type: 'NOTIFY', message: `⚡ ARMED — watching for X→X on ${this.state.primaryMarket}`, ntype: 'info' });
     }
 
     disarmSystem() {
@@ -24528,9 +24971,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="cp-input-group"><span class="cp-input-label">Take Profit</span><input class="cp-input" type="number" id="hotrepeat-tp" value="${s.takeProfit}" min="0"></div>
           <div class="cp-input-group"><span class="cp-input-label">Stop Loss</span><input class="cp-input" type="number" id="hotrepeat-sl" value="${s.stopLoss}" min="0"></div>
         </div>
-        <div class="cp-toggle-row" style="margin-bottom:0">
+        <div class="cp-toggle-row">
           <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Disarm after a loss</span>
           <button class="titan-toggle ${s.abortOnLoss ? 'on' : ''}" id="hotrepeat-abortonloss" onclick="event.stopPropagation()"></button>
+        </div>
+        <div class="cp-toggle-row">
+          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Auto-select market</span>
+          <button class="titan-toggle ${s.autoSelectMarket ? 'on' : ''}" id="hotrepeat-autoselect" onclick="event.stopPropagation()"></button>
+        </div>
+        <div class="cp-input-group" style="margin-bottom:0;${s.autoSelectMarket ? '' : 'opacity:.4'}">
+          <span class="cp-input-label">Loss-streak limit (rotate + rest)</span>
+          <input class="cp-input" type="number" id="hotrepeat-lossstreak" value="${s.lossStreakLimit}" min="2" max="9" ${s.autoSelectMarket ? '' : 'disabled'}>
+          <span style="font-size:8.5px;color:hsl(var(--muted-foreground))">On Arm and every ~40 ticks, picks the calmest of the 5 non-1s markets (avoids streaky ones, prefers HEALTHY). After this many LOSSES in a row it force-rotates + rests, independent of Disarm-after-a-loss above.</span>
         </div>
       </div>
       <button class="cp-engage-btn ${s.isArmed || s.isRunning ? 'active' : ''}" id="hotrepeat-engage" ${s.isSessionCooldown ? 'disabled' : ''}>
@@ -24691,6 +25143,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (slInp && !slInp._bound) { slInp._bound = true; slInp.onchange = () => eng.dispatch({ type: 'SET_SL', value: Math.max(0, parseFloat(slInp.value) || 0) }); }
     const abortBtn = el('hotrepeat-abortonloss', root);
     if (abortBtn && !abortBtn._bound) { abortBtn._bound = true; abortBtn.onclick = () => eng.dispatch({ type: 'TOGGLE_ABORT_ON_LOSS' }); }
+    const autoSelBtn = el('hotrepeat-autoselect', root);
+    if (autoSelBtn && !autoSelBtn._bound) { autoSelBtn._bound = true; autoSelBtn.onclick = () => eng.dispatch({ type: 'TOGGLE_AUTO_SELECT_MARKET' }); }
+    const lossStreakInp = el('hotrepeat-lossstreak', root);
+    if (lossStreakInp && !lossStreakInp._bound) { lossStreakInp._bound = true; lossStreakInp.onchange = () => eng.dispatch({ type: 'SET_LOSS_STREAK_LIMIT', value: parseInt(lossStreakInp.value, 10) || 3 }); }
     const engageBtn = el('hotrepeat-engage', root);
     if (engageBtn && !engageBtn._bound) {
       engageBtn._bound = true;
@@ -24720,6 +25176,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const speedEl = el('hotrepeat-speed');
     const tpEl    = el('hotrepeat-tp');
     const slEl    = el('hotrepeat-sl');
+    const lsEl    = el('hotrepeat-lossstreak');
     if (stakeEl) { const v = parseFloat(stakeEl.value); if (!isNaN(v)) eng.dispatch({ type: 'SET_STAKE', value: Math.max(0.35, v) }); }
     if (cdEl)    { const v = parseInt(cdEl.value, 10);  if (!isNaN(v)) eng.dispatch({ type: 'SET_COOLDOWN_TICKS', value: Math.max(0, v) }); }
     if (clEl)    { const v = parseInt(clEl.value, 10);  if (!isNaN(v)) eng.dispatch({ type: 'SET_CLUSTER_CAP', value: Math.max(1, v) }); }
@@ -24728,6 +25185,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (speedEl) { const v = parseInt(speedEl.value, 10); if (!isNaN(v)) eng.dispatch({ type: 'SET_SPEED', value: Math.min(1000, Math.max(50, v)) }); }
     if (tpEl)    { const v = parseFloat(tpEl.value); if (!isNaN(v)) eng.dispatch({ type: 'SET_TP', value: Math.max(0, v) }); }
     if (slEl)    { const v = parseFloat(slEl.value); if (!isNaN(v)) eng.dispatch({ type: 'SET_SL', value: Math.max(0, v) }); }
+    if (lsEl)    { const v = parseInt(lsEl.value, 10); if (!isNaN(v)) eng.dispatch({ type: 'SET_LOSS_STREAK_LIMIT', value: v }); }
   }
   function commitPendingSettings() { hotRepeatCommitAllFields(); const eng = window._hotRepeatEngineRef; if (eng) eng.saveConfig(); }
 
@@ -25167,7 +25625,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
@@ -25356,6 +25814,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   function initBotTab(id) {
+    if (id === 'market') {
+      if (window.MarketIntelPanel) window.MarketIntelPanel.activate();
+      return;
+    }
     if (id === 'differ') {
       const eng = ensureDifferEngine();
       if (!eng) return;
@@ -25400,6 +25862,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
   function switchApp(id) {
     if (!VALID_APPS.includes(id)) id = 'dashboard';
+    if (activeApp === 'market' && id !== 'market' && window.MarketIntelPanel) window.MarketIntelPanel.deactivate();
     activeApp = id;
     try { localStorage.setItem('hub_active_app', id); } catch (e) { /* storage unavailable — tab still switches for this session */ }
     const activeBtn = document.querySelector(`.hub-tab[data-app="${id}"]`);
@@ -26251,6 +26714,339 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
   window._hubEngines = engines; // expose for master toggle label updater
   window.UnifiedHub = { switchApp };
+})();
+</script>
+
+<script>
+// ── MARKET INTEL CONSOLE ─────────────────────────────────────────────────
+// A regular sidebar tab (data-app="market" → #panel-market). Everything on
+// this page — the per-bot picks, the full scoring matrix, the live digit
+// strips — renders unconditionally, whether the Terminal is ON or OFF.
+// The master toggle no longer gates *content*, only the status banner and
+// whether getRecommendation() (called from each bot engine) actually acts
+// on these scores. UnifiedHub.switchApp() shows/hides the tab; it also
+// calls MarketIntelPanel.activate()/deactivate() so the 1s refresh timer
+// only runs while this tab is the one on screen.
+(function () {
+  'use strict';
+  let mounted = false;
+  let refreshTimer = null;
+
+  // Bots wired into the Terminal today, in display order. Add an entry
+  // here (and to the getMatrix() call below) whenever another bot gets
+  // hooked up to getRecommendation().
+  const BOT_META = {
+    hotrepeat: { label: 'Hot Repeat',  icon: '🔁', wired: true  },
+    even:      { label: 'Even Omega',  icon: '🎯', wired: false },
+    odd:       { label: 'Odd Omega',   icon: '🎯', wired: false },
+    nexus:     { label: 'Over (Nexus)', icon: '📈', wired: false },
+    under:     { label: 'Under (Nexus)', icon: '📉', wired: false },
+  };
+  const BOT_ORDER = ['hotrepeat', 'even', 'odd', 'nexus', 'under'];
+
+  function fmtAge(ms) {
+    if (ms == null) return '—';
+    const s = Math.round(ms / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m`;
+  }
+  function tierClass(score) { return score >= 65 ? 'mit-good' : score >= 40 ? 'mit-mid' : 'mit-bad'; }
+  function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+  // ── Per-bot glowing pick card ────────────────────────────────────────
+  function renderBotCard(botId, ranked, idx) {
+    const meta = BOT_META[botId] || { label: botId, icon: '🤖', wired: false };
+    const usable = ranked.filter((r) => r.metrics.ready);
+    const styleIdx = `style="--i:${idx || 0}"`;
+    if (!usable.length) {
+      return `<div class="mit-botcard mit-warm-card" ${styleIdx}>
+        <div class="mit-botcard-head"><span class="mit-bot-icon">${meta.icon}</span><span class="mit-bot-name">${esc(meta.label)}</span></div>
+        <div class="mit-botcard-warm"><span class="mit-warm-dot"></span>warming up — collecting ticks…</div>
+      </div>`;
+    }
+    const best = usable[0];
+    const runners = usable.slice(1, 3);
+    const cls = tierClass(best.score);
+    const chips = best.reasons.map((r, i) => `<span class="mit-chip" style="--i:${i}">${esc(r)}</span>`).join('');
+    return `<div class="mit-botcard ${cls}" ${styleIdx}>
+      <div class="mit-card-spin"></div>
+      <div class="mit-botcard-inner">
+      <div class="mit-botcard-head">
+        <span class="mit-bot-icon">${meta.icon}</span>
+        <span class="mit-bot-name">${esc(meta.label)}</span>
+        <span class="mit-bot-wired ${meta.wired ? 'is-wired' : ''}">${meta.wired ? 'wired' : 'reference only'}</span>
+      </div>
+      <div class="mit-botcard-pick">
+        <div class="mit-pick-market">${esc(best.label)}</div>
+        <div class="mit-pick-score">${best.score}<span>/100</span></div>
+      </div>
+      <div class="mit-chips">${chips}</div>
+      ${runners.length ? `<div class="mit-runners">${runners.map((r) => `<span class="mit-runner">${esc(r.label)} <b>${r.score}</b></span>`).join('')}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // ── Live digit strip, one row per market, all 10 symbols ────────────
+  function renderLiveDigits(mit) {
+    const rows = mit.MARKETS.map((m, idx) => {
+      const metrics = mit.computeMicroMetrics(m.value);
+      const buf = mit.getRecentDigits(m.value, 24);
+      if (!buf.length) {
+        return `<div class="mit-live-row" style="--i:${idx}"><div class="mit-live-label">${esc(m.label)}</div><div class="mit-live-empty">no ticks yet</div></div>`;
+      }
+      const hot = new Set(metrics.ready ? metrics.hotDigits : []);
+      const cold = new Set(metrics.ready ? metrics.coldDigits : []);
+      const chips = buf.map((t, i) => {
+        const isLast = i === buf.length - 1;
+        const cls = hot.has(t.digit) ? 'mit-d-hot' : cold.has(t.digit) ? 'mit-d-cold' : 'mit-d-neutral';
+        return `<span class="mit-digit ${cls}${isLast ? ' mit-d-last' : ''}" style="--i:${i}">${t.digit}</span>`;
+      }).join('');
+      const age = fmtAge(Date.now() - buf[buf.length - 1].ts);
+      return `<div class="mit-live-row" style="--i:${idx}">
+        <div class="mit-live-label">${esc(m.label)}${m.is1s ? '<span class="mit-1s-tag">1s</span>' : ''}</div>
+        <div class="mit-digit-strip">${chips}</div>
+        <div class="mit-live-age">${age}</div>
+      </div>`;
+    }).join('');
+    return `<div class="mit-live-wrap">
+      <div class="mit-section-title"><span class="mit-sec-ico">📡</span>Live digit stream — all markets</div>
+      <div class="mit-live-note">Last ~24 ticks per market, oldest → newest. <span class="mit-d-hot mit-legend-swatch"></span> hot digit &nbsp; <span class="mit-d-cold mit-legend-swatch"></span> cold digit &nbsp; <span class="mit-d-neutral mit-legend-swatch"></span> neutral — classification is relative to that market's own recent spread, not an absolute threshold.</div>
+      <div class="mit-live-rows">${rows}</div>
+    </div>`;
+  }
+
+  function renderMatrix() {
+    const mit = window.MarketIntelTerminal;
+    const root = document.getElementById('market-root');
+    if (!mit || !root) return;
+    const active = mit.isActive();
+
+    const toggle = document.getElementById('mit-master-toggle');
+    const toggleLabel = document.querySelector('#mit-master-toggle .mit-toggle-label');
+    if (toggle) toggle.classList.toggle('on', active);
+    if (toggleLabel) toggleLabel.textContent = active ? '● TERMINAL ACTIVE — now driving market picks' : '○ TERMINAL OFF — bots use their own picker';
+    const tabDot = document.getElementById('market-tab-dot');
+    if (tabDot) tabDot.style.display = active ? '' : 'none';
+    const banner = document.getElementById('mit-status-note');
+    if (banner) banner.textContent = active
+      ? 'Every wired bot below is following these scores for market selection right now.'
+      : 'This view always runs live — the scores below are current whether or not the Terminal is driving anything. Turn it on to have wired bots actually follow these picks.';
+
+    // Bot cards — always render, independent of active state.
+    const matrix = mit.getMatrix(BOT_ORDER);
+    const cardsHtml = matrix.map((c, i) => renderBotCard(c.botType, c.ranked, i)).join('');
+    const cardsEl = document.getElementById('mit-botcards');
+    if (cardsEl) cardsEl.innerHTML = cardsHtml;
+
+    // Full cross-bot matrix table — always render.
+    const marketOrder = mit.MARKETS.filter((m) => !m.is1s).map((m) => m.value);
+    let tableHtml = `<table class="mit-table"><thead><tr><th>Market</th>${matrix.map((c) => `<th>${(BOT_META[c.botType] || {}).label || c.botType}</th>`).join('')}</tr></thead><tbody>`;
+    marketOrder.forEach((sym) => {
+      const label = (mit.MARKETS.find((m) => m.value === sym) || {}).label || sym;
+      tableHtml += `<tr><td class="mit-sym">${label}</td>`;
+      matrix.forEach((col) => {
+        const entry = col.ranked.find((r) => r.symbol === sym);
+        if (!entry || !entry.metrics.ready) { tableHtml += `<td class="mit-cell mit-warm">warming…</td>`; return; }
+        const cls = tierClass(entry.score);
+        const stale = entry.stale ? ' mit-stale' : '';
+        tableHtml += `<td class="mit-cell ${cls}${stale}" title="${esc(entry.reasons.join(' · '))}">${entry.score}<span class="mit-age">${fmtAge(Date.now() - entry.metrics.lastUpdate)}</span></td>`;
+      });
+      tableHtml += `</tr>`;
+    });
+    tableHtml += `</tbody></table>`;
+    const tableEl = document.getElementById('mit-table-wrap');
+    if (tableEl) tableEl.innerHTML = tableHtml;
+
+    // Rotation log — always render.
+    const log = mit.getRotationLog();
+    const logEl = document.getElementById('mit-log');
+    if (logEl) logEl.innerHTML = log.length
+      ? log.map((r) => `<div class="mit-log-row"><span>${new Date(r.ts).toLocaleTimeString()}</span> <b>${esc(r.botId)}</b> ${esc(r.from)} → ${esc(r.to)} <i>(${esc(r.reason)})</i></div>`).join('')
+      : '<div class="mit-log-row mit-log-empty">No rotations yet.</div>';
+
+    // Live digit streams — always render.
+    const liveEl = document.getElementById('mit-live-container');
+    if (liveEl) liveEl.innerHTML = renderLiveDigits(mit);
+  }
+
+  function injectStyles() {
+    const css = document.createElement('style');
+    css.textContent = `
+      @keyframes mit-fade-up { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+      @keyframes mit-fade-in { from { opacity:0; } to { opacity:1; } }
+      @keyframes mit-pop { 0% { opacity:0; transform:scale(.5); } 60% { opacity:1; transform:scale(1.15); } 100% { opacity:1; transform:scale(1); } }
+      @keyframes mit-pulse-dot { 0%,100% { opacity:1; box-shadow:0 0 0 0 hsl(var(--win)/0.55); } 50% { opacity:.7; box-shadow:0 0 0 5px hsl(var(--win)/0); } }
+      @keyframes mit-ring-pulse { 0%,100% { box-shadow:0 0 0 0 hsl(var(--foreground)/0.35); } 50% { box-shadow:0 0 0 4px hsl(var(--foreground)/0); } }
+      @keyframes mit-grid-drift { from { background-position:0 0, 0 0; } to { background-position:60px 60px, 60px 60px; } }
+      @keyframes mit-blob-float1 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(40px,-30px) scale(1.15); } }
+      @keyframes mit-blob-float2 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(-50px,25px) scale(1.1); } }
+      @keyframes mit-shimmer-sweep { 0% { transform:translateX(-120%) skewX(-15deg); } 100% { transform:translateX(220%) skewX(-15deg); } }
+      @keyframes mit-title-glow { 0%,100% { filter:drop-shadow(0 0 6px hsl(var(--primary)/0.35)); } 50% { filter:drop-shadow(0 0 14px hsl(var(--primary)/0.65)); } }
+      @keyframes mit-underline-slide { 0%,100% { background-position:0% 0; } 50% { background-position:100% 0; } }
+      @keyframes mit-spin-slow { to { transform:rotate(360deg); } }
+      @keyframes mit-warm-blink { 0%,100% { opacity:.3; } 50% { opacity:1; } }
+      @keyframes mit-cell-in { from { opacity:0; transform:scale(.85); } to { opacity:1; transform:scale(1); } }
+
+      #panel-market { position:relative; }
+      #panel-market .mit-bgfx { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+      #panel-market .mit-bgfx-grid { position:absolute; inset:-60px; opacity:.35;
+        background-image:linear-gradient(hsl(var(--border)/0.5) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--border)/0.5) 1px, transparent 1px);
+        background-size:60px 60px; animation:mit-grid-drift 14s linear infinite; mask-image:radial-gradient(ellipse 70% 60% at 50% 20%, black, transparent 75%); }
+      #panel-market .mit-bgfx-glow { position:absolute; width:420px; height:420px; border-radius:50%; filter:blur(90px); opacity:.22; }
+      #panel-market .mit-bgfx-glow1 { top:-100px; left:8%; background:hsl(var(--win)); animation:mit-blob-float1 16s ease-in-out infinite; }
+      #panel-market .mit-bgfx-glow2 { top:220px; right:6%; background:hsl(var(--primary)); animation:mit-blob-float2 19s ease-in-out infinite; }
+
+      #panel-market .mit-wrap { position:relative; z-index:1; max-width:1180px; margin:0 auto; padding:20px 4px 48px; font-family:'DM Mono',monospace; font-size:12px; color:hsl(var(--foreground)); animation:mit-fade-in .5s ease; }
+      #panel-market .mit-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+      #panel-market .mit-title { font-family:'Orbitron',sans-serif; font-size:19px; letter-spacing:1px; display:flex; align-items:center; gap:9px;
+        background:linear-gradient(100deg, hsl(var(--foreground)), hsl(var(--win)) 45%, hsl(var(--primary)) 65%, hsl(var(--foreground)));
+        background-size:280% auto; -webkit-background-clip:text; background-clip:text; color:transparent; animation:mit-title-glow 3.4s ease-in-out infinite; }
+      #panel-market .mit-title-pulse { width:9px; height:9px; border-radius:50%; background:hsl(var(--win)); flex-shrink:0; animation:mit-pulse-dot 1.8s ease-in-out infinite; }
+      #panel-market .mit-subtitle { opacity:.55; font-size:11px; margin-top:3px; letter-spacing:.2px; }
+
+      #mit-master-toggle { position:relative; overflow:hidden; width:100%; padding:14px; border-radius:12px; border:1px solid hsl(var(--border)); background:hsl(var(--muted)/0.3); cursor:pointer; font-family:'DM Mono',monospace; font-size:12px; font-weight:600; letter-spacing:.3px; margin-bottom:6px; color:hsl(var(--muted-foreground)); transition:transform .15s ease, box-shadow .3s ease, border-color .3s ease, background .3s ease; }
+      #mit-master-toggle:hover { transform:translateY(-1px); border-color:hsl(var(--border-bright, var(--border))); }
+      #mit-master-toggle.mit-toggle-pressed { transform:scale(.98); }
+      #mit-master-toggle.on { background:linear-gradient(90deg, hsl(var(--win)/0.16), hsl(var(--win)/0.08)); border-color:hsl(var(--win)/0.6); color:hsl(var(--win)); box-shadow:0 0 22px hsl(var(--win)/0.28), inset 0 0 20px hsl(var(--win)/0.06); }
+      #mit-master-toggle .mit-toggle-label { position:relative; z-index:1; }
+      #mit-master-toggle .mit-toggle-shimmer { position:absolute; top:0; left:0; width:40%; height:100%; background:linear-gradient(90deg, transparent, hsl(var(--foreground)/0.12), transparent); pointer-events:none; }
+      #mit-master-toggle.on .mit-toggle-shimmer { animation:mit-shimmer-sweep 2.8s ease-in-out infinite; background:linear-gradient(90deg, transparent, hsl(var(--win)/0.35), transparent); }
+      #mit-status-note { opacity:.6; line-height:1.5; margin-bottom:20px; font-size:11px; transition:opacity .3s ease; }
+
+      .mit-section-title { font-family:'Orbitron',sans-serif; font-size:12px; letter-spacing:.6px; opacity:.8; margin:26px 0 10px; display:flex; align-items:center; gap:7px; position:relative; padding-bottom:8px; }
+      .mit-sec-ico { font-size:13px; filter:drop-shadow(0 0 4px hsl(var(--primary)/0.4)); }
+      .mit-section-title::after { content:''; position:absolute; left:0; bottom:0; width:100%; height:1px;
+        background:linear-gradient(90deg, hsl(var(--win)/0.7), hsl(var(--primary)/0.5) 40%, transparent 70%); background-size:200% 100%; animation:mit-underline-slide 4s ease-in-out infinite; }
+
+      /* Bot pick cards */
+      .mit-botcards { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:14px; margin-bottom:8px; }
+      .mit-botcard { position:relative; border-radius:14px; padding:1px; border:1px solid hsl(var(--border)); background:hsl(var(--card)); overflow:hidden;
+        opacity:0; animation:mit-fade-up .45s ease forwards; animation-delay:calc(var(--i, 0) * 70ms);
+        transition:transform .25s ease, box-shadow .25s ease; }
+      .mit-botcard:hover { transform:translateY(-4px) scale(1.015); }
+      .mit-botcard-inner { position:relative; z-index:1; background:hsl(var(--card)); border-radius:13px; padding:13px 14px 12px; backdrop-filter:blur(6px); }
+      .mit-card-spin { position:absolute; inset:-40%; z-index:0; opacity:0; }
+      .mit-botcard.mit-good .mit-card-spin, .mit-botcard.mit-bad .mit-card-spin { opacity:1; animation:mit-spin-slow 5s linear infinite; }
+      .mit-botcard.mit-good .mit-card-spin { background:conic-gradient(from 0deg, transparent 0deg, hsl(var(--win)/0.9) 25deg, transparent 70deg, transparent 360deg); }
+      .mit-botcard.mit-bad .mit-card-spin { background:conic-gradient(from 0deg, transparent 0deg, hsl(var(--loss)/0.85) 25deg, transparent 70deg, transparent 360deg); }
+      .mit-botcard.mit-good { box-shadow:0 0 22px hsl(var(--win)/0.18); animation:mit-fade-up .45s ease forwards, mit-glow-good 2.6s ease-in-out infinite; animation-delay:calc(var(--i, 0) * 70ms), calc(var(--i, 0) * 70ms + .45s); }
+      .mit-botcard.mit-mid  { border-color:hsl(var(--muted-foreground)/0.4); }
+      .mit-botcard.mit-bad  { box-shadow:0 0 18px hsl(var(--loss)/0.14); animation:mit-fade-up .45s ease forwards, mit-glow-bad 2.6s ease-in-out infinite; animation-delay:calc(var(--i, 0) * 70ms), calc(var(--i, 0) * 70ms + .45s); }
+      .mit-warm-card { opacity:0; animation:mit-fade-up .45s ease forwards; animation-delay:calc(var(--i, 0) * 70ms); }
+      @keyframes mit-glow-good { 0%,100% { box-shadow:0 0 16px hsl(var(--win)/0.18); } 50% { box-shadow:0 0 30px hsl(var(--win)/0.4); } }
+      @keyframes mit-glow-bad  { 0%,100% { box-shadow:0 0 12px hsl(var(--loss)/0.12); } 50% { box-shadow:0 0 22px hsl(var(--loss)/0.28); } }
+      .mit-botcard-head { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+      .mit-bot-icon { font-size:14px; }
+      .mit-bot-name { font-family:'Outfit',sans-serif; font-weight:700; font-size:12px; flex:1; }
+      .mit-bot-wired { font-size:8px; text-transform:uppercase; letter-spacing:.6px; padding:2px 6px; border-radius:5px; background:hsl(var(--muted)/0.4); opacity:.6; transition:all .3s ease; }
+      .mit-bot-wired.is-wired { background:hsl(var(--win)/0.18); color:hsl(var(--win)); opacity:1; box-shadow:0 0 8px hsl(var(--win)/0.3); }
+      .mit-botcard-warm { opacity:.6; font-size:11px; padding:14px 0; text-align:center; display:flex; align-items:center; justify-content:center; gap:7px; }
+      .mit-warm-dot { width:6px; height:6px; border-radius:50%; background:currentColor; animation:mit-warm-blink 1.2s ease-in-out infinite; }
+      .mit-botcard-pick { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+      .mit-pick-market { font-family:'Outfit',sans-serif; font-weight:600; font-size:14px; }
+      .mit-pick-score { font-family:'Orbitron',sans-serif; font-size:21px; font-weight:700; transition:color .3s ease; }
+      .mit-pick-score span { font-size:10px; opacity:.5; font-weight:400; }
+      .mit-good .mit-pick-score, .mit-good .mit-pick-market { color:hsl(var(--win)); }
+      .mit-bad .mit-pick-score, .mit-bad .mit-pick-market { color:hsl(var(--loss)); }
+      .mit-chips { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; }
+      .mit-chip { font-size:9px; padding:3px 7px; border-radius:20px; background:hsl(var(--muted)/0.35); opacity:0; white-space:nowrap; transition:background .2s ease, transform .2s ease;
+        animation:mit-fade-up .35s ease forwards; animation-delay:calc(var(--i, 0) * 60ms + .2s); }
+      .mit-chip:hover { background:hsl(var(--muted)/0.6); transform:translateY(-1px); }
+      .mit-runners { display:flex; gap:10px; padding-top:8px; border-top:1px solid hsl(var(--border)/0.4); opacity:.6; font-size:10px; }
+      .mit-runner b { opacity:.9; }
+
+      /* Full matrix table */
+      .mit-table { width:100%; border-collapse:collapse; margin-bottom:8px; border-radius:10px; overflow:hidden; }
+      .mit-table th, .mit-table td { padding:9px 10px; text-align:center; border-bottom:1px solid hsl(var(--border)/0.4); transition:background .2s ease; }
+      .mit-table th { font-weight:400; opacity:.6; font-family:'Outfit',sans-serif; letter-spacing:.3px; }
+      .mit-table tbody tr { transition:background .2s ease; }
+      .mit-table tbody tr:hover { background:hsl(var(--muted)/0.15); }
+      .mit-sym { text-align:left !important; opacity:.85; font-weight:600; }
+      .mit-cell { font-weight:600; position:relative; animation:mit-cell-in .3s ease; }
+      .mit-good { color:hsl(var(--win)); text-shadow:0 0 10px hsl(var(--win)/0.35); }
+      .mit-mid { color:hsl(var(--muted-foreground)); }
+      .mit-bad { color:hsl(var(--loss)); text-shadow:0 0 10px hsl(var(--loss)/0.3); }
+      .mit-warm { opacity:.35; font-weight:400; }
+      .mit-stale { opacity:.4; }
+      .mit-age { display:block; font-size:9px; opacity:.5; font-weight:400; }
+
+      /* Rotation log */
+      .mit-log { max-height:200px; overflow:auto; border:1px solid hsl(var(--border)/0.4); border-radius:10px; padding:8px 10px; background:hsl(var(--card)/0.5); }
+      .mit-log-row { padding:4px 2px; opacity:.8; border-radius:6px; animation:mit-fade-up .3s ease; }
+      .mit-log-row:first-child:not(.mit-log-empty) { background:hsl(var(--win)/0.08); }
+      .mit-log-empty { opacity:.4; }
+      .mit-log::-webkit-scrollbar, .mit-wrap ::-webkit-scrollbar { width:5px; }
+      .mit-log::-webkit-scrollbar-thumb { background:hsl(var(--border)); border-radius:4px; }
+
+      /* Live digit streams */
+      .mit-live-note { opacity:.55; font-size:10px; line-height:1.6; margin-bottom:12px; }
+      .mit-legend-swatch { display:inline-block; width:9px; height:9px; border-radius:3px; margin:0 2px -1px 4px; }
+      .mit-live-rows { display:flex; flex-direction:column; gap:8px; }
+      .mit-live-row { display:flex; align-items:center; gap:10px; padding:9px 10px; border:1px solid hsl(var(--border)/0.4); border-radius:10px; background:hsl(var(--card)/0.55);
+        opacity:0; animation:mit-fade-up .4s ease forwards; animation-delay:calc(var(--i, 0) * 45ms); transition:border-color .3s ease, box-shadow .3s ease; }
+      .mit-live-row:hover { border-color:hsl(var(--border-bright, var(--border))); box-shadow:0 0 14px hsl(var(--primary)/0.1); }
+      .mit-live-label { flex:0 0 84px; font-weight:600; opacity:.85; font-size:11px; }
+      .mit-1s-tag { display:inline-block; margin-left:5px; font-size:8px; padding:1px 4px; border-radius:4px; background:hsl(var(--primary)/0.2); color:hsl(var(--primary)); vertical-align:middle; }
+      .mit-digit-strip { flex:1; display:flex; flex-wrap:wrap; gap:3px; overflow:hidden; }
+      .mit-digit { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:5px; font-size:10px; font-weight:700; background:hsl(var(--muted)/0.35);
+        opacity:0; animation:mit-pop .3s ease forwards; animation-delay:calc(var(--i, 0) * 18ms); }
+      .mit-d-hot { background:hsl(var(--win)/0.28); color:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.35); }
+      .mit-d-cold { background:hsl(var(--primary)/0.22); color:hsl(var(--primary)); box-shadow:0 0 8px hsl(var(--primary)/0.3); }
+      .mit-d-last { outline:1.5px solid hsl(var(--foreground)/0.65); animation:mit-pop .3s ease forwards, mit-ring-pulse 1.6s ease-in-out infinite .3s; }
+      .mit-live-age { flex:0 0 34px; text-align:right; opacity:.45; font-size:10px; }
+      .mit-live-empty { flex:1; opacity:.4; font-size:10px; }
+    `;
+    document.head.appendChild(css);
+  }
+
+  function injectDom() {
+    const root = document.getElementById('market-root');
+    if (!root || root.dataset.mitBuilt) return;
+    root.dataset.mitBuilt = '1';
+    root.innerHTML = `
+      <div class="mit-bgfx"><div class="mit-bgfx-grid"></div><div class="mit-bgfx-glow mit-bgfx-glow1"></div><div class="mit-bgfx-glow mit-bgfx-glow2"></div></div>
+      <div class="mit-wrap">
+        <div class="mit-header">
+          <div>
+            <div class="mit-title"><span class="mit-title-pulse"></span>MARKET INTEL TERMINAL</div>
+            <div class="mit-subtitle">Per-bot picks, full scoring matrix, live digit stream and rotation log — always live</div>
+          </div>
+        </div>
+        <button id="mit-master-toggle"><span class="mit-toggle-shimmer"></span><span class="mit-toggle-label"></span></button>
+        <div id="mit-status-note"></div>
+
+        <div class="mit-section-title"><span class="mit-sec-ico">🧭</span>Best ranked market — per bot</div>
+        <div class="mit-botcards" id="mit-botcards"></div>
+
+        <div class="mit-section-title"><span class="mit-sec-ico">📊</span>Full scoring matrix</div>
+        <div id="mit-table-wrap"></div>
+
+        <div class="mit-section-title"><span class="mit-sec-ico">🔄</span>Rotation log</div>
+        <div class="mit-log" id="mit-log"></div>
+
+        <div id="mit-live-container"></div>
+      </div>`;
+    document.getElementById('mit-master-toggle').onclick = function () {
+      const mit = window.MarketIntelTerminal;
+      if (!mit) return;
+      this.classList.add('mit-toggle-pressed');
+      setTimeout(() => this.classList.remove('mit-toggle-pressed'), 220);
+      mit.setActive(!mit.isActive());
+      renderMatrix();
+    };
+  }
+
+  function activate() {
+    if (!window.MarketIntelTerminal) { setTimeout(activate, 200); return; }
+    if (!mounted) { injectStyles(); injectDom(); mounted = true; }
+    renderMatrix();
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(renderMatrix, 1000); // faster tick — the live digit strip wants sub-2s refresh
+  }
+  function deactivate() {
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  }
+
+  window.MarketIntelPanel = { activate, deactivate };
 })();
 </script>
 </body>
