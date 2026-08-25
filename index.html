@@ -9584,21 +9584,114 @@ window.MarketIntelTerminal = (function () {
     return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
   }
 
-  // Even/Odd/Over/Under family — placeholder shared default until each
-  // gets its own fitness fn wired to its real gate logic (hot/cold %,
-  // parity shape, etc.). Favors higher entropy (more room for a parity
-  // gate to trigger) and a clear hot/cold structure, penalizes velocity
-  // spikes the same way.
+  // Even/Odd/Over/Under — each bet resolves on a fixed rule over the last
+  // digit (even∈{0,2,4,6,8}, odd∈{1,3,5,7,9}, over/under split at a
+  // barrier), so unlike Hot Repeat's streak-hunting, "good market" here
+  // means "the weighted digit distribution is currently leaning toward my
+  // side," not just "orderly." Each fn also rewards the market's hot/cold
+  // digits (the ones the σ-classifier flagged as genuinely skewed, not
+  // just noise) landing on the bot's own side — a market where the hot
+  // digits are ALL even is a stronger Even pick than one where the even
+  // mass is high but spread evenly across hot and cold.
+  function evenOddFitness(favorEven) {
+    const side = favorEven ? [0, 2, 4, 6, 8] : [1, 3, 5, 7, 9];
+    const sideName = favorEven ? 'even' : 'odd';
+    return function (m) {
+      if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
+      const sideMass = side.reduce((a, d) => a + m.weightedPct[d], 0);
+      let score = 50 + (sideMass - 50) * 1.2; // 50% is the no-edge baseline (5 of 10 digits)
+      const reasons = [`${sideName}-digit mass ${sideMass.toFixed(1)}%`];
+      const hotOnSide = m.hotDigits.filter((d) => side.includes(d)).length;
+      const coldOffSide = m.coldDigits.filter((d) => !side.includes(d)).length;
+      if (hotOnSide || coldOffSide) { score += hotOnSide * 4 + coldOffSide * 4; reasons.push(`${hotOnSide} hot-${sideName} / ${coldOffSide} cold-opposite digits`); }
+      if (m.velocitySpike) { score -= 10; reasons.push('tick velocity spike'); }
+      return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
+    };
+  }
+
+  // Over/Under — scored at the standard barrier-4 split (Over 4: digits
+  // 5-9, Under 4: digits 0-3; digit 4 is the push zone, matching Deriv's
+  // default). A bot armed with a different barrier will see a slightly
+  // different real edge than this reference score shows — this registry
+  // scores a representative barrier, not each armed instance's own one,
+  // since the matrix is evaluated independent of any specific bot config.
+  // Wiring per-instance barriers through would mean passing `opts.barrier`
+  // from the bot's own getRecommendation() call — worth doing once
+  // Over/Under get real rotation logic (see note below).
+  function overUnderFitness(favorHigh) {
+    const side = favorHigh ? [5, 6, 7, 8, 9] : [0, 1, 2, 3];
+    const sideName = favorHigh ? 'high-half (5-9)' : 'low-half (0-3)';
+    return function (m) {
+      if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
+      const sideMass = side.reduce((a, d) => a + m.weightedPct[d], 0);
+      const baseline = favorHigh ? 50 : 40; // 5 digits vs 4 digits of "no-edge" mass
+      let score = 50 + (sideMass - baseline) * 1.3;
+      const reasons = [`${sideName} mass ${sideMass.toFixed(1)}%`, 'scored at reference barrier 4 — not this bot\u2019s configured barrier'];
+      const hotOnSide = m.hotDigits.filter((d) => side.includes(d)).length;
+      const coldOffSide = m.coldDigits.filter((d) => !side.includes(d)).length;
+      if (hotOnSide || coldOffSide) { score += hotOnSide * 4 + coldOffSide * 4; reasons.push(`${hotOnSide} hot-in-range / ${coldOffSide} cold-out-of-range digits`); }
+      if (m.velocitySpike) { score -= 10; reasons.push('tick velocity spike'); }
+      return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
+    };
+  }
+
+  // Fallback for any bot ID that hasn't gotten a real fitness fn yet.
   function parityFitness(m) {
     if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
     let score = 50 + (m.entropyScore - 50) * 0.3 + Math.min(20, (m.hotDigits.length + m.coldDigits.length) * 4);
-    const reasons = [`entropy ${m.entropyScore}`, `${m.hotDigits.length} hot / ${m.coldDigits.length} cold digits`];
+    const reasons = [`entropy ${m.entropyScore}`, `${m.hotDigits.length} hot / ${m.coldDigits.length} cold digits (generic placeholder — no dedicated fitness fn yet)`];
     if (m.velocitySpike) { score -= 10; reasons.push('tick velocity spike'); }
     return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
   }
 
+  // Matches — bets that the NEXT digit equals whichever digit it targets
+  // (typically the current hottest digit), so the edge lives entirely in
+  // how concentrated the distribution is around its top digit: a market
+  // with one clearly dominant digit is a better hunting ground than one
+  // where mass is spread thin across many digits.
+  function matchesFitness(m) {
+    if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
+    const topPct = Math.max(...m.weightedPct);
+    let score = 50 + (topPct - 10) * 3; // 10% is the no-edge baseline (1 of 10 digits)
+    const reasons = [`top digit mass ${topPct.toFixed(1)}%`, `entropy ${m.entropyScore}`];
+    if (m.hotDigits.length) { score += 6; reasons.push(`${m.hotDigits.length} statistically hot digit(s)`); }
+    if (m.velocitySpike) { score -= 10; reasons.push('tick velocity spike'); }
+    return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
+  }
+
+  // Rise/Fall & Mean-Reversion family (meanrev, risemr, fallmr, oldrisefall)
+  // trade CALL/PUT price direction off ADX/Bollinger/RSI/Stochastic/ATR —
+  // not last-digit parity — so the digit-distribution metrics above don't
+  // map onto their actual edge. Until a price-indicator-based fitness fn
+  // exists, this scores markets as generic "worth watching" venues: decent
+  // streak health (not already mid-exhaustion) and no live velocity spike
+  // (a stable, un-distorted tick feed for the indicator stack to read).
+  // This is explicitly a proxy, not a model of the bot's real signal.
+  function priceDirectionFitness(m) {
+    if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
+    let score = 50 + (m.streakHealth - 50) * 0.3;
+    const reasons = [`streak health ${m.streakHealth}`, 'generic proxy — not this bot\u2019s own indicator stack'];
+    if (m.velocitySpike) { score -= 15; reasons.push('tick velocity spike — noisy feed'); }
+    return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
+  }
+
   registerFitness('hotrepeat', hotRepeatFitness);
-  ['even', 'odd', 'nexus', 'under', 'oldeven', 'oldodd'].forEach((id) => registerFitness(id, parityFitness));
+  registerFitness('even', evenOddFitness(true));
+  registerFitness('odd', evenOddFitness(false));
+  registerFitness('oldeven', evenOddFitness(true));
+  registerFitness('oldodd', evenOddFitness(false));
+  registerFitness('nexus', overUnderFitness(true));   // Nexus tab = "Over"
+  registerFitness('under', overUnderFitness(false));
+  // Even/Odd (Mean Reversion) — same DIGITEVEN/DIGITODD contract and same
+  // parity math as the classic bots, just a different entry pipeline, so
+  // it shares the classic evenOddFitness rather than getting its own copy.
+  registerFitness('evenmr', evenOddFitness(true));
+  registerFitness('oddmr', evenOddFitness(false));
+  registerFitness('matches', matchesFitness);
+  registerFitness('meanrev', priceDirectionFitness);
+  registerFitness('risemr', priceDirectionFitness);
+  registerFitness('fallmr', priceDirectionFitness);
+  registerFitness('oldrisefall', priceDirectionFitness);
 
   function evaluate(botType, botId) {
     return MARKETS.map((m) => {
@@ -9694,7 +9787,13 @@ window.MarketIntelTerminal = (function () {
   function getMatrix(botTypes) {
     ensureSubscribed();
     const types = botTypes && botTypes.length ? botTypes : [...fitnessFns.keys()];
-    return types.map((botType) => ({ botType, ranked: evaluate(botType, `__preview_${botType}`) }));
+    // Every bot currently wired into the Terminal uses its botType string
+    // as its botId too (see hrPickNextMarketViaTerminal's
+    // getRecommendation('hotrepeat', 'hotrepeat', ...) call) — evaluating
+    // under that same id here means the panel shows this bot's REAL
+    // accumulated realized-loss penalty and REAL claimed market, not a
+    // detached preview that never accrues either.
+    return types.map((botType) => ({ botType, ranked: evaluate(botType, botType) }));
   }
 
   function getRotationLog() { return rotationLog.slice(0, 30); }
@@ -9708,9 +9807,21 @@ window.MarketIntelTerminal = (function () {
     return n ? buf.slice(-n) : buf.slice();
   }
 
+  // Exposed for the Portfolio Exposure panel — real, current claims only
+  // (a bot appears here only after an actual getRecommendation() call
+  // resolved to it while the Terminal was active). Returns a plain object
+  // symbol -> [botId, ...] rather than the internal Set/Map so the UI
+  // layer never touches Terminal internals directly.
+  function getAllocations() {
+    const out = {};
+    allocations.forEach((set, symbol) => { if (set.size) out[symbol] = [...set]; });
+    return out;
+  }
+
   return {
     isActive, setActive, registerFitness, getRecommendation, recordOutcome,
-    getMatrix, getRotationLog, getRecentDigits, computeMicroMetrics, onUpdate, MARKETS,
+    getMatrix, getRotationLog, getRecentDigits, getAllocations, computeMicroMetrics, onUpdate, MARKETS,
+    MAX_BOTS_PER_MARKET,
   };
 })();
 
@@ -14038,6 +14149,41 @@ window.NexusStrategies=exports;
       return this.config.smartRecovery ? 'CHOPPY' : 'TRENDING';
     }
 
+    // ── Terminal adapter ─────────────────────────────────────────────────
+    // Every market-rotation decision in this class goes through here
+    // instead of calling window.BenzPickNextMarket directly — exactly the
+    // same pattern as Hot Repeat's hrPickNextMarketViaTerminal. When the
+    // Market Intel Terminal is OFF (or has nothing useful to say yet)
+    // getRecommendation() returns null and this falls straight through to
+    // this bot's own original BenzPickNextMarket scan, byte-for-byte the
+    // same behavior as before the Terminal existed. When it's ON, the
+    // Terminal's cross-bot exposure guard, hysteresis, and realized-loss
+    // penalty apply on top of this bot's own fitness fn (registered above
+    // under this.id).
+    //
+    // `this.id` is used as BOTH the botId and the botType (see
+    // getMatrix's note on this same convention) — this is also what makes
+    // every mode a fully separate bot in the Terminal: 'even' and
+    // 'oldeven' each carry their own residency/penalty/allocation state
+    // even though they share the exact same fitness fn and TitanEngine
+    // class, and the same is true for every other pair here (odd/oldodd,
+    // even/evenmr, nexus/under, meanrev/risemr/fallmr, etc).
+    pickMarketViaTerminal(currentSymbol, opts) {
+      const mit = window.MarketIntelTerminal;
+      if (mit && mit.isActive()) {
+        const rec = mit.getRecommendation(this.id, this.id, currentSymbol, opts || {});
+        if (rec) {
+          return {
+            symbol: rec.symbol, label: rec.label, score: rec.score,
+            _forcedSwitch: rec.switched, _viaTerminal: true, reasons: rec.reasons,
+          };
+        }
+      }
+      return (this.scanner && window.BenzPickNextMarket)
+        ? window.BenzPickNextMarket(this.scanner, currentSymbol, this.getPreferredRegime())
+        : null;
+    }
+
     // ── STAKE ADDITION ANALYSIS ─────────────────────────────────────────
     // A step up from "guess a number": looks at your actual recent session
     // results (win/loss per completed session, not per trade) and turns
@@ -14569,8 +14715,8 @@ window.NexusStrategies=exports;
             if (Date.now() - this._eomrLastRotateAt >= idleRotateMs) {
               const scannerBest = this.scanner && this.scanner.getBestMarket && this.scanner.getBestMarket();
               let candidate = scannerBest && scannerBest.symbol && scannerBest.symbol !== market ? scannerBest.symbol : null;
-              if (!candidate && window.BenzPickNextMarket && this.scanner) {
-                const next = window.BenzPickNextMarket(this.scanner, market, this.getPreferredRegime());
+              if (!candidate) {
+                const next = this.pickMarketViaTerminal(market, {});
                 if (next && next.symbol && next.symbol !== market) candidate = next.symbol;
               }
               if (candidate) {
@@ -14627,8 +14773,8 @@ window.NexusStrategies=exports;
             if (now < this._altCooldownUntil) { this.emit(); return; }
             this._altCooldownUntil = 0;
             this._altLastDomCheck = 0;
-            if (this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, market, this.getPreferredRegime());
+            {
+              const best = this.pickMarketViaTerminal(market, {});
               if (best && best.symbol && best.symbol !== market) {
                 this.addLog('engine', 'ALT-GATE', `🔁 Rotating to ${best.symbol}`);
                 this.changeMarket(best.symbol);
@@ -14694,8 +14840,8 @@ window.NexusStrategies=exports;
             // minutes straight — rather than sit here indefinitely, rotate
             // into whatever market is currently scoring best.
             if (!this._over3WaitStart) this._over3WaitStart = Date.now();
-            if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+            if (Date.now() - this._over3WaitStart > 120000) {
+              const best = this.pickMarketViaTerminal(this.config.selectedMarket, {});
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -14732,8 +14878,8 @@ window.NexusStrategies=exports;
               ? `Over-streak ${streak}/${this.config.minStreak} — waiting`
               : `Streak of ${streak} ended on digit ${lastDigit} — need 7 or 9`;
             if (!this._over3WaitStart) this._over3WaitStart = Date.now();
-            if (Date.now() - this._over3WaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+            if (Date.now() - this._over3WaitStart > 120000) {
+              const best = this.pickMarketViaTerminal(this.config.selectedMarket, {});
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -14794,8 +14940,8 @@ window.NexusStrategies=exports;
             // straight — rotate to whatever market is scoring best instead
             // of sitting here indefinitely.
             if (!this._oddWaitStart) this._oddWaitStart = Date.now();
-            if (Date.now() - this._oddWaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+            if (Date.now() - this._oddWaitStart > 120000) {
+              const best = this.pickMarketViaTerminal(this.config.selectedMarket, {});
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -14855,8 +15001,8 @@ window.NexusStrategies=exports;
           } else {
             this.strategyPhase = 'waiting';
             if (!this._evenWaitStart) this._evenWaitStart = Date.now();
-            if (Date.now() - this._evenWaitStart > 120000 && this.scanner && window.BenzPickNextMarket) {
-              const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+            if (Date.now() - this._evenWaitStart > 120000) {
+              const best = this.pickMarketViaTerminal(this.config.selectedMarket, {});
               if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
                 this.addLog('engine', 'MARKET', `⏱ No fireable setup here after 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
                 this.setConfig({ selectedMarket: best.symbol });
@@ -15523,8 +15669,8 @@ window.NexusStrategies=exports;
           // 1s ("V.. (1S)") markets are prioritised first, normal markets
           // stay in the fallback pool so they're still used whenever there's
           // no good 1s candidate available.
-          if (this.scanner && window.BenzPickNextMarket && !this.fixedMarket) {
-            const best = window.BenzPickNextMarket(this.scanner, this.config.selectedMarket, this.getPreferredRegime());
+          if (!this.fixedMarket) {
+            const best = this.pickMarketViaTerminal(this.config.selectedMarket, { force: true, reason: 'cooldown rotation' });
             if (best && best.symbol) {
               const label = best._forcedSwitch ? `🔀 Switching to ${best.symbol}` : `↻ Staying on ${best.symbol} (only viable market)`;
               this.addLog('engine', 'MARKET', `${label} (score: ${best.score || '?'}${best._rank > 1 ? `, picked #${best._rank}` : ''})`);
@@ -15750,6 +15896,14 @@ window.NexusStrategies=exports;
         ) : '',
       };
       this.journal = [journalEntry, ...this.journal].slice(0, 500);
+      // Feed the real outcome back into the Market Intel Terminal's
+      // realized-loss penalty for THIS bot's own id (see the Terminal
+      // adapter note on pickMarketViaTerminal above) — the same
+      // recordOutcome() call Hot Repeat makes. Excludes sacrifice/test
+      // probes, which aren't real trades and shouldn't move the penalty.
+      if (window.MarketIntelTerminal && !this._isSacrificeTrade) {
+        window.MarketIntelTerminal.recordOutcome(this.id, journalEntry.market, win);
+      }
       // Digit-based modes only (Even/Odd/Over/Under/Matches) — Higher/Lower
       // trades on price direction, not a single settled digit, so the
       // "next 3 digits" readout doesn't apply.
@@ -26732,17 +26886,38 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   let mounted = false;
   let refreshTimer = null;
 
-  // Bots wired into the Terminal today, in display order. Add an entry
-  // here (and to the getMatrix() call below) whenever another bot gets
-  // hooked up to getRecommendation().
+  // Bots wired into the Terminal today, in display order.
+  // status: 'auto'   — has real fitness AND its own engine actually calls
+  //                     getRecommendation()/recordOutcome() to rotate
+  //                     markets and feed back realized results — every
+  //                     bot below now does, each under its own id, so
+  //                     'even' and 'oldeven' (etc.) are tracked as fully
+  //                     separate bots with independent residency/penalty
+  //                     state even though they share a fitness fn.
+  //         'proxy'  — has a fitness fn AND rotation wiring, but the
+  //                     fitness fn is a generic price/streak proxy rather
+  //                     than that bot's own indicator stack (see
+  //                     priceDirectionFitness above) — the CALL/PUT price
+  //                     bots (meanrev/risemr/fallmr/oldrisefall), which
+  //                     don't resolve on last-digit parity.
   const BOT_META = {
-    hotrepeat: { label: 'Hot Repeat',  icon: '🔁', wired: true  },
-    even:      { label: 'Even Omega',  icon: '🎯', wired: false },
-    odd:       { label: 'Odd Omega',   icon: '🎯', wired: false },
-    nexus:     { label: 'Over (Nexus)', icon: '📈', wired: false },
-    under:     { label: 'Under (Nexus)', icon: '📉', wired: false },
+    hotrepeat:   { label: 'Hot Repeat',        icon: '🔁', status: 'auto' },
+    even:        { label: 'Even Omega',        icon: '🎯', status: 'auto' },
+    odd:         { label: 'Odd Omega',         icon: '🎯', status: 'auto' },
+    nexus:       { label: 'Over (Nexus)',      icon: '📈', status: 'auto' },
+    under:       { label: 'Under (Nexus)',     icon: '📉', status: 'auto' },
+    evenmr:      { label: 'Even MR',           icon: '🎯', status: 'auto' },
+    oddmr:       { label: 'Odd MR',            icon: '🎯', status: 'auto' },
+    oldeven:     { label: 'Even Omega (Old)',  icon: '🎯', status: 'auto' },
+    oldodd:      { label: 'Odd Omega (Old)',   icon: '🎯', status: 'auto' },
+    matches:     { label: 'Matches',           icon: '🔢', status: 'auto' },
+    meanrev:     { label: 'Rise & Fall MR',    icon: '📊', status: 'proxy' },
+    risemr:      { label: 'Rise MR',           icon: '📊', status: 'proxy' },
+    fallmr:      { label: 'Fall MR',           icon: '📊', status: 'proxy' },
+    oldrisefall: { label: 'Higher/Lower (Old)', icon: '📊', status: 'proxy' },
   };
-  const BOT_ORDER = ['hotrepeat', 'even', 'odd', 'nexus', 'under'];
+  const BOT_ORDER = ['hotrepeat', 'even', 'odd', 'nexus', 'under', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'matches', 'meanrev', 'risemr', 'fallmr', 'oldrisefall'];
+  const STATUS_LABEL = { auto: 'auto-rotates', proxy: 'auto-rotates (generic proxy score)' };
 
   function fmtAge(ms) {
     if (ms == null) return '—';
@@ -26752,35 +26927,89 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function tierClass(score) { return score >= 65 ? 'mit-good' : score >= 40 ? 'mit-mid' : 'mit-bad'; }
   function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
+  // ── Per-bot score sparkline — same "equity curve" language as the
+  // Dashboard's balance chart (smoothed line + soft gradient fill under
+  // it, win/loss-tinted), just tracking this bot's top-pick score over
+  // the last ~40 render ticks instead of cumulative P&L.
+  const scoreHistory = new Map(); // botId -> [score, score, ...]
+  const SPARK_MAX = 40;
+  function pushScoreHistory(botId, score) {
+    let h = scoreHistory.get(botId);
+    if (!h) { h = []; scoreHistory.set(botId, h); }
+    h.push(score);
+    if (h.length > SPARK_MAX) h.shift();
+  }
+  // Catmull-Rom → cubic bezier smoothing, so the sparkline actually reads
+  // as a curve rather than a jagged tick-to-tick polyline.
+  function smoothPath(pts) {
+    if (pts.length < 2) return '';
+    if (pts.length === 2) return `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)} L${pts[1][0].toFixed(1)},${pts[1][1].toFixed(1)}`;
+    let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i === 0 ? 0 : i - 1], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2 < pts.length ? i + 2 : i + 1];
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+    }
+    return d;
+  }
+  function renderSparkline(botId, isGood, isBad) {
+    const h = scoreHistory.get(botId) || [];
+    const w = 100, ht = 30;
+    if (h.length < 2) return `<svg class="mit-spark" viewBox="0 0 ${w} ${ht}" preserveAspectRatio="none"></svg>`;
+    const min = Math.min(...h), max = Math.max(...h);
+    const range = (max - min) || 1;
+    const stepX = w / (h.length - 1);
+    const pts = h.map((v, i) => [i * stepX, ht - 3 - ((v - min) / range) * (ht - 6)]);
+    const line = smoothPath(pts);
+    const area = `${line} L${w.toFixed(1)},${ht} L0,${ht} Z`;
+    const gid = `spk-${botId}`;
+    const color = isGood ? 'var(--win)' : isBad ? 'var(--loss)' : 'var(--muted-foreground)';
+    return `<svg class="mit-spark" viewBox="0 0 ${w} ${ht}" preserveAspectRatio="none">
+      <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="hsl(${color})" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="hsl(${color})" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#${gid})" stroke="none"/>
+      <path d="${line}" fill="none" stroke="hsl(${color})" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+  }
+
   // ── Per-bot glowing pick card ────────────────────────────────────────
   function renderBotCard(botId, ranked, idx) {
-    const meta = BOT_META[botId] || { label: botId, icon: '🤖', wired: false };
+    const meta = BOT_META[botId] || { label: botId, icon: '🤖', status: 'scored' };
     const usable = ranked.filter((r) => r.metrics.ready);
-    const styleIdx = `style="--i:${idx || 0}"`;
     if (!usable.length) {
-      return `<div class="mit-botcard mit-warm-card" ${styleIdx}>
+      return `<div class="mit-botcard mit-warm-card" style="--i:${idx}">
+        <div class="mit-botcard-accent"></div>
+        <div class="mit-botcard-inner">
         <div class="mit-botcard-head"><span class="mit-bot-icon">${meta.icon}</span><span class="mit-bot-name">${esc(meta.label)}</span></div>
         <div class="mit-botcard-warm"><span class="mit-warm-dot"></span>warming up — collecting ticks…</div>
+        </div>
       </div>`;
     }
     const best = usable[0];
     const runners = usable.slice(1, 3);
     const cls = tierClass(best.score);
-    const chips = best.reasons.map((r, i) => `<span class="mit-chip" style="--i:${i}">${esc(r)}</span>`).join('');
-    return `<div class="mit-botcard ${cls}" ${styleIdx}>
+    const isGood = cls === 'mit-good', isBad = cls === 'mit-bad';
+    pushScoreHistory(botId, best.score);
+    const chips = best.reasons.map((r) => `<span class="mit-chip">${esc(r)}</span>`).join('');
+    return `<div class="mit-botcard ${cls}" style="--i:${idx}">
+      <div class="mit-botcard-accent"></div>
       <div class="mit-card-spin"></div>
       <div class="mit-botcard-inner">
       <div class="mit-botcard-head">
         <span class="mit-bot-icon">${meta.icon}</span>
         <span class="mit-bot-name">${esc(meta.label)}</span>
-        <span class="mit-bot-wired ${meta.wired ? 'is-wired' : ''}">${meta.wired ? 'wired' : 'reference only'}</span>
+        <span class="mit-bot-wired ${(meta.status === 'auto' || meta.status === 'proxy') ? 'is-wired' : ''}">${esc(STATUS_LABEL[meta.status] || meta.status)}</span>
       </div>
-      <div class="mit-botcard-pick">
-        <div class="mit-pick-market">${esc(best.label)}</div>
+      <div class="mit-botcard-pick mit-drill-trigger" data-symbol="${esc(best.symbol)}">
+        <div class="mit-pick-market">${esc(best.label)} <span class="mit-drill-hint">details ▾</span></div>
         <div class="mit-pick-score">${best.score}<span>/100</span></div>
       </div>
+      <div class="mit-spark-wrap">${renderSparkline(botId, isGood, isBad)}</div>
       <div class="mit-chips">${chips}</div>
-      ${runners.length ? `<div class="mit-runners">${runners.map((r) => `<span class="mit-runner">${esc(r.label)} <b>${r.score}</b></span>`).join('')}</div>` : ''}
+      ${runners.length ? `<div class="mit-runners">${runners.map((r) => `<span class="mit-runner mit-drill-trigger" data-symbol="${esc(r.symbol)}">${esc(r.label)} <b>${r.score}</b></span>`).join('')}</div>` : ''}
       </div>
     </div>`;
   }
@@ -26814,6 +27043,124 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     </div>`;
   }
 
+  // ── Per-market drill-down: mini SVG bar chart + full metric readout ─
+  let drillSymbol = null;
+
+  function renderDrillSvg(m) {
+    const w = 340, h = 96, barW = 27, gap = 4;
+    const maxPct = Math.max(20, ...m.weightedPct);
+    const hot = new Set(m.hotDigits), cold = new Set(m.coldDigits);
+    let bars = '';
+    for (let d = 0; d < 10; d++) {
+      const pct = m.weightedPct[d];
+      const bh = Math.max(2, (pct / maxPct) * (h - 26));
+      const x = d * (barW + gap) + 6;
+      const y = h - 20 - bh;
+      const cls = hot.has(d) ? 'mit-bar-hot' : cold.has(d) ? 'mit-bar-cold' : 'mit-bar-neutral';
+      bars += `<rect class="${cls}" x="${x}" y="${y}" width="${barW}" height="${bh}" rx="3"><title>digit ${d}: ${pct.toFixed(1)}%</title></rect>` +
+        `<text x="${x + barW / 2}" y="${h - 7}" text-anchor="middle" class="mit-bar-label">${d}</text>` +
+        `<text x="${x + barW / 2}" y="${y - 4}" text-anchor="middle" class="mit-bar-pct">${pct.toFixed(0)}</text>`;
+    }
+    return `<svg viewBox="0 0 ${w} ${h}" class="mit-drill-svg">${bars}<line x1="0" y1="${h - 20}" x2="${w}" y2="${h - 20}" class="mit-bar-axis"/></svg>`;
+  }
+
+  function renderDrilldown() {
+    if (!drillSymbol) return '';
+    const mit = window.MarketIntelTerminal;
+    const meta = mit.MARKETS.find((x) => x.value === drillSymbol) || {};
+    const m = mit.computeMicroMetrics(drillSymbol);
+    if (!m.ready) {
+      return `<div class="mit-drilldown"><div class="mit-drill-head"><span>🔍 ${esc(meta.label || drillSymbol)}</span><button class="mit-drill-close" id="mit-drill-close">✕</button></div>
+        <div class="mit-drill-warm">Warming up — needs 15 ticks minimum, has ${m.ticks}.</div></div>`;
+    }
+    let transHtml = 'no repeats of this digit observed yet in the current window';
+    if (m.transitionProbs) {
+      const top = m.transitionProbs.map((p, d) => ({ d, p })).filter((x) => x.p > 0).sort((a, b) => b.p - a.p).slice(0, 3);
+      if (top.length) transHtml = top.map((x) => `${m.lastDigit}→${x.d} <b>${x.p}%</b>`).join('&nbsp;&nbsp;·&nbsp;&nbsp;');
+    }
+    return `<div class="mit-drilldown">
+      <div class="mit-drill-head"><span>🔍 ${esc(meta.label || drillSymbol)} — detail</span><button class="mit-drill-close" id="mit-drill-close">✕</button></div>
+      ${renderDrillSvg(m)}
+      <div class="mit-drill-legend"><span class="mit-legend-swatch mit-bar-hot"></span>hot &nbsp; <span class="mit-legend-swatch mit-bar-cold"></span>cold &nbsp; <span class="mit-legend-swatch mit-bar-neutral"></span>neutral &nbsp;·&nbsp; bars show this market's own σ-relative weighted digit mass, not raw counts</div>
+      <div class="mit-drill-stats">
+        <div><span>Entropy</span><b>${m.entropyScore}</b></div>
+        <div><span>σ (spread)</span><b>${m.sigma}</b></div>
+        <div><span>Streak health</span><b>${m.streakHealth}</b></div>
+        <div><span>Trailing streak</span><b>${m.trailingStreak}</b></div>
+        <div><span>Longest streak (window)</span><b>${m.longestStreak}</b></div>
+        <div><span>Avg tick gap</span><b>${m.avgGapMs != null ? m.avgGapMs + 'ms' : '—'}</b></div>
+        <div><span>Velocity spike</span><b>${m.velocitySpike ? 'yes ⚠️' : 'no'}</b></div>
+        <div><span>Last digit</span><b>${m.lastDigit}</b></div>
+      </div>
+      <div class="mit-drill-trans"><span>Next-digit odds after a ${m.lastDigit}:</span> ${transHtml}</div>
+    </div>`;
+  }
+
+  // ── Portfolio exposure — real claims + a "what if everyone followed
+  // their top pick" projection ─────────────────────────────────────────
+  // Real claims only exist for bots whose engine actually calls
+  // getRecommendation() (Hot Repeat today) AND only while the Terminal is
+  // active — so on its own that view is thin right now. The projection
+  // fills the gap: it's useful concentration insight the moment more
+  // bots get real fitness scores (this update), even before their
+  // engines gain rotation logic to act on them.
+  function renderExposure(mit, matrix) {
+    const allocations = mit.getAllocations();
+    const cap = mit.MAX_BOTS_PER_MARKET;
+    const projected = {};
+    matrix.forEach((col) => {
+      const usable = col.ranked.filter((r) => r.metrics.ready);
+      if (!usable.length) return;
+      const top = usable[0];
+      (projected[top.symbol] = projected[top.symbol] || []).push(col.botType);
+    });
+    const symbols = new Set([...Object.keys(allocations), ...Object.keys(projected)]);
+    if (!symbols.size) {
+      return `<div class="mit-exposure-empty">No overlap yet — every bot's current top pick lands on a different market.</div>`;
+    }
+    let html = '<div class="mit-exposure-rows">';
+    [...symbols].forEach((sym) => {
+      const label = (mit.MARKETS.find((m) => m.value === sym) || {}).label || sym;
+      const real = allocations[sym] || [];
+      const proj = projected[sym] || [];
+      const realOver = real.length >= cap;
+      const projOver = proj.length >= cap;
+      if (!real.length && !projOver) return; // only show real claims + genuinely concentrated projections
+      html += `<div class="mit-exposure-row ${realOver || projOver ? 'mit-exposure-warn' : ''}">
+        <span class="mit-exposure-sym">${esc(label)}</span>
+        ${real.length ? `<span class="mit-exposure-real">${real.length} bot${real.length > 1 ? 's' : ''} actually parked here: ${real.map(esc).join(', ')}${realOver ? ' ⚠️ at/over the ' + cap + '-bot cap' : ''}</span>` : ''}
+        ${proj.length >= 2 ? `<span class="mit-exposure-proj">${proj.length} bots' top pick right now: ${proj.map(esc).join(', ')}${projOver ? ' — would concentrate here if all switched' : ''}</span>` : ''}
+      </div>`;
+    });
+    html += '</div>';
+    if (html === '<div class="mit-exposure-rows"></div>') return `<div class="mit-exposure-empty">No overlap yet — every bot's current top pick lands on a different market.</div>`;
+    return `<div class="mit-exposure-note">Real claims only happen while the Terminal is active — every bot below now actually rotates onto its recommendation. The projection shows what WOULD happen if every bot switched to its current #1 pick right now.</div>${html}`;
+  }
+
+  // ── KPI strip — same "stat card" language as the Dashboard's top row:
+  // gradient glass tiles, hairline top highlight, big Outfit number,
+  // small DM Mono uppercase label + delta line.
+  function renderStatsRow(matrix, active, log) {
+    const autoCount = BOT_ORDER.filter((id) => (BOT_META[id] || {}).status === 'auto').length;
+    const proxyCount = BOT_ORDER.length - autoCount;
+    const usableScores = matrix.map((c) => c.ranked.find((r) => r.metrics.ready)).filter(Boolean);
+    const topScore = usableScores.length ? Math.max(...usableScores.map((r) => r.score)) : null;
+    const topCol = topScore != null ? matrix.find((c) => (c.ranked.find((r) => r.metrics.ready) || {}).score === topScore) : null;
+    const topLabel = topCol ? (BOT_META[topCol.botType] || {}).label || topCol.botType : '—';
+    const recentRotations = log.filter((r) => Date.now() - r.ts < 3600000).length;
+    const tiles = [
+      { label: 'Bots Wired', val: String(BOT_ORDER.length), delta: `${autoCount} full · ${proxyCount} proxy`, cls: 'mit-kpi-neutral' },
+      { label: 'Terminal', val: active ? 'ACTIVE' : 'OFF', delta: active ? 'driving market picks' : 'bots use own picker', cls: active ? 'mit-kpi-good' : 'mit-kpi-neutral' },
+      { label: 'Top Score Now', val: topScore != null ? String(topScore) : '—', delta: topCol ? esc(topLabel) : 'warming up', cls: topScore != null ? tierClass(topScore).replace('mit-', 'mit-kpi-') : 'mit-kpi-neutral' },
+      { label: 'Rotations / hr', val: String(recentRotations), delta: 'across all wired bots', cls: recentRotations > 0 ? 'mit-kpi-good' : 'mit-kpi-neutral' },
+    ];
+    return tiles.map((t, i) => `<div class="mit-kpi ${t.cls}" style="--i:${i}">
+      <div class="mit-kpi-label">${esc(t.label)}</div>
+      <div class="mit-kpi-val">${t.val}</div>
+      <div class="mit-kpi-delta">${t.delta}</div>
+    </div>`).join('');
+  }
+
   function renderMatrix() {
     const mit = window.MarketIntelTerminal;
     const root = document.getElementById('market-root');
@@ -26823,7 +27170,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const toggle = document.getElementById('mit-master-toggle');
     const toggleLabel = document.querySelector('#mit-master-toggle .mit-toggle-label');
     if (toggle) toggle.classList.toggle('on', active);
-    if (toggleLabel) toggleLabel.textContent = active ? '● TERMINAL ACTIVE — now driving market picks' : '○ TERMINAL OFF — bots use their own picker';
+    if (toggleLabel) toggleLabel.textContent = active ? 'TERMINAL ACTIVE — now driving market picks' : 'TERMINAL OFF — bots use their own picker';
     const tabDot = document.getElementById('market-tab-dot');
     if (tabDot) tabDot.style.display = active ? '' : 'none';
     const banner = document.getElementById('mit-status-note');
@@ -26837,30 +27184,42 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const cardsEl = document.getElementById('mit-botcards');
     if (cardsEl) cardsEl.innerHTML = cardsHtml;
 
+    // KPI strip — always render.
+    const log0 = mit.getRotationLog();
+    const kpiEl = document.getElementById('mit-kpi-row');
+    if (kpiEl) kpiEl.innerHTML = renderStatsRow(matrix, active, log0);
+
+    // Portfolio exposure — always render.
+    const exposureEl = document.getElementById('mit-exposure');
+    if (exposureEl) exposureEl.innerHTML = renderExposure(mit, matrix);
+
     // Full cross-bot matrix table — always render.
     const marketOrder = mit.MARKETS.filter((m) => !m.is1s).map((m) => m.value);
-    let tableHtml = `<table class="mit-table"><thead><tr><th>Market</th>${matrix.map((c) => `<th>${(BOT_META[c.botType] || {}).label || c.botType}</th>`).join('')}</tr></thead><tbody>`;
+    let tableHtml = `<div class="mit-table-panel"><table class="mit-table"><thead><tr><th>Market</th>${matrix.map((c) => `<th>${(BOT_META[c.botType] || {}).label || c.botType}</th>`).join('')}</tr></thead><tbody>`;
     marketOrder.forEach((sym) => {
       const label = (mit.MARKETS.find((m) => m.value === sym) || {}).label || sym;
-      tableHtml += `<tr><td class="mit-sym">${label}</td>`;
+      tableHtml += `<tr class="mit-drill-trigger" data-symbol="${esc(sym)}"><td class="mit-sym">${label}</td>`;
       matrix.forEach((col) => {
         const entry = col.ranked.find((r) => r.symbol === sym);
         if (!entry || !entry.metrics.ready) { tableHtml += `<td class="mit-cell mit-warm">warming…</td>`; return; }
         const cls = tierClass(entry.score);
         const stale = entry.stale ? ' mit-stale' : '';
-        tableHtml += `<td class="mit-cell ${cls}${stale}" title="${esc(entry.reasons.join(' · '))}">${entry.score}<span class="mit-age">${fmtAge(Date.now() - entry.metrics.lastUpdate)}</span></td>`;
+        tableHtml += `<td class="mit-cell ${cls}${stale}" title="${esc(entry.reasons.join(' · '))}"><span class="mit-badge">${entry.score}</span><span class="mit-age">${fmtAge(Date.now() - entry.metrics.lastUpdate)}</span></td>`;
       });
       tableHtml += `</tr>`;
     });
-    tableHtml += `</tbody></table>`;
+    tableHtml += `</tbody></table></div>`;
     const tableEl = document.getElementById('mit-table-wrap');
     if (tableEl) tableEl.innerHTML = tableHtml;
 
+    // Drill-down detail panel — always render (empty string collapses it).
+    const drillEl = document.getElementById('mit-drilldown-wrap');
+    if (drillEl) drillEl.innerHTML = renderDrilldown();
+
     // Rotation log — always render.
-    const log = mit.getRotationLog();
     const logEl = document.getElementById('mit-log');
-    if (logEl) logEl.innerHTML = log.length
-      ? log.map((r) => `<div class="mit-log-row"><span>${new Date(r.ts).toLocaleTimeString()}</span> <b>${esc(r.botId)}</b> ${esc(r.from)} → ${esc(r.to)} <i>(${esc(r.reason)})</i></div>`).join('')
+    if (logEl) logEl.innerHTML = log0.length
+      ? log0.map((r) => `<div class="mit-log-row"><span>${new Date(r.ts).toLocaleTimeString()}</span> <b>${esc(r.botId)}</b> ${esc(r.from)} → ${esc(r.to)} <i>(${esc(r.reason)})</i></div>`).join('')
       : '<div class="mit-log-row mit-log-empty">No rotations yet.</div>';
 
     // Live digit streams — always render.
@@ -26871,129 +27230,230 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function injectStyles() {
     const css = document.createElement('style');
     css.textContent = `
-      @keyframes mit-fade-up { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
       @keyframes mit-fade-in { from { opacity:0; } to { opacity:1; } }
-      @keyframes mit-pop { 0% { opacity:0; transform:scale(.5); } 60% { opacity:1; transform:scale(1.15); } 100% { opacity:1; transform:scale(1); } }
-      @keyframes mit-pulse-dot { 0%,100% { opacity:1; box-shadow:0 0 0 0 hsl(var(--win)/0.55); } 50% { opacity:.7; box-shadow:0 0 0 5px hsl(var(--win)/0); } }
-      @keyframes mit-ring-pulse { 0%,100% { box-shadow:0 0 0 0 hsl(var(--foreground)/0.35); } 50% { box-shadow:0 0 0 4px hsl(var(--foreground)/0); } }
+      @keyframes mit-pulse-dot { 0%,100% { opacity:1; box-shadow:0 0 0 0 hsl(var(--win)/0.5); } 50% { opacity:.65; box-shadow:0 0 0 5px hsl(var(--win)/0); } }
+      @keyframes mit-ring-pulse { 0%,100% { box-shadow:0 0 0 0 hsl(var(--foreground)/0.3); } 50% { box-shadow:0 0 0 4px hsl(var(--foreground)/0); } }
       @keyframes mit-grid-drift { from { background-position:0 0, 0 0; } to { background-position:60px 60px, 60px 60px; } }
-      @keyframes mit-blob-float1 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(40px,-30px) scale(1.15); } }
-      @keyframes mit-blob-float2 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(-50px,25px) scale(1.1); } }
+      @keyframes mit-blob-float1 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(40px,-30px) scale(1.12); } }
+      @keyframes mit-blob-float2 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(-50px,25px) scale(1.08); } }
       @keyframes mit-shimmer-sweep { 0% { transform:translateX(-120%) skewX(-15deg); } 100% { transform:translateX(220%) skewX(-15deg); } }
-      @keyframes mit-title-glow { 0%,100% { filter:drop-shadow(0 0 6px hsl(var(--primary)/0.35)); } 50% { filter:drop-shadow(0 0 14px hsl(var(--primary)/0.65)); } }
-      @keyframes mit-underline-slide { 0%,100% { background-position:0% 0; } 50% { background-position:100% 0; } }
       @keyframes mit-spin-slow { to { transform:rotate(360deg); } }
       @keyframes mit-warm-blink { 0%,100% { opacity:.3; } 50% { opacity:1; } }
-      @keyframes mit-cell-in { from { opacity:0; transform:scale(.85); } to { opacity:1; transform:scale(1); } }
+      @keyframes mit-knob-in { from { opacity:0; transform:translateX(-6px); } to { opacity:1; transform:translateX(0); } }
+      @keyframes mit-card-enter { from { opacity:0; transform:translateY(16px) scale(.97); filter:blur(3px); } to { opacity:1; transform:translateY(0) scale(1); filter:blur(0); } }
+      @keyframes mit-header-sweep { 0% { background-position:-200% 0; } 100% { background-position:200% 0; } }
+      @keyframes mit-kpi-count { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
 
-      #panel-market { position:relative; }
+      /* ── Layout / scroll ─────────────────────────────────────────────── */
+      #panel-market.app-panel.active { position:relative; overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflow-scrolling:touch; }
+      #market-root.app-root { overflow:visible !important; }
       #panel-market .mit-bgfx { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
-      #panel-market .mit-bgfx-grid { position:absolute; inset:-60px; opacity:.35;
-        background-image:linear-gradient(hsl(var(--border)/0.5) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--border)/0.5) 1px, transparent 1px);
-        background-size:60px 60px; animation:mit-grid-drift 14s linear infinite; mask-image:radial-gradient(ellipse 70% 60% at 50% 20%, black, transparent 75%); }
-      #panel-market .mit-bgfx-glow { position:absolute; width:420px; height:420px; border-radius:50%; filter:blur(90px); opacity:.22; }
-      #panel-market .mit-bgfx-glow1 { top:-100px; left:8%; background:hsl(var(--win)); animation:mit-blob-float1 16s ease-in-out infinite; }
-      #panel-market .mit-bgfx-glow2 { top:220px; right:6%; background:hsl(var(--primary)); animation:mit-blob-float2 19s ease-in-out infinite; }
+      #panel-market .mit-bgfx-grid { position:absolute; inset:-60px; opacity:.25;
+        background-image:linear-gradient(hsl(var(--border)/0.45) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--border)/0.45) 1px, transparent 1px);
+        background-size:64px 64px; animation:mit-grid-drift 22s linear infinite; mask-image:radial-gradient(ellipse 65% 55% at 50% 15%, black, transparent 78%); }
+      #panel-market .mit-bgfx-glow { position:absolute; width:460px; height:460px; border-radius:50%; filter:blur(120px); opacity:.10; }
+      #panel-market .mit-bgfx-glow1 { top:-120px; left:6%; background:hsl(var(--win)); animation:mit-blob-float1 20s ease-in-out infinite; }
+      #panel-market .mit-bgfx-glow2 { top:260px; right:4%; background:hsl(var(--primary)); animation:mit-blob-float2 24s ease-in-out infinite; }
 
-      #panel-market .mit-wrap { position:relative; z-index:1; max-width:1180px; margin:0 auto; padding:20px 4px 48px; font-family:'DM Mono',monospace; font-size:12px; color:hsl(var(--foreground)); animation:mit-fade-in .5s ease; }
-      #panel-market .mit-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
-      #panel-market .mit-title { font-family:'Orbitron',sans-serif; font-size:19px; letter-spacing:1px; display:flex; align-items:center; gap:9px;
-        background:linear-gradient(100deg, hsl(var(--foreground)), hsl(var(--win)) 45%, hsl(var(--primary)) 65%, hsl(var(--foreground)));
-        background-size:280% auto; -webkit-background-clip:text; background-clip:text; color:transparent; animation:mit-title-glow 3.4s ease-in-out infinite; }
-      #panel-market .mit-title-pulse { width:9px; height:9px; border-radius:50%; background:hsl(var(--win)); flex-shrink:0; animation:mit-pulse-dot 1.8s ease-in-out infinite; }
-      #panel-market .mit-subtitle { opacity:.55; font-size:11px; margin-top:3px; letter-spacing:.2px; }
+      #panel-market .mit-wrap { position:relative; z-index:1; max-width:1180px; margin:0 auto; padding:24px 10px 60px; font-family:'DM Mono',monospace; font-size:12px; color:hsl(var(--foreground)); animation:mit-fade-in .5s ease; }
 
-      #mit-master-toggle { position:relative; overflow:hidden; width:100%; padding:14px; border-radius:12px; border:1px solid hsl(var(--border)); background:hsl(var(--muted)/0.3); cursor:pointer; font-family:'DM Mono',monospace; font-size:12px; font-weight:600; letter-spacing:.3px; margin-bottom:6px; color:hsl(var(--muted-foreground)); transition:transform .15s ease, box-shadow .3s ease, border-color .3s ease, background .3s ease; }
-      #mit-master-toggle:hover { transform:translateY(-1px); border-color:hsl(var(--border-bright, var(--border))); }
-      #mit-master-toggle.mit-toggle-pressed { transform:scale(.98); }
-      #mit-master-toggle.on { background:linear-gradient(90deg, hsl(var(--win)/0.16), hsl(var(--win)/0.08)); border-color:hsl(var(--win)/0.6); color:hsl(var(--win)); box-shadow:0 0 22px hsl(var(--win)/0.28), inset 0 0 20px hsl(var(--win)/0.06); }
+      /* ── Header — same lifted-glass card language as the Dashboard's
+         stat cards (gradient bg, hairline top sweep, deep drop shadow) ── */
+      #panel-market .mit-header { position:relative; overflow:hidden; display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:14px; padding:18px 22px; border-radius:16px;
+        border:1px solid hsl(var(--border)/0.5); background:linear-gradient(135deg, hsl(var(--card)/0.9) 0%, hsl(var(--bg)/0.6) 100%); backdrop-filter:blur(16px) saturate(140%);
+        box-shadow:var(--shadow-md, 0 10px 30px hsl(0 0% 0%/0.5)), inset 0 1px 0 hsl(255 100% 100%/0.05); }
+      #panel-market .mit-header::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; z-index:1;
+        background:linear-gradient(90deg, transparent, hsl(var(--primary)/0.5), hsl(var(--win)/0.4), transparent); background-size:200% 100%; animation:mit-header-sweep 6s linear infinite; }
+      #panel-market .mit-header-left { display:flex; align-items:center; gap:14px; }
+      #panel-market .mit-icon-badge { width:40px; height:40px; flex:0 0 40px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:18px;
+        background:linear-gradient(155deg, hsl(var(--primary)/0.24), hsl(var(--win)/0.16)); border:1px solid hsl(var(--border)/0.6); box-shadow:0 0 18px hsl(var(--primary)/0.18) inset; }
+      #panel-market .mit-title { font-family:'Outfit',sans-serif; font-size:18px; font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:8px; color:hsl(var(--foreground)); }
+      #panel-market .mit-title-pulse { width:7px; height:7px; border-radius:50%; background:hsl(var(--win)); flex-shrink:0; animation:mit-pulse-dot 1.8s ease-in-out infinite; }
+      #panel-market .mit-subtitle { opacity:.5; font-size:10.5px; margin-top:3px; letter-spacing:.15px; font-weight:400; }
+
+      /* ── KPI strip — Dashboard's dash-stat-card, restyled for Intel ──── */
+      #panel-market .mit-kpi-row { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-bottom:16px; }
+      #panel-market .mit-kpi { position:relative; overflow:hidden; border-radius:14px; padding:13px 15px; border:1px solid hsl(var(--border)/0.5);
+        background:linear-gradient(135deg, hsl(var(--card)/0.9) 0%, hsl(var(--bg)/0.6) 100%); backdrop-filter:blur(12px);
+        box-shadow:0 2px 12px hsl(0 0% 0%/0.3), inset 0 1px 0 hsl(255 100% 100%/0.04);
+        animation:mit-card-enter .45s cubic-bezier(.34,1.4,.64,1) both; animation-delay:calc(var(--i, 0) * 60ms);
+        transition:transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s ease, border-color .2s ease; }
+      #panel-market .mit-kpi::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, hsl(var(--primary)/0.3), transparent); }
+      #panel-market .mit-kpi:hover { transform:translateY(-3px); border-color:hsl(var(--border-bright, var(--border))); box-shadow:0 12px 28px hsl(0 0% 0%/0.35), inset 0 1px 0 hsl(255 100% 100%/0.06); }
+      #panel-market .mit-kpi-label { font-family:'Outfit',sans-serif; font-size:8.5px; font-weight:700; letter-spacing:2px; text-transform:uppercase; opacity:.55; margin-bottom:6px; }
+      #panel-market .mit-kpi-val { font-family:'Outfit',sans-serif; font-size:22px; font-weight:800; letter-spacing:-.3px; font-variant-numeric:tabular-nums; animation:mit-kpi-count .3s ease both; }
+      #panel-market .mit-kpi-delta { font-size:9px; font-family:'DM Mono',monospace; opacity:.5; margin-top:4px; }
+      #panel-market .mit-kpi-good .mit-kpi-val { color:hsl(var(--win)); }
+      #panel-market .mit-kpi-good { border-color:hsl(var(--win)/0.3); }
+      #panel-market .mit-kpi-bad .mit-kpi-val { color:hsl(var(--loss)); }
+      #panel-market .mit-kpi-bad { border-color:hsl(var(--loss)/0.3); }
+      #panel-market .mit-kpi-mid .mit-kpi-val { color:hsl(var(--muted-foreground)); }
+      @media (max-width:640px) { #panel-market .mit-kpi-row { grid-template-columns:repeat(2, 1fr); } }
+
+      /* ── Master toggle — glass pill switch ───────────────────────────── */
+      #mit-master-toggle { position:relative; overflow:hidden; display:flex; align-items:center; gap:10px; width:100%; padding:13px 16px 13px 14px; border-radius:13px;
+        border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.16); backdrop-filter:blur(10px); cursor:pointer; font-family:'DM Mono',monospace; font-size:11.5px;
+        font-weight:600; letter-spacing:.2px; margin-top:16px; margin-bottom:10px; color:hsl(var(--muted-foreground));
+        transition:border-color .25s ease, background .3s ease, box-shadow .3s ease; }
+      #mit-master-toggle:hover { border-color:hsl(var(--border-bright, var(--border))); }
+      #mit-master-toggle.mit-toggle-pressed { transform:scale(.995); }
+      #mit-master-toggle .mit-toggle-track { position:relative; flex:0 0 34px; width:34px; height:19px; border-radius:99px; background:hsl(var(--muted)/0.5); border:1px solid hsl(var(--border)/0.6); transition:background .3s ease, border-color .3s ease; }
+      #mit-master-toggle .mit-toggle-knob { position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:hsl(var(--muted-foreground)); transition:transform .25s cubic-bezier(.34,1.4,.64,1), background .3s ease; }
+      #mit-master-toggle.on .mit-toggle-track { background:hsl(var(--win)/0.35); border-color:hsl(var(--win)/0.65); }
+      #mit-master-toggle.on .mit-toggle-knob { transform:translateX(15px); background:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.7); }
+      #mit-master-toggle.on { color:hsl(var(--win)); border-color:hsl(var(--win)/0.45); background:linear-gradient(90deg, hsl(var(--win)/0.12), hsl(var(--win)/0.04)); box-shadow:0 0 24px hsl(var(--win)/0.14), inset 0 0 20px hsl(var(--win)/0.04); }
       #mit-master-toggle .mit-toggle-label { position:relative; z-index:1; }
-      #mit-master-toggle .mit-toggle-shimmer { position:absolute; top:0; left:0; width:40%; height:100%; background:linear-gradient(90deg, transparent, hsl(var(--foreground)/0.12), transparent); pointer-events:none; }
-      #mit-master-toggle.on .mit-toggle-shimmer { animation:mit-shimmer-sweep 2.8s ease-in-out infinite; background:linear-gradient(90deg, transparent, hsl(var(--win)/0.35), transparent); }
-      #mit-status-note { opacity:.6; line-height:1.5; margin-bottom:20px; font-size:11px; transition:opacity .3s ease; }
+      #mit-master-toggle .mit-toggle-shimmer { position:absolute; top:0; left:0; width:40%; height:100%; background:linear-gradient(90deg, transparent, hsl(var(--foreground)/0.1), transparent); pointer-events:none; }
+      #mit-master-toggle.on .mit-toggle-shimmer { animation:mit-shimmer-sweep 3.2s ease-in-out infinite; background:linear-gradient(90deg, transparent, hsl(var(--win)/0.28), transparent); }
+      #mit-status-note { line-height:1.55; margin-bottom:24px; font-size:10.5px; padding:11px 15px; border-radius:11px; border:1px solid hsl(var(--border)/0.45);
+        background:hsl(var(--card)/0.4); backdrop-filter:blur(8px); opacity:.85; transition:opacity .3s ease; }
 
-      .mit-section-title { font-family:'Orbitron',sans-serif; font-size:12px; letter-spacing:.6px; opacity:.8; margin:26px 0 10px; display:flex; align-items:center; gap:7px; position:relative; padding-bottom:8px; }
-      .mit-sec-ico { font-size:13px; filter:drop-shadow(0 0 4px hsl(var(--primary)/0.4)); }
-      .mit-section-title::after { content:''; position:absolute; left:0; bottom:0; width:100%; height:1px;
-        background:linear-gradient(90deg, hsl(var(--win)/0.7), hsl(var(--primary)/0.5) 40%, transparent 70%); background-size:200% 100%; animation:mit-underline-slide 4s ease-in-out infinite; }
+      /* ── Section headers ─────────────────────────────────────────────── */
+      .mit-section-title { font-family:'Outfit',sans-serif; font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; opacity:.55; margin:32px 0 13px;
+        display:flex; align-items:center; gap:9px; position:relative; padding-bottom:10px; }
+      .mit-sec-ico { width:22px; height:22px; flex:0 0 22px; display:flex; align-items:center; justify-content:center; font-size:11.5px; border-radius:7px;
+        background:hsl(var(--muted)/0.3); border:1px solid hsl(var(--border)/0.5); }
+      .mit-section-title::after { content:''; position:absolute; left:0; bottom:0; width:100%; height:1px; background:hsl(var(--border)/0.55); }
 
-      /* Bot pick cards */
-      .mit-botcards { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:14px; margin-bottom:8px; }
-      .mit-botcard { position:relative; border-radius:14px; padding:1px; border:1px solid hsl(var(--border)); background:hsl(var(--card)); overflow:hidden;
-        opacity:0; animation:mit-fade-up .45s ease forwards; animation-delay:calc(var(--i, 0) * 70ms);
-        transition:transform .25s ease, box-shadow .25s ease; }
-      .mit-botcard:hover { transform:translateY(-4px) scale(1.015); }
-      .mit-botcard-inner { position:relative; z-index:1; background:hsl(var(--card)); border-radius:13px; padding:13px 14px 12px; backdrop-filter:blur(6px); }
+      /* ── Bot pick cards ───────────────────────────────────────────────── */
+      .mit-botcards { display:grid; grid-template-columns:repeat(auto-fit, minmax(226px, 1fr)); gap:14px; margin-bottom:8px; }
+      .mit-botcard { position:relative; border-radius:15px; padding:1px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--card)/0.5); overflow:hidden;
+        backdrop-filter:blur(10px); transition:transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s ease, border-color .25s ease;
+        animation:mit-card-enter .5s cubic-bezier(.34,1.4,.64,1) both; animation-delay:calc(var(--i, 0) * 50ms); }
+      .mit-botcard:hover { transform:translateY(-4px) scale(1.012); border-color:hsl(var(--border-bright, var(--border))); box-shadow:var(--shadow-md, 0 10px 30px hsl(0 0% 0%/0.5)); }
+      .mit-botcard-accent { position:absolute; top:0; left:0; right:0; height:2.5px; z-index:2; background:hsl(var(--border)/0.5); }
+      .mit-botcard.mit-good .mit-botcard-accent { background:linear-gradient(90deg, hsl(var(--win)/0.2), hsl(var(--win)), hsl(var(--win)/0.2)); }
+      .mit-botcard.mit-bad .mit-botcard-accent { background:linear-gradient(90deg, hsl(var(--loss)/0.2), hsl(var(--loss)), hsl(var(--loss)/0.2)); }
+      .mit-botcard-inner { position:relative; z-index:1; background:linear-gradient(165deg, hsl(var(--card)/0.65), hsl(var(--card)/0.3)); border-radius:14px; padding:17px 18px 15px; }
       .mit-card-spin { position:absolute; inset:-40%; z-index:0; opacity:0; }
-      .mit-botcard.mit-good .mit-card-spin, .mit-botcard.mit-bad .mit-card-spin { opacity:1; animation:mit-spin-slow 5s linear infinite; }
-      .mit-botcard.mit-good .mit-card-spin { background:conic-gradient(from 0deg, transparent 0deg, hsl(var(--win)/0.9) 25deg, transparent 70deg, transparent 360deg); }
-      .mit-botcard.mit-bad .mit-card-spin { background:conic-gradient(from 0deg, transparent 0deg, hsl(var(--loss)/0.85) 25deg, transparent 70deg, transparent 360deg); }
-      .mit-botcard.mit-good { box-shadow:0 0 22px hsl(var(--win)/0.18); animation:mit-fade-up .45s ease forwards, mit-glow-good 2.6s ease-in-out infinite; animation-delay:calc(var(--i, 0) * 70ms), calc(var(--i, 0) * 70ms + .45s); }
-      .mit-botcard.mit-mid  { border-color:hsl(var(--muted-foreground)/0.4); }
-      .mit-botcard.mit-bad  { box-shadow:0 0 18px hsl(var(--loss)/0.14); animation:mit-fade-up .45s ease forwards, mit-glow-bad 2.6s ease-in-out infinite; animation-delay:calc(var(--i, 0) * 70ms), calc(var(--i, 0) * 70ms + .45s); }
-      .mit-warm-card { opacity:0; animation:mit-fade-up .45s ease forwards; animation-delay:calc(var(--i, 0) * 70ms); }
-      @keyframes mit-glow-good { 0%,100% { box-shadow:0 0 16px hsl(var(--win)/0.18); } 50% { box-shadow:0 0 30px hsl(var(--win)/0.4); } }
-      @keyframes mit-glow-bad  { 0%,100% { box-shadow:0 0 12px hsl(var(--loss)/0.12); } 50% { box-shadow:0 0 22px hsl(var(--loss)/0.28); } }
-      .mit-botcard-head { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
-      .mit-bot-icon { font-size:14px; }
-      .mit-bot-name { font-family:'Outfit',sans-serif; font-weight:700; font-size:12px; flex:1; }
-      .mit-bot-wired { font-size:8px; text-transform:uppercase; letter-spacing:.6px; padding:2px 6px; border-radius:5px; background:hsl(var(--muted)/0.4); opacity:.6; transition:all .3s ease; }
-      .mit-bot-wired.is-wired { background:hsl(var(--win)/0.18); color:hsl(var(--win)); opacity:1; box-shadow:0 0 8px hsl(var(--win)/0.3); }
-      .mit-botcard-warm { opacity:.6; font-size:11px; padding:14px 0; text-align:center; display:flex; align-items:center; justify-content:center; gap:7px; }
+      .mit-botcard.mit-good .mit-card-spin, .mit-botcard.mit-bad .mit-card-spin { opacity:.5; animation:mit-spin-slow 7s linear infinite; }
+      .mit-botcard.mit-good .mit-card-spin { background:conic-gradient(from 0deg, transparent 0deg, hsl(var(--win)/0.7) 25deg, transparent 70deg, transparent 360deg); }
+      .mit-botcard.mit-bad .mit-card-spin { background:conic-gradient(from 0deg, transparent 0deg, hsl(var(--loss)/0.65) 25deg, transparent 70deg, transparent 360deg); }
+      .mit-botcard.mit-good { box-shadow:0 0 22px hsl(var(--win)/0.1); animation:mit-glow-good 3.2s ease-in-out infinite; }
+      .mit-botcard.mit-mid  { border-color:hsl(var(--muted-foreground)/0.35); }
+      .mit-botcard.mit-bad  { box-shadow:0 0 18px hsl(var(--loss)/0.08); animation:mit-glow-bad 3.2s ease-in-out infinite; }
+      @keyframes mit-glow-good { 0%,100% { box-shadow:0 0 14px hsl(var(--win)/0.1); } 50% { box-shadow:0 0 26px hsl(var(--win)/0.24); } }
+      @keyframes mit-glow-bad  { 0%,100% { box-shadow:0 0 10px hsl(var(--loss)/0.07); } 50% { box-shadow:0 0 18px hsl(var(--loss)/0.16); } }
+      .mit-botcard-head { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+      .mit-bot-icon { width:26px; height:26px; flex:0 0 26px; display:flex; align-items:center; justify-content:center; font-size:13px; border-radius:8px;
+        background:hsl(var(--muted)/0.3); border:1px solid hsl(var(--border)/0.5); }
+      .mit-bot-name { font-family:'Outfit',sans-serif; font-weight:700; font-size:12px; flex:1; letter-spacing:.1px; }
+      .mit-bot-wired { font-size:8px; text-transform:uppercase; letter-spacing:.5px; padding:3px 7px; border-radius:99px; background:hsl(var(--muted)/0.35); opacity:.55; font-weight:700; transition:all .3s ease; }
+      .mit-bot-wired.is-wired { background:hsl(var(--win)/0.16); color:hsl(var(--win)); opacity:1; box-shadow:0 0 8px hsl(var(--win)/0.25); }
+      .mit-botcard-warm { opacity:.55; font-size:11px; padding:16px 0; text-align:center; display:flex; align-items:center; justify-content:center; gap:7px; }
       .mit-warm-dot { width:6px; height:6px; border-radius:50%; background:currentColor; animation:mit-warm-blink 1.2s ease-in-out infinite; }
-      .mit-botcard-pick { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
-      .mit-pick-market { font-family:'Outfit',sans-serif; font-weight:600; font-size:14px; }
-      .mit-pick-score { font-family:'Orbitron',sans-serif; font-size:21px; font-weight:700; transition:color .3s ease; }
-      .mit-pick-score span { font-size:10px; opacity:.5; font-weight:400; }
+      .mit-botcard-pick { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+      .mit-pick-market { font-family:'Outfit',sans-serif; font-weight:600; font-size:13.5px; }
+      .mit-pick-score { font-family:'Outfit',sans-serif; font-size:22px; font-weight:800; letter-spacing:-.3px; font-variant-numeric:tabular-nums; transition:color .3s ease; }
+      .mit-pick-score span { font-size:9.5px; opacity:.45; font-weight:500; }
       .mit-good .mit-pick-score, .mit-good .mit-pick-market { color:hsl(var(--win)); }
       .mit-bad .mit-pick-score, .mit-bad .mit-pick-market { color:hsl(var(--loss)); }
-      .mit-chips { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; }
-      .mit-chip { font-size:9px; padding:3px 7px; border-radius:20px; background:hsl(var(--muted)/0.35); opacity:0; white-space:nowrap; transition:background .2s ease, transform .2s ease;
-        animation:mit-fade-up .35s ease forwards; animation-delay:calc(var(--i, 0) * 60ms + .2s); }
-      .mit-chip:hover { background:hsl(var(--muted)/0.6); transform:translateY(-1px); }
-      .mit-runners { display:flex; gap:10px; padding-top:8px; border-top:1px solid hsl(var(--border)/0.4); opacity:.6; font-size:10px; }
-      .mit-runner b { opacity:.9; }
+      .mit-chips { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
+      .mit-chip { font-size:9px; padding:4px 9px; border-radius:99px; background:hsl(var(--muted)/0.28); border:1px solid hsl(var(--border)/0.4); white-space:nowrap; font-weight:500;
+        transition:background .2s ease, transform .2s ease, border-color .2s ease; }
+      .mit-chip:hover { background:hsl(var(--muted)/0.5); border-color:hsl(var(--border-bright, var(--border))); transform:translateY(-1px); }
+      .mit-runners { display:flex; flex-wrap:wrap; gap:8px; padding-top:10px; border-top:1px solid hsl(var(--border)/0.35); opacity:.65; font-size:10px; }
+      .mit-runner { padding:2px 0; }
+      .mit-runner b { opacity:.95; font-weight:700; }
 
-      /* Full matrix table */
-      .mit-table { width:100%; border-collapse:collapse; margin-bottom:8px; border-radius:10px; overflow:hidden; }
-      .mit-table th, .mit-table td { padding:9px 10px; text-align:center; border-bottom:1px solid hsl(var(--border)/0.4); transition:background .2s ease; }
-      .mit-table th { font-weight:400; opacity:.6; font-family:'Outfit',sans-serif; letter-spacing:.3px; }
-      .mit-table tbody tr { transition:background .2s ease; }
-      .mit-table tbody tr:hover { background:hsl(var(--muted)/0.15); }
+      /* ── Score sparkline — same curve language as the Dashboard's
+         equity chart: smoothed line + soft gradient fill underneath ── */
+      .mit-spark-wrap { margin:2px 0 10px; border-radius:8px; overflow:hidden; background:hsl(var(--muted)/0.08); border:1px solid hsl(var(--border)/0.3); }
+      .mit-spark { width:100%; height:30px; display:block; }
+
+      /* ── Full scoring matrix table ────────────────────────────────────── */
+      .mit-table-panel { border-radius:14px; border:1px solid hsl(var(--border)/0.5); background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%);
+        backdrop-filter:blur(10px); overflow:hidden auto; max-height:420px; margin-bottom:8px; box-shadow:0 2px 12px hsl(0 0% 0%/0.25), inset 0 1px 0 hsl(255 100% 100%/0.03); }
+      .mit-table { width:100%; border-collapse:collapse; }
+      .mit-table th, .mit-table td { padding:12px 10px; text-align:center; border-bottom:1px solid hsl(var(--border)/0.35); transition:background .2s ease; }
+      .mit-table th { position:sticky; top:0; z-index:2; font-weight:700; opacity:.6; font-family:'Outfit',sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:.5px;
+        background:hsl(var(--card)/0.92); backdrop-filter:blur(10px); box-shadow:0 1px 0 hsl(var(--border)/0.5); }
+      .mit-table tbody tr { transition:background .18s ease, box-shadow .18s ease; cursor:pointer; }
+      .mit-table tbody tr:nth-child(even) { background:hsl(var(--muted)/0.05); }
+      .mit-table tbody tr:hover { background:hsl(var(--primary)/0.06); box-shadow:inset 2px 0 0 hsl(var(--primary)/0.5); }
+      .mit-table tbody tr:last-child td { border-bottom:none; }
       .mit-sym { text-align:left !important; opacity:.85; font-weight:600; }
-      .mit-cell { font-weight:600; position:relative; animation:mit-cell-in .3s ease; }
-      .mit-good { color:hsl(var(--win)); text-shadow:0 0 10px hsl(var(--win)/0.35); }
-      .mit-mid { color:hsl(var(--muted-foreground)); }
-      .mit-bad { color:hsl(var(--loss)); text-shadow:0 0 10px hsl(var(--loss)/0.3); }
-      .mit-warm { opacity:.35; font-weight:400; }
-      .mit-stale { opacity:.4; }
-      .mit-age { display:block; font-size:9px; opacity:.5; font-weight:400; }
+      .mit-cell { position:relative; }
+      .mit-badge { display:inline-flex; align-items:center; justify-content:center; min-width:34px; padding:4px 9px; border-radius:99px; font-weight:700;
+        font-family:'Outfit',sans-serif; font-size:11.5px; font-variant-numeric:tabular-nums; transition:background .2s ease, color .2s ease, box-shadow .2s ease; }
+      .mit-good .mit-badge { color:hsl(var(--win)); background:hsl(var(--win)/0.14); box-shadow:0 0 10px hsl(var(--win)/0.14); }
+      .mit-mid .mit-badge { color:hsl(var(--muted-foreground)); background:hsl(var(--muted)/0.25); }
+      .mit-bad .mit-badge { color:hsl(var(--loss)); background:hsl(var(--loss)/0.12); }
+      .mit-warm { opacity:.35; font-weight:400; font-size:10.5px; }
+      .mit-stale .mit-badge { opacity:.4; }
+      .mit-age { display:block; font-size:8.5px; opacity:.45; font-weight:500; margin-top:3px; }
 
-      /* Rotation log */
-      .mit-log { max-height:200px; overflow:auto; border:1px solid hsl(var(--border)/0.4); border-radius:10px; padding:8px 10px; background:hsl(var(--card)/0.5); }
-      .mit-log-row { padding:4px 2px; opacity:.8; border-radius:6px; animation:mit-fade-up .3s ease; }
-      .mit-log-row:first-child:not(.mit-log-empty) { background:hsl(var(--win)/0.08); }
-      .mit-log-empty { opacity:.4; }
+      /* ── Rotation log ─────────────────────────────────────────────────── */
+      .mit-log { max-height:210px; overflow:auto; border:1px solid hsl(var(--border)/0.5); border-radius:12px; padding:6px;
+        background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%); backdrop-filter:blur(10px); box-shadow:0 2px 12px hsl(0 0% 0%/0.25); }
+      .mit-log-row { padding:8px 10px; opacity:.85; border-radius:8px; border-left:2px solid transparent; font-size:11px; transition:background .15s ease; }
+      .mit-log-row:hover { background:hsl(var(--muted)/0.1); }
+      .mit-log-row:first-child:not(.mit-log-empty) { background:hsl(var(--win)/0.07); border-left-color:hsl(var(--win)/0.6); animation:mit-glow-good 3.2s ease-in-out infinite; }
+      .mit-log-row span { opacity:.5; font-size:9.5px; margin-right:4px; }
+      .mit-log-empty { opacity:.4; text-align:center; padding:14px 0; }
       .mit-log::-webkit-scrollbar, .mit-wrap ::-webkit-scrollbar { width:5px; }
       .mit-log::-webkit-scrollbar-thumb { background:hsl(var(--border)); border-radius:4px; }
 
-      /* Live digit streams */
-      .mit-live-note { opacity:.55; font-size:10px; line-height:1.6; margin-bottom:12px; }
+      /* ── Live digit streams ───────────────────────────────────────────── */
+      .mit-live-note { opacity:.5; font-size:9.5px; line-height:1.65; margin-bottom:13px; }
       .mit-legend-swatch { display:inline-block; width:9px; height:9px; border-radius:3px; margin:0 2px -1px 4px; }
-      .mit-live-rows { display:flex; flex-direction:column; gap:8px; }
-      .mit-live-row { display:flex; align-items:center; gap:10px; padding:9px 10px; border:1px solid hsl(var(--border)/0.4); border-radius:10px; background:hsl(var(--card)/0.55);
-        opacity:0; animation:mit-fade-up .4s ease forwards; animation-delay:calc(var(--i, 0) * 45ms); transition:border-color .3s ease, box-shadow .3s ease; }
-      .mit-live-row:hover { border-color:hsl(var(--border-bright, var(--border))); box-shadow:0 0 14px hsl(var(--primary)/0.1); }
-      .mit-live-label { flex:0 0 84px; font-weight:600; opacity:.85; font-size:11px; }
-      .mit-1s-tag { display:inline-block; margin-left:5px; font-size:8px; padding:1px 4px; border-radius:4px; background:hsl(var(--primary)/0.2); color:hsl(var(--primary)); vertical-align:middle; }
+      .mit-live-rows { display:flex; flex-direction:column; gap:7px; }
+      .mit-live-row { display:flex; align-items:center; gap:11px; padding:11px 13px; border:1px solid hsl(var(--border)/0.4); border-radius:11px;
+        background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%); backdrop-filter:blur(8px);
+        transition:border-color .25s ease, box-shadow .25s ease, transform .25s cubic-bezier(.16,1,.3,1);
+        animation:mit-card-enter .4s cubic-bezier(.34,1.4,.64,1) both; animation-delay:calc(var(--i, 0) * 30ms); }
+      .mit-live-row:hover { border-color:hsl(var(--border-bright, var(--border))); box-shadow:0 0 14px hsl(var(--primary)/0.1); transform:translateX(2px); }
+      .mit-live-label { flex:0 0 84px; font-weight:600; opacity:.8; font-size:10.5px; }
+      .mit-1s-tag { display:inline-block; margin-left:5px; font-size:8px; padding:1px 5px; border-radius:99px; background:hsl(var(--primary)/0.18); color:hsl(var(--primary)); vertical-align:middle; font-weight:700; }
       .mit-digit-strip { flex:1; display:flex; flex-wrap:wrap; gap:3px; overflow:hidden; }
-      .mit-digit { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:5px; font-size:10px; font-weight:700; background:hsl(var(--muted)/0.35);
-        opacity:0; animation:mit-pop .3s ease forwards; animation-delay:calc(var(--i, 0) * 18ms); }
-      .mit-d-hot { background:hsl(var(--win)/0.28); color:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.35); }
-      .mit-d-cold { background:hsl(var(--primary)/0.22); color:hsl(var(--primary)); box-shadow:0 0 8px hsl(var(--primary)/0.3); }
-      .mit-d-last { outline:1.5px solid hsl(var(--foreground)/0.65); animation:mit-pop .3s ease forwards, mit-ring-pulse 1.6s ease-in-out infinite .3s; }
-      .mit-live-age { flex:0 0 34px; text-align:right; opacity:.45; font-size:10px; }
+      .mit-digit { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:6px; font-size:10px; font-weight:700; background:hsl(var(--muted)/0.28);
+        transition:background .2s ease, color .2s ease, box-shadow .2s ease; }
+      .mit-d-neutral { color:hsl(var(--muted-foreground)); opacity:.75; }
+      .mit-d-hot { background:hsl(var(--win)/0.24); color:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.3); }
+      .mit-d-cold { background:hsl(var(--primary)/0.2); color:hsl(var(--primary)); box-shadow:0 0 8px hsl(var(--primary)/0.25); }
+      .mit-d-last { outline:1.5px solid hsl(var(--foreground)/0.6); animation:mit-ring-pulse 1.6s ease-in-out infinite; }
+      .mit-live-age { flex:0 0 34px; text-align:right; opacity:.4; font-size:9.5px; }
       .mit-live-empty { flex:1; opacity:.4; font-size:10px; }
+
+      /* ── Drill-down ───────────────────────────────────────────────────── */
+      .mit-matrix-hint { opacity:.45; font-size:10px; margin-bottom:10px; }
+      .mit-runner.mit-drill-trigger, .mit-botcard-pick.mit-drill-trigger { cursor:pointer; }
+      .mit-drill-hint { font-size:9px; opacity:.4; font-weight:400; margin-left:4px; }
+      .mit-drilldown { margin:4px 0 16px; padding:17px; border:1px solid hsl(var(--border-bright, var(--border))); border-radius:14px;
+        background:linear-gradient(160deg, hsl(var(--card)/0.65), hsl(var(--card)/0.35)); backdrop-filter:blur(12px);
+        box-shadow:var(--shadow-md, 0 10px 30px hsl(0 0% 0%/0.5)); animation:mit-card-enter .35s cubic-bezier(.34,1.4,.64,1) both; }
+      .mit-drill-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid hsl(var(--border)/0.4);
+        font-family:'Outfit',sans-serif; font-weight:700; font-size:13px; }
+      .mit-drill-close { background:hsl(var(--muted)/0.3); border:1px solid hsl(var(--border)/0.5); border-radius:8px; width:24px; height:24px; color:hsl(var(--muted-foreground)); cursor:pointer; font-size:12px; opacity:.8; transition:all .2s ease; }
+      .mit-drill-close:hover { opacity:1; background:hsl(var(--muted)/0.5); }
+      .mit-drill-warm { opacity:.5; padding:12px 0; text-align:center; }
+      .mit-drill-svg { width:100%; height:96px; display:block; margin-bottom:8px; }
+      .mit-bar-hot { fill:hsl(var(--win)/0.7); }
+      .mit-bar-cold { fill:hsl(var(--primary)/0.6); }
+      .mit-bar-neutral { fill:hsl(var(--muted-foreground)/0.3); }
+      .mit-bar-axis { stroke:hsl(var(--border)); stroke-width:1; }
+      .mit-bar-label { font-size:8px; fill:hsl(var(--muted-foreground)); }
+      .mit-bar-pct { font-size:8px; fill:hsl(var(--foreground)); opacity:.7; }
+      .mit-drill-legend { font-size:9px; opacity:.5; margin-bottom:12px; }
+      .mit-drill-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(126px, 1fr)); gap:8px; margin-bottom:12px; }
+      .mit-drill-stats div { display:flex; justify-content:space-between; padding:8px 10px; border:1px solid hsl(var(--border)/0.4); border-radius:9px; background:hsl(var(--muted)/0.1); }
+      .mit-drill-stats span { opacity:.55; }
+      .mit-drill-stats b { font-family:'Outfit',sans-serif; font-variant-numeric:tabular-nums; }
+      .mit-drill-trans { font-size:10.5px; opacity:.8; padding-top:8px; border-top:1px solid hsl(var(--border)/0.35); }
+
+      /* ── Portfolio exposure ───────────────────────────────────────────── */
+      .mit-exposure-empty { opacity:.4; font-size:10.5px; padding:14px; text-align:center; border:1px dashed hsl(var(--border)/0.5); border-radius:12px; }
+      .mit-exposure-note { opacity:.45; font-size:9.5px; line-height:1.6; margin-bottom:9px; }
+      .mit-exposure-rows { display:flex; flex-direction:column; gap:7px; margin-bottom:10px; }
+      .mit-exposure-row { display:flex; flex-wrap:wrap; align-items:center; gap:9px; padding:10px 13px; border:1px solid hsl(var(--border)/0.45); border-left:2.5px solid hsl(var(--border)/0.6);
+        border-radius:10px; background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%); backdrop-filter:blur(8px); font-size:10.5px;
+        box-shadow:0 2px 10px hsl(0 0% 0%/0.2); transition:transform .2s cubic-bezier(.16,1,.3,1); }
+      .mit-exposure-row:hover { transform:translateX(2px); }
+      .mit-exposure-warn { border-color:hsl(var(--loss)/0.4); border-left-color:hsl(var(--loss)/0.75); background:hsl(var(--loss)/0.05); }
+      .mit-exposure-sym { font-weight:700; flex:0 0 auto; font-family:'Outfit',sans-serif; }
+      .mit-exposure-real { color:hsl(var(--win)); }
+      .mit-exposure-proj { opacity:.65; }
+      .mit-exposure-warn .mit-exposure-real, .mit-exposure-warn .mit-exposure-proj { color:hsl(var(--loss)); opacity:1; }
     `;
     document.head.appendChild(css);
   }
@@ -27006,19 +27466,29 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       <div class="mit-bgfx"><div class="mit-bgfx-grid"></div><div class="mit-bgfx-glow mit-bgfx-glow1"></div><div class="mit-bgfx-glow mit-bgfx-glow2"></div></div>
       <div class="mit-wrap">
         <div class="mit-header">
-          <div>
-            <div class="mit-title"><span class="mit-title-pulse"></span>MARKET INTEL TERMINAL</div>
-            <div class="mit-subtitle">Per-bot picks, full scoring matrix, live digit stream and rotation log — always live</div>
+          <div class="mit-header-left">
+            <div class="mit-icon-badge">📊</div>
+            <div>
+              <div class="mit-title"><span class="mit-title-pulse"></span>Market Intel Terminal</div>
+              <div class="mit-subtitle">Per-bot picks, full scoring matrix, live digit stream and rotation log — always live</div>
+            </div>
           </div>
         </div>
-        <button id="mit-master-toggle"><span class="mit-toggle-shimmer"></span><span class="mit-toggle-label"></span></button>
+        <div class="mit-kpi-row" id="mit-kpi-row"></div>
+
+        <button id="mit-master-toggle"><span class="mit-toggle-shimmer"></span><span class="mit-toggle-track"><span class="mit-toggle-knob"></span></span><span class="mit-toggle-label"></span></button>
         <div id="mit-status-note"></div>
 
         <div class="mit-section-title"><span class="mit-sec-ico">🧭</span>Best ranked market — per bot</div>
         <div class="mit-botcards" id="mit-botcards"></div>
 
+        <div class="mit-section-title"><span class="mit-sec-ico">🛡️</span>Portfolio exposure</div>
+        <div id="mit-exposure"></div>
+
         <div class="mit-section-title"><span class="mit-sec-ico">📊</span>Full scoring matrix</div>
+        <div class="mit-matrix-hint">Click any market row, or a bot card's pick, for the full breakdown.</div>
         <div id="mit-table-wrap"></div>
+        <div id="mit-drilldown-wrap"></div>
 
         <div class="mit-section-title"><span class="mit-sec-ico">🔄</span>Rotation log</div>
         <div class="mit-log" id="mit-log"></div>
@@ -27033,6 +27503,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       mit.setActive(!mit.isActive());
       renderMatrix();
     };
+    // Delegated click handling — bound once on the persistent wrapper,
+    // since #mit-botcards/#mit-table-wrap's own innerHTML gets replaced
+    // every render tick and would lose any per-element handlers.
+    root.addEventListener('click', (e) => {
+      const closeBtn = e.target.closest('#mit-drill-close');
+      if (closeBtn) { drillSymbol = null; renderMatrix(); return; }
+      const trigger = e.target.closest('.mit-drill-trigger');
+      if (trigger && trigger.dataset.symbol) { drillSymbol = trigger.dataset.symbol; renderMatrix(); }
+    });
   }
 
   function activate() {
