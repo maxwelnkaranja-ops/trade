@@ -9836,10 +9836,16 @@ window.MarketIntelTerminal = (function () {
     return out;
   }
 
+  // Exposed for the Analysis layer — a bot's realized win/loss penalty on
+  // a specific market, so the conclusion can flag when a bot's own recent
+  // trade history disagrees with what today's fitness score says about
+  // that same market (theory vs this bot's actual outcomes there).
+  function getPenalty(botId, symbol) { return penalties.get(`${botId}|${symbol}`) || 0; }
+
   return {
     isActive, setActive, registerFitness, getRecommendation, recordOutcome,
     getMatrix, getRotationLog, getRecentDigits, getAllocations, computeMicroMetrics, onUpdate, MARKETS,
-    MAX_BOTS_PER_MARKET,
+    MAX_BOTS_PER_MARKET, getPenalty, PENALTY_CAP,
   };
 })();
 
@@ -26402,6 +26408,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     try { localStorage.setItem('dash_master_sl', sl.toString()); } catch (e) { /* ignore */ }
   }
 
+  // Local copies for THIS closure — the ones near buildShell() live in the
+  // separate DashboardUI closure and are only used there to render the
+  // input's initial value. Calling those from here would throw
+  // "loadTargetBalanceState is not defined" (different closure, not on
+  // window) — which is exactly why the toggle looked like it did nothing:
+  // the click handler below was throwing before it ever reached
+  // classList.toggle(). Both copies just read/write the same two
+  // localStorage keys, so there's nothing to keep in sync.
+  function loadTargetBalanceState() {
+    try {
+      const bal = parseFloat(localStorage.getItem('dash_target_balance'));
+      const on = localStorage.getItem('dash_target_balance_on') === '1';
+      return { balance: !isNaN(bal) ? bal : 0, enabled: on };
+    } catch (e) {
+      return { balance: 0, enabled: false };
+    }
+  }
+  function saveTargetBalanceState(balance, enabled) {
+    try {
+      localStorage.setItem('dash_target_balance', String(balance));
+      localStorage.setItem('dash_target_balance_on', enabled ? '1' : '0');
+    } catch (e) {}
+  }
+
   // ── SESSION P&L GATE ─────────────────────────────────────────────────────
   // Reads the gate inputs every render tick and kills all engines if the
   // session P&L has crossed the daily loss limit or daily profit target.
@@ -27221,26 +27251,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   // ── Per-bot glowing pick card ────────────────────────────────────────
-  function renderBotCard(botId, ranked, idx) {
-    const meta = BOT_META[botId] || { label: botId, icon: '🤖', status: 'scored' };
-    const usable = ranked.filter((r) => r.metrics.ready);
-    if (!usable.length) {
-      return `<div class="mit-botcard mit-warm-card" style="--i:${idx}">
-        <div class="mit-botcard-accent"></div>
-        <div class="mit-botcard-inner">
-        <div class="mit-botcard-head"><span class="mit-bot-icon">${meta.icon}</span><span class="mit-bot-name">${esc(meta.label)}</span></div>
-        <div class="mit-botcard-warm"><span class="mit-warm-dot"></span>warming up — collecting ticks…</div>
-        </div>
+  // Cards used to be rebuilt via one big innerHTML join every render tick
+  // (same root cause as the live-digit-rows flicker documented above:
+  // scores/entropy recompute from live ticks almost every tick, so the
+  // generated HTML differs constantly, and setIfChanged's "skip if
+  // identical" guard can't help when it's *always* different). Each
+  // card's DOM node is now built once and reused; only the fields that
+  // actually changed (score, tier class, chips, sparkline, runners) are
+  // patched in place, so an already-mounted card never replays its
+  // mit-card-enter entrance animation again — only brand-new cards
+  // (first tick, or warming-up ⇄ live transitions) get the pop-in.
+  const mitBotCardKind = new Map(); // botId -> 'warm' | 'live'
+
+  function renderBotCardWarmInner(meta) {
+    return `<div class="mit-botcard-accent"></div>
+      <div class="mit-botcard-inner">
+      <div class="mit-botcard-head"><span class="mit-bot-icon">${meta.icon}</span><span class="mit-bot-name">${esc(meta.label)}</span></div>
+      <div class="mit-botcard-warm"><span class="mit-warm-dot"></span>warming up — collecting ticks…</div>
       </div>`;
-    }
-    const best = usable[0];
-    const runners = usable.slice(1, 3);
-    const cls = tierClass(best.score);
+  }
+
+  function renderBotCardLiveInner(botId, meta, best, runners, cls) {
     const isGood = cls === 'mit-good', isBad = cls === 'mit-bad';
-    pushScoreHistory(botId, best.score);
     const chips = best.reasons.map((r) => `<span class="mit-chip">${esc(r)}</span>`).join('');
-    return `<div class="mit-botcard ${cls}" style="--i:${idx}">
-      <div class="mit-botcard-accent"></div>
+    return `<div class="mit-botcard-accent"></div>
       <div class="mit-card-spin"></div>
       <div class="mit-botcard-inner">
       <div class="mit-botcard-head">
@@ -27255,8 +27289,78 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       <div class="mit-spark-wrap">${renderSparkline(botId, isGood, isBad)}</div>
       <div class="mit-chips">${chips}</div>
       ${runners.length ? `<div class="mit-runners">${runners.map((r) => `<span class="mit-runner mit-drill-trigger" data-symbol="${esc(r.symbol)}">${esc(r.label)} <b>${r.score}</b></span>`).join('')}</div>` : ''}
-      </div>
-    </div>`;
+      </div>`;
+  }
+
+  function updateBotCards(matrix) {
+    const container = document.getElementById('mit-botcards');
+    if (!container) return;
+    matrix.forEach((c, idx) => {
+      const botId = c.botType;
+      const meta = BOT_META[botId] || { label: botId, icon: '🤖', status: 'scored' };
+      const usable = c.ranked.filter((r) => r.metrics.ready);
+
+      let slot = document.getElementById(`mit-botcard-slot-${botId}`);
+      const isNewSlot = !slot;
+      if (isNewSlot) {
+        slot = document.createElement('div');
+        slot.id = `mit-botcard-slot-${botId}`;
+        container.appendChild(slot);
+      }
+      if (container.children[idx] !== slot) container.insertBefore(slot, container.children[idx] || null);
+
+      if (!usable.length) {
+        if (isNewSlot || mitBotCardKind.get(botId) !== 'warm') {
+          slot.className = 'mit-botcard mit-warm-card';
+          slot.style.setProperty('--i', idx);
+          slot.innerHTML = renderBotCardWarmInner(meta);
+          mitBotCardKind.set(botId, 'warm');
+        }
+        return;
+      }
+
+      const best = usable[0];
+      const runners = usable.slice(1, 3);
+      const cls = tierClass(best.score);
+      pushScoreHistory(botId, best.score);
+
+      if (isNewSlot || mitBotCardKind.get(botId) !== 'live') {
+        slot.className = `mit-botcard ${cls}`;
+        slot.style.setProperty('--i', idx);
+        slot.innerHTML = renderBotCardLiveInner(botId, meta, best, runners, cls);
+        mitBotCardKind.set(botId, 'live');
+        return;
+      }
+
+      // Already a live card mounted from a previous tick — patch fields
+      // in place instead of touching innerHTML on the card root, so it
+      // never re-triggers the entrance animation.
+      slot.classList.remove('mit-good', 'mit-mid', 'mit-bad');
+      slot.classList.add(cls);
+      const pickEl = slot.querySelector('.mit-botcard-pick');
+      if (pickEl) pickEl.dataset.symbol = best.symbol;
+      const pickMarketEl = slot.querySelector('.mit-pick-market');
+      if (pickMarketEl) pickMarketEl.innerHTML = `${esc(best.label)} <span class="mit-drill-hint">details ▾</span>`;
+      const scoreEl = slot.querySelector('.mit-pick-score');
+      if (scoreEl) scoreEl.innerHTML = `${best.score}<span>/100</span>`;
+      const sparkWrap = slot.querySelector('.mit-spark-wrap');
+      if (sparkWrap) sparkWrap.innerHTML = renderSparkline(botId, cls === 'mit-good', cls === 'mit-bad');
+      const chipsEl = slot.querySelector('.mit-chips');
+      if (chipsEl) chipsEl.innerHTML = best.reasons.map((r) => `<span class="mit-chip">${esc(r)}</span>`).join('');
+      let runnersEl = slot.querySelector('.mit-runners');
+      if (runners.length) {
+        const html = runners.map((r) => `<span class="mit-runner mit-drill-trigger" data-symbol="${esc(r.symbol)}">${esc(r.label)} <b>${r.score}</b></span>`).join('');
+        if (!runnersEl) {
+          runnersEl = document.createElement('div');
+          runnersEl.className = 'mit-runners';
+          const inner = slot.querySelector('.mit-botcard-inner');
+          if (inner) inner.appendChild(runnersEl);
+        }
+        if (runnersEl.innerHTML !== html) runnersEl.innerHTML = html;
+      } else if (runnersEl) {
+        runnersEl.remove();
+      }
+    });
   }
 
   // ── Live digit strip, one row per market, all 10 symbols ────────────
@@ -27449,8 +27553,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
   // ── KPI strip — same "stat card" language as the Dashboard's top row:
   // gradient glass tiles, hairline top highlight, big Outfit number,
-  // small DM Mono uppercase label + delta line.
-  function renderStatsRow(matrix, active, log) {
+  // small DM Mono uppercase label + delta line. Same flicker cause/fix as
+  // the bot cards above: these 4 numbers change almost every tick, so
+  // they're built once and patched in place rather than re-rendered via
+  // innerHTML each time.
+  function computeKpiTiles(matrix, active, log) {
     const autoCount = BOT_ORDER.filter((id) => (BOT_META[id] || {}).status === 'auto').length;
     const proxyCount = BOT_ORDER.length - autoCount;
     const usableScores = matrix.map((c) => c.ranked.find((r) => r.metrics.ready)).filter(Boolean);
@@ -27458,53 +27565,115 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const topCol = topScore != null ? matrix.find((c) => (c.ranked.find((r) => r.metrics.ready) || {}).score === topScore) : null;
     const topLabel = topCol ? (BOT_META[topCol.botType] || {}).label || topCol.botType : '—';
     const recentRotations = log.filter((r) => Date.now() - r.ts < 3600000).length;
-    const tiles = [
+    return [
       { label: 'Bots Wired', val: String(BOT_ORDER.length), delta: `${autoCount} full · ${proxyCount} proxy`, cls: 'mit-kpi-neutral' },
       { label: 'Terminal', val: active ? 'ACTIVE' : 'OFF', delta: active ? 'driving market picks' : 'bots use own picker', cls: active ? 'mit-kpi-good' : 'mit-kpi-neutral' },
       { label: 'Top Score Now', val: topScore != null ? String(topScore) : '—', delta: topCol ? esc(topLabel) : 'warming up', cls: topScore != null ? tierClass(topScore).replace('mit-', 'mit-kpi-') : 'mit-kpi-neutral' },
       { label: 'Rotations / hr', val: String(recentRotations), delta: 'across all wired bots', cls: recentRotations > 0 ? 'mit-kpi-good' : 'mit-kpi-neutral' },
     ];
-    return tiles.map((t, i) => `<div class="mit-kpi ${t.cls}" style="--i:${i}">
-      <div class="mit-kpi-label">${esc(t.label)}</div>
-      <div class="mit-kpi-val">${t.val}</div>
-      <div class="mit-kpi-delta">${t.delta}</div>
-    </div>`).join('');
   }
 
-  // ── Analysis & Conclusion — the terminal's decision layer. Everything
-  // above this (bot cards, KPIs, matrix) is raw scoring data; this
-  // synthesizes it into one plain-English read of current conditions, a
-  // ranked "best actionable idea right now" line, and a short list of
-  // anything worth flagging — including the real-allocation and
-  // projected-concentration risk that used to live in its own Portfolio
-  // exposure section (folded in here so it's one decision layer instead
-  // of two). Recomputed every render tick from the same matrix/log/
-  // allocations everything else on this page already uses — no separate
-  // data source, and nothing here is a guarantee: it's a read of the
-  // current scoring snapshot, not a prediction.
+  function updateKpiRow(matrix, active, log) {
+    const container = document.getElementById('mit-kpi-row');
+    if (!container) return;
+    const tiles = computeKpiTiles(matrix, active, log);
+    tiles.forEach((t, i) => {
+      let tile = document.getElementById(`mit-kpi-tile-${i}`);
+      if (!tile) {
+        tile = document.createElement('div');
+        tile.id = `mit-kpi-tile-${i}`;
+        tile.style.setProperty('--i', i);
+        tile.innerHTML = `<div class="mit-kpi-label">${esc(t.label)}</div><div class="mit-kpi-val"></div><div class="mit-kpi-delta"></div>`;
+        container.appendChild(tile);
+      }
+      const wantCls = `mit-kpi ${t.cls}`;
+      if (tile.className !== wantCls) tile.className = wantCls;
+      const valEl = tile.querySelector('.mit-kpi-val');
+      if (valEl && valEl.textContent !== t.val) valEl.textContent = t.val;
+      const deltaEl = tile.querySelector('.mit-kpi-delta');
+      if (deltaEl && deltaEl.innerHTML !== t.delta) deltaEl.innerHTML = t.delta;
+    });
+  }
+
+  // ── Analysis & Conclusion — the terminal's full decision layer.
+  // Everything above this (bot cards, KPIs, matrix, live digits) is raw
+  // scoring data; this synthesizes ALL of it — not just each bot's #1
+  // pick — into a layered read:
+  //   1. Market Regime Map   — per-market read (CHOPPY/TRENDING/NOISY/
+  //      WARMING) from entropy + streak health + velocity, independent
+  //      of any bot's score.
+  //   2. Conviction tiering with a real-history override — a bot's own
+  //      realized win/loss penalty on its current pick's market can pull
+  //      its displayed tier down a notch, so a bot that keeps losing on
+  //      a market doesn't get called "high conviction" just because the
+  //      theoretical fitness score says so.
+  //   3. Per-bot narrative lines — one line per wired bot instead of one
+  //      blended fleet-wide read.
+  //   4. Risk flags — concentration (real + projected), stale data, feed
+  //      noise behind a live pick, streak exhaustion, and "persistent
+  //      loser" (a bot's own history disagreeing with its own pick).
+  //   5. Trajectory — is the average score better/worse than ~5 minutes
+  //      ago, from a small in-memory history ring buffer.
+  //   6. Verdict — the same 🟢/🟡/🔴 read as before, now built from the
+  //      penalty-adjusted tiers.
+  //   7. Conclusion — a separate, templated "so what" line distinct from
+  //      the verdict: what to actually act on given everything above.
+  // Recomputed every render tick from data every other widget on this
+  // page already reads — no separate data source — and none of this is
+  // a guarantee: it's a read of the current snapshot, not a prediction.
+  const analysisHistory = []; // { ts, avgScore } ring buffer for trajectory
+  const ANALYSIS_HISTORY_MS = 6 * 60 * 1000;
+
+  function buildRegimeMap(mit, matrix) {
+    // Any column's ranked list already covers every market (each bot's
+    // fitness fn is evaluated against all 10 symbols) — reuse the first
+    // wired bot's list purely to read the market-level metrics, which
+    // don't depend on which bot is asking.
+    const anyCol = matrix[0];
+    if (!anyCol) return [];
+    return anyCol.ranked.map((r) => {
+      const m = r.metrics;
+      let regime;
+      if (!m.ready) regime = 'WARMING';
+      else if (m.velocitySpike) regime = 'NOISY';
+      else if (m.entropyScore >= 60) regime = 'CHOPPY';
+      else if (m.streakHealth < 70) regime = 'TRENDING';
+      else regime = 'NEUTRAL';
+      return { symbol: r.symbol, label: r.label, regime, ready: m.ready, stale: r.stale };
+    });
+  }
+
   function computeAnalysis(mit, matrix, active, log) {
     const totalBots = matrix.length;
     const usableCols = matrix
       .map((c) => ({ botType: c.botType, top: c.ranked.find((r) => r.metrics.ready) }))
       .filter((c) => c.top);
     const readyCount = usableCols.length;
-    const scores = usableCols.map((c) => c.top.score);
-    const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
-    const goodCount = usableCols.filter((c) => tierClass(c.top.score) === 'mit-good').length;
-    const badCount = usableCols.filter((c) => tierClass(c.top.score) === 'mit-bad').length;
-    const midCount = readyCount - goodCount - badCount;
-    const staleCount = usableCols.filter((c) => c.top.stale).length;
 
-    // Concentration — how many distinct bots share the same top-pick market
-    // (projected: "if every bot switched to its #1 pick right now").
+    // ── Layer 2: penalty-adjusted conviction tier per bot ────────────
+    const withEffectiveTier = usableCols.map((c) => {
+      const penalty = mit.getPenalty ? mit.getPenalty(c.botType, c.top.symbol) : 0;
+      const rawTier = tierClass(c.top.score);
+      // A bot with an elevated realized-loss penalty on this exact market
+      // doesn't get to show as "good" just because the theoretical score
+      // says so — its own recent outcomes here disagree.
+      const effectiveTier = (penalty >= 25 && rawTier === 'mit-good') ? 'mit-mid' : rawTier;
+      return { ...c, penalty, rawTier, effectiveTier };
+    });
+
+    const scores = withEffectiveTier.map((c) => c.top.score);
+    const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+    const goodCount = withEffectiveTier.filter((c) => c.effectiveTier === 'mit-good').length;
+    const badCount = withEffectiveTier.filter((c) => c.effectiveTier === 'mit-bad').length;
+    const midCount = readyCount - goodCount - badCount;
+    const staleCount = withEffectiveTier.filter((c) => c.top.stale).length;
+
+    // Concentration — projected (every bot's #1 pick) and real (actual claims).
     const bySymbol = {};
-    usableCols.forEach((c) => { (bySymbol[c.top.symbol] = bySymbol[c.top.symbol] || []).push(c.botType); });
+    withEffectiveTier.forEach((c) => { (bySymbol[c.top.symbol] = bySymbol[c.top.symbol] || []).push(c.botType); });
     let maxCluster = 0, maxClusterSymbol = null;
     Object.entries(bySymbol).forEach(([sym, list]) => { if (list.length > maxCluster) { maxCluster = list.length; maxClusterSymbol = sym; } });
 
-    // Real allocation — bots actually parked on a market right now (only
-    // populated while the Terminal is active and an engine has rotated
-    // onto its recommendation), checked against the per-market cap.
     const allocations = mit.getAllocations ? mit.getAllocations() : {};
     const cap = mit.MAX_BOTS_PER_MARKET;
     let realOverCapSymbol = null, realOverCapList = [];
@@ -27514,15 +27683,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
     const recentRotations = log.filter((r) => Date.now() - r.ts < 3600000).length;
 
-    // Best actionable idea right now — the single highest-scoring ready
-    // pick across every bot, non-stale, above a "worth acting on" floor.
-    // This is the seed of a real trade signal: one ranked pick instead of
-    // a per-bot readout the person has to scan themselves.
-    const actionable = usableCols
-      .filter((c) => !c.top.stale && c.top.score >= 65)
+    // ── Layer 1: market regime map ────────────────────────────────────
+    const regimeMap = buildRegimeMap(mit, matrix);
+    const noisyBackingAPick = regimeMap.filter((r) => r.regime === 'NOISY' && bySymbol[r.symbol]);
+    const regimeCounts = regimeMap.reduce((acc, r) => { acc[r.regime] = (acc[r.regime] || 0) + 1; return acc; }, {});
+    const readyRegimes = regimeMap.filter((r) => r.ready);
+    let regimeSummary = null;
+    if (readyRegimes.length) {
+      const parts = [];
+      if (regimeCounts.TRENDING) parts.push(`${regimeCounts.TRENDING} trending`);
+      if (regimeCounts.CHOPPY) parts.push(`${regimeCounts.CHOPPY} choppy`);
+      if (regimeCounts.NOISY) parts.push(`${regimeCounts.NOISY} noisy-feed`);
+      if (regimeCounts.NEUTRAL) parts.push(`${regimeCounts.NEUTRAL} neutral`);
+      regimeSummary = `Markets right now: ${parts.join(', ')} (of ${readyRegimes.length} live).`;
+    }
+
+    // Best actionable idea — highest-scoring ready pick, non-stale, above
+    // a "worth acting on" floor, using the penalty-adjusted tier so a
+    // persistent loser can't surface here just on theoretical score.
+    const actionable = withEffectiveTier
+      .filter((c) => !c.top.stale && c.top.score >= 65 && c.effectiveTier !== 'mit-mid')
       .sort((a, b) => b.top.score - a.top.score);
     const bestIdea = actionable[0] || null;
 
+    // ── Layer 6: verdict, from the penalty-adjusted tiers ─────────────
     let verdict, verdictClass, verdictIcon;
     if (readyCount === 0) {
       verdict = 'Warming up — no bot has enough ticks yet to score a pick.';
@@ -27538,18 +27722,50 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       verdictClass = 'mit-verdict-mid'; verdictIcon = '🟡';
     }
 
+    // ── Layer 5: trajectory — vs ~5 minutes ago ───────────────────────
+    const now = Date.now();
+    if (avgScore != null) analysisHistory.push({ ts: now, avgScore });
+    while (analysisHistory.length && now - analysisHistory[0].ts > ANALYSIS_HISTORY_MS) analysisHistory.shift();
+    let trajectory = null;
+    if (avgScore != null) {
+      const past = analysisHistory.find((h) => now - h.ts >= 4.5 * 60 * 1000) || analysisHistory[0];
+      if (past && now - past.ts >= 60000) {
+        const delta = avgScore - past.avgScore;
+        if (delta >= 6) trajectory = { label: 'Improving', icon: '↗️' };
+        else if (delta <= -6) trajectory = { label: 'Deteriorating', icon: '↘️' };
+        else trajectory = { label: 'Steady', icon: '→' };
+      }
+    }
+
+    // ── Layer 3: per-bot narrative lines (wired bots only) ────────────
+    const botLines = BOT_ORDER.filter((id) => (BOT_META[id] || {}).status === 'auto' || (BOT_META[id] || {}).status === 'proxy')
+      .map((id) => {
+        const col = withEffectiveTier.find((c) => c.botType === id);
+        const meta = BOT_META[id] || {};
+        if (!col) return { botId: id, label: meta.label, icon: meta.icon, warming: true };
+        const label = (mit.MARKETS.find((m) => m.value === col.top.symbol) || {}).label || col.top.symbol;
+        const downgraded = col.effectiveTier !== col.rawTier;
+        return {
+          botId: id, label: meta.label, icon: meta.icon, warming: false,
+          pickLabel: label, score: col.top.score, tier: col.effectiveTier,
+          reason: col.top.reasons[0] || '', stale: col.top.stale, downgraded, penalty: col.penalty,
+        };
+      });
+
+    // ── Layer 4: risk flags ────────────────────────────────────────────
     const bullets = [];
     if (bestIdea) {
       const label = (mit.MARKETS.find((m) => m.value === bestIdea.top.symbol) || {}).label || bestIdea.top.symbol;
       const botLabel = (BOT_META[bestIdea.botType] || {}).label || bestIdea.botType;
-      bullets.push({ icon: '🎯', text: `Best actionable idea right now: ${botLabel} on ${label} — score ${bestIdea.top.score}/100, fresh data.` });
+      bullets.push({ icon: '🎯', text: `Best actionable idea right now: ${botLabel} on ${label} — score ${bestIdea.top.score}/100, fresh data, no history override.` });
     }
     if (readyCount < totalBots) {
       bullets.push({ icon: 'ℹ️', text: `${totalBots - readyCount} of ${totalBots} bots are still warming up (collecting ticks) — their picks aren't scored yet.` });
     }
     if (readyCount > 0) {
-      bullets.push({ icon: '📊', text: `${goodCount} high-conviction pick${goodCount === 1 ? '' : 's'} (≥65), ${midCount} mid, ${badCount} low (<40) across ${readyCount} scored bot${readyCount === 1 ? '' : 's'} — average top score ${avgScore}/100.` });
+      bullets.push({ icon: '📊', text: `${goodCount} high-conviction pick${goodCount === 1 ? '' : 's'} (≥65, no penalty override), ${midCount} mid, ${badCount} low (<40) across ${readyCount} scored bot${readyCount === 1 ? '' : 's'} — average top score ${avgScore}/100.` });
     }
+    if (regimeSummary) bullets.push({ icon: '🧭', text: regimeSummary });
     if (realOverCapSymbol) {
       const label = (mit.MARKETS.find((m) => m.value === realOverCapSymbol) || {}).label || realOverCapSymbol;
       bullets.push({ icon: '🛡️', text: `${realOverCapList.length} bots are actually parked on ${label} right now (${realOverCapList.join(', ')}) — at/over the ${cap}-bot exposure cap. Real concentration, not a projection.` });
@@ -27557,8 +27773,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const label = (mit.MARKETS.find((m) => m.value === maxClusterSymbol) || {}).label || maxClusterSymbol;
       bullets.push({ icon: '⚠️', text: `${maxCluster} bots are all currently favoring ${label} — would concentrate exposure there if every bot switched to its #1 pick.` });
     }
+    if (noisyBackingAPick.length) {
+      const names = noisyBackingAPick.map((r) => r.label).join(', ');
+      bullets.push({ icon: '⚠️', text: `Feed velocity spike on ${names} while a bot's pick sits there — treat that score as noisier than usual until the feed settles.` });
+    }
     if (staleCount > 0) {
       bullets.push({ icon: '⚠️', text: `${staleCount} top pick${staleCount === 1 ? '' : 's'} showing stale data right now — treat those with less confidence until they refresh.` });
+    }
+    const persistentLosers = withEffectiveTier.filter((c) => c.penalty >= 25);
+    if (persistentLosers.length) {
+      const names = persistentLosers.map((c) => (BOT_META[c.botType] || {}).label || c.botType).join(', ');
+      bullets.push({ icon: '🔻', text: `${names} ${persistentLosers.length === 1 ? 'has' : 'have'} an elevated realized-loss penalty on its own current pick — this bot's actual recent history disagrees with today's score, so it's been capped at "mid" above regardless of the raw number.` });
     }
     if (recentRotations > 15) {
       bullets.push({ icon: '⚠️', text: `${recentRotations} rotations in the last hour — markets are choppy, scores may be noisier than usual.` });
@@ -27569,13 +27794,47 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       bullets.push({ icon: 'ℹ️', text: 'Nothing unusual to flag — conditions look ordinary across the board.' });
     }
 
-    return { verdict, verdictClass, verdictIcon, bullets };
+    // ── Layer 7: conclusion — the actual "so what," separate from the
+    // state-of-the-world verdict above. Templated from the flags/tiers
+    // that actually fired this tick, not freeform.
+    let conclusion;
+    if (readyCount === 0) {
+      conclusion = 'Nothing to act on yet — wait for bots to finish warming up.';
+    } else if (bestIdea) {
+      const goodBots = withEffectiveTier.filter((c) => c.effectiveTier === 'mit-good' && !c.top.stale);
+      const names = goodBots.map((c) => (BOT_META[c.botType] || {}).label || c.botType);
+      const skipCount = totalBots - names.length;
+      conclusion = names.length > 1
+        ? `Act on ${names.join(', ')} — everything else is below conviction, penalty-flagged, or stale. Revisit if that changes.`
+        : `Only ${names[0]} clears the bar right now — everything else (${skipCount} bot${skipCount === 1 ? '' : 's'}) is below conviction, penalty-flagged, or stale.`;
+      if (persistentLosers.length) conclusion += ` Note: ignore ${persistentLosers.map((c) => (BOT_META[c.botType] || {}).label || c.botType).join(', ')} even if its raw score looks fine — its own history says otherwise here.`;
+    } else if (verdictClass === 'mit-verdict-bad') {
+      conclusion = 'No pick clears the bar and overall conditions are weak — best move right now is to sit out or wait for a regime change.';
+    } else {
+      conclusion = 'No pick is strong enough to call "actionable" yet — hold and keep watching rather than forcing a trade.';
+    }
+
+    return { verdict, verdictClass, verdictIcon, trajectory, regimeSummary, botLines, bullets, conclusion };
   }
 
   function renderAnalysis(a) {
+    const trajHtml = a.trajectory
+      ? `<span class="mit-analysis-traj mit-traj-${a.trajectory.label.toLowerCase()}">${a.trajectory.icon} ${esc(a.trajectory.label)}</span>` : '';
+    const botLinesHtml = a.botLines.map((b) => {
+      if (b.warming) return `<div class="mit-abot mit-abot-warm"><span class="mit-abot-ico">${b.icon}</span><span class="mit-abot-name">${esc(b.label)}</span><span class="mit-abot-note">warming up…</span></div>`;
+      const tierIco = b.tier === 'mit-good' ? '🟢' : b.tier === 'mit-bad' ? '🔴' : '🟡';
+      return `<div class="mit-abot mit-abot-${b.tier.replace('mit-', '')}">
+        <span class="mit-abot-ico">${b.icon}</span>
+        <span class="mit-abot-name">${esc(b.label)}</span>
+        <span class="mit-abot-pick">${esc(b.pickLabel)}</span>
+        <span class="mit-abot-score">${tierIco} ${b.score}${b.stale ? ' <i>(stale)</i>' : ''}${b.downgraded ? ' <i>(history-capped)</i>' : ''}</span>
+      </div>`;
+    }).join('');
     return `<div class="mit-analysis ${a.verdictClass}">
-      <div class="mit-analysis-head"><span class="mit-analysis-icon">${a.verdictIcon}</span><span class="mit-analysis-verdict">${esc(a.verdict)}</span></div>
+      <div class="mit-analysis-head"><span class="mit-analysis-icon">${a.verdictIcon}</span><span class="mit-analysis-verdict">${esc(a.verdict)}</span>${trajHtml}</div>
       <ul class="mit-analysis-list">${a.bullets.map((b) => `<li><span class="mit-analysis-bicon">${b.icon}</span>${esc(b.text)}</li>`).join('')}</ul>
+      <div class="mit-analysis-botlines">${botLinesHtml}</div>
+      <div class="mit-analysis-conclusion"><span class="mit-analysis-concl-ico">🧩</span><b>Conclusion:</b> ${esc(a.conclusion)}</div>
     </div>`;
   }
 
@@ -27596,16 +27855,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       ? 'Every wired bot below is following these scores for market selection right now.'
       : 'This view always runs live — the scores below are current whether or not the Terminal is driving anything. Turn it on to have wired bots actually follow these picks.';
 
-    // Bot cards — always render, independent of active state.
+    // Bot cards — always render, independent of active state. Patched in
+    // place (see updateBotCards above) — no more full-grid innerHTML
+    // rewrite every tick, which was replaying every card's entrance
+    // animation continuously (the actual cause of the flicker).
     const matrix = mit.getMatrix(BOT_ORDER);
-    const cardsHtml = matrix.map((c, i) => renderBotCard(c.botType, c.ranked, i)).join('');
-    const cardsEl = document.getElementById('mit-botcards');
-    setIfChanged(cardsEl, cardsHtml);
+    updateBotCards(matrix);
 
-    // KPI strip — always render.
+    // KPI strip — always render, same patch-in-place fix as bot cards.
     const log0 = mit.getRotationLog();
-    const kpiEl = document.getElementById('mit-kpi-row');
-    setIfChanged(kpiEl, renderStatsRow(matrix, active, log0));
+    updateKpiRow(matrix, active, log0);
 
     // Trade Signal Alerts — alert-only, across every wired bot. Checked
     // every tick against the same matrix the rest of this view uses.
@@ -27705,8 +27964,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #panel-market .mit-kpi { position:relative; overflow:hidden; border-radius:10px; padding:9px 11px; border:1px solid hsl(var(--border)/0.5);
         background:linear-gradient(135deg, hsl(var(--card)/0.9) 0%, hsl(var(--bg)/0.6) 100%); backdrop-filter:blur(12px);
         box-shadow:0 2px 12px hsl(0 0% 0%/0.3), inset 0 1px 0 hsl(255 100% 100%/0.04);
-        animation:mit-card-enter .45s cubic-bezier(.34,1.4,.64,1) both; animation-delay:calc(var(--i, 0) * 60ms);
-        transition:transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s ease, border-color .2s ease; }
+        transition:transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s ease, border-color .2s ease, background .3s ease; }
       #panel-market .mit-kpi::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, hsl(var(--primary)/0.3), transparent); }
       #panel-market .mit-kpi:hover { transform:translateY(-3px); border-color:hsl(var(--border-bright, var(--border))); box-shadow:0 12px 28px hsl(0 0% 0%/0.35), inset 0 1px 0 hsl(255 100% 100%/0.06); }
       #panel-market .mit-kpi-label { font-family:'Outfit',sans-serif; font-size:8px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; opacity:.55; margin-bottom:4px; }
@@ -27747,8 +28005,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       /* ── Bot pick cards ───────────────────────────────────────────────── */
       .mit-botcards { display:grid; grid-template-columns:repeat(auto-fit, minmax(178px, 1fr)); gap:8px; margin-bottom:4px; }
       .mit-botcard { position:relative; border-radius:15px; padding:1px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--card)/0.5); overflow:hidden;
-        backdrop-filter:blur(10px); transition:transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s ease, border-color .25s ease;
-        animation:mit-card-enter .5s cubic-bezier(.34,1.4,.64,1) both; animation-delay:calc(var(--i, 0) * 50ms); }
+        backdrop-filter:blur(10px); transition:transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s ease, border-color .25s ease; }
       .mit-botcard:hover { transform:translateY(-4px) scale(1.012); border-color:hsl(var(--border-bright, var(--border))); box-shadow:var(--shadow-md, 0 10px 30px hsl(0 0% 0%/0.5)); }
       .mit-botcard-accent { position:absolute; top:0; left:0; right:0; height:2.5px; z-index:2; background:hsl(var(--border)/0.5); }
       .mit-botcard.mit-good .mit-botcard-accent { background:linear-gradient(90deg, hsl(var(--win)/0.2), hsl(var(--win)), hsl(var(--win)/0.2)); }
@@ -27873,8 +28130,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       /* ── Analysis & Conclusion ────────────────────────────────────────── */
       .mit-analysis { position:relative; overflow:hidden; border-radius:11px; padding:10px 12px; margin-bottom:6px;
         border:1px solid hsl(var(--border)/0.5); background:linear-gradient(135deg, hsl(var(--card)/0.85) 0%, hsl(var(--bg)/0.55) 100%);
-        backdrop-filter:blur(10px); box-shadow:0 2px 12px hsl(0 0% 0%/0.25), inset 0 1px 0 hsl(255 100% 100%/0.04);
-        animation:mit-card-enter .4s cubic-bezier(.34,1.4,.64,1) both; }
+        backdrop-filter:blur(10px); box-shadow:0 2px 12px hsl(0 0% 0%/0.25), inset 0 1px 0 hsl(255 100% 100%/0.04); }
       .mit-analysis::before { content:''; position:absolute; top:0; left:0; bottom:0; width:3px; }
       .mit-analysis.mit-verdict-good::before { background:hsl(var(--win)); box-shadow:0 0 10px hsl(var(--win)/0.5); }
       .mit-analysis.mit-verdict-bad::before { background:hsl(var(--loss)); box-shadow:0 0 10px hsl(var(--loss)/0.5); }
@@ -27887,6 +28143,20 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-analysis-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
       .mit-analysis-list li { display:flex; align-items:flex-start; gap:6px; font-size:9.5px; line-height:1.45; opacity:.85; }
       .mit-analysis-bicon { flex:0 0 auto; font-size:10px; line-height:1.4; }
+      .mit-analysis-traj { margin-left:auto; font-size:8.5px; font-weight:700; padding:2px 7px; border-radius:99px; background:hsl(var(--muted)/0.3); white-space:nowrap; }
+      .mit-traj-improving { background:hsl(var(--win)/0.16); color:hsl(var(--win)); }
+      .mit-traj-deteriorating { background:hsl(var(--loss)/0.16); color:hsl(var(--loss)); }
+      .mit-analysis-botlines { display:flex; flex-direction:column; gap:2px; margin:8px 0; padding-top:8px; border-top:1px solid hsl(var(--border)/0.35); }
+      .mit-abot { display:flex; align-items:center; gap:6px; font-size:9px; padding:3px 2px; }
+      .mit-abot-ico { flex:0 0 auto; }
+      .mit-abot-name { font-weight:700; flex:0 0 auto; min-width:78px; }
+      .mit-abot-pick { opacity:.7; flex:1; }
+      .mit-abot-score { flex:0 0 auto; font-variant-numeric:tabular-nums; opacity:.9; }
+      .mit-abot-score i { opacity:.6; font-style:normal; font-size:8px; }
+      .mit-abot-warm { opacity:.45; }
+      .mit-abot-warm .mit-abot-note { font-size:8.5px; }
+      .mit-analysis-conclusion { display:flex; align-items:flex-start; gap:6px; font-size:9.5px; line-height:1.5; padding-top:8px; border-top:1px solid hsl(var(--border)/0.4); opacity:.92; }
+      .mit-analysis-concl-ico { flex:0 0 auto; font-size:11px; }
 
       /* ── Trade Signal Alerts ─────────────────────────────────────────── */
       @keyframes mit-signal-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
