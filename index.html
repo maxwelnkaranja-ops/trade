@@ -7045,6 +7045,24 @@ html body #panel-dashboard .journal-entry {
 /* ══════════════════════════════════════════════════════════════
    DASHBOARD STAKE POPUP — upgrade
    ══════════════════════════════════════════════════════════════ */
+/* Target Account Balance automation — small on/off pill switch next to
+   the Target Balance $ input in Master Control. */
+.dash-target-toggle-btn {
+  border: none; background: transparent; padding: 0; cursor: pointer;
+  align-self: center; flex: 0 0 auto;
+}
+.dash-target-toggle-track {
+  position: relative; display: block; width: 34px; height: 19px; border-radius: 99px;
+  background: hsl(var(--muted)/0.5); border: 1px solid hsl(var(--border)/0.6);
+  transition: background .3s ease, border-color .3s ease;
+}
+.dash-target-toggle-knob {
+  position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%;
+  background: hsl(var(--muted-foreground)); transition: transform .25s cubic-bezier(.34,1.4,.64,1), background .3s ease;
+}
+.dash-target-toggle-btn.on .dash-target-toggle-track { background: hsl(var(--secondary)/0.35); border-color: hsl(var(--secondary)/0.65); }
+.dash-target-toggle-btn.on .dash-target-toggle-knob { transform: translateX(15px); background: hsl(var(--secondary)); box-shadow: 0 0 8px hsl(var(--secondary)/0.7); }
+
 .dash-stake-trigger {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 16px; border-radius: 12px; cursor: pointer;
@@ -19786,6 +19804,26 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
   }
 
+  // Target Account Balance automation — separate from the TP/SL gate values
+  // above. When enabled, a small Take Profit no longer ends the session: the
+  // gate reloads P&L + stake progression and keeps trading, repeating until
+  // the real account balance (not session P&L) reaches this target.
+  function loadTargetBalanceState() {
+    try {
+      const bal = parseFloat(localStorage.getItem('dash_target_balance'));
+      const on = localStorage.getItem('dash_target_balance_on') === '1';
+      return { balance: !isNaN(bal) ? bal : 0, enabled: on };
+    } catch (e) {
+      return { balance: 0, enabled: false };
+    }
+  }
+  function saveTargetBalanceState(balance, enabled) {
+    try {
+      localStorage.setItem('dash_target_balance', String(balance));
+      localStorage.setItem('dash_target_balance_on', enabled ? '1' : '0');
+    } catch (e) {}
+  }
+
   function buildShell(root) {
     root.innerHTML = `
       <div class="dash-scroll">
@@ -19900,6 +19938,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               <svg viewBox="0 0 10 10" width="7" height="7" fill="hsl(var(--loss))"><polygon points="5,9 9,1 1,1"/></svg>Stop Loss $
             </label>
             <input id="dash-master-sl" type="number" min="0" step="1" value="${loadMasterGateValues().sl}" style="width:90px;padding:8px 10px;border:1px solid hsl(var(--loss)/0.35);border-radius:10px;background:hsl(var(--loss)/0.07);color:hsl(var(--loss));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
+          </div>
+          <!-- Target Account Balance automation — small TP no longer stops
+               everything while this is ON: it cooldown-reloads P&L + stake
+               progression instead, and keeps cycling until real account
+               balance reaches this figure. SL is never affected. -->
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <label style="font-size:8px;letter-spacing:2px;font-family:'Outfit',sans-serif;font-weight:800;color:hsl(var(--secondary));text-transform:uppercase;display:flex;align-items:center;gap:4px;white-space:nowrap">
+              <svg viewBox="0 0 10 10" width="7" height="7" fill="hsl(var(--secondary))"><circle cx="5" cy="5" r="4"/></svg>Target Balance $
+            </label>
+            <div style="display:flex;align-items:center;gap:6px">
+              <input id="dash-target-balance" type="number" min="0" step="1" value="${loadTargetBalanceState().balance}" placeholder="off" style="width:90px;padding:8px 10px;border:1px solid hsl(var(--secondary)/0.35);border-radius:10px;background:hsl(var(--secondary)/0.07);color:hsl(var(--secondary));font-family:'DM Mono',monospace;font-size:13px;font-weight:700;outline:none;text-align:center;transition:all .2s">
+              <button id="dash-target-balance-toggle" type="button" title="Auto-reload small Take Profit until this balance is reached" class="dash-target-toggle-btn ${loadTargetBalanceState().enabled ? 'on' : ''}">
+                <span class="dash-target-toggle-track"><span class="dash-target-toggle-knob"></span></span>
+              </button>
+            </div>
           </div>
           <!-- P&L gate status badge -->
           <div id="dash-pnl-gate-status" style="font-family:'DM Mono',monospace;font-size:11px;font-weight:700;padding:7px 13px;border-radius:8px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border)/0.5);color:hsl(var(--muted-foreground));white-space:nowrap;align-self:flex-end">Gate: Armed</div>
@@ -25766,8 +25819,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 (function () {
   'use strict';
 
+  // 'differ' used to be left out of this list entirely, even though almost
+  // every master-control function below already had a dead `id === 'differ'`
+  // special case written in waiting for it. That made Differ invisible to
+  // Master Control — ENGAGE ALL / TERMINATE ALL, the P&L gate, tab dots,
+  // and the stake widget all silently skipped it. It's included now.
   const BOT_IDS
- = ['hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
+ = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -26387,7 +26445,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     BOT_IDS.forEach((id) => {
       const eng = engines[id];
       if (!eng) return;
-      if (id === 'differ') {
+      // Hot Repeat used to fall into the `else` branch here and get
+      // forceStopTitan()'d — a shutdown path built for Titan-style bots
+      // that resets fields Hot Repeat doesn't use (active/isLocked) and
+      // never calls abortTrades()/disarmSystem(), the fields that actually
+      // control it (isArmed/isRunning). Its trading loop just kept running
+      // straight through the TP/SL gate. It now gets the same real
+      // shutdown Differ gets.
+      if (id === 'differ' || id === 'hotrepeat') {
         try {
           if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
           if (eng.pingInterval) { clearInterval(eng.pingInterval); eng.pingInterval = null; }
@@ -26436,13 +26501,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const badge = document.getElementById('dash-pnl-gate-status');
 
     if (pnl <= -Math.abs(slVal)) {
+      // Stop Loss ALWAYS stops everything immediately, regardless of the
+      // Target Balance automation below — that automation only ever
+      // touches the Take Profit side.
       _gateTriggered = true;
       if (window.showResultPopup) window.showResultPopup('sl', Math.abs(slVal), pnl);
       terminateAllEngines(`LOSS GATE -$${Math.abs(slVal).toFixed(2)}`);
     } else if (pnl >= Math.abs(tpVal)) {
-      _gateTriggered = true;
-      if (window.showResultPopup) window.showResultPopup('tp', Math.abs(tpVal), pnl);
-      terminateAllEngines(`PROFIT GATE +$${Math.abs(tpVal).toFixed(2)}`);
+      const targetState = loadTargetBalanceState();
+      const realBalance = getRealBalance();
+      if (targetState.enabled && targetState.balance > 0 && realBalance < targetState.balance) {
+        // Target Balance automation: don't stop — cooldown, reload P&L +
+        // stake progression, and keep pushing toward the real target
+        // balance instead of ending the session on this small win.
+        startTargetReloadCycle(tpVal);
+      } else {
+        _gateTriggered = true;
+        if (window.showResultPopup) window.showResultPopup('tp', Math.abs(tpVal), pnl);
+        terminateAllEngines(`PROFIT GATE +$${Math.abs(tpVal).toFixed(2)}`);
+      }
     } else {
       // Update badge with live P&L
       if (badge) {
@@ -26458,6 +26535,103 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       }
     }
   }
+
+  // ── TARGET ACCOUNT BALANCE AUTOMATION ───────────────────────────────────
+  // Reads the *real* account balance (Deriv's authorized balance, kept in
+  // HubStore.balanceUSD) rather than session P&L, since the goal is "grow
+  // my actual account to X", not "this session made $Y". Only wired into
+  // the Take Profit side of the gate above — Stop Loss is untouched.
+  function getRealBalance() {
+    try { return (window.HubStore && window.HubStore.getState().balanceUSD) || 0; } catch (e) { return 0; }
+  }
+
+  // Resets session P&L AND every bot's stake/martingale progression back
+  // to base — a superset of reloadGateAndKeepTrading()'s P&L-only reset,
+  // needed here because the whole point of this automation is that bots
+  // with a stake-escalation mechanism go back to their starting stake and
+  // climb fresh each cycle, rather than carrying an escalated stake
+  // across into the next round.
+  function resetPnlAndStakeForAllBots() {
+    BOT_IDS.forEach((id) => {
+      const eng = engines[id];
+      if (!eng) return;
+      try {
+        if (id === 'differ' || id === 'hotrepeat') {
+          eng.dispatch && eng.dispatch({ type: 'RESET_PNL_ONLY' });
+          if (id === 'hotrepeat') eng.state.consecutiveLosses = 0;
+        } else {
+          if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
+          eng.executionGuard = false;
+          eng.pendingTrade = null;
+          eng.state = {
+            ...eng.state,
+            stats: { win: 0, loss: 0, profit: 0 },
+            currentStake: eng.config.stake,
+            martingaleStep: 0,
+            inRecovery: false,
+            isCooldown: false,
+            isLocked: false,
+            active: false,
+          };
+          eng.emit && eng.emit();
+        }
+      } catch (_) {}
+    });
+  }
+
+  let _targetCycleTimer = null;
+  const TARGET_RELOAD_COOLDOWN_SECS = 45;
+
+  function startTargetReloadCycle(tpVal) {
+    if (_targetCycleTimer) return; // a cycle is already counting down
+    _gateTriggered = true; // stop checkPnlGate from re-firing mid-cooldown
+    let remaining = TARGET_RELOAD_COOLDOWN_SECS;
+    const badge = document.getElementById('dash-pnl-gate-status');
+    const paint = () => {
+      if (!badge) return;
+      badge.textContent = `🎯 Target reload in ${remaining}s…`;
+      badge.style.background = 'hsl(var(--secondary)/0.15)';
+      badge.style.borderColor = 'hsl(var(--secondary)/0.55)';
+      badge.style.color = 'hsl(var(--secondary))';
+    };
+    paint();
+    const toast = document.getElementById('global-error-toast');
+    if (toast) {
+      toast.textContent = `🎯 Take Profit +$${Math.abs(tpVal).toFixed(2)} hit — target balance not reached yet. Reloading in ${TARGET_RELOAD_COOLDOWN_SECS}s and continuing…`;
+      toast.style.background = 'hsl(var(--secondary)/0.15)';
+      toast.style.borderColor = 'hsl(var(--secondary)/0.5)';
+      toast.style.color = 'hsl(var(--secondary))';
+      toast.classList.add('show');
+      setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 6000);
+    }
+    _targetCycleTimer = setInterval(() => {
+      remaining -= 1;
+      if (remaining > 0) { paint(); return; }
+      clearInterval(_targetCycleTimer);
+      _targetCycleTimer = null;
+      resetPnlAndStakeForAllBots();
+      resetPnlGateLatch();
+      applyMasterTpSlToAllEngines();
+      const engagedCount = BOT_IDS.filter((id) => {
+        const eng = engines[id];
+        if (!eng) return false;
+        return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+      }).length;
+      const masterBtn = document.getElementById('dash-master-toggle');
+      if (engagedCount < BOT_IDS.length && masterBtn) masterBtn.click();
+      queueDashboardRender();
+      const t2 = document.getElementById('global-error-toast');
+      if (t2) {
+        t2.textContent = '🎯 Target Balance cycle — P&L and stakes reset to base, trading resumed fresh.';
+        t2.style.background = 'hsl(var(--win)/0.15)';
+        t2.style.borderColor = 'hsl(var(--win)/0.5)';
+        t2.style.color = 'hsl(var(--win))';
+        t2.classList.add('show');
+        setTimeout(() => { t2.classList.remove('show'); t2.style.background = ''; t2.style.borderColor = ''; t2.style.color = ''; }, 4000);
+      }
+    }, 1000);
+  }
+  // ── END TARGET ACCOUNT BALANCE AUTOMATION ───────────────────────────────
 
   // Reset gate latch — MANUAL ONLY. This used to auto-clear itself the
   // moment every engine was off, which is exactly what terminateAllEngines()
@@ -26537,6 +26711,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('#dash-master-toggle');
       if (!btn) return;
+      // The whole handler used to run with no error isolation at all: the
+      // auto P&L gate's terminateAllEngines() wraps every bot's shutdown in
+      // its own try/catch, but this manual Engage/Terminate click handler
+      // did not — one misbehaving engine throwing mid-loop would silently
+      // abort everything after it (no bots touched past that point, button
+      // label never updated), which looked exactly like "click it, nothing
+      // happens." Every bot's block below now has its own try/catch, the
+      // whole handler has a top-level one too, and a failure surfaces as a
+      // visible toast + console log instead of dying silently.
+      const failedIds = [];
+      try {
       const engagedCount = BOT_IDS.filter((id) => {
         const eng = engines[id];
         if (!eng) return false;
@@ -26545,6 +26730,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const turnOn = engagedCount < BOT_IDS.length;
       if (turnOn) { applyMasterTpSlToAllEngines(); resetPnlGateLatch(); }
       BOT_IDS.forEach((id) => {
+       try {
         const eng = ensureTitanOrDifferForControl(id);
         if (!eng) return;
         if (id === 'differ' || id === 'hotrepeat') {
@@ -26621,7 +26807,26 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
           }
         }
+       } catch (errBot) {
+         failedIds.push(id);
+         console.error(`[Hub] Master control error on "${id}":`, errBot);
+       }
       });
+      } catch (errTop) {
+        console.error('[Hub] Master control click handler error:', errTop);
+        failedIds.push('(handler)');
+      }
+      if (failedIds.length) {
+        const toast = document.getElementById('global-error-toast');
+        if (toast) {
+          toast.textContent = `⚠ Engage/Terminate hit an error on: ${failedIds.join(', ')} — others were still applied. Check console.`;
+          toast.style.background = 'hsl(var(--loss)/0.15)';
+          toast.style.borderColor = 'hsl(var(--loss)/0.5)';
+          toast.style.color = 'hsl(var(--loss))';
+          toast.classList.add('show');
+          setTimeout(() => { toast.classList.remove('show'); toast.style.background = ''; toast.style.borderColor = ''; toast.style.color = ''; }, 6000);
+        }
+      }
       // Update button label immediately after click
       setTimeout(() => {
         const masterBtn = document.getElementById('dash-master-toggle');
@@ -26652,8 +26857,29 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (e.target.id === 'dash-master-tp' || e.target.id === 'dash-master-sl') {
         saveMasterGateValues(parseFloat(document.getElementById('dash-master-tp')?.value) || 50, parseFloat(document.getElementById('dash-master-sl')?.value) || 20);
       }
+      if (e.target.id === 'dash-target-balance') {
+        const cur = loadTargetBalanceState();
+        saveTargetBalanceState(parseFloat(e.target.value) || 0, cur.enabled);
+      }
     });
     document.addEventListener('click', (e) => {
+      const targetToggle = e.target.closest('#dash-target-balance-toggle');
+      if (targetToggle) {
+        const cur = loadTargetBalanceState();
+        const nowOn = !cur.enabled;
+        const balInput = document.getElementById('dash-target-balance');
+        saveTargetBalanceState(parseFloat(balInput?.value) || cur.balance, nowOn);
+        targetToggle.classList.toggle('on', nowOn);
+        const toast = document.getElementById('global-error-toast');
+        if (toast) {
+          toast.textContent = nowOn
+            ? '🎯 Target Balance automation ON — small Take Profit will auto-reload instead of stopping, until this balance is hit.'
+            : '🎯 Target Balance automation OFF — Take Profit will stop all bots normally.';
+          toast.classList.add('show');
+          setTimeout(() => toast.classList.remove('show'), 5000);
+        }
+        return;
+      }
       const currencyBtn = e.target.closest('.dash-currency-btn');
       if (!currencyBtn) return;
       const selected = currencyBtn.dataset.currency;
@@ -26665,6 +26891,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   function ensureTitanOrDifferForControl(id) {
+    if (id === 'differ') return ensureDifferEngine();
     if (id === 'hotrepeat') return ensureHotRepeatEngine();
     return ensureTitanEngine(id);
   }
@@ -26716,7 +26943,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const dot = document.querySelector(`.hub-tab[data-app="${id}"] .dot`);
       if (!dot) return;
       const eng = engines[id];
-      const active = eng && (id === 'differ' ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
+      const active = eng && ((id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
       dot.classList.toggle('live', !!active);
     });
   }
@@ -26728,7 +26955,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // is just a fast path. Save here persists immediately per-engine (same
   // saveConfig() each bot's own Save uses) rather than waiting on the
   // navbar's global Save button, since the whole point is a quick tweak.
-  const STAKE_IDS = ['differ', ...BOT_IDS];
+  const STAKE_IDS = [...BOT_IDS]; // 'differ' now lives inside BOT_IDS itself
 
   function getStakeEngine(id) {
     if (id === 'differ') return ensureDifferEngine();
@@ -26886,6 +27113,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   let mounted = false;
   let refreshTimer = null;
 
+  // Every renderMatrix() tick rebuilds each section's HTML from scratch and
+  // writes it via innerHTML, even on ticks where nothing in that section
+  // actually changed. A fresh innerHTML write re-triggers that section's
+  // CSS entrance animations (mit-card-enter's opacity/blur/scale fade,
+  // mit-fade-in, mit-kpi-count, etc.) every single second, which is what
+  // shows up as visible flicker. Guard each write so it's skipped unless
+  // the generated markup actually differs from last tick — same "don't
+  // touch the DOM when nothing changed" fix already applied elsewhere in
+  // this file for the same class of bug (see the countdown/CD patch notes
+  // above).
+  const lastHtml = new Map(); // elementId -> last-written HTML string
+  function setIfChanged(el, html) {
+    if (!el) return;
+    if (lastHtml.get(el.id) === html) return;
+    lastHtml.set(el.id, html);
+    el.innerHTML = html;
+  }
+
   // Bots wired into the Terminal today, in display order.
   // status: 'auto'   — has real fitness AND its own engine actually calls
   //                     getRecommendation()/recordOutcome() to rotate
@@ -27015,36 +27260,142 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   // ── Live digit strip, one row per market, all 10 symbols ────────────
-  function renderLiveDigits(mit) {
-    const rows = mit.MARKETS.map((m, idx) => {
+  // This region legitimately changes every tick (new ticks, ages), so the
+  // blanket "skip if unchanged" guard above can't help it. The flicker
+  // here came from a different cause: rebuilding the *whole* container
+  // via innerHTML every second recreated every row's DOM node, replaying
+  // each row's mit-card-enter entrance animation (opacity/blur/scale
+  // fade) on every single tick. The outer shell and each market's row
+  // are now built once and reused; only the digit chips and age text
+  // inside an existing row are updated in place, so already-mounted rows
+  // never re-animate — only their content changes.
+  function renderLiveDigitRowContent(m, metrics, buf) {
+    if (!buf.length) return `<div class="mit-live-label">${esc(m.label)}</div><div class="mit-live-empty">no ticks yet</div>`;
+    const hot = new Set(metrics.ready ? metrics.hotDigits : []);
+    const cold = new Set(metrics.ready ? metrics.coldDigits : []);
+    const chips = buf.map((t, i) => {
+      const isLast = i === buf.length - 1;
+      const cls = hot.has(t.digit) ? 'mit-d-hot' : cold.has(t.digit) ? 'mit-d-cold' : 'mit-d-neutral';
+      return `<span class="mit-digit ${cls}${isLast ? ' mit-d-last' : ''}" style="--i:${i}">${t.digit}</span>`;
+    }).join('');
+    const age = fmtAge(Date.now() - buf[buf.length - 1].ts);
+    return `<div class="mit-live-label">${esc(m.label)}${m.is1s ? '<span class="mit-1s-tag">1s</span>' : ''}</div>
+      <div class="mit-digit-strip">${chips}</div>
+      <div class="mit-live-age">${age}</div>`;
+  }
+  function updateLiveDigits(mit, container) {
+    if (!container) return;
+    let rowsEl = container.querySelector('.mit-live-rows');
+    if (!rowsEl) {
+      container.innerHTML = `<div class="mit-live-wrap">
+        <div class="mit-section-title"><span class="mit-sec-ico">📡</span>Live digit stream — all markets</div>
+        <div class="mit-live-note">Last ~24 ticks per market, oldest → newest. <span class="mit-d-hot mit-legend-swatch"></span> hot digit &nbsp; <span class="mit-d-cold mit-legend-swatch"></span> cold digit &nbsp; <span class="mit-d-neutral mit-legend-swatch"></span> neutral — classification is relative to that market's own recent spread, not an absolute threshold.</div>
+        <div class="mit-live-rows"></div>
+      </div>`;
+      rowsEl = container.querySelector('.mit-live-rows');
+    }
+    mit.MARKETS.forEach((m, idx) => {
       const metrics = mit.computeMicroMetrics(m.value);
       const buf = mit.getRecentDigits(m.value, 24);
-      if (!buf.length) {
-        return `<div class="mit-live-row" style="--i:${idx}"><div class="mit-live-label">${esc(m.label)}</div><div class="mit-live-empty">no ticks yet</div></div>`;
+      let rowEl = rowsEl.querySelector(`.mit-live-row[data-symbol="${m.value}"]`);
+      if (!rowEl) {
+        rowEl = document.createElement('div');
+        rowEl.className = 'mit-live-row';
+        rowEl.dataset.symbol = m.value;
+        rowEl.style.setProperty('--i', idx);
+        rowsEl.appendChild(rowEl);
       }
-      const hot = new Set(metrics.ready ? metrics.hotDigits : []);
-      const cold = new Set(metrics.ready ? metrics.coldDigits : []);
-      const chips = buf.map((t, i) => {
-        const isLast = i === buf.length - 1;
-        const cls = hot.has(t.digit) ? 'mit-d-hot' : cold.has(t.digit) ? 'mit-d-cold' : 'mit-d-neutral';
-        return `<span class="mit-digit ${cls}${isLast ? ' mit-d-last' : ''}" style="--i:${i}">${t.digit}</span>`;
-      }).join('');
-      const age = fmtAge(Date.now() - buf[buf.length - 1].ts);
-      return `<div class="mit-live-row" style="--i:${idx}">
-        <div class="mit-live-label">${esc(m.label)}${m.is1s ? '<span class="mit-1s-tag">1s</span>' : ''}</div>
-        <div class="mit-digit-strip">${chips}</div>
-        <div class="mit-live-age">${age}</div>
-      </div>`;
-    }).join('');
-    return `<div class="mit-live-wrap">
-      <div class="mit-section-title"><span class="mit-sec-ico">📡</span>Live digit stream — all markets</div>
-      <div class="mit-live-note">Last ~24 ticks per market, oldest → newest. <span class="mit-d-hot mit-legend-swatch"></span> hot digit &nbsp; <span class="mit-d-cold mit-legend-swatch"></span> cold digit &nbsp; <span class="mit-d-neutral mit-legend-swatch"></span> neutral — classification is relative to that market's own recent spread, not an absolute threshold.</div>
-      <div class="mit-live-rows">${rows}</div>
-    </div>`;
+      const html = renderLiveDigitRowContent(m, metrics, buf);
+      if (rowEl.dataset.lastHtml !== html) {
+        rowEl.dataset.lastHtml = html;
+        rowEl.innerHTML = html;
+      }
+    });
   }
 
   // ── Per-market drill-down: mini SVG bar chart + full metric readout ─
   let drillSymbol = null;
+
+  // ── Trade Signal Alerts — alert-only layer, across every wired bot.
+  // This NEVER places a trade. It watches the same matrix everything
+  // else on this page reads and, when one bot's pick becomes genuinely
+  // actionable, surfaces a clear banner + sound + (optional) Telegram
+  // ping so the person can act on it manually. Two guards keep it from
+  // being noisy: a debounce (the pick has to hold steady for a few
+  // seconds before it counts — kills one-tick spikes) and a per-pick
+  // cooldown (won't re-fire the same bot+market combo back to back).
+  function loadPref(key, fallback) {
+    try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch (e) { return fallback; }
+  }
+  function savePref(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* */ }
+  }
+  let alertsEnabled = loadPref('mit_alerts_enabled', 'true') !== 'false';
+  let pendingSignal = null;      // { key, botType, symbol, score, since } — candidate still proving itself
+  let lastFired = null;          // { key, ts } — cooldown tracker
+  let signalHistory = [];        // most-recent-first, capped
+  let lastAlertBanner = null;    // { botLabel, label, score, ts } — drives the transient banner
+  let bannerUntil = 0;
+  const SIGNAL_DEBOUNCE_MS = 4000;           // pick must hold this long before it's trusted
+  const SIGNAL_COOLDOWN_MS = 3 * 60 * 1000;  // don't re-alert the same bot+market inside this window
+  const SIGNAL_SCORE_FLOOR = 70;             // stricter than the 65 used for the "best idea" line in Analysis
+  const SIGNAL_BANNER_MS = 12000;
+
+  function checkTradeSignal(mit, matrix) {
+    if (!alertsEnabled) { pendingSignal = null; return null; }
+    const candidates = matrix
+      .map((c) => ({ botType: c.botType, top: c.ranked.find((r) => r.metrics.ready) }))
+      .filter((c) => c.top && !c.top.stale && c.top.score >= SIGNAL_SCORE_FLOOR)
+      .sort((a, b) => b.top.score - a.top.score);
+    const best = candidates[0] || null;
+    const now = Date.now();
+    if (!best) { pendingSignal = null; return null; }
+
+    const key = `${best.botType}:${best.top.symbol}`;
+    if (!pendingSignal || pendingSignal.key !== key) {
+      pendingSignal = { key, botType: best.botType, symbol: best.top.symbol, score: best.top.score, since: now };
+      return null;
+    }
+    pendingSignal.score = best.top.score; // keep the score fresh while it holds
+    if (now - pendingSignal.since < SIGNAL_DEBOUNCE_MS) return null;
+    if (lastFired && lastFired.key === key && (now - lastFired.ts) < SIGNAL_COOLDOWN_MS) return null;
+
+    lastFired = { key, ts: now };
+    const fired = { botType: pendingSignal.botType, symbol: pendingSignal.symbol, score: pendingSignal.score, ts: now };
+    signalHistory.unshift(fired);
+    if (signalHistory.length > 20) signalHistory.length = 20;
+    return fired;
+  }
+
+  function fireSignalAlert(mit, sig) {
+    const label = (mit.MARKETS.find((m) => m.value === sig.symbol) || {}).label || sig.symbol;
+    const botLabel = (BOT_META[sig.botType] || {}).label || sig.botType;
+    try { window.Sounds && window.Sounds.soundEngine && window.Sounds.soundEngine.playAlert(); } catch (e) { /* */ }
+    try {
+      if (window.HubStore && typeof window.HubStore.notifyTelegram === 'function') {
+        window.HubStore.notifyTelegram(`📡 <b>Trade signal</b>\n${esc(botLabel)} → ${esc(label)}\nScore ${sig.score}/100\n<i>Alert only — no trade was placed automatically.</i>`);
+      }
+    } catch (e) { /* */ }
+    lastAlertBanner = { botLabel, label, score: sig.score, ts: sig.ts };
+    bannerUntil = Date.now() + SIGNAL_BANNER_MS;
+  }
+
+  function renderSignalBanner() {
+    if (!lastAlertBanner || Date.now() > bannerUntil) return '';
+    return `<div class="mit-signal-banner">
+      <span class="mit-signal-ico">📡</span>
+      <span class="mit-signal-text"><b>${esc(lastAlertBanner.botLabel)}</b> → <b>${esc(lastAlertBanner.label)}</b> just crossed ${lastAlertBanner.score}/100 and held — worth a look. Alert only, nothing was traded automatically.</span>
+    </div>`;
+  }
+
+  function renderSignalHistory(mit) {
+    if (!signalHistory.length) return '<div class="mit-log-row mit-log-empty">No signals fired yet — needs a pick at 70+ to hold for a few seconds.</div>';
+    return signalHistory.map((s) => {
+      const label = (mit.MARKETS.find((m) => m.value === s.symbol) || {}).label || s.symbol;
+      const botLabel = (BOT_META[s.botType] || {}).label || s.botType;
+      return `<div class="mit-log-row"><span>${new Date(s.ts).toLocaleTimeString()}</span> <b>${esc(botLabel)}</b> → ${esc(label)} <i>(score ${s.score})</i></div>`;
+    }).join('');
+  }
 
   function renderDrillSvg(m) {
     const w = 340, h = 96, barW = 27, gap = 4;
@@ -27096,47 +27447,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     </div>`;
   }
 
-  // ── Portfolio exposure — real claims + a "what if everyone followed
-  // their top pick" projection ─────────────────────────────────────────
-  // Real claims only exist for bots whose engine actually calls
-  // getRecommendation() (Hot Repeat today) AND only while the Terminal is
-  // active — so on its own that view is thin right now. The projection
-  // fills the gap: it's useful concentration insight the moment more
-  // bots get real fitness scores (this update), even before their
-  // engines gain rotation logic to act on them.
-  function renderExposure(mit, matrix) {
-    const allocations = mit.getAllocations();
-    const cap = mit.MAX_BOTS_PER_MARKET;
-    const projected = {};
-    matrix.forEach((col) => {
-      const usable = col.ranked.filter((r) => r.metrics.ready);
-      if (!usable.length) return;
-      const top = usable[0];
-      (projected[top.symbol] = projected[top.symbol] || []).push(col.botType);
-    });
-    const symbols = new Set([...Object.keys(allocations), ...Object.keys(projected)]);
-    if (!symbols.size) {
-      return `<div class="mit-exposure-empty">No overlap yet — every bot's current top pick lands on a different market.</div>`;
-    }
-    let html = '<div class="mit-exposure-rows">';
-    [...symbols].forEach((sym) => {
-      const label = (mit.MARKETS.find((m) => m.value === sym) || {}).label || sym;
-      const real = allocations[sym] || [];
-      const proj = projected[sym] || [];
-      const realOver = real.length >= cap;
-      const projOver = proj.length >= cap;
-      if (!real.length && !projOver) return; // only show real claims + genuinely concentrated projections
-      html += `<div class="mit-exposure-row ${realOver || projOver ? 'mit-exposure-warn' : ''}">
-        <span class="mit-exposure-sym">${esc(label)}</span>
-        ${real.length ? `<span class="mit-exposure-real">${real.length} bot${real.length > 1 ? 's' : ''} actually parked here: ${real.map(esc).join(', ')}${realOver ? ' ⚠️ at/over the ' + cap + '-bot cap' : ''}</span>` : ''}
-        ${proj.length >= 2 ? `<span class="mit-exposure-proj">${proj.length} bots' top pick right now: ${proj.map(esc).join(', ')}${projOver ? ' — would concentrate here if all switched' : ''}</span>` : ''}
-      </div>`;
-    });
-    html += '</div>';
-    if (html === '<div class="mit-exposure-rows"></div>') return `<div class="mit-exposure-empty">No overlap yet — every bot's current top pick lands on a different market.</div>`;
-    return `<div class="mit-exposure-note">Real claims only happen while the Terminal is active — every bot below now actually rotates onto its recommendation. The projection shows what WOULD happen if every bot switched to its current #1 pick right now.</div>${html}`;
-  }
-
   // ── KPI strip — same "stat card" language as the Dashboard's top row:
   // gradient glass tiles, hairline top highlight, big Outfit number,
   // small DM Mono uppercase label + delta line.
@@ -27161,6 +27471,114 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     </div>`).join('');
   }
 
+  // ── Analysis & Conclusion — the terminal's decision layer. Everything
+  // above this (bot cards, KPIs, matrix) is raw scoring data; this
+  // synthesizes it into one plain-English read of current conditions, a
+  // ranked "best actionable idea right now" line, and a short list of
+  // anything worth flagging — including the real-allocation and
+  // projected-concentration risk that used to live in its own Portfolio
+  // exposure section (folded in here so it's one decision layer instead
+  // of two). Recomputed every render tick from the same matrix/log/
+  // allocations everything else on this page already uses — no separate
+  // data source, and nothing here is a guarantee: it's a read of the
+  // current scoring snapshot, not a prediction.
+  function computeAnalysis(mit, matrix, active, log) {
+    const totalBots = matrix.length;
+    const usableCols = matrix
+      .map((c) => ({ botType: c.botType, top: c.ranked.find((r) => r.metrics.ready) }))
+      .filter((c) => c.top);
+    const readyCount = usableCols.length;
+    const scores = usableCols.map((c) => c.top.score);
+    const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+    const goodCount = usableCols.filter((c) => tierClass(c.top.score) === 'mit-good').length;
+    const badCount = usableCols.filter((c) => tierClass(c.top.score) === 'mit-bad').length;
+    const midCount = readyCount - goodCount - badCount;
+    const staleCount = usableCols.filter((c) => c.top.stale).length;
+
+    // Concentration — how many distinct bots share the same top-pick market
+    // (projected: "if every bot switched to its #1 pick right now").
+    const bySymbol = {};
+    usableCols.forEach((c) => { (bySymbol[c.top.symbol] = bySymbol[c.top.symbol] || []).push(c.botType); });
+    let maxCluster = 0, maxClusterSymbol = null;
+    Object.entries(bySymbol).forEach(([sym, list]) => { if (list.length > maxCluster) { maxCluster = list.length; maxClusterSymbol = sym; } });
+
+    // Real allocation — bots actually parked on a market right now (only
+    // populated while the Terminal is active and an engine has rotated
+    // onto its recommendation), checked against the per-market cap.
+    const allocations = mit.getAllocations ? mit.getAllocations() : {};
+    const cap = mit.MAX_BOTS_PER_MARKET;
+    let realOverCapSymbol = null, realOverCapList = [];
+    Object.entries(allocations).forEach(([sym, list]) => {
+      if (list.length >= cap && list.length > realOverCapList.length) { realOverCapSymbol = sym; realOverCapList = list; }
+    });
+
+    const recentRotations = log.filter((r) => Date.now() - r.ts < 3600000).length;
+
+    // Best actionable idea right now — the single highest-scoring ready
+    // pick across every bot, non-stale, above a "worth acting on" floor.
+    // This is the seed of a real trade signal: one ranked pick instead of
+    // a per-bot readout the person has to scan themselves.
+    const actionable = usableCols
+      .filter((c) => !c.top.stale && c.top.score >= 65)
+      .sort((a, b) => b.top.score - a.top.score);
+    const bestIdea = actionable[0] || null;
+
+    let verdict, verdictClass, verdictIcon;
+    if (readyCount === 0) {
+      verdict = 'Warming up — no bot has enough ticks yet to score a pick.';
+      verdictClass = 'mit-verdict-mid'; verdictIcon = '⏳';
+    } else if (avgScore >= 62 && (goodCount / readyCount) >= 0.45 && maxCluster < 3) {
+      verdict = 'Favorable — multiple high-conviction picks, well spread across markets.';
+      verdictClass = 'mit-verdict-good'; verdictIcon = '🟢';
+    } else if (avgScore < 42 || (badCount / readyCount) >= 0.5) {
+      verdict = 'Weak — scores are running low across most bots. Trade cautiously or sit this out.';
+      verdictClass = 'mit-verdict-bad'; verdictIcon = '🔴';
+    } else {
+      verdict = 'Mixed — selective conditions. Favor the highest-scoring picks, skip the rest.';
+      verdictClass = 'mit-verdict-mid'; verdictIcon = '🟡';
+    }
+
+    const bullets = [];
+    if (bestIdea) {
+      const label = (mit.MARKETS.find((m) => m.value === bestIdea.top.symbol) || {}).label || bestIdea.top.symbol;
+      const botLabel = (BOT_META[bestIdea.botType] || {}).label || bestIdea.botType;
+      bullets.push({ icon: '🎯', text: `Best actionable idea right now: ${botLabel} on ${label} — score ${bestIdea.top.score}/100, fresh data.` });
+    }
+    if (readyCount < totalBots) {
+      bullets.push({ icon: 'ℹ️', text: `${totalBots - readyCount} of ${totalBots} bots are still warming up (collecting ticks) — their picks aren't scored yet.` });
+    }
+    if (readyCount > 0) {
+      bullets.push({ icon: '📊', text: `${goodCount} high-conviction pick${goodCount === 1 ? '' : 's'} (≥65), ${midCount} mid, ${badCount} low (<40) across ${readyCount} scored bot${readyCount === 1 ? '' : 's'} — average top score ${avgScore}/100.` });
+    }
+    if (realOverCapSymbol) {
+      const label = (mit.MARKETS.find((m) => m.value === realOverCapSymbol) || {}).label || realOverCapSymbol;
+      bullets.push({ icon: '🛡️', text: `${realOverCapList.length} bots are actually parked on ${label} right now (${realOverCapList.join(', ')}) — at/over the ${cap}-bot exposure cap. Real concentration, not a projection.` });
+    } else if (maxCluster >= 3) {
+      const label = (mit.MARKETS.find((m) => m.value === maxClusterSymbol) || {}).label || maxClusterSymbol;
+      bullets.push({ icon: '⚠️', text: `${maxCluster} bots are all currently favoring ${label} — would concentrate exposure there if every bot switched to its #1 pick.` });
+    }
+    if (staleCount > 0) {
+      bullets.push({ icon: '⚠️', text: `${staleCount} top pick${staleCount === 1 ? '' : 's'} showing stale data right now — treat those with less confidence until they refresh.` });
+    }
+    if (recentRotations > 15) {
+      bullets.push({ icon: '⚠️', text: `${recentRotations} rotations in the last hour — markets are choppy, scores may be noisier than usual.` });
+    } else if (active && readyCount > 0 && recentRotations === 0) {
+      bullets.push({ icon: 'ℹ️', text: 'Terminal is ON with no rotations in the last hour — current picks have been stable.' });
+    }
+    if (!bullets.length) {
+      bullets.push({ icon: 'ℹ️', text: 'Nothing unusual to flag — conditions look ordinary across the board.' });
+    }
+
+    return { verdict, verdictClass, verdictIcon, bullets };
+  }
+
+  function renderAnalysis(a) {
+    return `<div class="mit-analysis ${a.verdictClass}">
+      <div class="mit-analysis-head"><span class="mit-analysis-icon">${a.verdictIcon}</span><span class="mit-analysis-verdict">${esc(a.verdict)}</span></div>
+      <ul class="mit-analysis-list">${a.bullets.map((b) => `<li><span class="mit-analysis-bicon">${b.icon}</span>${esc(b.text)}</li>`).join('')}</ul>
+    </div>`;
+  }
+
   function renderMatrix() {
     const mit = window.MarketIntelTerminal;
     const root = document.getElementById('market-root');
@@ -27182,16 +27600,27 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const matrix = mit.getMatrix(BOT_ORDER);
     const cardsHtml = matrix.map((c, i) => renderBotCard(c.botType, c.ranked, i)).join('');
     const cardsEl = document.getElementById('mit-botcards');
-    if (cardsEl) cardsEl.innerHTML = cardsHtml;
+    setIfChanged(cardsEl, cardsHtml);
 
     // KPI strip — always render.
     const log0 = mit.getRotationLog();
     const kpiEl = document.getElementById('mit-kpi-row');
-    if (kpiEl) kpiEl.innerHTML = renderStatsRow(matrix, active, log0);
+    setIfChanged(kpiEl, renderStatsRow(matrix, active, log0));
 
-    // Portfolio exposure — always render.
-    const exposureEl = document.getElementById('mit-exposure');
-    if (exposureEl) exposureEl.innerHTML = renderExposure(mit, matrix);
+    // Trade Signal Alerts — alert-only, across every wired bot. Checked
+    // every tick against the same matrix the rest of this view uses.
+    const toggleSignal = document.getElementById('mit-signal-toggle');
+    if (toggleSignal) toggleSignal.classList.toggle('on', alertsEnabled);
+    const fired = checkTradeSignal(mit, matrix);
+    if (fired) fireSignalAlert(mit, fired);
+    const bannerEl = document.getElementById('mit-signal-banner');
+    setIfChanged(bannerEl, renderSignalBanner());
+    const signalLogEl = document.getElementById('mit-signal-log');
+    setIfChanged(signalLogEl, renderSignalHistory(mit));
+
+    // Analysis & Conclusion — always render, synthesized from the same matrix/log.
+    const analysisEl = document.getElementById('mit-analysis');
+    setIfChanged(analysisEl, renderAnalysis(computeAnalysis(mit, matrix, active, log0)));
 
     // Full cross-bot matrix table — always render.
     const marketOrder = mit.MARKETS.filter((m) => !m.is1s).map((m) => m.value);
@@ -27210,21 +27639,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     });
     tableHtml += `</tbody></table></div>`;
     const tableEl = document.getElementById('mit-table-wrap');
-    if (tableEl) tableEl.innerHTML = tableHtml;
+    setIfChanged(tableEl, tableHtml);
 
     // Drill-down detail panel — always render (empty string collapses it).
     const drillEl = document.getElementById('mit-drilldown-wrap');
-    if (drillEl) drillEl.innerHTML = renderDrilldown();
+    setIfChanged(drillEl, renderDrilldown());
 
     // Rotation log — always render.
     const logEl = document.getElementById('mit-log');
-    if (logEl) logEl.innerHTML = log0.length
+    setIfChanged(logEl, log0.length
       ? log0.map((r) => `<div class="mit-log-row"><span>${new Date(r.ts).toLocaleTimeString()}</span> <b>${esc(r.botId)}</b> ${esc(r.from)} → ${esc(r.to)} <i>(${esc(r.reason)})</i></div>`).join('')
-      : '<div class="mit-log-row mit-log-empty">No rotations yet.</div>';
+      : '<div class="mit-log-row mit-log-empty">No rotations yet.</div>');
 
-    // Live digit streams — always render.
+    // Live digit streams — patched in place, see updateLiveDigits above.
     const liveEl = document.getElementById('mit-live-container');
-    if (liveEl) liveEl.innerHTML = renderLiveDigits(mit);
+    updateLiveDigits(mit, liveEl);
   }
 
   function injectStyles() {
@@ -27255,34 +27684,34 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #panel-market .mit-bgfx-glow1 { top:-120px; left:6%; background:hsl(var(--win)); animation:mit-blob-float1 20s ease-in-out infinite; }
       #panel-market .mit-bgfx-glow2 { top:260px; right:4%; background:hsl(var(--primary)); animation:mit-blob-float2 24s ease-in-out infinite; }
 
-      #panel-market .mit-wrap { position:relative; z-index:1; max-width:1180px; margin:0 auto; padding:24px 10px 60px; font-family:'DM Mono',monospace; font-size:12px; color:hsl(var(--foreground)); animation:mit-fade-in .5s ease; }
+      #panel-market .mit-wrap { position:relative; z-index:1; max-width:1180px; margin:0 auto; padding:12px 8px 32px; font-family:'DM Mono',monospace; font-size:11px; color:hsl(var(--foreground)); animation:mit-fade-in .5s ease; }
 
       /* ── Header — same lifted-glass card language as the Dashboard's
          stat cards (gradient bg, hairline top sweep, deep drop shadow) ── */
-      #panel-market .mit-header { position:relative; overflow:hidden; display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:14px; padding:18px 22px; border-radius:16px;
+      #panel-market .mit-header { position:relative; overflow:hidden; display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px; padding:11px 14px; border-radius:12px;
         border:1px solid hsl(var(--border)/0.5); background:linear-gradient(135deg, hsl(var(--card)/0.9) 0%, hsl(var(--bg)/0.6) 100%); backdrop-filter:blur(16px) saturate(140%);
         box-shadow:var(--shadow-md, 0 10px 30px hsl(0 0% 0%/0.5)), inset 0 1px 0 hsl(255 100% 100%/0.05); }
       #panel-market .mit-header::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; z-index:1;
         background:linear-gradient(90deg, transparent, hsl(var(--primary)/0.5), hsl(var(--win)/0.4), transparent); background-size:200% 100%; animation:mit-header-sweep 6s linear infinite; }
-      #panel-market .mit-header-left { display:flex; align-items:center; gap:14px; }
-      #panel-market .mit-icon-badge { width:40px; height:40px; flex:0 0 40px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:18px;
+      #panel-market .mit-header-left { display:flex; align-items:center; gap:10px; }
+      #panel-market .mit-icon-badge { width:30px; height:30px; flex:0 0 30px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:14px;
         background:linear-gradient(155deg, hsl(var(--primary)/0.24), hsl(var(--win)/0.16)); border:1px solid hsl(var(--border)/0.6); box-shadow:0 0 18px hsl(var(--primary)/0.18) inset; }
-      #panel-market .mit-title { font-family:'Outfit',sans-serif; font-size:18px; font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:8px; color:hsl(var(--foreground)); }
-      #panel-market .mit-title-pulse { width:7px; height:7px; border-radius:50%; background:hsl(var(--win)); flex-shrink:0; animation:mit-pulse-dot 1.8s ease-in-out infinite; }
-      #panel-market .mit-subtitle { opacity:.5; font-size:10.5px; margin-top:3px; letter-spacing:.15px; font-weight:400; }
+      #panel-market .mit-title { font-family:'Outfit',sans-serif; font-size:14px; font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:6px; color:hsl(var(--foreground)); }
+      #panel-market .mit-title-pulse { width:6px; height:6px; border-radius:50%; background:hsl(var(--win)); flex-shrink:0; animation:mit-pulse-dot 1.8s ease-in-out infinite; }
+      #panel-market .mit-subtitle { opacity:.5; font-size:9px; margin-top:2px; letter-spacing:.1px; font-weight:400; }
 
       /* ── KPI strip — Dashboard's dash-stat-card, restyled for Intel ──── */
-      #panel-market .mit-kpi-row { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-bottom:16px; }
-      #panel-market .mit-kpi { position:relative; overflow:hidden; border-radius:14px; padding:13px 15px; border:1px solid hsl(var(--border)/0.5);
+      #panel-market .mit-kpi-row { display:grid; grid-template-columns:repeat(4, 1fr); gap:7px; margin-bottom:8px; }
+      #panel-market .mit-kpi { position:relative; overflow:hidden; border-radius:10px; padding:9px 11px; border:1px solid hsl(var(--border)/0.5);
         background:linear-gradient(135deg, hsl(var(--card)/0.9) 0%, hsl(var(--bg)/0.6) 100%); backdrop-filter:blur(12px);
         box-shadow:0 2px 12px hsl(0 0% 0%/0.3), inset 0 1px 0 hsl(255 100% 100%/0.04);
         animation:mit-card-enter .45s cubic-bezier(.34,1.4,.64,1) both; animation-delay:calc(var(--i, 0) * 60ms);
         transition:transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s ease, border-color .2s ease; }
       #panel-market .mit-kpi::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg, transparent, hsl(var(--primary)/0.3), transparent); }
       #panel-market .mit-kpi:hover { transform:translateY(-3px); border-color:hsl(var(--border-bright, var(--border))); box-shadow:0 12px 28px hsl(0 0% 0%/0.35), inset 0 1px 0 hsl(255 100% 100%/0.06); }
-      #panel-market .mit-kpi-label { font-family:'Outfit',sans-serif; font-size:8.5px; font-weight:700; letter-spacing:2px; text-transform:uppercase; opacity:.55; margin-bottom:6px; }
-      #panel-market .mit-kpi-val { font-family:'Outfit',sans-serif; font-size:22px; font-weight:800; letter-spacing:-.3px; font-variant-numeric:tabular-nums; animation:mit-kpi-count .3s ease both; }
-      #panel-market .mit-kpi-delta { font-size:9px; font-family:'DM Mono',monospace; opacity:.5; margin-top:4px; }
+      #panel-market .mit-kpi-label { font-family:'Outfit',sans-serif; font-size:8px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; opacity:.55; margin-bottom:4px; }
+      #panel-market .mit-kpi-val { font-family:'Outfit',sans-serif; font-size:16px; font-weight:800; letter-spacing:-.3px; font-variant-numeric:tabular-nums; animation:mit-kpi-count .3s ease both; }
+      #panel-market .mit-kpi-delta { font-size:8.5px; font-family:'DM Mono',monospace; opacity:.5; margin-top:3px; }
       #panel-market .mit-kpi-good .mit-kpi-val { color:hsl(var(--win)); }
       #panel-market .mit-kpi-good { border-color:hsl(var(--win)/0.3); }
       #panel-market .mit-kpi-bad .mit-kpi-val { color:hsl(var(--loss)); }
@@ -27291,9 +27720,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       @media (max-width:640px) { #panel-market .mit-kpi-row { grid-template-columns:repeat(2, 1fr); } }
 
       /* ── Master toggle — glass pill switch ───────────────────────────── */
-      #mit-master-toggle { position:relative; overflow:hidden; display:flex; align-items:center; gap:10px; width:100%; padding:13px 16px 13px 14px; border-radius:13px;
-        border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.16); backdrop-filter:blur(10px); cursor:pointer; font-family:'DM Mono',monospace; font-size:11.5px;
-        font-weight:600; letter-spacing:.2px; margin-top:16px; margin-bottom:10px; color:hsl(var(--muted-foreground));
+      #mit-master-toggle { position:relative; overflow:hidden; display:flex; align-items:center; gap:8px; width:100%; padding:9px 13px 9px 11px; border-radius:10px;
+        border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.16); backdrop-filter:blur(10px); cursor:pointer; font-family:'DM Mono',monospace; font-size:10.5px;
+        font-weight:600; letter-spacing:.2px; margin-top:4px; margin-bottom:6px; color:hsl(var(--muted-foreground));
         transition:border-color .25s ease, background .3s ease, box-shadow .3s ease; }
       #mit-master-toggle:hover { border-color:hsl(var(--border-bright, var(--border))); }
       #mit-master-toggle.mit-toggle-pressed { transform:scale(.995); }
@@ -27305,18 +27734,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #mit-master-toggle .mit-toggle-label { position:relative; z-index:1; }
       #mit-master-toggle .mit-toggle-shimmer { position:absolute; top:0; left:0; width:40%; height:100%; background:linear-gradient(90deg, transparent, hsl(var(--foreground)/0.1), transparent); pointer-events:none; }
       #mit-master-toggle.on .mit-toggle-shimmer { animation:mit-shimmer-sweep 3.2s ease-in-out infinite; background:linear-gradient(90deg, transparent, hsl(var(--win)/0.28), transparent); }
-      #mit-status-note { line-height:1.55; margin-bottom:24px; font-size:10.5px; padding:11px 15px; border-radius:11px; border:1px solid hsl(var(--border)/0.45);
+      #mit-status-note { line-height:1.4; margin-bottom:10px; font-size:9.5px; padding:8px 12px; border-radius:9px; border:1px solid hsl(var(--border)/0.45);
         background:hsl(var(--card)/0.4); backdrop-filter:blur(8px); opacity:.85; transition:opacity .3s ease; }
 
       /* ── Section headers ─────────────────────────────────────────────── */
-      .mit-section-title { font-family:'Outfit',sans-serif; font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; opacity:.55; margin:32px 0 13px;
-        display:flex; align-items:center; gap:9px; position:relative; padding-bottom:10px; }
-      .mit-sec-ico { width:22px; height:22px; flex:0 0 22px; display:flex; align-items:center; justify-content:center; font-size:11.5px; border-radius:7px;
+      .mit-section-title { font-family:'Outfit',sans-serif; font-size:10px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; opacity:.55; margin:14px 0 7px;
+        display:flex; align-items:center; gap:7px; position:relative; padding-bottom:6px; }
+      .mit-sec-ico { width:18px; height:18px; flex:0 0 18px; display:flex; align-items:center; justify-content:center; font-size:10px; border-radius:6px;
         background:hsl(var(--muted)/0.3); border:1px solid hsl(var(--border)/0.5); }
       .mit-section-title::after { content:''; position:absolute; left:0; bottom:0; width:100%; height:1px; background:hsl(var(--border)/0.55); }
 
       /* ── Bot pick cards ───────────────────────────────────────────────── */
-      .mit-botcards { display:grid; grid-template-columns:repeat(auto-fit, minmax(226px, 1fr)); gap:14px; margin-bottom:8px; }
+      .mit-botcards { display:grid; grid-template-columns:repeat(auto-fit, minmax(178px, 1fr)); gap:8px; margin-bottom:4px; }
       .mit-botcard { position:relative; border-radius:15px; padding:1px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--card)/0.5); overflow:hidden;
         backdrop-filter:blur(10px); transition:transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s ease, border-color .25s ease;
         animation:mit-card-enter .5s cubic-bezier(.34,1.4,.64,1) both; animation-delay:calc(var(--i, 0) * 50ms); }
@@ -27324,7 +27753,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-botcard-accent { position:absolute; top:0; left:0; right:0; height:2.5px; z-index:2; background:hsl(var(--border)/0.5); }
       .mit-botcard.mit-good .mit-botcard-accent { background:linear-gradient(90deg, hsl(var(--win)/0.2), hsl(var(--win)), hsl(var(--win)/0.2)); }
       .mit-botcard.mit-bad .mit-botcard-accent { background:linear-gradient(90deg, hsl(var(--loss)/0.2), hsl(var(--loss)), hsl(var(--loss)/0.2)); }
-      .mit-botcard-inner { position:relative; z-index:1; background:linear-gradient(165deg, hsl(var(--card)/0.65), hsl(var(--card)/0.3)); border-radius:14px; padding:17px 18px 15px; }
+      .mit-botcard-inner { position:relative; z-index:1; background:linear-gradient(165deg, hsl(var(--card)/0.65), hsl(var(--card)/0.3)); border-radius:11px; padding:10px 11px 9px; }
       .mit-card-spin { position:absolute; inset:-40%; z-index:0; opacity:0; }
       .mit-botcard.mit-good .mit-card-spin, .mit-botcard.mit-bad .mit-card-spin { opacity:.5; animation:mit-spin-slow 7s linear infinite; }
       .mit-botcard.mit-good .mit-card-spin { background:conic-gradient(from 0deg, transparent 0deg, hsl(var(--win)/0.7) 25deg, transparent 70deg, transparent 360deg); }
@@ -27334,39 +27763,39 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-botcard.mit-bad  { box-shadow:0 0 18px hsl(var(--loss)/0.08); animation:mit-glow-bad 3.2s ease-in-out infinite; }
       @keyframes mit-glow-good { 0%,100% { box-shadow:0 0 14px hsl(var(--win)/0.1); } 50% { box-shadow:0 0 26px hsl(var(--win)/0.24); } }
       @keyframes mit-glow-bad  { 0%,100% { box-shadow:0 0 10px hsl(var(--loss)/0.07); } 50% { box-shadow:0 0 18px hsl(var(--loss)/0.16); } }
-      .mit-botcard-head { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
-      .mit-bot-icon { width:26px; height:26px; flex:0 0 26px; display:flex; align-items:center; justify-content:center; font-size:13px; border-radius:8px;
+      .mit-botcard-head { display:flex; align-items:center; gap:6px; margin-bottom:7px; }
+      .mit-bot-icon { width:20px; height:20px; flex:0 0 20px; display:flex; align-items:center; justify-content:center; font-size:11px; border-radius:6px;
         background:hsl(var(--muted)/0.3); border:1px solid hsl(var(--border)/0.5); }
-      .mit-bot-name { font-family:'Outfit',sans-serif; font-weight:700; font-size:12px; flex:1; letter-spacing:.1px; }
-      .mit-bot-wired { font-size:8px; text-transform:uppercase; letter-spacing:.5px; padding:3px 7px; border-radius:99px; background:hsl(var(--muted)/0.35); opacity:.55; font-weight:700; transition:all .3s ease; }
+      .mit-bot-name { font-family:'Outfit',sans-serif; font-weight:700; font-size:10.5px; flex:1; letter-spacing:.1px; }
+      .mit-bot-wired { font-size:7px; text-transform:uppercase; letter-spacing:.4px; padding:2px 6px; border-radius:99px; background:hsl(var(--muted)/0.35); opacity:.55; font-weight:700; transition:all .3s ease; }
       .mit-bot-wired.is-wired { background:hsl(var(--win)/0.16); color:hsl(var(--win)); opacity:1; box-shadow:0 0 8px hsl(var(--win)/0.25); }
-      .mit-botcard-warm { opacity:.55; font-size:11px; padding:16px 0; text-align:center; display:flex; align-items:center; justify-content:center; gap:7px; }
-      .mit-warm-dot { width:6px; height:6px; border-radius:50%; background:currentColor; animation:mit-warm-blink 1.2s ease-in-out infinite; }
-      .mit-botcard-pick { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
-      .mit-pick-market { font-family:'Outfit',sans-serif; font-weight:600; font-size:13.5px; }
-      .mit-pick-score { font-family:'Outfit',sans-serif; font-size:22px; font-weight:800; letter-spacing:-.3px; font-variant-numeric:tabular-nums; transition:color .3s ease; }
-      .mit-pick-score span { font-size:9.5px; opacity:.45; font-weight:500; }
+      .mit-botcard-warm { opacity:.55; font-size:10px; padding:10px 0; text-align:center; display:flex; align-items:center; justify-content:center; gap:6px; }
+      .mit-warm-dot { width:5px; height:5px; border-radius:50%; background:currentColor; animation:mit-warm-blink 1.2s ease-in-out infinite; }
+      .mit-botcard-pick { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+      .mit-pick-market { font-family:'Outfit',sans-serif; font-weight:600; font-size:11.5px; }
+      .mit-pick-score { font-family:'Outfit',sans-serif; font-size:17px; font-weight:800; letter-spacing:-.3px; font-variant-numeric:tabular-nums; transition:color .3s ease; }
+      .mit-pick-score span { font-size:8.5px; opacity:.45; font-weight:500; }
       .mit-good .mit-pick-score, .mit-good .mit-pick-market { color:hsl(var(--win)); }
       .mit-bad .mit-pick-score, .mit-bad .mit-pick-market { color:hsl(var(--loss)); }
-      .mit-chips { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
-      .mit-chip { font-size:9px; padding:4px 9px; border-radius:99px; background:hsl(var(--muted)/0.28); border:1px solid hsl(var(--border)/0.4); white-space:nowrap; font-weight:500;
+      .mit-chips { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
+      .mit-chip { font-size:8px; padding:3px 7px; border-radius:99px; background:hsl(var(--muted)/0.28); border:1px solid hsl(var(--border)/0.4); white-space:nowrap; font-weight:500;
         transition:background .2s ease, transform .2s ease, border-color .2s ease; }
       .mit-chip:hover { background:hsl(var(--muted)/0.5); border-color:hsl(var(--border-bright, var(--border))); transform:translateY(-1px); }
-      .mit-runners { display:flex; flex-wrap:wrap; gap:8px; padding-top:10px; border-top:1px solid hsl(var(--border)/0.35); opacity:.65; font-size:10px; }
+      .mit-runners { display:flex; flex-wrap:wrap; gap:6px; padding-top:6px; border-top:1px solid hsl(var(--border)/0.35); opacity:.65; font-size:9px; }
       .mit-runner { padding:2px 0; }
       .mit-runner b { opacity:.95; font-weight:700; }
 
       /* ── Score sparkline — same curve language as the Dashboard's
          equity chart: smoothed line + soft gradient fill underneath ── */
-      .mit-spark-wrap { margin:2px 0 10px; border-radius:8px; overflow:hidden; background:hsl(var(--muted)/0.08); border:1px solid hsl(var(--border)/0.3); }
-      .mit-spark { width:100%; height:30px; display:block; }
+      .mit-spark-wrap { margin:1px 0 6px; border-radius:6px; overflow:hidden; background:hsl(var(--muted)/0.08); border:1px solid hsl(var(--border)/0.3); }
+      .mit-spark { width:100%; height:22px; display:block; }
 
       /* ── Full scoring matrix table ────────────────────────────────────── */
-      .mit-table-panel { border-radius:14px; border:1px solid hsl(var(--border)/0.5); background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%);
-        backdrop-filter:blur(10px); overflow:hidden auto; max-height:420px; margin-bottom:8px; box-shadow:0 2px 12px hsl(0 0% 0%/0.25), inset 0 1px 0 hsl(255 100% 100%/0.03); }
+      .mit-table-panel { border-radius:10px; border:1px solid hsl(var(--border)/0.5); background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%);
+        backdrop-filter:blur(10px); overflow:hidden auto; max-height:340px; margin-bottom:4px; box-shadow:0 2px 12px hsl(0 0% 0%/0.25), inset 0 1px 0 hsl(255 100% 100%/0.03); }
       .mit-table { width:100%; border-collapse:collapse; }
-      .mit-table th, .mit-table td { padding:12px 10px; text-align:center; border-bottom:1px solid hsl(var(--border)/0.35); transition:background .2s ease; }
-      .mit-table th { position:sticky; top:0; z-index:2; font-weight:700; opacity:.6; font-family:'Outfit',sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:.5px;
+      .mit-table th, .mit-table td { padding:6px 6px; text-align:center; border-bottom:1px solid hsl(var(--border)/0.35); transition:background .2s ease; }
+      .mit-table th { position:sticky; top:0; z-index:2; font-weight:700; opacity:.6; font-family:'Outfit',sans-serif; font-size:8.5px; text-transform:uppercase; letter-spacing:.3px;
         background:hsl(var(--card)/0.92); backdrop-filter:blur(10px); box-shadow:0 1px 0 hsl(var(--border)/0.5); }
       .mit-table tbody tr { transition:background .18s ease, box-shadow .18s ease; cursor:pointer; }
       .mit-table tbody tr:nth-child(even) { background:hsl(var(--muted)/0.05); }
@@ -27374,8 +27803,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-table tbody tr:last-child td { border-bottom:none; }
       .mit-sym { text-align:left !important; opacity:.85; font-weight:600; }
       .mit-cell { position:relative; }
-      .mit-badge { display:inline-flex; align-items:center; justify-content:center; min-width:34px; padding:4px 9px; border-radius:99px; font-weight:700;
-        font-family:'Outfit',sans-serif; font-size:11.5px; font-variant-numeric:tabular-nums; transition:background .2s ease, color .2s ease, box-shadow .2s ease; }
+      .mit-badge { display:inline-flex; align-items:center; justify-content:center; min-width:28px; padding:3px 7px; border-radius:99px; font-weight:700;
+        font-family:'Outfit',sans-serif; font-size:10px; font-variant-numeric:tabular-nums; transition:background .2s ease, color .2s ease, box-shadow .2s ease; }
       .mit-good .mit-badge { color:hsl(var(--win)); background:hsl(var(--win)/0.14); box-shadow:0 0 10px hsl(var(--win)/0.14); }
       .mit-mid .mit-badge { color:hsl(var(--muted-foreground)); background:hsl(var(--muted)/0.25); }
       .mit-bad .mit-badge { color:hsl(var(--loss)); background:hsl(var(--loss)/0.12); }
@@ -27384,9 +27813,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-age { display:block; font-size:8.5px; opacity:.45; font-weight:500; margin-top:3px; }
 
       /* ── Rotation log ─────────────────────────────────────────────────── */
-      .mit-log { max-height:210px; overflow:auto; border:1px solid hsl(var(--border)/0.5); border-radius:12px; padding:6px;
+      .mit-log { max-height:150px; overflow:auto; border:1px solid hsl(var(--border)/0.5); border-radius:10px; padding:4px;
         background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%); backdrop-filter:blur(10px); box-shadow:0 2px 12px hsl(0 0% 0%/0.25); }
-      .mit-log-row { padding:8px 10px; opacity:.85; border-radius:8px; border-left:2px solid transparent; font-size:11px; transition:background .15s ease; }
+      .mit-log-row { padding:5px 8px; opacity:.85; border-radius:6px; border-left:2px solid transparent; font-size:9.5px; transition:background .15s ease; }
       .mit-log-row:hover { background:hsl(var(--muted)/0.1); }
       .mit-log-row:first-child:not(.mit-log-empty) { background:hsl(var(--win)/0.07); border-left-color:hsl(var(--win)/0.6); animation:mit-glow-good 3.2s ease-in-out infinite; }
       .mit-log-row span { opacity:.5; font-size:9.5px; margin-right:4px; }
@@ -27395,35 +27824,35 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-log::-webkit-scrollbar-thumb { background:hsl(var(--border)); border-radius:4px; }
 
       /* ── Live digit streams ───────────────────────────────────────────── */
-      .mit-live-note { opacity:.5; font-size:9.5px; line-height:1.65; margin-bottom:13px; }
-      .mit-legend-swatch { display:inline-block; width:9px; height:9px; border-radius:3px; margin:0 2px -1px 4px; }
-      .mit-live-rows { display:flex; flex-direction:column; gap:7px; }
-      .mit-live-row { display:flex; align-items:center; gap:11px; padding:11px 13px; border:1px solid hsl(var(--border)/0.4); border-radius:11px;
+      .mit-live-note { opacity:.5; font-size:8.5px; line-height:1.5; margin-bottom:7px; }
+      .mit-legend-swatch { display:inline-block; width:8px; height:8px; border-radius:3px; margin:0 2px -1px 3px; }
+      .mit-live-rows { display:flex; flex-direction:column; gap:4px; }
+      .mit-live-row { display:flex; align-items:center; gap:8px; padding:6px 9px; border:1px solid hsl(var(--border)/0.4); border-radius:8px;
         background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%); backdrop-filter:blur(8px);
         transition:border-color .25s ease, box-shadow .25s ease, transform .25s cubic-bezier(.16,1,.3,1);
         animation:mit-card-enter .4s cubic-bezier(.34,1.4,.64,1) both; animation-delay:calc(var(--i, 0) * 30ms); }
       .mit-live-row:hover { border-color:hsl(var(--border-bright, var(--border))); box-shadow:0 0 14px hsl(var(--primary)/0.1); transform:translateX(2px); }
-      .mit-live-label { flex:0 0 84px; font-weight:600; opacity:.8; font-size:10.5px; }
-      .mit-1s-tag { display:inline-block; margin-left:5px; font-size:8px; padding:1px 5px; border-radius:99px; background:hsl(var(--primary)/0.18); color:hsl(var(--primary)); vertical-align:middle; font-weight:700; }
-      .mit-digit-strip { flex:1; display:flex; flex-wrap:wrap; gap:3px; overflow:hidden; }
-      .mit-digit { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:6px; font-size:10px; font-weight:700; background:hsl(var(--muted)/0.28);
+      .mit-live-label { flex:0 0 70px; font-weight:600; opacity:.8; font-size:9px; }
+      .mit-1s-tag { display:inline-block; margin-left:4px; font-size:7px; padding:1px 4px; border-radius:99px; background:hsl(var(--primary)/0.18); color:hsl(var(--primary)); vertical-align:middle; font-weight:700; }
+      .mit-digit-strip { flex:1; display:flex; flex-wrap:wrap; gap:2px; overflow:hidden; }
+      .mit-digit { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:5px; font-size:8.5px; font-weight:700; background:hsl(var(--muted)/0.28);
         transition:background .2s ease, color .2s ease, box-shadow .2s ease; }
       .mit-d-neutral { color:hsl(var(--muted-foreground)); opacity:.75; }
       .mit-d-hot { background:hsl(var(--win)/0.24); color:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.3); }
       .mit-d-cold { background:hsl(var(--primary)/0.2); color:hsl(var(--primary)); box-shadow:0 0 8px hsl(var(--primary)/0.25); }
       .mit-d-last { outline:1.5px solid hsl(var(--foreground)/0.6); animation:mit-ring-pulse 1.6s ease-in-out infinite; }
-      .mit-live-age { flex:0 0 34px; text-align:right; opacity:.4; font-size:9.5px; }
-      .mit-live-empty { flex:1; opacity:.4; font-size:10px; }
+      .mit-live-age { flex:0 0 28px; text-align:right; opacity:.4; font-size:8.5px; }
+      .mit-live-empty { flex:1; opacity:.4; font-size:9px; }
 
       /* ── Drill-down ───────────────────────────────────────────────────── */
       .mit-matrix-hint { opacity:.45; font-size:10px; margin-bottom:10px; }
       .mit-runner.mit-drill-trigger, .mit-botcard-pick.mit-drill-trigger { cursor:pointer; }
       .mit-drill-hint { font-size:9px; opacity:.4; font-weight:400; margin-left:4px; }
-      .mit-drilldown { margin:4px 0 16px; padding:17px; border:1px solid hsl(var(--border-bright, var(--border))); border-radius:14px;
+      .mit-drilldown { margin:2px 0 8px; padding:11px; border:1px solid hsl(var(--border-bright, var(--border))); border-radius:11px;
         background:linear-gradient(160deg, hsl(var(--card)/0.65), hsl(var(--card)/0.35)); backdrop-filter:blur(12px);
         box-shadow:var(--shadow-md, 0 10px 30px hsl(0 0% 0%/0.5)); animation:mit-card-enter .35s cubic-bezier(.34,1.4,.64,1) both; }
-      .mit-drill-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid hsl(var(--border)/0.4);
-        font-family:'Outfit',sans-serif; font-weight:700; font-size:13px; }
+      .mit-drill-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; padding-bottom:7px; border-bottom:1px solid hsl(var(--border)/0.4);
+        font-family:'Outfit',sans-serif; font-weight:700; font-size:11px; }
       .mit-drill-close { background:hsl(var(--muted)/0.3); border:1px solid hsl(var(--border)/0.5); border-radius:8px; width:24px; height:24px; color:hsl(var(--muted-foreground)); cursor:pointer; font-size:12px; opacity:.8; transition:all .2s ease; }
       .mit-drill-close:hover { opacity:1; background:hsl(var(--muted)/0.5); }
       .mit-drill-warm { opacity:.5; padding:12px 0; text-align:center; }
@@ -27441,19 +27870,38 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-drill-stats b { font-family:'Outfit',sans-serif; font-variant-numeric:tabular-nums; }
       .mit-drill-trans { font-size:10.5px; opacity:.8; padding-top:8px; border-top:1px solid hsl(var(--border)/0.35); }
 
-      /* ── Portfolio exposure ───────────────────────────────────────────── */
-      .mit-exposure-empty { opacity:.4; font-size:10.5px; padding:14px; text-align:center; border:1px dashed hsl(var(--border)/0.5); border-radius:12px; }
-      .mit-exposure-note { opacity:.45; font-size:9.5px; line-height:1.6; margin-bottom:9px; }
-      .mit-exposure-rows { display:flex; flex-direction:column; gap:7px; margin-bottom:10px; }
-      .mit-exposure-row { display:flex; flex-wrap:wrap; align-items:center; gap:9px; padding:10px 13px; border:1px solid hsl(var(--border)/0.45); border-left:2.5px solid hsl(var(--border)/0.6);
-        border-radius:10px; background:linear-gradient(135deg, hsl(var(--card)/0.7) 0%, hsl(var(--bg)/0.4) 100%); backdrop-filter:blur(8px); font-size:10.5px;
-        box-shadow:0 2px 10px hsl(0 0% 0%/0.2); transition:transform .2s cubic-bezier(.16,1,.3,1); }
-      .mit-exposure-row:hover { transform:translateX(2px); }
-      .mit-exposure-warn { border-color:hsl(var(--loss)/0.4); border-left-color:hsl(var(--loss)/0.75); background:hsl(var(--loss)/0.05); }
-      .mit-exposure-sym { font-weight:700; flex:0 0 auto; font-family:'Outfit',sans-serif; }
-      .mit-exposure-real { color:hsl(var(--win)); }
-      .mit-exposure-proj { opacity:.65; }
-      .mit-exposure-warn .mit-exposure-real, .mit-exposure-warn .mit-exposure-proj { color:hsl(var(--loss)); opacity:1; }
+      /* ── Analysis & Conclusion ────────────────────────────────────────── */
+      .mit-analysis { position:relative; overflow:hidden; border-radius:11px; padding:10px 12px; margin-bottom:6px;
+        border:1px solid hsl(var(--border)/0.5); background:linear-gradient(135deg, hsl(var(--card)/0.85) 0%, hsl(var(--bg)/0.55) 100%);
+        backdrop-filter:blur(10px); box-shadow:0 2px 12px hsl(0 0% 0%/0.25), inset 0 1px 0 hsl(255 100% 100%/0.04);
+        animation:mit-card-enter .4s cubic-bezier(.34,1.4,.64,1) both; }
+      .mit-analysis::before { content:''; position:absolute; top:0; left:0; bottom:0; width:3px; }
+      .mit-analysis.mit-verdict-good::before { background:hsl(var(--win)); box-shadow:0 0 10px hsl(var(--win)/0.5); }
+      .mit-analysis.mit-verdict-bad::before { background:hsl(var(--loss)); box-shadow:0 0 10px hsl(var(--loss)/0.5); }
+      .mit-analysis.mit-verdict-mid::before { background:hsl(var(--muted-foreground)); }
+      .mit-analysis-head { display:flex; align-items:center; gap:7px; margin-bottom:6px; }
+      .mit-analysis-icon { font-size:13px; line-height:1; }
+      .mit-analysis-verdict { font-family:'Outfit',sans-serif; font-weight:700; font-size:11px; letter-spacing:.1px; }
+      .mit-verdict-good .mit-analysis-verdict { color:hsl(var(--win)); }
+      .mit-verdict-bad .mit-analysis-verdict { color:hsl(var(--loss)); }
+      .mit-analysis-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+      .mit-analysis-list li { display:flex; align-items:flex-start; gap:6px; font-size:9.5px; line-height:1.45; opacity:.85; }
+      .mit-analysis-bicon { flex:0 0 auto; font-size:10px; line-height:1.4; }
+
+      /* ── Trade Signal Alerts ─────────────────────────────────────────── */
+      @keyframes mit-signal-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+      .mit-signal-banner:empty { display:none; }
+      .mit-signal-banner { display:flex; align-items:center; gap:8px; margin-bottom:8px; padding:10px 12px; border-radius:11px;
+        border:1px solid hsl(var(--primary)/0.45); background:linear-gradient(135deg, hsl(var(--primary)/0.16) 0%, hsl(var(--card)/0.7) 100%);
+        box-shadow:0 0 18px hsl(var(--primary)/0.2), inset 0 1px 0 hsl(255 100% 100%/0.06); animation:mit-signal-in .35s ease; }
+      .mit-signal-ico { font-size:14px; flex:0 0 auto; animation:mit-pulse-dot 1.6s ease-in-out infinite; }
+      .mit-signal-text { font-size:10px; line-height:1.4; opacity:.92; }
+      .mit-signal-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:8px 0 10px; padding:9px 12px;
+        border-radius:11px; border:1px solid hsl(var(--border)/0.5); background:hsl(var(--card)/0.55); }
+      .mit-signal-row-label { display:flex; flex-direction:column; gap:2px; }
+      .mit-signal-row-title { font-family:'Outfit',sans-serif; font-size:10.5px; font-weight:700; }
+      .mit-signal-row-sub { font-size:8.5px; opacity:.55; line-height:1.4; }
+
     `;
     document.head.appendChild(css);
   }
@@ -27474,27 +27922,45 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             </div>
           </div>
         </div>
+        <div id="mit-signal-banner"></div>
         <div class="mit-kpi-row" id="mit-kpi-row"></div>
 
         <button id="mit-master-toggle"><span class="mit-toggle-shimmer"></span><span class="mit-toggle-track"><span class="mit-toggle-knob"></span></span><span class="mit-toggle-label"></span></button>
         <div id="mit-status-note"></div>
 
+        <div class="mit-signal-row">
+          <div class="mit-signal-row-label">
+            <span class="mit-signal-row-title">📡 Trade Signal Alerts</span>
+            <span class="mit-signal-row-sub">Alert-only — never places a trade. Pings when a pick holds ≥70 across any wired bot.</span>
+          </div>
+          <button type="button" class="toggle" id="mit-signal-toggle"></button>
+        </div>
+
+        <div class="mit-section-title"><span class="mit-sec-ico">🧠</span>Analysis &amp; conclusion</div>
+        <div id="mit-analysis"></div>
+
         <div class="mit-section-title"><span class="mit-sec-ico">🧭</span>Best ranked market — per bot</div>
         <div class="mit-botcards" id="mit-botcards"></div>
-
-        <div class="mit-section-title"><span class="mit-sec-ico">🛡️</span>Portfolio exposure</div>
-        <div id="mit-exposure"></div>
 
         <div class="mit-section-title"><span class="mit-sec-ico">📊</span>Full scoring matrix</div>
         <div class="mit-matrix-hint">Click any market row, or a bot card's pick, for the full breakdown.</div>
         <div id="mit-table-wrap"></div>
         <div id="mit-drilldown-wrap"></div>
 
+        <div class="mit-section-title"><span class="mit-sec-ico">🔔</span>Signal history</div>
+        <div class="mit-log" id="mit-signal-log"></div>
+
         <div class="mit-section-title"><span class="mit-sec-ico">🔄</span>Rotation log</div>
         <div class="mit-log" id="mit-log"></div>
 
         <div id="mit-live-container"></div>
       </div>`;
+    document.getElementById('mit-signal-toggle').onclick = function () {
+      alertsEnabled = !alertsEnabled;
+      savePref('mit_alerts_enabled', String(alertsEnabled));
+      this.classList.toggle('on', alertsEnabled);
+      if (!alertsEnabled) { pendingSignal = null; lastAlertBanner = null; }
+    };
     document.getElementById('mit-master-toggle').onclick = function () {
       const mit = window.MarketIntelTerminal;
       if (!mit) return;
