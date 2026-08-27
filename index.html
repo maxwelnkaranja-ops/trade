@@ -24806,6 +24806,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     connectAnalysis() {
       try { if (this.socketP) { this.socketP.onclose = null; this.socketP.close(); } } catch (e) {}
       this.tickIndex = 0; this._eligibleFromTick = 0;
+      this._confirmedFirstTick = false;
       if (this.analysisReconnectAttempts == null) this.analysisReconnectAttempts = 0;
       const ws = new WebSocket(hrGetPublicWsUrl());
       ws.onopen = () => {
@@ -24815,8 +24816,36 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       ws.onmessage = (m) => {
         try {
           const d = JSON.parse(m.data);
-          if (d.tick) { const digit = parseInt(d.tick.quote.toString().slice(-1)); this.dispatch({ type: 'TICK', digit }); }
-        } catch (e) {}
+          // BUG FIX: Deriv can reject a `ticks` subscribe request (bad/
+          // stale symbol, rate limit, etc.) WITHOUT closing the socket —
+          // the connection just sits open forever with zero tick messages
+          // ever arriving. The old code only ever looked for `d.tick` and
+          // silently ignored everything else, so a rejected subscribe
+          // looked identical to "connected and waiting for the next tick"
+          // — no live digits, no journal (nothing to trigger off of), and
+          // no reconnect either, since onclose never fired. Same error +
+          // resubscribe pattern GlobalSocketManager already uses for the
+          // shared Even/Odd/Matches feed.
+          if (d.error) {
+            window.SysLog && window.SysLog.add('error', `[HotRepeat] Tick feed rejected — ${d.error.message || d.error.code || 'unknown error'} (market: ${this.state.primaryMarket}). Reconnecting…`);
+            this.dispatch({ type: 'NOTIFY', message: `⚠ Tick feed error: ${d.error.message || d.error.code || 'unknown'} — reconnecting…`, ntype: 'loss' });
+            try { ws.close(); } catch (e2) {}
+            return;
+          }
+          if (d.tick) {
+            const digit = parseInt(d.tick.quote.toString().slice(-1));
+            if (!this._confirmedFirstTick) {
+              this._confirmedFirstTick = true;
+              window.SysLog && window.SysLog.add('success', `[HotRepeat] First tick received for ${this.state.primaryMarket} — digit ${digit}.`);
+            }
+            this.dispatch({ type: 'TICK', digit });
+          }
+        } catch (e) {
+          window.SysLog && window.SysLog.add('error', `[HotRepeat] Tick parse error — ${e && e.message}`);
+        }
+      };
+      ws.onerror = () => {
+        window.SysLog && window.SysLog.add('error', '[HotRepeat] Could not reach the public tick feed (wss://ws.derivws.com) — check your network/firewall, or the numeric App ID in Settings.');
       };
       ws.onclose = () => {
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
@@ -24948,7 +24977,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                 else if (d.buy && d.buy.contract_id) { _self.ownContractIds.add(d.buy.contract_id); window.HubContractRegistry.claim(d.buy.contract_id, 'hotrepeat'); }
               }
             }
-          } catch (e) {}
+          } catch (e) {
+            // BUG FIX: this whole handler — including the ADD_JOURNAL
+            // dispatch that builds every journal entry — used to sit
+            // behind a bare `catch (e) {}`. Any single thrown error here
+            // (an unexpected field shape in a contract payload, etc.)
+            // silently killed the journal update, the WIN/LOSS notify,
+            // the Telegram ping, and the loss-streak breaker for that
+            // trade — with literally nothing in the console or SysLog to
+            // show it happened. Logging it means a real recurrence is now
+            // visible in Settings → System Log instead of just looking
+            // like "trades happen but the journal doesn't update."
+            window.SysLog && window.SysLog.add('error', `[HotRepeat] Trading-message handler error — ${e && e.message}`);
+          }
         };
 
         if (window.HubTradingSocket.isAuthorized(token)) _self._handleTradingMessage({ msg_type: 'authorize', authorize: { balance: window.HubStore.getState().balanceUSD } });
