@@ -25240,7 +25240,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
       <button class="cp-engage-btn ${s.isArmed || s.isRunning ? 'active' : ''}" id="hotrepeat-engage" ${s.isSessionCooldown ? 'disabled' : ''}>
-        ${s.isSessionCooldown ? `⏳ COOLDOWN ${Math.floor(s.sessionCooldownRemaining / 60)}m ${s.sessionCooldownRemaining % 60}s` : s.isArmed || s.isRunning ? '⛔ DISARM' : '⚡ ENGAGE'}
+        ${s.isSessionCooldown ? `⏳ COOLDOWN ${Math.floor(s.sessionCooldownRemaining / 60)}m ${s.sessionCooldownRemaining % 60}s` : s.isArmed || s.isRunning ? '⛔ TERMINATE' : '⚡ ENGAGE'}
       </button>
       <div class="hr-note"><b>On the math:</b> a repeat doesn't change the next digit's odds — each tick is an independent ~10% draw, so DIGITDIFF on X wins ~90% of the time whether or not X just repeated. This trigger changes when it fires, not its per-trade win chance.</div>`;
   }
