@@ -27202,18 +27202,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // and turns the Terminal on so those engines' own pickMarketViaTerminal
   // calls (already wired into every engine — see ensureTitanEngine)
   // actually rotate onto whichever market this page's own fitness scores
-  // currently rank best for that bot. "Runs per cycle" maps straight onto
-  // each engine's own config.targetRuns — after that many runs the engine
-  // takes its own built-in cooldown, re-reads the scores next cycle, and
-  // resumes — exactly the "batch, then re-analyze" loop that was asked for.
-  const AUTO_BOT_IDS = ['even', 'odd', 'matches'];
-  const AUTO_CFG_KEY = 'mit_auto_config';
+  // currently rank best for that bot — i.e. the market currently showing
+  // the strongest live dynamic pattern (parity dominance, streaks, digit
+  // frequency skew) for that bot type. "Runs per cycle" maps straight
+  // onto each engine's own config.targetRuns — after that many runs the
+  // engine takes its own built-in cooldown, re-reads the scores next
+  // cycle, and resumes on whatever now scores best — the "batch, then
+  // re-analyze, then follow the trend" loop that was asked for.
+  //
+  // Each bot is fully independent: its own stake, its own runs/cycle,
+  // its own start/stop, its own localStorage key — starting Even doesn't
+  // touch Odd or Matches.
+  const AUTO_BOTS = [
+    { id: 'even', label: 'Even Bot', icon: '🎯', desc: 'Bets DIGITEVEN each qualifying tick — trades whichever market is currently showing the strongest even-parity pattern.' },
+    { id: 'odd', label: 'Odd Bot', icon: '🎯', desc: 'Bets DIGITODD each qualifying tick — trades whichever market is currently showing the strongest odd-parity pattern.' },
+    { id: 'matches', label: 'Matches Bot', icon: '🔢', desc: 'Reads live digit frequency and predicts one digit (DIGITMATCH) — trades whichever market currently shows the clearest frequency skew.' },
+  ];
+  const AUTO_IDS = AUTO_BOTS.map((b) => b.id);
 
   function getEngines() { return window.__BotEngines || window._hubEngines || {}; }
+  function autoCfgKey(id) { return `mit_auto_${id}`; }
 
-  function loadAutoConfig() {
+  function loadAutoConfig(id) {
     try {
-      const raw = JSON.parse(localStorage.getItem(AUTO_CFG_KEY) || '{}');
+      const raw = JSON.parse(localStorage.getItem(autoCfgKey(id)) || '{}');
       return {
         stake: (typeof raw.stake === 'number' && raw.stake > 0) ? raw.stake : 1,
         runs: (typeof raw.runs === 'number' && raw.runs > 0) ? raw.runs : 5,
@@ -27222,102 +27234,167 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     } catch (e) { return { stake: 1, runs: 5, enabled: false }; }
   }
 
-  function saveAutoConfig(cfg) {
-    try { localStorage.setItem(AUTO_CFG_KEY, JSON.stringify(cfg)); } catch (e) {}
+  function saveAutoConfig(id, cfg) {
+    try { localStorage.setItem(autoCfgKey(id), JSON.stringify(cfg)); } catch (e) {}
   }
 
-  function applyAutoStakeAndRuns(stake, runs) {
-    AUTO_BOT_IDS.forEach((id) => {
-      const eng = getEngines()[id];
-      if (!eng) return;
-      eng.setConfig({ stake, targetRuns: runs });
+  // Fired on every keystroke in a Stake/Runs box — this is the fix for
+  // "when i set stakes it should persist": previously the value only
+  // saved when Start was clicked, so typing a new stake and reloading
+  // before starting lost it. Now every keystroke writes straight to
+  // localStorage, AND — if that bot is currently running — pushes the
+  // new value live into the engine so a running session picks it up on
+  // its very next run without needing a restart.
+  function persistAutoField(id, field, rawValue) {
+    const cfg = loadAutoConfig(id);
+    if (field === 'stake') {
+      const v = parseFloat(rawValue);
+      if (!isNaN(v) && v > 0) cfg.stake = v;
+    } else if (field === 'runs') {
+      const v = Math.round(parseFloat(rawValue));
+      if (!isNaN(v) && v > 0) cfg.runs = v;
+    }
+    saveAutoConfig(id, cfg);
+    const eng = getEngines()[id];
+    if (eng && eng.state.active) {
+      eng.setConfig({ stake: cfg.stake, targetRuns: cfg.runs });
       eng.saveConfig();
-    });
+    }
   }
 
-  function startAutoTrade() {
-    const stakeInput = document.getElementById('mit-auto-stake');
-    const runsInput = document.getElementById('mit-auto-runs');
+  // Applies the saved stake/runs to an engine AND forces the settings
+  // this feature needs to actually fire on its own: autoPilot on (some
+  // saved configs from manual use of the bot's own tab may have had this
+  // off, which stops the engine from auto-executing a qualifying signal
+  // and was the most likely cause of "doesn't fire" — Auto-Trader from
+  // this tab is meaningless without it) and the bot enabled on the
+  // Dashboard's own kill-switch (toggleEngine() silently refuses to start
+  // a bot the Dashboard has disabled).
+  function applyAutoConfigToEngine(id, cfg) {
+    const eng = getEngines()[id];
+    if (!eng) return;
+    eng.setConfig({ stake: cfg.stake, targetRuns: cfg.runs, autoPilot: true });
+    eng.saveConfig();
+    if (window.HubStore && window.HubStore.setBotEnabled) window.HubStore.setBotEnabled(id, true);
+  }
+
+  function startAutoTradeBot(id) {
+    const stakeInput = document.getElementById(`mit-auto-stake-${id}`);
+    const runsInput = document.getElementById(`mit-auto-runs-${id}`);
     const stake = Math.max(0.35, parseFloat(stakeInput && stakeInput.value) || 1);
     const runs = Math.max(1, Math.round(parseFloat(runsInput && runsInput.value) || 5));
     if (stakeInput) stakeInput.value = stake;
     if (runsInput) runsInput.value = runs;
-    saveAutoConfig({ stake, runs, enabled: true });
+    const cfg = { stake, runs, enabled: true };
+    saveAutoConfig(id, cfg);
     if (window.MarketIntelTerminal) window.MarketIntelTerminal.setActive(true);
-    applyAutoStakeAndRuns(stake, runs);
-    const engines = getEngines();
-    AUTO_BOT_IDS.forEach((id) => {
-      if (window.HubStore && window.HubStore.setBotEnabled) window.HubStore.setBotEnabled(id, true);
-      const eng = engines[id];
-      if (eng && !eng.state.active) eng.toggleEngine();
-    });
+    applyAutoConfigToEngine(id, cfg);
+    const eng = getEngines()[id];
+    if (eng && !eng.state.active) eng.toggleEngine();
     renderMatrix();
   }
 
-  function stopAutoTrade() {
-    saveAutoConfig({ ...loadAutoConfig(), enabled: false });
-    const engines = getEngines();
-    AUTO_BOT_IDS.forEach((id) => {
-      const eng = engines[id];
-      if (eng && eng.state.active) eng.toggleEngine();
-    });
+  function stopAutoTradeBot(id) {
+    saveAutoConfig(id, { ...loadAutoConfig(id), enabled: false });
+    const eng = getEngines()[id];
+    if (eng && eng.state.active) eng.toggleEngine();
     renderMatrix();
   }
 
-  // Resume automatically on page reload if it was left ON — this is the
-  // one piece of Auto-Trader state a page reload would otherwise silently
+  // Resume automatically on page reload if a bot was left ON — this is
+  // the piece of Auto-Trader state a page reload would otherwise silently
   // drop, since an engine's state.active is deliberately NOT persisted
   // (same reasoning as every other bot: a fresh load shouldn't blindly
-  // resume live trading — see TitanEngine's constructor comments). Stake
-  // and Runs/cycle themselves are plain config and already persist via
-  // each engine's own saveConfig(), same as every other bot setting.
+  // resume live trading on its own — see TitanEngine's constructor
+  // comments). Stake and Runs/cycle themselves are plain config and
+  // persist via localStorage the moment they're typed (see
+  // persistAutoField above), independent of whether the bot is running.
   function tryAutoResume(attempt) {
     attempt = attempt || 0;
     if (attempt > 40) return; // ~20s of polling, then give up quietly
-    const cfg = loadAutoConfig();
-    if (!cfg.enabled) return;
     const engines = getEngines();
-    const ready = AUTO_BOT_IDS.every((id) => engines[id]);
+    const ready = AUTO_IDS.every((id) => engines[id]);
     if (!ready || !window.MarketIntelTerminal) { setTimeout(() => tryAutoResume(attempt + 1), 500); return; }
-    window.MarketIntelTerminal.setActive(true);
-    applyAutoStakeAndRuns(cfg.stake, cfg.runs);
-    AUTO_BOT_IDS.forEach((id) => {
-      if (window.HubStore && window.HubStore.setBotEnabled) window.HubStore.setBotEnabled(id, true);
+    let anyEnabled = false;
+    AUTO_IDS.forEach((id) => {
+      const cfg = loadAutoConfig(id);
+      if (!cfg.enabled) return;
+      anyEnabled = true;
+      applyAutoConfigToEngine(id, cfg);
       const eng = engines[id];
       if (eng && !eng.state.active) eng.toggleEngine();
     });
+    if (anyEnabled && window.MarketIntelTerminal) window.MarketIntelTerminal.setActive(true);
   }
   setTimeout(() => tryAutoResume(0), 1500);
 
-  function renderAutoPanel() {
-    const cfg = loadAutoConfig();
-    const toggleBtn = document.getElementById('mit-auto-toggle');
-    const engines = getEngines();
-    const anyActive = AUTO_BOT_IDS.some((id) => engines[id] && engines[id].state.active);
-    if (toggleBtn && document.activeElement !== toggleBtn) {
-      toggleBtn.classList.toggle('on', anyActive);
-      toggleBtn.textContent = anyActive ? 'STOP AUTO-TRADE' : 'START AUTO-TRADE';
-    }
-    const stakeInput = document.getElementById('mit-auto-stake');
-    const runsInput = document.getElementById('mit-auto-runs');
-    if (stakeInput && document.activeElement !== stakeInput && !stakeInput.dataset.userTouched) stakeInput.value = cfg.stake;
-    if (runsInput && document.activeElement !== runsInput && !runsInput.dataset.userTouched) runsInput.value = cfg.runs;
+  // Pulls this bot's live score + top reason for its CURRENT market out
+  // of the same matrix the scoring table above already computes, so the
+  // status box can show exactly which dynamic pattern the bot is
+  // currently trading with (or waiting for) — no separate analysis path,
+  // same numbers as the rest of the page.
+  function autoBotScoreInfo(mit, id, market) {
+    if (!mit || !market) return null;
+    const ranked = mit.getMatrix([id])[0];
+    if (!ranked) return null;
+    const entry = ranked.ranked.find((r) => r.symbol === market);
+    if (!entry || !entry.metrics.ready) return null;
+    return { score: entry.score, reason: (entry.reasons && entry.reasons[0]) || '' };
+  }
 
-    const rowsHtml = AUTO_BOT_IDS.map((id) => {
+  function renderAutoPanel() {
+    const engines = getEngines();
+    const mit = window.MarketIntelTerminal;
+    AUTO_BOTS.forEach((b) => {
+      const id = b.id;
+      const cfg = loadAutoConfig(id);
+      const card = document.getElementById(`mit-auto-card-${id}`);
+      const toggleBtn = document.getElementById(`mit-auto-toggle-${id}`);
+      const stakeInput = document.getElementById(`mit-auto-stake-${id}`);
+      const runsInput = document.getElementById(`mit-auto-runs-${id}`);
       const eng = engines[id];
-      const meta = BOT_META[id] || { label: id, icon: '🎯' };
-      if (!eng) return `<div class="mit-auto-botrow"><span class="mit-auto-dot"></span><span class="mit-auto-bname">${meta.icon} ${meta.label}</span><span class="mit-auto-bmeta">not loaded yet</span></div>`;
-      const s = eng.state, c = eng.config;
-      const wl = `${(s.stats && s.stats.win) || 0}W / ${(s.stats && s.stats.loss) || 0}L`;
-      const pnl = (s.stats && typeof s.stats.profit === 'number') ? s.stats.profit : 0;
-      const pnlStr = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`;
-      const meta2 = s.active
-        ? `${esc(c.selectedMarket || '—')} · run ${s.currentRuns || 0}/${c.targetRuns || 1} · $${(s.currentStake || c.stake).toFixed(2)} · ${wl} · ${pnlStr}`
-        : 'idle';
-      return `<div class="mit-auto-botrow${s.active ? ' live' : ''}"><span class="mit-auto-dot"></span><span class="mit-auto-bname">${meta.icon} ${meta.label}</span><span class="mit-auto-bmeta">${meta2}</span></div>`;
-    }).join('');
-    const botsEl = document.getElementById('mit-auto-bots');
-    setIfChanged(botsEl, rowsHtml);
+      const active = !!(eng && eng.state.active);
+      if (card) card.classList.toggle('live', active);
+      if (toggleBtn) { toggleBtn.classList.toggle('on', active); toggleBtn.textContent = active ? 'STOP' : 'START'; }
+      if (stakeInput && document.activeElement !== stakeInput && !stakeInput.dataset.userTouched) stakeInput.value = cfg.stake;
+      if (runsInput && document.activeElement !== runsInput && !runsInput.dataset.userTouched) runsInput.value = cfg.runs;
+
+      const statusEl = document.getElementById(`mit-auto-status-${id}`);
+      let statusHtml;
+      if (!eng) {
+        statusHtml = `<div class="mit-auto-status-row"><span>Status</span><b>not loaded yet</b></div>`;
+      } else if (!active) {
+        statusHtml = `<div class="mit-auto-status-row"><span>Status</span><b>idle — press Start</b></div>`;
+      } else {
+        const s = eng.state, c = eng.config;
+        const wl = `${(s.stats && s.stats.win) || 0}W / ${(s.stats && s.stats.loss) || 0}L`;
+        const pnl = (s.stats && typeof s.stats.profit === 'number') ? s.stats.profit : 0;
+        const pnlStr = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`;
+        const info = autoBotScoreInfo(mit, id, c.selectedMarket);
+        const scoreStr = info ? `${info.score}/100` : 'warming up';
+        const phaseLabel = s.isLocked ? 'trading' : s.isCooldown ? 'cooldown' : 'watching for a pattern';
+        statusHtml = `
+          <div class="mit-auto-status-row"><span>Market</span><b>${esc(c.selectedMarket || '—')} (score ${scoreStr})</b></div>
+          <div class="mit-auto-status-row"><span>Phase</span><b>${phaseLabel}</b></div>
+          <div class="mit-auto-status-row"><span>Run</span><b>${s.currentRuns || 0} / ${c.targetRuns || 1}</b></div>
+          <div class="mit-auto-status-row"><span>Stake</span><b>$${(s.currentStake || c.stake).toFixed(2)}</b></div>
+          <div class="mit-auto-status-row"><span>Result</span><b>${wl} (${pnlStr})</b></div>
+          ${info && info.reason ? `<div class="mit-auto-reason">Pattern: ${esc(info.reason)}</div>` : ''}`;
+      }
+      setIfChanged(statusEl, statusHtml);
+
+      const journalEl = document.getElementById(`mit-auto-journal-${id}`);
+      const journal = (eng && eng.journal) || [];
+      const jHtml = journal.length
+        ? journal.slice(0, 8).map((j) => {
+            const isWin = j.type === 'win';
+            const pl = typeof j.profit === 'number' ? `${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}` : '';
+            const exitD = (j.exitDigit != null && j.exitDigit !== '?') ? j.exitDigit : '—';
+            return `<div class="mit-auto-jrow ${isWin ? 'win' : 'loss'}"><span class="jd">${exitD}</span><span>${esc(j.market || '')}</span><span class="jp">${pl}</span></div>`;
+          }).join('')
+        : `<div class="mit-auto-jempty">No trades yet this session.</div>`;
+      setIfChanged(journalEl, jHtml);
+    });
   }
 
   function fmtAge(ms) {
@@ -28302,29 +28379,45 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-signal-row-title { font-family:'Outfit',sans-serif; font-size:10.5px; font-weight:700; }
       .mit-signal-row-sub { font-size:8.5px; opacity:.55; line-height:1.4; }
 
-      /* ── Intel Auto-Trader ───────────────────────────────────────────── */
-      .mit-auto-panel { position:relative; overflow:hidden; border-radius:12px; padding:12px 14px; margin-bottom:6px;
-        border:1px solid hsl(var(--primary)/0.4); background:linear-gradient(135deg, hsl(var(--primary)/0.1) 0%, hsl(var(--card)/0.7) 100%);
-        backdrop-filter:blur(12px); box-shadow:0 2px 16px hsl(0 0% 0%/0.3), inset 0 1px 0 hsl(255 100% 100%/0.05); }
-      .mit-auto-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
-      .mit-auto-title { font-family:'Outfit',sans-serif; font-weight:800; font-size:11.5px; display:flex; align-items:center; gap:6px; }
-      .mit-auto-note { font-size:8.5px; opacity:.6; line-height:1.5; margin-bottom:10px; }
-      .mit-auto-controls { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px; margin-bottom:10px; }
+      /* ── Intel Auto-Trader — one big box per bot ─────────────────────── */
+      .mit-auto-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px; margin-bottom:6px; }
+      .mit-auto-card { position:relative; overflow:hidden; border-radius:14px; padding:14px 15px; border:1px solid hsl(var(--border)/0.55);
+        background:linear-gradient(150deg, hsl(var(--card)/0.85) 0%, hsl(var(--bg)/0.55) 100%); backdrop-filter:blur(14px);
+        box-shadow:0 2px 16px hsl(0 0% 0%/0.3), inset 0 1px 0 hsl(255 100% 100%/0.05); transition:border-color .25s ease, box-shadow .25s ease; }
+      .mit-auto-card.live { border-color:hsl(var(--win)/0.5); box-shadow:0 0 22px hsl(var(--win)/0.12), inset 0 1px 0 hsl(255 100% 100%/0.05); }
+      .mit-auto-card-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+      .mit-auto-card-icon { width:26px; height:26px; flex:0 0 26px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:13px;
+        background:hsl(var(--muted)/0.3); border:1px solid hsl(var(--border)/0.5); }
+      .mit-auto-card-name { font-family:'Outfit',sans-serif; font-weight:800; font-size:12px; flex:1; }
+      .mit-auto-card-dot { width:7px; height:7px; border-radius:50%; background:hsl(var(--muted-foreground)); flex:0 0 auto; }
+      .mit-auto-card.live .mit-auto-card-dot { background:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.8); animation:mit-pulse-dot 1.6s ease-in-out infinite; }
+      .mit-auto-card-desc { font-size:8.5px; opacity:.55; line-height:1.5; margin-bottom:10px; min-height:26px; }
+      .mit-auto-card-controls { display:flex; flex-wrap:wrap; align-items:flex-end; gap:7px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid hsl(var(--border)/0.35); }
       .mit-auto-field { display:flex; flex-direction:column; gap:3px; }
-      .mit-auto-field label { font-size:8px; text-transform:uppercase; letter-spacing:.6px; opacity:.55; font-weight:700; }
-      .mit-auto-field input { width:88px; padding:7px 9px; border-radius:8px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
-        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:12px; font-weight:700; text-align:center; outline:none; }
+      .mit-auto-field label { font-size:7.5px; text-transform:uppercase; letter-spacing:.6px; opacity:.55; font-weight:700; }
+      .mit-auto-field input { width:72px; padding:6px 8px; border-radius:8px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:11.5px; font-weight:700; text-align:center; outline:none; }
       .mit-auto-field input:focus { border-color:hsl(var(--primary)/0.7); }
-      #mit-auto-toggle { padding:9px 18px; border-radius:9px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.25);
-        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-weight:800; font-size:10.5px; letter-spacing:.3px; cursor:pointer; transition:all .2s ease; }
-      #mit-auto-toggle.on { background:linear-gradient(90deg, hsl(var(--win)/0.25), hsl(var(--win)/0.12)); border-color:hsl(var(--win)/0.6); color:hsl(var(--win)); box-shadow:0 0 16px hsl(var(--win)/0.2); }
-      .mit-auto-bots { display:flex; flex-direction:column; gap:5px; }
-      .mit-auto-botrow { display:flex; align-items:center; gap:8px; padding:6px 9px; border-radius:8px; border:1px solid hsl(var(--border)/0.4); background:hsl(var(--bg)/0.35); font-size:9.5px; }
-      .mit-auto-dot { width:6px; height:6px; border-radius:50%; background:hsl(var(--muted-foreground)); flex:0 0 auto; }
-      .mit-auto-botrow.live .mit-auto-dot { background:hsl(var(--win)); box-shadow:0 0 6px hsl(var(--win)/0.7); animation:mit-pulse-dot 1.6s ease-in-out infinite; }
-      .mit-auto-bname { font-weight:700; flex:0 0 66px; }
-      .mit-auto-bmeta { flex:1; opacity:.7; }
-      .mit-auto-bwl { font-variant-numeric:tabular-nums; opacity:.85; }
+      .mit-auto-card-toggle { padding:8px 14px; border-radius:9px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.25);
+        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-weight:800; font-size:9.5px; letter-spacing:.3px; cursor:pointer; transition:all .2s ease; margin-left:auto; }
+      .mit-auto-card-toggle.on { background:linear-gradient(90deg, hsl(var(--win)/0.25), hsl(var(--win)/0.12)); border-color:hsl(var(--win)/0.6); color:hsl(var(--win)); box-shadow:0 0 14px hsl(var(--win)/0.2); }
+      .mit-auto-status { font-size:9.5px; line-height:1.6; padding:8px 10px; border-radius:9px; border:1px solid hsl(var(--border)/0.4); background:hsl(var(--bg)/0.35); margin-bottom:8px; }
+      .mit-auto-status-row { display:flex; justify-content:space-between; gap:8px; }
+      .mit-auto-status-row span:first-child { opacity:.55; }
+      .mit-auto-status-row b { font-variant-numeric:tabular-nums; }
+      .mit-auto-reason { font-size:8.5px; opacity:.55; line-height:1.5; margin-top:4px; padding-top:4px; border-top:1px solid hsl(var(--border)/0.3); }
+      .mit-auto-jtitle { font-size:8px; text-transform:uppercase; letter-spacing:.6px; opacity:.5; font-weight:700; margin-bottom:5px; }
+      .mit-auto-journal { display:flex; flex-direction:column; gap:3px; max-height:150px; overflow-y:auto; }
+      .mit-auto-jrow { display:flex; align-items:center; gap:6px; padding:4px 7px; border-radius:6px; background:hsl(var(--bg)/0.3); font-size:9px; }
+      .mit-auto-jrow.win { border-left:2px solid hsl(var(--win)/0.7); }
+      .mit-auto-jrow.loss { border-left:2px solid hsl(var(--loss)/0.5); }
+      .mit-auto-jrow .jd { font-weight:800; width:14px; text-align:center; }
+      .mit-auto-jrow.win .jd { color:hsl(var(--win)); }
+      .mit-auto-jrow.loss .jd { color:hsl(var(--loss)/0.7); }
+      .mit-auto-jrow .jp { margin-left:auto; font-variant-numeric:tabular-nums; opacity:.85; }
+      .mit-auto-jempty { font-size:9px; opacity:.4; text-align:center; padding:8px 0; }
+      .mit-auto-topnote { font-size:9px; opacity:.6; line-height:1.55; margin-bottom:8px; padding:9px 12px; border-radius:9px; border:1px solid hsl(var(--border)/0.45); background:hsl(var(--card)/0.4); }
+
 
     `;
     document.head.appendChild(css);
@@ -28361,18 +28454,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
 
         <div class="mit-section-title"><span class="mit-sec-ico">🤖</span>Intel Auto-Trader</div>
-        <div class="mit-auto-panel">
-          <div class="mit-auto-head">
-            <div class="mit-auto-title">🤖 Runs its own bots off these scores</div>
-          </div>
-          <div class="mit-auto-note">Turns the Terminal on and drives the Even, Odd, and Matches bots directly from this tab — each rotates to whichever market scores best above, runs a batch, cools down, re-scores, and goes again. Digits on these markets are provider-generated at random; the score is a live statistical read, not a guarantee — trade only what you can afford to lose.</div>
-          <div class="mit-auto-controls">
-            <div class="mit-auto-field"><label>Stake $</label><input id="mit-auto-stake" type="number" min="0.35" step="0.1" value="1"></div>
-            <div class="mit-auto-field"><label>Runs / cycle</label><input id="mit-auto-runs" type="number" min="1" step="1" value="5"></div>
-            <button type="button" id="mit-auto-toggle">START AUTO-TRADE</button>
-          </div>
-          <div class="mit-auto-bots" id="mit-auto-bots"></div>
-        </div>
+        <div class="mit-auto-topnote">Each box below is its own bot with its own Stake, Runs/cycle, and Start/Stop — the SAME Even / Odd / Matches bots as their own tabs, just controlled from here. When running, a bot follows the live scoring matrix above: it sits on whichever market currently shows the strongest dynamic pattern for it (parity dominance, streaks, digit frequency), fires when its own signal + that market's score line up, runs its cycle, cools down, re-reads the scores, and moves on — riding the trend instead of a fixed market. Digits are provider-generated at random — this is a live statistical read, not a guaranteed edge, so only stake what you can afford to lose.</div>
+        <div class="mit-auto-grid" id="mit-auto-grid"></div>
 
         <div class="mit-section-title"><span class="mit-sec-ico">🧠</span>Analysis &amp; conclusion</div>
         <div id="mit-analysis"></div>
@@ -28407,16 +28490,41 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       mit.setActive(!mit.isActive());
       renderMatrix();
     };
-    document.getElementById('mit-auto-toggle').onclick = function () {
-      const engines = getEngines();
-      const anyActive = AUTO_BOT_IDS.some((id) => engines[id] && engines[id].state.active);
-      if (anyActive) stopAutoTrade(); else startAutoTrade();
-    };
-    ['mit-auto-stake', 'mit-auto-runs'].forEach((id) => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.addEventListener('input', () => { el.dataset.userTouched = '1'; });
-      el.addEventListener('blur', () => { delete el.dataset.userTouched; });
+    document.getElementById('mit-auto-grid').innerHTML = AUTO_BOTS.map((b) => `
+      <div class="mit-auto-card" id="mit-auto-card-${b.id}">
+        <div class="mit-auto-card-head">
+          <div class="mit-auto-card-icon">${b.icon}</div>
+          <div class="mit-auto-card-name">${b.label}</div>
+          <span class="mit-auto-card-dot"></span>
+        </div>
+        <div class="mit-auto-card-desc">${b.desc}</div>
+        <div class="mit-auto-card-controls">
+          <div class="mit-auto-field"><label>Stake $</label><input id="mit-auto-stake-${b.id}" type="number" min="0.35" step="0.1" value="1"></div>
+          <div class="mit-auto-field"><label>Runs/cycle</label><input id="mit-auto-runs-${b.id}" type="number" min="1" step="1" value="5"></div>
+          <button type="button" class="mit-auto-card-toggle" id="mit-auto-toggle-${b.id}">START</button>
+        </div>
+        <div class="mit-auto-status" id="mit-auto-status-${b.id}"></div>
+        <div class="mit-auto-jtitle">Journal</div>
+        <div class="mit-auto-journal" id="mit-auto-journal-${b.id}"></div>
+      </div>`).join('');
+    AUTO_BOTS.forEach((b) => {
+      const id = b.id;
+      document.getElementById(`mit-auto-toggle-${id}`).onclick = function () {
+        const eng = getEngines()[id];
+        if (eng && eng.state.active) stopAutoTradeBot(id); else startAutoTradeBot(id);
+      };
+      ['stake', 'runs'].forEach((field) => {
+        const inp = document.getElementById(`mit-auto-${field}-${id}`);
+        if (!inp) return;
+        inp.addEventListener('input', () => {
+          inp.dataset.userTouched = '1';
+          persistAutoField(id, field, inp.value);
+        });
+        inp.addEventListener('blur', () => { delete inp.dataset.userTouched; });
+      });
+      const cfg = loadAutoConfig(id);
+      document.getElementById(`mit-auto-stake-${id}`).value = cfg.stake;
+      document.getElementById(`mit-auto-runs-${id}`).value = cfg.runs;
     });
     // Delegated click handling — bound once on the persistent wrapper,
     // since #mit-botcards/#mit-table-wrap's own innerHTML gets replaced
