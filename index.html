@@ -9706,6 +9706,14 @@ window.MarketIntelTerminal = (function () {
   registerFitness('evenmr', evenOddFitness(true));
   registerFitness('oddmr', evenOddFitness(false));
   registerFitness('matches', matchesFitness);
+  // Intel Auto-Trader runs its own fully-separate engine instances (see
+  // ensureTitanEngine's `_intel` handling) so they never touch the
+  // regular Even/Odd/Matches tabs' engines, journals, or stats — but
+  // they should still get the SAME tuned fitness function as their
+  // regular counterpart rather than falling back to generic parityFitness.
+  registerFitness('even_intel', evenOddFitness(true));
+  registerFitness('odd_intel', evenOddFitness(false));
+  registerFitness('matches_intel', matchesFitness);
   registerFitness('meanrev', priceDirectionFitness);
   registerFitness('risemr', priceDirectionFitness);
   registerFitness('fallmr', priceDirectionFitness);
@@ -9734,6 +9742,72 @@ window.MarketIntelTerminal = (function () {
     penalties.set(key, isWin ? Math.max(0, cur - PENALTY_DECAY_PER_WIN) : Math.min(PENALTY_CAP, cur + PENALTY_PER_LOSS));
   }
 
+  // ── DYNAMIC RECOVERY INTEL ────────────────────────────────────────────
+  // Every TitanEngine trade that settles while inside a martingale/recovery
+  // sequence (martingaleStep >= 1) is logged here — win or loss, at
+  // whichever step it happened. This answers the actual question an
+  // operator has about Dynamic/Smart Recovery: "if I capped recovery at
+  // step N, how many of my eventual wins would I have kept, and how much
+  // stake exposure would I have avoided?" Persisted to localStorage (not
+  // just in-memory, unlike the market-fitness penalties above) because the
+  // whole point is to build up a real sample across many sessions/reloads.
+  const RECOVERY_LOG_KEY = 'mit_recovery_step_log';
+  const RECOVERY_LOG_MAX = 3000;
+  let recoveryLog = [];
+  try { recoveryLog = JSON.parse(localStorage.getItem(RECOVERY_LOG_KEY) || '[]'); } catch (e) { recoveryLog = []; }
+  if (!Array.isArray(recoveryLog)) recoveryLog = [];
+
+  function recordRecoveryStep(botId, step, isWin) {
+    if (!step || step < 1) return; // step 0 = a clean, non-recovery trade — not relevant here
+    recoveryLog.unshift({ botId, step, win: !!isWin, ts: Date.now() });
+    if (recoveryLog.length > RECOVERY_LOG_MAX) recoveryLog.length = RECOVERY_LOG_MAX;
+    try { localStorage.setItem(RECOVERY_LOG_KEY, JSON.stringify(recoveryLog)); } catch (e) {}
+  }
+
+  // botIds: optional array to filter to specific bots (e.g. just the Intel
+  // Auto-Trader bots, or one bot at a time). Omit/empty = every bot.
+  function getRecoveryStats(botIds) {
+    const rows = (botIds && botIds.length) ? recoveryLog.filter((r) => botIds.includes(r.botId)) : recoveryLog;
+    const maxStep = rows.reduce((m, r) => Math.max(m, r.step), 0);
+    const byStep = {};
+    for (let s = 1; s <= Math.max(maxStep, 1); s++) byStep[s] = { step: s, wins: 0, losses: 0 };
+    rows.forEach((r) => {
+      if (!byStep[r.step]) byStep[r.step] = { step: r.step, wins: 0, losses: 0 };
+      byStep[r.step][r.win ? 'wins' : 'losses']++;
+    });
+    const steps = Object.values(byStep).sort((a, b) => a.step - b.step).map((s) => ({
+      ...s, total: s.wins + s.losses,
+      winRate: (s.wins + s.losses) ? +((s.wins / (s.wins + s.losses)) * 100).toFixed(1) : 0,
+    }));
+    const totalRecoveryWins = steps.reduce((sum, s) => sum + s.wins, 0);
+    let running = 0;
+    const cumulative = steps.map((s) => {
+      running += s.wins;
+      return { step: s.step, wins: s.wins, cumWins: running, cumPct: totalRecoveryWins ? +((running / totalRecoveryWins) * 100).toFixed(1) : 0 };
+    });
+    const totalSamples = rows.length;
+    let recommendedStopStep = null, rationale = '';
+    if (totalSamples < 20) {
+      rationale = `Only ${totalSamples} recovery trade${totalSamples === 1 ? '' : 's'} logged so far — keep trading with Martingale/Smart Recovery on for a bit longer before trusting a recommendation here (20+ needed).`;
+    } else {
+      // Smallest step that has already captured at least 85% of every
+      // recovery win ever recorded. Stopping any earlier than this would
+      // have thrown away real, historically-recurring wins; going further
+      // only adds stake risk for a shrinking trickle of extra wins.
+      const target = cumulative.find((c) => c.cumPct >= 85) || cumulative[cumulative.length - 1];
+      recommendedStopStep = target ? target.step : null;
+      if (recommendedStopStep != null) {
+        rationale = `${target.cumPct}% of all recorded recovery wins (${target.cumWins}/${totalRecoveryWins}) happened at or before step ${recommendedStopStep}. Steps beyond that have won rarely enough that continuing to escalate stake past step ${recommendedStopStep} has mostly been extra risk, not extra recovery.`;
+      }
+    }
+    return { steps, cumulative, totalRecoveryWins, totalSamples, recommendedStopStep, rationale };
+  }
+
+  function clearRecoveryStats() {
+    recoveryLog = [];
+    try { localStorage.removeItem(RECOVERY_LOG_KEY); } catch (e) {}
+  }
+
   function claim(botId, symbol) {
     allocations.forEach((set) => set.delete(botId));
     if (!allocations.has(symbol)) allocations.set(symbol, new Set());
@@ -9754,39 +9828,54 @@ window.MarketIntelTerminal = (function () {
     opts = opts || {};
     if (!active) return null;
     ensureSubscribed();
-    const ranked = evaluate(botType, botId).filter((r) => !r.is1s || opts.allow1s);
+    // avoidSymbols: hard exclusion list (e.g. a sibling bot's current
+    // market — see ENGINE_SIBLING_MAP in TitanEngine) — filtered out before
+    // the exposure guard even runs, unless it's the market this bot is
+    // ALREADY on (in which case we still need to evaluate it so the
+    // fall-through rotation logic below can move this bot off of it).
+    const avoidSet = opts.avoidSymbols && opts.avoidSymbols.length ? new Set(opts.avoidSymbols) : null;
+    let ranked = evaluate(botType, botId).filter((r) => !r.is1s || opts.allow1s);
+    if (avoidSet) ranked = ranked.filter((r) => !avoidSet.has(r.symbol) || r.symbol === currentSymbol);
     if (!ranked.length || !ranked[0].metrics.ready) return null;
 
     const res = residency.get(botId);
-    const tooSoon = !opts.force && res && res.symbol === currentSymbol && (Date.now() - res.sinceTs) < 1000; // debounce
+    // mustEscape: this bot is CURRENTLY sitting on a market its hard-
+    // exclusion sibling also occupies (e.g. both still on the shared
+    // '1HZ100V' default right after a fresh load, before either has
+    // rotated once). This overrides debounce/residency/hysteresis below —
+    // colliding with the sibling is never an acceptable "hold" outcome.
+    const mustEscape = !!(avoidSet && avoidSet.has(currentSymbol));
+    const tooSoon = !mustEscape && !opts.force && res && res.symbol === currentSymbol && (Date.now() - res.sinceTs) < 1000; // debounce
     const currentEntry = ranked.find((r) => r.symbol === currentSymbol);
     const currentScore = currentEntry ? currentEntry.score : 0;
 
     // Exposure guard — deprioritize markets already hosting
     // MAX_BOTS_PER_MARKET OTHER bots (this bot's own current market never
-    // counts against itself).
+    // counts against itself, UNLESS mustEscape is forcing us off it).
     const candidates = ranked.filter((r) => {
       const occupants = allocations.get(r.symbol);
       const hostedByOthers = occupants ? [...occupants].filter((id) => id !== botId).length : 0;
+      if (mustEscape) return r.symbol !== currentSymbol && hostedByOthers < MAX_BOTS_PER_MARKET;
       return r.symbol === currentSymbol || hostedByOthers < MAX_BOTS_PER_MARKET;
     });
-    const best = candidates[0] || ranked[0];
+    const best = candidates[0] || (mustEscape ? ranked.find((r) => r.symbol !== currentSymbol) : ranked[0]) || ranked[0];
 
-    if (best.symbol === currentSymbol) { claim(botId, currentSymbol); return { symbol: currentSymbol, label: best.label, score: best.score, reasons: best.reasons, switched: false }; }
+    if (!mustEscape && best.symbol === currentSymbol) { claim(botId, currentSymbol); return { symbol: currentSymbol, label: best.label, score: best.score, reasons: best.reasons, switched: false }; }
 
     // Minimum residency — won't move a bot off a market it just settled
-    // into unless this is a forced rotation (e.g. the loss-streak breaker).
-    if (!opts.force && res && res.symbol === currentSymbol && (opts.ticksResident || 0) < MIN_RESIDENCY_TICKS) {
+    // into unless this is a forced rotation (e.g. the loss-streak breaker,
+    // or mustEscape above).
+    if (!mustEscape && !opts.force && res && res.symbol === currentSymbol && (opts.ticksResident || 0) < MIN_RESIDENCY_TICKS) {
       return { symbol: currentSymbol, label: currentEntry ? currentEntry.label : currentSymbol, score: currentScore, reasons: ['holding — minimum residency not yet met'], switched: false };
     }
 
     // Hysteresis — the alternative must beat the current market by a
     // real margin, not a rounding difference, or a forced rotation.
-    if (!opts.force && currentEntry && best.score < currentScore * (1 + HYSTERESIS)) {
+    if (!mustEscape && !opts.force && currentEntry && best.score < currentScore * (1 + HYSTERESIS)) {
       return { symbol: currentSymbol, label: currentEntry.label, score: currentScore, reasons: ['holding — no alternative clears the switch threshold'], switched: false };
     }
 
-    if (tooSoon) return { symbol: currentSymbol, label: currentEntry ? currentEntry.label : currentSymbol, score: currentScore, reasons: ['holding'], switched: false };
+    if (!mustEscape && tooSoon) return { symbol: currentSymbol, label: currentEntry ? currentEntry.label : currentSymbol, score: currentScore, reasons: ['holding'], switched: false };
 
     claim(botId, best.symbol);
     logRotation(botId, currentSymbol, best.symbol, opts.force ? (opts.reason || 'forced') : 'fitness switch');
@@ -9846,6 +9935,7 @@ window.MarketIntelTerminal = (function () {
     isActive, setActive, registerFitness, getRecommendation, recordOutcome,
     getMatrix, getRotationLog, getRecentDigits, getAllocations, computeMicroMetrics, onUpdate, MARKETS,
     MAX_BOTS_PER_MARKET, getPenalty, PENALTY_CAP,
+    recordRecoveryStep, getRecoveryStats, clearRecoveryStats,
   };
 })();
 
@@ -11687,9 +11777,10 @@ window.NexusTrading = exports;
   // always chosen once cooldown ends — unless it's the only viable market
   // left, in which case we allow staying rather than picking something with
   // no data at all.
-  window.BenzPickNextMarket = function BenzPickNextMarket(scanner, currentSymbol, preferredRegime) {
+  window.BenzPickNextMarket = function BenzPickNextMarket(scanner, currentSymbol, preferredRegime, avoidSymbols) {
     if (!scanner) return null;
     const is1s = (sym) => typeof sym === 'string' && sym.startsWith('1HZ');
+    const avoidSet = avoidSymbols && avoidSymbols.length ? new Set(avoidSymbols) : null;
 
     // Prefer "golden" (healthy + high-probability) markets when we have them,
     // otherwise fall back to every market the scanner knows about so there's
@@ -11724,8 +11815,14 @@ window.NexusTrading = exports;
     });
 
     // Force an actual switch: drop the currently-active market from the
-    // candidate pool. Only fall back to including it if nothing else is left.
-    let candidates = pool.filter((m) => m.symbol !== currentSymbol);
+    // candidate pool. Also hard-drop any market a hard-exclusion sibling
+    // bot (see ENGINE_SIBLING_MAP) is currently sitting on — this is what
+    // keeps e.g. Even Bot and Even Bot (Old) from ever landing on the same
+    // symbol and firing identical entries in lockstep. Only fall back to
+    // including the excluded/current symbol if nothing else is left, so a
+    // cold scanner never gets starved down to zero candidates.
+    let candidates = pool.filter((m) => m.symbol !== currentSymbol && (!avoidSet || !avoidSet.has(m.symbol)));
+    if (!candidates.length) candidates = pool.filter((m) => !avoidSet || !avoidSet.has(m.symbol));
     if (!candidates.length) candidates = pool;
     candidates = candidates.slice(0, 3);
     if (!candidates.length) return null;
@@ -13695,6 +13792,21 @@ window.NexusStrategies=exports;
     };
   })();
 
+  // ── HARD MARKET-EXCLUSION PAIRS ─────────────────────────────────────────
+  // Even Bot / Even Bot (Old) — and likewise Odd Bot / Odd Bot (Old) — are
+  // deliberately built from the byte-identical mode + fitness fn + strategy
+  // module (see the comment above pickMarketViaTerminal). That means if
+  // they're ever standing on the same market, they read the exact same tick
+  // stream through the exact same signal logic and fire entries at the same
+  // moment — which is what looked like "not independent" even though their
+  // stake/journal/stats genuinely never touch each other.
+  // The normal Market Intel Terminal exposure guard (MAX_BOTS_PER_MARKET)
+  // deliberately ALLOWS 2 unrelated bots to share a market, so it doesn't
+  // help here. This map is a hard, always-on rule (applies whether the
+  // Terminal is on or off) that a bot's listed sibling can NEVER occupy the
+  // same market — one of them will always be forced onto a different symbol.
+  const ENGINE_SIBLING_MAP = { even: 'oldeven', oldeven: 'even', odd: 'oldodd', oldodd: 'odd' };
+
   class TitanEngine {
     constructor(opts) {
       this.id = opts.id;
@@ -13714,6 +13826,27 @@ window.NexusStrategies=exports;
       this.onUpdate = null;
 
       this.config = this.loadConfig();
+      // Hard-exclusion sibling collision check (see ENGINE_SIBLING_MAP) —
+      // runs once, right here at construction, so a freshly-built engine
+      // never even STARTS on the same market as its sibling. This matters
+      // because every evenodd-mode bot ships the same default
+      // selectedMarket ('1HZ100V'); without this, Even Bot and Even Bot
+      // (Old) (or Odd Bot / Odd Bot (Old)) would both come up on that same
+      // default symbol on a fresh install/reset and could fire identical
+      // entries before either one ever gets a chance to rotate away.
+      // Harmless no-op for every other bot (no sibling) or once each has
+      // already rotated onto its own distinct market.
+      (() => {
+        const siblingId = ENGINE_SIBLING_MAP[this.id];
+        if (!siblingId) return;
+        const sib = window.__BotEngines && window.__BotEngines[siblingId];
+        const sibMarket = sib && sib.config && sib.config.selectedMarket;
+        if (sibMarket && sibMarket === this.config.selectedMarket) {
+          const allSymbols = ['1HZ10V','R_10','1HZ25V','R_25','1HZ50V','R_50','1HZ75V','R_75','1HZ100V','R_100'];
+          const alt = allSymbols.find((s) => s !== sibMarket);
+          if (alt) this.config.selectedMarket = alt;
+        }
+      })();
       // Stake Addition's "boosted" stake lives ONLY here — a plain instance
       // property, never written into this.config, never persisted to
       // localStorage. That's the whole trick: the ARMED switch and the
@@ -14192,20 +14325,50 @@ window.NexusStrategies=exports;
     // even though they share the exact same fitness fn and TitanEngine
     // class, and the same is true for every other pair here (odd/oldodd,
     // even/evenmr, nexus/under, meanrev/risemr/fallmr, etc).
+    // Live market this bot's hard-exclusion sibling (if any — see
+    // ENGINE_SIBLING_MAP) is currently sitting on, read straight off the
+    // real engine instance so this is always the true, current answer and
+    // never a stale copy. Returns null if there's no sibling, the sibling
+    // engine hasn't been built yet, or the sibling has no market yet.
+    getSiblingMarket() {
+      const siblingId = ENGINE_SIBLING_MAP[this.id];
+      if (!siblingId) return null;
+      const sib = window.__BotEngines && window.__BotEngines[siblingId];
+      return (sib && sib.config && sib.config.selectedMarket) || null;
+    }
+
     pickMarketViaTerminal(currentSymbol, opts) {
+      const avoid = this.getSiblingMarket();
+      const avoidSymbols = avoid ? [avoid] : undefined;
+      const mergedOpts = avoidSymbols ? { ...(opts || {}), avoidSymbols } : (opts || {});
       const mit = window.MarketIntelTerminal;
+      let result = null;
       if (mit && mit.isActive()) {
-        const rec = mit.getRecommendation(this.id, this.id, currentSymbol, opts || {});
+        const rec = mit.getRecommendation(this.id, this.id, currentSymbol, mergedOpts);
         if (rec) {
-          return {
+          result = {
             symbol: rec.symbol, label: rec.label, score: rec.score,
             _forcedSwitch: rec.switched, _viaTerminal: true, reasons: rec.reasons,
           };
         }
       }
-      return (this.scanner && window.BenzPickNextMarket)
-        ? window.BenzPickNextMarket(this.scanner, currentSymbol, this.getPreferredRegime())
-        : null;
+      if (!result) {
+        result = (this.scanner && window.BenzPickNextMarket)
+          ? window.BenzPickNextMarket(this.scanner, currentSymbol, this.getPreferredRegime(), avoidSymbols)
+          : null;
+      }
+      // Last-resort safety net: if every candidate path still somehow
+      // landed on the sibling's market (e.g. only one market is warm right
+      // now), force a move to literally any other known market rather than
+      // let two hard-excluded siblings collide. This never fires under
+      // normal conditions — it's a guard against the pool ever emptying out
+      // to nothing but the excluded symbol.
+      if (result && avoid && result.symbol === avoid) {
+        const allSymbols = ['1HZ10V','R_10','1HZ25V','R_25','1HZ50V','R_50','1HZ75V','R_75','1HZ100V','R_100'];
+        const alt = allSymbols.find((s) => s !== avoid && s !== currentSymbol) || allSymbols.find((s) => s !== avoid);
+        if (alt) result = { ...result, symbol: alt, label: alt, _forcedSwitch: true };
+      }
+      return result;
     }
 
     // ── STAKE ADDITION ANALYSIS ─────────────────────────────────────────
@@ -15927,6 +16090,11 @@ window.NexusStrategies=exports;
       // probes, which aren't real trades and shouldn't move the penalty.
       if (window.MarketIntelTerminal && !this._isSacrificeTrade) {
         window.MarketIntelTerminal.recordOutcome(this.id, journalEntry.market, win);
+        // Dynamic Recovery Intel — log which martingale step this trade
+        // settled at (win or loss) whenever it was part of a recovery
+        // sequence, so the Intel tab's recovery terminal can build up a
+        // real "wins mostly land by step N" ranking over time.
+        window.MarketIntelTerminal.recordRecoveryStep(this.id, journalEntry.martingaleStep, win);
       }
       // Digit-based modes only (Even/Odd/Over/Under/Matches) — Higher/Lower
       // trades on price direction, not a single settled digit, so the
@@ -18328,7 +18496,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>
       ` : ''}
       <div style="margin-top:8px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
-        Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
+        Stake saves instantly the moment you change it. Every other setting here applies immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep those after a reload
       </div>
     </div>
     ${window.renderStakeAdditionTerminal(engine, rootId, c)}
@@ -18535,6 +18703,20 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // changed/blurred. Persisting to localStorage now happens only via
     // the navbar's global "SAVE SETTINGS" button (see saveAllSettings),
     // not from a per-tab button — this tab has none anymore.
+    //
+    // EXCEPTION — Stake: every other bot family (Over/Under, Rise/Fall,
+    // Mean Reversion — see their "Stake saves instantly" onchange
+    // handlers) special-cases Stake to call engine.saveConfig()
+    // immediately, bypassing the "click Save Settings" requirement that
+    // applies to every other field. This tab (Even/Odd's TitanUI config
+    // panel) never got that same special-case — Stake here fell through
+    // to the generic deferred-write path below like every other field, so
+    // a typed stake would silently revert to the last explicitly-saved
+    // value on reload unless you separately clicked the navbar's global
+    // Save Settings. Fixed by saving immediately, right here, the moment
+    // a valid stake is typed — matching the OU/RiseFall/MeanRev behavior
+    // exactly. Every other field in this loop is untouched and still
+    // deferred to the global Save Settings button as before.
     [`${rootId}-stake`,`${rootId}-runs-in`,`${rootId}-signal`,`${rootId}-streak-in`,`${rootId}-mult`].forEach(id => {
       const inp = el(id);
       if (inp) {
@@ -18545,6 +18727,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           const signalVal = parseInt(el(`${rootId}-signal`)?.value);
           const streakVal = parseInt(el(`${rootId}-streak-in`)?.value);
           const multVal = parseFloat(el(`${rootId}-mult`)?.value);
+          let stakeChanged = false;
           if (!isNaN(stakeVal) && stakeVal > 0) {
             patch.stake = Math.max(0.01, stakeVal);
             // A manual edit to Stake $ always wins immediately, even if
@@ -18552,12 +18735,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             // should reduce stake" means a typed value overrides it on
             // the spot, not just after the next reload.
             engine.sessionStakeOverride = null;
+            stakeChanged = true;
           }
           if (!isNaN(runsVal) && runsVal > 0) patch.targetRuns = Math.max(1, runsVal);
           if (!isNaN(signalVal)) patch.minSignal = Math.min(100, Math.max(0, signalVal));
           if (!isNaN(streakVal) && streakVal > 0) patch.minStreak = Math.max(1, streakVal);
           if (!isNaN(multVal) && multVal >= 1.01) patch.martingaleMultiplier = multVal;
           if (Object.keys(patch).length) engine.setConfig(patch);
+          // Stake specifically persists to localStorage right now, same as
+          // every other bot family — see the comment above this block.
+          if (stakeChanged && engine.saveConfig) engine.saveConfig();
         };
       }
     });
@@ -19747,6 +19934,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     oldeven: { label: 'Even Bot (Old)', dot: 'hsl(var(--win))' },
     oldodd: { label: 'Odd Bot (Old)', dot: 'hsl(var(--primary-2))' },
     oldrisefall: { label: 'Higher/Lower Bot (Old)', dot: 'hsl(var(--win))' },
+    // Intel Auto-Trader bots — fully separate TitanEngine instances driven
+    // from the Market Intel tab (see ensureTitanEngine's isIntelVariant
+    // handling). Never merged into the totals/equity curve above; only
+    // pulled into the dashboard journal list, tagged with the INTEL chip.
+    even_intel: { label: 'Even Bot (Intel)', dot: 'hsl(var(--win))' },
+    odd_intel: { label: 'Odd Bot (Intel)', dot: 'hsl(var(--primary-2))' },
+    matches_intel: { label: 'Matches Bot (Intel)', dot: 'hsl(var(--accent))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -20843,6 +21037,27 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     allEntries.length = 0;
     dedupedEntries.forEach(e => allEntries.push(e));
 
+    // ── Intel Auto-Trader journal (display-only) ──────────────────────
+    // even_intel/odd_intel/matches_intel are fully separate engines (own
+    // stats, own storage, own trades — see ensureTitanEngine) that must
+    // NEVER be folded into the totals/win-rate/equity-curve/best-times
+    // numbers computed above from allEntries. They're gathered into their
+    // own array here, tagged isIntel, and only spliced into the JOURNAL
+    // list further down — so the dashboard journal can show them (with an
+    // INTEL chip) without a single dollar of their P&L touching any other
+    // stat on this page.
+    const intelBotIds = ['even_intel', 'odd_intel', 'matches_intel'];
+    const intelEntries = [];
+    intelBotIds.forEach((id) => {
+      try {
+        const engine = engines[id];
+        if (!engine) return;
+        getBotJournal(engine, id).forEach((j) => intelEntries.push({ ...j, isIntel: true }));
+      } catch (e) {
+        console.error(`[Hub] Intel journal merge error for "${id}":`, e);
+      }
+    });
+
     // Merge live trades into persistent 24h equity store (survives reload &
     // CLEAR STATS) — excludes isTest (sacrifice/probe) entries, same as
     // wonUSD/lostUSD above, so the curve's ending value always matches the
@@ -21090,8 +21305,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const filter = 'all';
     // Merge live session entries with Deriv historical entries
     const derivHistory = (global.HubStore.getDerivHistory ? global.HubStore.getDerivHistory() : []);
-    let allWithHistory = [...allEntries];
-    if (filter === 'all' && derivHistory.length > 0 && allEntries.length === 0) {
+    // Intel trades are appended here — journal display only, see the
+    // intelEntries comment above. They deliberately never touch
+    // allEntries itself, so every stat card/equity curve/best-times panel
+    // computed above stays exactly as if Intel bots didn't exist.
+    let allWithHistory = [...allEntries, ...intelEntries];
+    if (filter === 'all' && derivHistory.length > 0 && allEntries.length === 0 && intelEntries.length === 0) {
       allWithHistory = derivHistory.map(h => ({ ...h, isHistory: true }));
     }
     const filtered = (filter === 'all' ? allWithHistory : allWithHistory.filter((e) => e.botId === filter))
@@ -21125,6 +21344,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // _isSacrificeTrade branch). Tag them so it's obvious why this
       // entry's P&L doesn't move the Net P&L / equity curve.
       const testChip = j.isTest ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--muted-foreground)/0.1);color:hsl(var(--muted-foreground)/0.8);border:1px solid hsl(var(--muted-foreground)/0.25);font-family:'DM Mono',monospace" title="Probe trade — not counted in Net P&amp;L, Win Rate, or the equity curve">TEST</span>` : '';
+      // Intel Auto-Trader trades — a fully separate engine/journal/stats
+      // from this bot's regular tab (see ensureTitanEngine's isIntelVariant
+      // handling). Tagged here so it's obvious at a glance this trade did
+      // NOT come from — and never touches — the matching regular tab.
+      const intelChip = j.isIntel ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--accent)/0.12);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.35);font-family:'DM Mono',monospace" title="Placed by the Intel Auto-Trader — a fully separate engine, journal, and stats from this bot's regular tab">🧠 INTEL</span>` : '';
       return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}"
         data-nav-jnl="${j.botId || ''}"
         style="padding:8px 12px;min-height:0;gap:10px;cursor:${j.botId && !j.isHistory ? 'pointer' : 'default'};
@@ -21155,6 +21379,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               ${isWin ? '▲ WIN' : '▼ LOSS'}</span>
             ${recoveryChip}
             ${testChip}
+            ${intelChip}
           </div>
           ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;color:hsl(var(--muted-foreground)/0.3);font-family:'DM Mono',monospace;letter-spacing:0.5px;margin-top:1px">next ${j.followingDigits.join(' ')}</div>` : ''}
         </div>
@@ -22746,7 +22971,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           font-weight:800; letter-spacing:1.5px; cursor:pointer; transition:all .18s;
         ">⚙ EDIT IN DASHBOARD →</button>
         <div style="margin-top:10px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
-          Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
+          Stake saves instantly the moment you change it. Every other setting here applies immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep those after a reload
         </div>
       </div>`;
     if (shHtml(host, html)) {
@@ -22755,7 +22980,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // change — only an explicit Save (below, or the navbar's global
       // "SAVE SETTINGS" button) persists anything to disk.
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; engine.saveConfig(); };
       window.bindStakeAdditionTerminal(engine, rootId, el, host, () => renderCenter(engine, rootId, engine.getSnapshot()));
       const durationEl = el(`${rootId}-duration`, host);
       if (durationEl) durationEl.onchange = (e) => { engine.setConfig({ duration: Math.max(engine.isMeanRevMode ? 15 : 1, parseInt(e.target.value) || (engine.isMeanRevMode ? 15 : 5)) }); };
@@ -23433,12 +23658,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           font-weight:800; letter-spacing:1.5px; cursor:pointer; transition:all .18s;
         ">⚙ EDIT IN DASHBOARD →</button>
         <div style="margin-top:10px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
-          Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
+          Stake saves instantly the moment you change it. Every other setting here applies immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep those after a reload
         </div>
       </div>`;
     if (shHtml(host, html)) {
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; engine.saveConfig(); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       el(`${rootId}-signal`, host).onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
       el(`${rootId}-ticks`, host).onchange = (e) => { engine.setConfig({ numTicks: Math.min(10, Math.max(1, parseInt(e.target.value) || 2)) }); };
@@ -24066,12 +24291,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="cp-input-group"><span class="cp-input-label">Stop Loss ($)</span><input class="cp-input" type="number" step="0.5" min="0" id="${rootId}-sl" value="${c.stopLoss}"></div>
         </div>
         <div style="margin-top:10px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px;text-align:center">
-          Changes apply immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep them after a reload
+          Stake saves instantly the moment you change it. Every other setting here applies immediately — click <b style="color:hsl(var(--primary))">💾 SAVE SETTINGS</b> in the top bar to keep those after a reload
         </div>
       </div>`;
     if (shHtml(host, html)) {
       el(`${rootId}-toggle`, host).onclick = () => engine.toggleEngine();
-      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; };
+      el(`${rootId}-stake`, host).onchange = (e) => { engine.setConfig({ stake: parseFloat(e.target.value) || 0.35 }); engine.sessionStakeOverride = null; engine.saveConfig(); };
       el(`${rootId}-runs-in`, host).onchange = (e) => { engine.setConfig({ targetRuns: Math.max(1, parseInt(e.target.value) || 1) }); };
       const signalEl = el(`${rootId}-signal`, host);
       if (signalEl) signalEl.onchange = (e) => { engine.setConfig({ minSignal: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }); };
@@ -25945,17 +26170,28 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function ensureTitanEngine(id) {
     if (engines[id]) return engines[id];
     if (!window.TitanEngine) { console.warn('[Hub] TitanEngine not loaded yet'); return null; }
-    const isOver = id === 'nexus';
-    const isUnder = id === 'under';
+    // ── Intel Auto-Trader bots (`even_intel` / `odd_intel` / `matches_intel`) ──
+    // Fully separate TitanEngine instances from the regular Even/Odd/Matches
+    // tabs — same trading logic, but their own id, own storagePrefix (so
+    // their own localStorage config/state), own journal, own stats. They
+    // never share the engine object the regular tabs use, so their trades
+    // can never leak into the regular Even/Odd/Matches tab journals or
+    // stats, and vice versa. See registerFitness() above for their fitness
+    // functions and the Market Intel Console's AUTO_BOTS for where these
+    // ids are driven from.
+    const isIntelVariant = id === 'even_intel' || id === 'odd_intel' || id === 'matches_intel';
+    const baseId = isIntelVariant ? id.replace(/_intel$/, '') : id;
+    const isOver = baseId === 'nexus';
+    const isUnder = baseId === 'under';
     const isOU = isOver || isUnder;
-    const isRiseFall = id === 'oldrisefall';
+    const isRiseFall = baseId === 'oldrisefall';
     // Rise MR and Fall MR are the same 'meanrev' mode/pipeline as Rise & Fall
     // MR — they share its socket, scanner, and UI module — but each is
     // built below with fixedDirection locked to one side (see opts), so
     // they only ever fire HIGHER or only ever fire LOWER respectively.
-    const isMeanRev = id === 'meanrev' || id === 'risemr' || id === 'fallmr';
-    const isMatches = id === 'matches';
-    const isEvenOddMR = id === 'evenmr' || id === 'oddmr';
+    const isMeanRev = baseId === 'meanrev' || baseId === 'risemr' || baseId === 'fallmr';
+    const isMatches = baseId === 'matches';
+    const isEvenOddMR = baseId === 'evenmr' || baseId === 'oddmr';
     // Provide safe fallback stubs if socket/scanner globals failed to load
     // (e.g. opened as file:// or blocked by CSP) so the UI still renders.
     const safeSocket = (isOU || isRiseFall || isMeanRev ? window.NexusSocket : window.EvenSocket)
@@ -25981,7 +26217,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           // Matches gets its own frequency-based analyzer/scanner (digit
           // ticks only, no barrier/parity math) but shares the Even/Odd
           // socket since both just need live last-digit data.
-          id, mode: 'matches', fixedTradeMode: null, botLabel: 'Matches Bot',
+          id, mode: 'matches', fixedTradeMode: null, botLabel: 'Matches Bot' + (isIntelVariant ? ' (Intel)' : ''),
           trading: window.EvenTrading, socket: safeSocket, scanner: safeScanner,
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         }
@@ -26048,8 +26284,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           strategies: window.EvenStrategies, sounds: window.Sounds, storagePrefix: id,
         }
       : {
-          id, mode: 'evenodd', fixedTradeMode: (id === 'odd' || id === 'oldodd') ? 'odd' : 'even',
-          botLabel: (id === 'even' || id === 'oldeven') ? 'Even Bot' : 'Odd Bot',
+          // NOTE: these three checks use baseId, not id — for the
+          // even_intel/odd_intel Intel Auto-Trader variants, `id` is
+          // 'even_intel'/'odd_intel', which would never match 'odd'/
+          // 'oldodd'/'even'/'oldeven' and silently mislabel/misconfigure
+          // odd_intel as an Even bot. baseId strips the '_intel' suffix
+          // first so this resolves exactly like the non-intel bot it
+          // mirrors.
+          id, mode: 'evenodd', fixedTradeMode: (baseId === 'odd' || baseId === 'oldodd') ? 'odd' : 'even',
+          botLabel: ((baseId === 'even' || baseId === 'oldeven') ? 'Even Bot' : 'Odd Bot') + (isIntelVariant ? ' (Intel)' : ''),
           trading: window.EvenTrading,
           socket:  safeSocket,
           scanner: safeScanner,
@@ -27156,6 +27399,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       ['even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall']
         .forEach((id) => { try { ensureTitanEngine(id); } catch (e) { console.error(`[Hub] ensureTitanEngine(${id}) error:`, e); } });
     } catch(e) { console.error('[Hub] ensureTitanEngine error:', e); }
+    // Intel Auto-Trader engines (even_intel/odd_intel/matches_intel) — see
+    // ensureTitanEngine's isIntelVariant handling. These are FULLY separate
+    // TitanEngine instances from the regular Even/Odd/Matches tabs above:
+    // own id, own storagePrefix/config, own state, own journal, own stats.
+    // Pre-created here (not lazily on first Intel-tab visit) so their live
+    // tick analysis is already running the moment the page loads, exactly
+    // like every other bot — they just never place a real trade until the
+    // Intel tab's own Start button is clicked.
+    try {
+      ['even_intel', 'odd_intel', 'matches_intel']
+        .forEach((id) => { try { ensureTitanEngine(id); } catch (e) { console.error(`[Hub] ensureTitanEngine(${id}) error:`, e); } });
+    } catch(e) { console.error('[Hub] ensureTitanEngine (intel) error:', e); }
     try { bindHubTabs(); } catch(e) { console.error('[Hub] bindHubTabs error:', e); }
     try { queueDashboardRender(); renderDashboard(); } catch(e) { console.error('[Hub] queueDashboardRender error:', e); }
     setInterval(() => { try { if (activeApp === 'dashboard') queueDashboardRender(); refreshTabDots(); checkPnlGate(); maybeResetGateLatch(); } catch(e){} }, 3000);
@@ -27165,6 +27420,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   else init();
 
   window._hubEngines = engines; // expose for master toggle label updater
+  // Lets the Market Intel Console (a separate <script> block below) lazily
+  // create/fetch the same fully-separate even_intel/odd_intel/matches_intel
+  // engine instances this controller uses, without needing its own copy of
+  // ensureTitanEngine's mode-wiring logic.
+  window.ensureBotEngine = ensureTitanEngine;
+  // Reused by the Smart Stake Terminal (Market Intel tab) so it can read/
+  // bump any bot's stake — including the Redux-style Differ/Hot Repeat
+  // bots and the isolated _intel engines — through the exact same
+  // get/set/persist logic the Dashboard's own Stake widget already uses,
+  // instead of a second copy of this branching.
+  window.getBotStakeEngine = getStakeEngine;
+  window.getBotStakeValue = getStakeValue;
+  window.setBotStakeValue = setStakeValue;
   window.UnifiedHub = { switchApp };
 })();
 </script>
@@ -27236,10 +27504,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   const STATUS_LABEL = { auto: 'auto-rotates', proxy: 'auto-rotates (generic proxy score)' };
 
   // ── Intel Auto-Trader ───────────────────────────────────────────────
-  // Drives the three digit bots (Even, Odd, Matches) straight from this
-  // tab instead of requiring a visit to each bot's own tab. Doesn't
-  // reimplement trading — it configures + starts/stops the SAME
-  // TitanEngine instances every other tab uses (window.__BotEngines),
+  // Drives three digit bots (Even, Odd, Matches) straight from this tab.
+  // IMPORTANT: these are FULLY SEPARATE TitanEngine instances
+  // (even_intel/odd_intel/matches_intel — see engineIdFor() and
+  // ensureTitanEngine's isIntelVariant handling), NOT the same engines the
+  // regular Even/Odd/Matches tabs use. Their trades, journal, and stats
+  // never mix with the regular tabs' — that's the whole point of the
+  // separation. It configures + starts/stops those isolated instances,
   // and turns the Terminal on so those engines' own pickMarketViaTerminal
   // calls (already wired into every engine — see ensureTitanEngine)
   // actually rotate onto whichever market this page's own fitness scores
@@ -27263,6 +27534,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
   function getEngines() { return window.__BotEngines || window._hubEngines || {}; }
   function autoCfgKey(id) { return `mit_auto_${id}`; }
+  // Intel Auto-Trader must drive the FULLY SEPARATE even_intel/odd_intel/
+  // matches_intel TitanEngine instances — never the plain 'even'/'odd'/
+  // 'matches' ids, which are the SAME engines the regular Even/Odd/Matches
+  // tabs use. AUTO_BOTS below keeps the short base ids for its own
+  // localStorage config keys and DOM element ids (unchanged, so nothing
+  // else here needs touching); this is the one seam that maps a base id to
+  // its actual, isolated engine instance. Getting this wrong is exactly
+  // what silently made "Intel" bots share trades/journals/stats with the
+  // regular tabs before — see ensureTitanEngine's isIntelVariant handling.
+  function engineIdFor(id) { return id + '_intel'; }
+  function intelEngine(id) {
+    const engines = getEngines();
+    let eng = engines[engineIdFor(id)];
+    if (!eng && window.ensureBotEngine) {
+      try { eng = window.ensureBotEngine(engineIdFor(id)); } catch (e) { console.error(`[Intel] ensureBotEngine(${engineIdFor(id)}) error:`, e); }
+    }
+    return eng || null;
+  }
 
   function loadAutoConfig(id) {
     try {
@@ -27296,7 +27585,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (!isNaN(v) && v > 0) cfg.runs = v;
     }
     saveAutoConfig(id, cfg);
-    const eng = getEngines()[id];
+    const eng = intelEngine(id);
     if (eng && eng.state.active) {
       eng.setConfig({ stake: cfg.stake, targetRuns: cfg.runs });
       eng.saveConfig();
@@ -27312,11 +27601,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // Dashboard's own kill-switch (toggleEngine() silently refuses to start
   // a bot the Dashboard has disabled).
   function applyAutoConfigToEngine(id, cfg) {
-    const eng = getEngines()[id];
+    const eng = intelEngine(id);
     if (!eng) return;
     eng.setConfig({ stake: cfg.stake, targetRuns: cfg.runs, autoPilot: true });
     eng.saveConfig();
-    if (window.HubStore && window.HubStore.setBotEnabled) window.HubStore.setBotEnabled(id, true);
+    // Enable the Intel engine's OWN kill-switch id (e.g. 'even_intel'), not
+    // the regular tab's id — forcing 'even' enabled here used to silently
+    // flip the Dashboard's kill-switch for the REGULAR Even bot on too,
+    // every time the Intel Auto-Trader started, even if you'd deliberately
+    // disabled it.
+    if (window.HubStore && window.HubStore.setBotEnabled) window.HubStore.setBotEnabled(engineIdFor(id), true);
   }
 
   function startAutoTradeBot(id) {
@@ -27330,42 +27624,33 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     saveAutoConfig(id, cfg);
     if (window.MarketIntelTerminal) window.MarketIntelTerminal.setActive(true);
     applyAutoConfigToEngine(id, cfg);
-    const eng = getEngines()[id];
+    const eng = intelEngine(id);
     if (eng && !eng.state.active) eng.toggleEngine();
     renderMatrix();
   }
 
   function stopAutoTradeBot(id) {
     saveAutoConfig(id, { ...loadAutoConfig(id), enabled: false });
-    const eng = getEngines()[id];
+    const eng = intelEngine(id);
     if (eng && eng.state.active) eng.toggleEngine();
     renderMatrix();
   }
 
-  // Resume automatically on page reload if a bot was left ON — this is
-  // the piece of Auto-Trader state a page reload would otherwise silently
-  // drop, since an engine's state.active is deliberately NOT persisted
-  // (same reasoning as every other bot: a fresh load shouldn't blindly
-  // resume live trading on its own — see TitanEngine's constructor
-  // comments). Stake and Runs/cycle themselves are plain config and
-  // persist via localStorage the moment they're typed (see
-  // persistAutoField above), independent of whether the bot is running.
+  // On reload, Intel Auto-Trader bots now stay OFF like every other bot —
+  // they used to auto-restart trading here if they'd been left ON, which
+  // was the one place in the app that ever engaged a bot without an
+  // explicit click. Saved stake/runs/enabled config is still restored
+  // below (so the card shows the right numbers and the toggle reflects
+  // what you last chose), but the engine itself is never told to start —
+  // that only happens from clicking Start on this card (or Engage in the
+  // Dashboard, for the regular tabs).
   function tryAutoResume(attempt) {
     attempt = attempt || 0;
     if (attempt > 40) return; // ~20s of polling, then give up quietly
     const engines = getEngines();
-    const ready = AUTO_IDS.every((id) => engines[id]);
-    if (!ready || !window.MarketIntelTerminal) { setTimeout(() => tryAutoResume(attempt + 1), 500); return; }
-    let anyEnabled = false;
-    AUTO_IDS.forEach((id) => {
-      const cfg = loadAutoConfig(id);
-      if (!cfg.enabled) return;
-      anyEnabled = true;
-      applyAutoConfigToEngine(id, cfg);
-      const eng = engines[id];
-      if (eng && !eng.state.active) eng.toggleEngine();
-    });
-    if (anyEnabled && window.MarketIntelTerminal) window.MarketIntelTerminal.setActive(true);
+    const ready = AUTO_IDS.every((id) => engines[engineIdFor(id)]);
+    if (!ready) { setTimeout(() => tryAutoResume(attempt + 1), 500); return; }
+    renderAutoPanel();
   }
   setTimeout(() => tryAutoResume(0), 1500);
 
@@ -27376,7 +27661,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // same numbers as the rest of the page.
   function autoBotScoreInfo(mit, id, market) {
     if (!mit || !market) return null;
-    const ranked = mit.getMatrix([id])[0];
+    // Score under the engine's ACTUAL id (e.g. 'even_intel') — that's the
+    // botId its own pickMarketViaTerminal calls register allocations/
+    // penalties/fitness under (see registerFitness('even_intel', ...)),
+    // so this must match or the score shown here silently drifts from
+    // what the engine itself is really seeing.
+    const ranked = mit.getMatrix([engineIdFor(id)])[0];
     if (!ranked) return null;
     const entry = ranked.ranked.find((r) => r.symbol === market);
     if (!entry || !entry.metrics.ready) return null;
@@ -27393,7 +27683,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const toggleBtn = document.getElementById(`mit-auto-toggle-${id}`);
       const stakeInput = document.getElementById(`mit-auto-stake-${id}`);
       const runsInput = document.getElementById(`mit-auto-runs-${id}`);
-      const eng = engines[id];
+      const eng = engines[engineIdFor(id)];
       const active = !!(eng && eng.state.active);
       if (card) card.classList.toggle('live', active);
       if (toggleBtn) { toggleBtn.classList.toggle('on', active); toggleBtn.textContent = active ? 'STOP' : 'START'; }
@@ -28158,9 +28448,232 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const liveEl = document.getElementById('mit-live-container');
     updateLiveDigits(mit, liveEl);
 
-    // Intel Auto-Trader status rows — reflects the same engines every
-    // other tab shows, just surfaced here too.
+    // Intel Auto-Trader status rows — reflects the fully separate
+    // even_intel/odd_intel/matches_intel engines (see engineIdFor above),
+    // never the regular tabs' engines.
     renderAutoPanel();
+
+    // Dynamic Recovery Intel — always render, cheap (just filters/sorts
+    // the in-memory recoveryLog array).
+    renderRecoveryPanel();
+
+    // Stake Increase Terminal — sidebar box, also drives Smart Intel Drive
+    // (auto arm/disarm) as a side effect when that toggle is on.
+    renderStakeBox();
+  }
+
+  // ── DYNAMIC RECOVERY INTEL TERMINAL ─────────────────────────────────────
+  // UI for MarketIntelTerminal's recordRecoveryStep/getRecoveryStats data
+  // (see that module's "DYNAMIC RECOVERY INTEL" section) — every
+  // Martingale/Smart Recovery trade that settles at step 1+ across every
+  // bot is already being logged there; this renders it as a per-step
+  // win-rate breakdown plus a concrete "stop at step N" recommendation, so
+  // the operator can see where recovery money is actually landing instead
+  // of guessing a Smart Recovery cap.
+  const RECOVERY_LABELS = Object.assign({}, BOT_META, {
+    even_intel: { label: 'Even (Intel)' }, odd_intel: { label: 'Odd (Intel)' }, matches_intel: { label: 'Matches (Intel)' },
+  });
+  const RECOVERY_BOT_IDS = ['even', 'odd', 'oldeven', 'oldodd', 'evenmr', 'oddmr', 'nexus', 'under', 'meanrev', 'risemr', 'fallmr', 'oldrisefall', 'matches', 'even_intel', 'odd_intel', 'matches_intel'];
+  let recoveryFilterBotId = 'all';
+
+  function recoveryLabel(id) { return (RECOVERY_LABELS[id] || {}).label || id; }
+
+  function renderRecoveryPanel() {
+    const mit = window.MarketIntelTerminal;
+    const wrap = document.getElementById('mit-recovery-wrap');
+    if (!mit || !wrap) return;
+    const filterIds = recoveryFilterBotId === 'all' ? null : [recoveryFilterBotId];
+    const stats = mit.getRecoveryStats(filterIds);
+    const optionsHtml = `<option value="all"${recoveryFilterBotId === 'all' ? ' selected' : ''}>All bots</option>`
+      + RECOVERY_BOT_IDS.map((id) => `<option value="${id}"${recoveryFilterBotId === id ? ' selected' : ''}>${esc(recoveryLabel(id))}</option>`).join('');
+
+    let body;
+    if (!stats.totalSamples) {
+      body = `<div class="mit-recovery-empty">No recovery-step trades logged yet for ${recoveryFilterBotId === 'all' ? 'any bot' : esc(recoveryLabel(recoveryFilterBotId))} — this fills in automatically the first time a Martingale/Smart Recovery sequence actually settles (win or loss) at step 1 or beyond.</div>`;
+    } else {
+      const adviceClass = stats.totalSamples < 20 ? 'mit-radv-warm' : 'mit-radv-ok';
+      body = `
+        <div class="mit-recovery-advice ${adviceClass}">
+          ${stats.recommendedStopStep != null ? `Recommended stop step: <b>${stats.recommendedStopStep}</b>` : 'Not enough data yet for a recommendation'}<br>${esc(stats.rationale)}
+        </div>
+        <div class="mit-recovery-steps">
+          ${stats.steps.map((s) => `<div class="mit-rstep ${stats.recommendedStopStep === s.step ? 'mit-rstep-cutoff' : ''}" title="${s.wins}W / ${s.losses}L at step ${s.step}">
+            <div class="rs-n">STEP ${s.step}</div>
+            <div class="rs-wr">${s.winRate}%</div>
+            <div class="rs-c">${s.wins}W/${s.losses}L</div>
+          </div>`).join('')}
+        </div>
+        <div class="mit-recovery-note">${stats.totalSamples} recovery trade${stats.totalSamples === 1 ? '' : 's'} logged${recoveryFilterBotId !== 'all' ? ` for ${esc(recoveryLabel(recoveryFilterBotId))}` : ' across all bots'}. Win rate at each step is out of every recovery trade ever recorded at that step (win or loss) — the highlighted step marks where continuing further has mostly added stake risk without recovering much more.</div>`;
+    }
+
+    const html = `<div class="mit-recovery-box">
+      <div class="mit-recovery-note" style="margin-bottom:10px">Every trade that settles while a Martingale/Smart Recovery sequence is running (step 1+) is logged here the moment it happens, win or loss — persisted across reloads so the sample builds up over real sessions, not just this one.</div>
+      <div class="mit-recovery-topline">
+        <select id="mit-recovery-filter">${optionsHtml}</select>
+        <button type="button" class="mit-recovery-clear" id="mit-recovery-clear">CLEAR LOG</button>
+      </div>
+      ${body}
+    </div>`;
+
+    if (setIfChanged(wrap, html)) {
+      const sel = document.getElementById('mit-recovery-filter');
+      if (sel) sel.onchange = (e) => { recoveryFilterBotId = e.target.value; renderRecoveryPanel(); };
+      const clearBtn = document.getElementById('mit-recovery-clear');
+      if (clearBtn) clearBtn.onclick = () => {
+        if (confirm('Clear all logged recovery-step data? This cannot be undone.')) { mit.clearRecoveryStats(); renderRecoveryPanel(); }
+      };
+    }
+  }
+
+  // ── STAKE INCREASE TERMINAL (sidebar) ───────────────────────────────────
+  // A single aggregate control surface over every bot's existing Stake
+  // Addition terminal (see renderStakeAdditionTerminal/bindStakeAdditionTerminal
+  // — this reads and writes the EXACT SAME engine.config.stakeAdditionArmed /
+  // stakeAdditionNextStake fields those per-tab terminals use, so arming a
+  // bot here shows up as armed on its own tab too, and vice versa — nothing
+  // here is a separate/parallel system. Only lists bots whose engine has
+  // already been built (i.e. its tab has been opened at least once, or it's
+  // one of the three Intel Auto-Trader engines) — it deliberately does NOT
+  // force-construct every bot's engine just because this tab is open, since
+  // that would open live market subscriptions for bots the operator may
+  // never intend to run.
+  const STAKE_BOX_BOT_IDS = ['even', 'odd', 'oldeven', 'oldodd', 'evenmr', 'oddmr', 'nexus', 'under', 'meanrev', 'risemr', 'fallmr', 'oldrisefall', 'matches', 'even_intel', 'odd_intel', 'matches_intel'];
+  const SMART_DRIVE_KEY = 'mit_smart_stake_drive';
+  let smartDriveOn = false;
+  try { smartDriveOn = localStorage.getItem(SMART_DRIVE_KEY) === '1'; } catch (e) {}
+
+  function stakeBoxEngine(id) {
+    const engines = getEngines();
+    if (id === 'even_intel' || id === 'odd_intel' || id === 'matches_intel') return intelEngine(id.replace(/_intel$/, ''));
+    return engines[id] || null;
+  }
+
+  // Runs every render tick when Smart Intel Drive is ON. Purely additive to
+  // the manual controls below — it only touches a bot's Stake Addition arm
+  // state, never its base Stake $, never starts/stops the bot itself, and
+  // every action it takes is written to that bot's own log (addLog) so
+  // nothing happens silently. Simple hysteresis so it doesn't flip a bot's
+  // arm state back and forth on every tick: arms only on a genuinely strong
+  // read (3+ win streak, high suggestion confidence, ≥60% over last 10
+  // sessions), disarms only once the picture has clearly turned (<45%).
+  function smartDriveTick() {
+    if (!smartDriveOn) return;
+    STAKE_BOX_BOT_IDS.forEach((id) => {
+      const eng = stakeBoxEngine(id);
+      if (!eng || !eng.getSuggestedNextStake) return;
+      const { winRate, sessions } = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { winRate: null, sessions: 0 };
+      const streak = eng.getSessionWinStreak ? eng.getSessionWinStreak() : 0;
+      const armed = !!eng.config.stakeAdditionArmed;
+      if (!armed && sessions >= 3 && streak >= 3 && winRate != null && winRate >= 0.6) {
+        const sug = eng.getSuggestedNextStake();
+        if (sug && sug.confidence === 'high' && sug.value > 0) {
+          eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
+          eng.addLog('engine', 'SMART-INTEL', `🧠 Smart Intel Drive auto-armed Stake Addition at $${sug.value.toFixed(2)} — ${streak} winning sessions in a row, ${(winRate * 100).toFixed(0)}% over last ${sessions}.`);
+        }
+      } else if (armed && winRate != null && sessions >= 3 && winRate < 0.45) {
+        eng.setConfig({ stakeAdditionArmed: false });
+        eng.addLog('engine', 'SMART-INTEL', `🧠 Smart Intel Drive auto-disarmed Stake Addition — win rate dropped to ${(winRate * 100).toFixed(0)}% over last ${sessions} sessions.`);
+      }
+    });
+  }
+
+  function renderStakeBox() {
+    const wrap = document.getElementById('mit-stakebox-wrap');
+    if (!wrap) return;
+    smartDriveTick();
+
+    const rows = STAKE_BOX_BOT_IDS.map((id) => ({ id, eng: stakeBoxEngine(id) }));
+    const withEngine = rows.filter((r) => r.eng);
+    const armedCount = withEngine.filter((r) => !!r.eng.config.stakeAdditionArmed).length;
+    let wrSum = 0, wrCount = 0;
+    withEngine.forEach((r) => {
+      const s = r.eng.getRecentSessionStats ? r.eng.getRecentSessionStats(10) : { winRate: null };
+      if (s.winRate != null) { wrSum += s.winRate; wrCount++; }
+    });
+    const combinedWr = wrCount ? Math.round((wrSum / wrCount) * 100) : null;
+
+    const rowsHtml = STAKE_BOX_BOT_IDS.map((id) => {
+      const eng = stakeBoxEngine(id);
+      const label = esc(recoveryLabel(id));
+      if (!eng) {
+        return `<div class="mit-sb-row"><div class="mit-sb-row-top"><span class="mit-sb-name">${label}</span></div><div class="mit-sb-unopened">Not opened yet this session — visit its tab once (or start it in Intel Auto-Trader above) to monitor/arm it here.</div></div>`;
+      }
+      const c = eng.config;
+      const armed = !!c.stakeAdditionArmed;
+      const effective = eng.getEffectiveStake ? eng.getEffectiveStake() : c.stake;
+      const stats = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { sessions: 0, winRate: null };
+      const wrClass = stats.winRate == null ? 'neutral' : stats.winRate >= 0.6 ? 'good' : stats.winRate < 0.45 ? 'bad' : 'neutral';
+      const wrText = stats.winRate != null ? `${Math.round(stats.winRate * 100)}% / ${stats.sessions}` : '—';
+      const sug = eng.getSuggestedNextStake ? eng.getSuggestedNextStake() : null;
+      const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
+      return `<div class="mit-sb-row ${armed ? 'armed' : ''}">
+        <div class="mit-sb-row-top">
+          <span class="mit-sb-name">${label}</span>
+          <span class="mit-sb-wr ${wrClass}">${wrText}</span>
+        </div>
+        <div class="mit-sb-stake">trading at $${effective.toFixed(2)}${armed ? ' (boosted)' : ''}</div>
+        <div class="mit-sb-controls" style="margin-top:6px">
+          <input type="number" step="0.01" min="0.01" id="mit-sb-next-${id}" value="${nextVal}" placeholder="next $">
+          <button type="button" class="mit-sb-arm ${armed ? 'on' : ''}" id="mit-sb-arm-${id}">${armed ? 'DISARM' : 'ARM'}</button>
+        </div>
+        ${sug ? `<div class="mit-sb-hint ${sug.confidence === 'high' ? 'smart-flag' : ''}">suggested $${sug.value.toFixed(2)} · ${sug.confidence} confidence</div>` : ''}
+      </div>`;
+    }).join('');
+
+    const html = `<div class="mit-stakebox">
+      <div class="mit-stakebox-head"><span style="font-size:16px">📈</span><span class="mit-stakebox-title">STAKE INCREASE TERMINAL</span></div>
+      <div class="mit-stakebox-sub">One place to watch every bot's win rate and set/arm each one's Stake Addition — same underlying setting as each bot's own tab, individual controls there are untouched. Only bots opened at least once this session appear fully below.</div>
+
+      <div class="mit-stakebox-kpis">
+        <div class="mit-sbk-cell"><div class="mit-sbk-label">Combined win rate</div><div class="mit-sbk-val">${combinedWr != null ? combinedWr + '%' : '—'}</div></div>
+        <div class="mit-sbk-cell"><div class="mit-sbk-label">Bots armed</div><div class="mit-sbk-val">${armedCount} / ${withEngine.length}</div></div>
+      </div>
+
+      <div class="mit-smartdrive-row">
+        <div class="mit-smartdrive-label">
+          <span class="mit-smartdrive-title">🧠 Smart Intel Drive</span>
+          <span class="mit-smartdrive-desc">Auto-arms a bot's Stake Addition on a strong streak, auto-disarms it if win rate drops. You can still arm/disarm any bot manually below regardless of this setting.</span>
+        </div>
+        <div class="mit-sd-toggle ${smartDriveOn ? 'on' : ''}" id="mit-sd-toggle"><div class="knob"></div></div>
+      </div>
+
+      <div class="mit-stakebox-list">${rowsHtml}</div>
+      <div class="mit-stakebox-footnote">Arming here (or on a bot's own tab) only promotes stake at the end of a WINNING session, and always resets to the bot's normal Stake $ on page reload — same behavior as before, just watchable from one place now.</div>
+    </div>`;
+
+    if (setIfChanged(wrap, html)) {
+      const sdToggle = document.getElementById('mit-sd-toggle');
+      if (sdToggle) sdToggle.onclick = () => {
+        smartDriveOn = !smartDriveOn;
+        try { localStorage.setItem(SMART_DRIVE_KEY, smartDriveOn ? '1' : '0'); } catch (e) {}
+        renderStakeBox();
+      };
+      STAKE_BOX_BOT_IDS.forEach((id) => {
+        const eng = stakeBoxEngine(id);
+        if (!eng) return;
+        const nextInp = document.getElementById(`mit-sb-next-${id}`);
+        if (nextInp) nextInp.onchange = (e) => {
+          const v = parseFloat(e.target.value);
+          eng.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
+        };
+        const armBtn = document.getElementById(`mit-sb-arm-${id}`);
+        if (armBtn) armBtn.onclick = () => {
+          const arming = !eng.config.stakeAdditionArmed;
+          if (arming) {
+            const v = parseFloat((document.getElementById(`mit-sb-next-${id}`) || {}).value);
+            if (isNaN(v) || v <= 0) {
+              const inp = document.getElementById(`mit-sb-next-${id}`);
+              if (inp) { inp.style.borderColor = 'hsl(var(--loss))'; inp.placeholder = 'Enter a stake first!'; inp.focus(); setTimeout(() => { inp.style.borderColor = ''; }, 1500); }
+              return;
+            }
+            eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: v });
+          } else {
+            eng.setConfig({ stakeAdditionArmed: false });
+          }
+          renderStakeBox();
+        };
+      });
+    }
   }
 
   function injectStyles() {
@@ -28459,7 +28972,78 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-auto-jempty { font-size:9px; opacity:.4; text-align:center; padding:8px 0; }
       .mit-auto-topnote { font-size:9px; opacity:.6; line-height:1.55; margin-bottom:8px; padding:9px 12px; border-radius:9px; border:1px solid hsl(var(--border)/0.45); background:hsl(var(--card)/0.4); }
 
+      /* ── Two-column body: main content + sticky right sidebar ────────── */
+      .mit-body-grid { display:grid; grid-template-columns:1fr; gap:16px; align-items:start; }
+      @media (min-width: 980px) {
+        .mit-body-grid { grid-template-columns:minmax(0,1fr) 360px; }
+        .mit-side-col { position:sticky; top:12px; max-height:calc(100vh - 24px); overflow-y:auto; }
+        .mit-side-col::-webkit-scrollbar { width:3px; }
+        .mit-side-col::-webkit-scrollbar-thumb { background:hsl(0 0% 100%/0.12); border-radius:3px; }
+      }
+      .mit-main-col { min-width:0; }
 
+      /* ── Dynamic Recovery Intel Terminal ─────────────────────────────── */
+      .mit-recovery-box { position:relative; overflow:hidden; border-radius:14px; padding:14px 15px; border:1px solid hsl(var(--border)/0.55);
+        background:linear-gradient(150deg, hsl(var(--card)/0.85) 0%, hsl(var(--bg)/0.55) 100%); backdrop-filter:blur(14px);
+        box-shadow:0 2px 16px hsl(0 0% 0%/0.3), inset 0 1px 0 hsl(255 100% 100%/0.05); margin-bottom:14px; }
+      .mit-recovery-topline { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+      .mit-recovery-topline select { padding:5px 8px; border-radius:8px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:9.5px; }
+      .mit-recovery-clear { margin-left:auto; padding:5px 10px; border-radius:8px; border:1px solid hsl(var(--loss)/0.4); background:hsl(var(--loss)/0.08);
+        color:hsl(var(--loss)); font-family:'Outfit',sans-serif; font-size:8.5px; font-weight:800; letter-spacing:.5px; cursor:pointer; }
+      .mit-recovery-note { font-size:8.5px; opacity:.55; line-height:1.55; margin-bottom:10px; }
+      .mit-recovery-advice { padding:11px 13px; border-radius:11px; margin-bottom:12px; font-size:10px; line-height:1.55; }
+      .mit-recovery-advice.mit-radv-ok { border:1px solid hsl(var(--win)/0.4); background:hsl(var(--win)/0.08); color:hsl(var(--win)); }
+      .mit-recovery-advice.mit-radv-warm { border:1px solid hsl(var(--border)/0.5); background:hsl(var(--bg)/0.35); color:hsl(var(--muted-foreground)); }
+      .mit-recovery-advice b { font-size:13px; }
+      .mit-recovery-steps { display:grid; grid-template-columns:repeat(auto-fit, minmax(58px,1fr)); gap:5px; margin-bottom:8px; }
+      .mit-rstep { padding:7px 4px; border-radius:8px; text-align:center; border:1px solid hsl(var(--border)/0.4); background:hsl(var(--bg)/0.4); }
+      .mit-rstep.mit-rstep-cutoff { border-color:hsl(var(--win)/0.55); background:hsl(var(--win)/0.1); }
+      .mit-rstep .rs-n { font-size:7px; opacity:.55; letter-spacing:.5px; }
+      .mit-rstep .rs-wr { font-family:'Outfit',sans-serif; font-size:12px; font-weight:800; margin-top:2px; }
+      .mit-rstep .rs-c { font-size:7px; opacity:.6; margin-top:1px; }
+      .mit-recovery-empty { font-size:9.5px; opacity:.5; text-align:center; padding:12px 0; }
+
+      /* ── Stake Increase Terminal (big sidebar box) ───────────────────── */
+      .mit-stakebox { position:relative; overflow:hidden; border-radius:16px; padding:16px; border:1.5px solid hsl(var(--primary)/0.4);
+        background:linear-gradient(160deg, hsl(var(--card)/0.92) 0%, hsl(var(--bg-soft)/0.7) 100%); backdrop-filter:blur(14px);
+        box-shadow:0 4px 22px hsl(0 0% 0%/0.35), 0 0 30px hsl(var(--primary)/0.08), inset 0 1px 0 hsl(255 100% 100%/0.06); }
+      .mit-stakebox-head { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+      .mit-stakebox-title { font-family:'Outfit',sans-serif; font-weight:900; font-size:13px; letter-spacing:.4px; }
+      .mit-stakebox-sub { font-size:8.5px; opacity:.55; line-height:1.5; margin-bottom:12px; }
+      .mit-stakebox-kpis { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+      .mit-sbk-cell { padding:9px 10px; border-radius:10px; border:1px solid hsl(var(--border)/0.4); background:hsl(var(--bg)/0.4); text-align:center; }
+      .mit-sbk-label { font-size:7px; letter-spacing:.6px; opacity:.55; text-transform:uppercase; }
+      .mit-sbk-val { font-family:'Outfit',sans-serif; font-size:16px; font-weight:900; margin-top:2px; }
+      .mit-smartdrive-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; border-radius:11px;
+        border:1px solid hsl(var(--border)/0.5); background:hsl(var(--card)/0.5); margin-bottom:12px; }
+      .mit-smartdrive-label { display:flex; flex-direction:column; gap:1px; }
+      .mit-smartdrive-title { font-family:'Outfit',sans-serif; font-size:10px; font-weight:800; }
+      .mit-smartdrive-desc { font-size:8px; opacity:.55; line-height:1.4; max-width:210px; }
+      .mit-sd-toggle { position:relative; width:38px; height:20px; border-radius:999px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.3); cursor:pointer; flex:0 0 auto; }
+      .mit-sd-toggle.on { background:linear-gradient(90deg, hsl(var(--primary)/0.55), hsl(var(--primary)/0.3)); border-color:hsl(var(--primary)/0.7); }
+      .mit-sd-toggle .knob { position:absolute; top:1px; left:1px; width:16px; height:16px; border-radius:50%; background:#fff; transition:transform .18s ease; }
+      .mit-sd-toggle.on .knob { transform:translateX(18px); }
+      .mit-stakebox-list { display:flex; flex-direction:column; gap:8px; }
+      .mit-sb-row { padding:9px 10px; border-radius:11px; border:1px solid hsl(var(--border)/0.45); background:hsl(var(--bg)/0.35); }
+      .mit-sb-row.armed { border-color:hsl(var(--win)/0.5); background:hsl(var(--win)/0.06); }
+      .mit-sb-row-top { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+      .mit-sb-name { font-family:'Outfit',sans-serif; font-weight:800; font-size:10.5px; flex:1; }
+      .mit-sb-wr { font-size:8.5px; padding:2px 6px; border-radius:999px; font-weight:700; }
+      .mit-sb-wr.good { background:hsl(var(--win)/0.15); color:hsl(var(--win)); }
+      .mit-sb-wr.bad { background:hsl(var(--loss)/0.15); color:hsl(var(--loss)); }
+      .mit-sb-wr.neutral { background:hsl(var(--muted)/0.25); color:hsl(var(--muted-foreground)); }
+      .mit-sb-stake { font-size:8.5px; opacity:.7; font-variant-numeric:tabular-nums; }
+      .mit-sb-controls { display:flex; align-items:center; gap:6px; }
+      .mit-sb-controls input { width:100%; padding:5px 7px; border-radius:7px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10px; text-align:center; }
+      .mit-sb-arm { padding:6px 9px; border-radius:7px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.25);
+        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-weight:800; font-size:8px; letter-spacing:.3px; cursor:pointer; white-space:nowrap; flex:0 0 auto; }
+      .mit-sb-arm.on { background:linear-gradient(90deg, hsl(var(--win)/0.3), hsl(var(--win)/0.14)); border-color:hsl(var(--win)/0.6); color:hsl(var(--win)); }
+      .mit-sb-hint { font-size:7.5px; opacity:.5; margin-top:5px; line-height:1.4; }
+      .mit-sb-hint.smart-flag { opacity:.85; color:hsl(var(--primary)); }
+      .mit-sb-unopened { font-size:8.5px; opacity:.45; text-align:center; padding:8px 0; font-style:italic; }
+      .mit-stakebox-footnote { font-size:7.5px; opacity:.45; line-height:1.5; margin-top:10px; padding-top:9px; border-top:1px dashed hsl(var(--border)/0.4); }
     `;
     document.head.appendChild(css);
   }
@@ -28494,9 +29078,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <button type="button" class="toggle" id="mit-signal-toggle"></button>
         </div>
 
+        <div class="mit-body-grid">
+        <div class="mit-main-col">
+
         <div class="mit-section-title"><span class="mit-sec-ico">🤖</span>Intel Auto-Trader</div>
         <div class="mit-auto-topnote">Each box below is its own bot with its own Stake, Runs/cycle, and Start/Stop — the SAME Even / Odd / Matches bots as their own tabs, just controlled from here. When running, a bot follows the live scoring matrix above: it sits on whichever market currently shows the strongest dynamic pattern for it (parity dominance, streaks, digit frequency), fires when its own signal + that market's score line up, runs its cycle, cools down, re-reads the scores, and moves on — riding the trend instead of a fixed market. Digits are provider-generated at random — this is a live statistical read, not a guaranteed edge, so only stake what you can afford to lose.</div>
         <div class="mit-auto-grid" id="mit-auto-grid"></div>
+
+        <div class="mit-section-title"><span class="mit-sec-ico">🎯</span>Dynamic Recovery Intel</div>
+        <div id="mit-recovery-wrap"></div>
 
         <div class="mit-section-title"><span class="mit-sec-ico">🧠</span>Analysis &amp; conclusion</div>
         <div id="mit-analysis"></div>
@@ -28516,6 +29106,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div class="mit-log" id="mit-log"></div>
 
         <div id="mit-live-container"></div>
+
+        </div>
+        <div class="mit-side-col">
+          <div id="mit-stakebox-wrap"></div>
+        </div>
+        </div>
       </div>`;
     document.getElementById('mit-signal-toggle').onclick = function () {
       alertsEnabled = !alertsEnabled;
@@ -28551,7 +29147,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     AUTO_BOTS.forEach((b) => {
       const id = b.id;
       document.getElementById(`mit-auto-toggle-${id}`).onclick = function () {
-        const eng = getEngines()[id];
+        const eng = intelEngine(id);
         if (eng && eng.state.active) stopAutoTradeBot(id); else startAutoTradeBot(id);
       };
       ['stake', 'runs'].forEach((field) => {
