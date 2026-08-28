@@ -10073,6 +10073,232 @@ window.MarketIntelTerminal = (function () {
   };
 })();
 
+// ════════════════════════════════════════════════════════════════════════
+// PATTERN INTEL ENGINE — the shared brain behind the three Intel bots
+// (even_intel / odd_intel / matches_intel).
+//
+// The idea, end to end:
+//  1. WATCH EVERYTHING — self-subscribes to all 10 markets' tick streams
+//     the moment it starts, independent of whichever single market any
+//     one bot is currently parked on. A setup brewing on V25 is never
+//     missed just because the Intel bot happens to be watching V100.
+//  2. FIND REPEATING PATTERNS — mines two shapes out of each market's own
+//     tick history, continuously:
+//       PARITY — a run of N same-parity digits ends; what parity actually
+//                followed, across every such run in this market's history?
+//       DIGIT  — a digit prints; how often does that exact digit repeat
+//                within the next few ticks, across this market's history?
+//     Either shape only counts as CONFIRMED once it has actually paid off
+//     MORE THAN ONCE (>=2 real occurrences) at a healthy win rate — never
+//     off a single lucky instance.
+//  3. CROSS-CHECK THE 1s TWIN — a confirmed pattern only becomes ARMED
+//     (tradeable) once the market's paired 1s/non-1s twin (R_100 ↔
+//     1HZ100V, etc.) shows the same relationship holding up too. This is
+//     the "confirm with the respective 1s index" step.
+//  4. RANK THE WHOLE BOARD — getBestParitySignal()/getBestDigitSignal()
+//     scan all 10 markets and hand back whichever ONE currently has the
+//     strongest confirmed + armed + live-ready setup, so the bots pick
+//     the cleanest shot on the table instead of only judging whatever
+//     market they're already sitting on.
+//  5. LEARN ITS OWN RECOVERY — recordPatternOutcome()/getPatternRecovery-
+//     Plan() build a real per-pattern win/loss ledger by recovery step
+//     (persisted across reloads), so a martingale step gets sized up only
+//     when THAT pattern has actually recovered at that step before, and
+//     gets capped instead of escalated blindly when it hasn't.
+// ════════════════════════════════════════════════════════════════════════
+window.PatternIntelEngine = (function () {
+  const MARKETS = ['1HZ10V', 'R_10', '1HZ25V', 'R_25', '1HZ50V', 'R_50', '1HZ75V', 'R_75', '1HZ100V', 'R_100'];
+  const pairOf = (s) => s.startsWith('1HZ') ? s.replace('1HZ', 'R_').replace('V', '') : ('1HZ' + s.replace('R_', '') + 'V');
+
+  const RUN_LEN = 3;              // parity run length that counts as "a streak"
+  const MIN_HITS = 2;             // "done that more than once" — hard floor
+  const MIN_WIN_RATE = 0.60;      // has to actually be good, not just seen
+  const LOOKBACK = 400;           // ticks of history mined per market
+  const REPEAT_WINDOW = 4;        // ticks a digit has to repeat within, for the DIGIT pattern
+
+  let watching = false;
+  const unsubs = [];
+  const STORE_KEY = 'benz_pattern_intel_recovery_v1';
+
+  function loadLedger() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; }
+  }
+  function saveLedger(l) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(l)); } catch (e) { /* storage full/unavailable — ledger just won't persist this run */ }
+  }
+  let ledger = loadLedger();
+
+  function startWatching() {
+    if (watching) return;
+    const sock = window.EvenSocket && window.EvenSocket.globalSocket;
+    if (!sock) return; // socket not ready yet — try again next call
+    watching = true;
+    MARKETS.forEach((symbol) => {
+      // A no-op listener is enough — subscribing keeps this symbol's tick
+      // history flowing in the shared socket even when no bot is actively
+      // displaying it, which is the whole point of "watching all indices".
+      unsubs.push(sock.subscribe(symbol, () => {}));
+    });
+  }
+
+  function digitsOf(symbol) {
+    const sock = window.EvenSocket && window.EvenSocket.globalSocket;
+    if (!sock) return [];
+    const hist = sock.getHistory(symbol) || [];
+    return hist.slice(-LOOKBACK).map((t) => (t && typeof t === 'object' ? t.digit : t)).filter((d) => d != null && !isNaN(d));
+  }
+
+  // ── PARITY pattern: a run of RUN_LEN same-parity digits just ended —
+  // across every such run in this market's history, what parity actually
+  // followed? Also reports the LIVE read: is a run of that length running
+  // right now, on the very last tick, so the bot is watching this exact
+  // setup complete live rather than reacting to it after the fact.
+  function mineParity(digits) {
+    if (digits.length < RUN_LEN + 10) return null;
+    let hits = 0, evenFollows = 0, oddFollows = 0, total = 0;
+    let runParity = null, runLen = 0;
+    for (let i = 0; i < digits.length; i++) {
+      const isEven = digits[i] % 2 === 0;
+      const parity = isEven ? 'even' : 'odd';
+      if (parity === runParity) {
+        runLen++;
+      } else {
+        // The run (if long enough) just ended on the PREVIOUS digit, and
+        // THIS digit's parity is the real outcome that followed it.
+        if (runLen >= RUN_LEN) {
+          total++;
+          if (parity === 'even') evenFollows++; else oddFollows++;
+        }
+        runParity = parity; runLen = 1;
+      }
+    }
+    if (total < MIN_HITS) return null;
+    const predictedParity = evenFollows >= oddFollows ? 'even' : 'odd';
+    hits = Math.max(evenFollows, oddFollows);
+    const winRate = hits / total;
+    // Live state: is a RUN_LEN run of the OPPOSITE parity to our
+    // prediction currently sitting on the tail, i.e. is this setup
+    // complete right now on the live feed?
+    const tail = digits.slice(-RUN_LEN);
+    const oppParity = predictedParity === 'even' ? 'odd' : 'even';
+    const tailIsRun = tail.length === RUN_LEN && tail.every((d) => (d % 2 === 0 ? 'even' : 'odd') === oppParity);
+    return {
+      confirmed: winRate >= MIN_WIN_RATE && hits >= MIN_HITS,
+      live: tailIsRun,
+      predictedParity, hits, total, winRate,
+      context: `${RUN_LEN}-${oppParity} run → ${predictedParity} (${hits}/${total})`,
+    };
+  }
+
+  // ── DIGIT pattern: how often does each digit repeat within the next
+  // REPEAT_WINDOW ticks after it prints? Picks the digit with the best
+  // real repeat rate and reports whether that digit just printed live
+  // (i.e. the bot should now be watching for the repeat).
+  function mineDigit(digits) {
+    if (digits.length < 30) return null;
+    const hitCounts = new Array(10).fill(0), totalCounts = new Array(10).fill(0);
+    for (let i = 0; i < digits.length - 1; i++) {
+      const d = digits[i];
+      totalCounts[d]++;
+      const window_ = digits.slice(i + 1, i + 1 + REPEAT_WINDOW);
+      if (window_.includes(d)) hitCounts[d]++;
+    }
+    let bestDigit = -1, bestRate = 0, bestHits = 0, bestTotal = 0;
+    for (let d = 0; d < 10; d++) {
+      if (totalCounts[d] < MIN_HITS) continue;
+      const rate = hitCounts[d] / totalCounts[d];
+      if (rate > bestRate) { bestRate = rate; bestDigit = d; bestHits = hitCounts[d]; bestTotal = totalCounts[d]; }
+    }
+    if (bestDigit < 0 || bestHits < MIN_HITS) return null;
+    const lastDigit = digits[digits.length - 1];
+    return {
+      confirmed: bestRate >= MIN_WIN_RATE && bestHits >= MIN_HITS,
+      live: lastDigit === bestDigit,
+      predictedDigit: bestDigit, hits: bestHits, total: bestTotal, winRate: bestRate,
+      context: `digit ${bestDigit} repeats within ${REPEAT_WINDOW} ticks (${bestHits}/${bestTotal})`,
+    };
+  }
+
+  // Cross-checks a market's read against its paired 1s/non-1s twin — the
+  // twin has to independently confirm the SAME predicted outcome (not
+  // just "any" pattern) at a workable win rate before the setup is
+  // considered armed. If the twin doesn't have enough history yet, this
+  // fails closed (not armed) rather than firing on unconfirmed data.
+  function crossConfirm(symbol, mode, predicted) {
+    const twin = pairOf(symbol);
+    const twinDigits = digitsOf(twin);
+    const twinRead = mode === 'parity' ? mineParity(twinDigits) : mineDigit(twinDigits);
+    if (!twinRead) return false;
+    const twinPredicted = mode === 'parity' ? twinRead.predictedParity : twinRead.predictedDigit;
+    return twinPredicted === predicted && twinRead.winRate >= 0.5 && twinRead.total >= MIN_HITS;
+  }
+
+  // Scans every market and returns the single strongest confirmed + armed
+  // (live-ready + cross-confirmed) setup for the given mode, or null if
+  // nothing on the whole board currently qualifies.
+  function scan(mode) {
+    startWatching();
+    let best = null;
+    MARKETS.forEach((symbol) => {
+      const digits = digitsOf(symbol);
+      const read = mode === 'parity' ? mineParity(digits) : mineDigit(digits);
+      if (!read || !read.confirmed || !read.live) return;
+      const predicted = mode === 'parity' ? read.predictedParity : read.predictedDigit;
+      if (!crossConfirm(symbol, mode, predicted)) return;
+      if (!best || read.winRate > best.winRate) {
+        best = { symbol, ...read, crossConfirmed: true };
+      }
+    });
+    return best;
+  }
+
+  function getBestParitySignal() { return scan('parity'); }
+  function getBestDigitSignal() { return scan('digit'); }
+
+  // ── Dynamic recovery ledger — keyed per pattern signature so each
+  // pattern's OWN track record (not a global blanket assumption) drives
+  // how hard the bot leans into a recovery step.
+  function patternKey(symbol, mode, predicted) { return `${symbol}|${mode}|${predicted}`; }
+
+  function recordPatternOutcome(symbol, mode, predicted, step, win) {
+    const key = patternKey(symbol, mode, predicted);
+    const entry = ledger[key] || {};
+    const stepEntry = entry[step] || { wins: 0, losses: 0 };
+    if (win) stepEntry.wins++; else stepEntry.losses++;
+    entry[step] = stepEntry;
+    ledger[key] = entry;
+    saveLedger(ledger);
+  }
+
+  // Returns { multiplier, shouldStop } for the NEXT recovery step, using
+  // this exact pattern's own logged history at that step once there's
+  // enough sample (>=5 settled trades at that step); otherwise falls back
+  // to the caller's configured multiplier/stop-step so a brand-new pattern
+  // doesn't misfire on zero data.
+  function getPatternRecoveryPlan(symbol, mode, predicted, step, fallbackMultiplier, fallbackStopStep) {
+    const key = patternKey(symbol, mode, predicted);
+    const stepEntry = (ledger[key] || {})[step];
+    if (!stepEntry || (stepEntry.wins + stepEntry.losses) < 5) {
+      return { multiplier: fallbackMultiplier, shouldStop: fallbackStopStep !== 999 && step >= fallbackStopStep, sample: 0 };
+    }
+    const total = stepEntry.wins + stepEntry.losses;
+    const rate = stepEntry.wins / total;
+    // Recovered well at this step historically → trust the configured
+    // multiplier. Recovered poorly → stop escalating rather than keep
+    // doubling into a step that this pattern's own data says rarely pays.
+    return {
+      multiplier: rate >= 0.4 ? fallbackMultiplier : 1,
+      shouldStop: rate < 0.4 || (fallbackStopStep !== 999 && step >= fallbackStopStep),
+      sample: total, winRate: rate,
+    };
+  }
+
+  return {
+    MARKETS, startWatching, getBestParitySignal, getBestDigitSignal,
+    recordPatternOutcome, getPatternRecoveryPlan, patternKey,
+  };
+})();
+
 (function () {
   'use strict';
   function createMarketScanner(Trading, Socket, ns) {
@@ -15069,14 +15295,26 @@ window.NexusStrategies=exports;
           } else {
             this._mxConfirmDigit = null; this._mxConfirmCount = 0;
           }
-          if (meetsSignal && gapOk && this._mxConfirmCount >= neededMxConfirm) {
+          // Intel variant only — same board-wide Pattern Intel gate as the
+          // Even/Odd Intel bots: this market's own digit-repeat pattern has
+          // to be CONFIRMED (>1 historical repeat) AND cross-confirmed
+          // against the 1s/non-1s twin, live, predicting THIS target digit.
+          const intelDigitOk = !this.id.endsWith('_intel') || (() => {
+            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestDigitSignal();
+            this._lastIntelDigitSignal = sig || null;
+            return !!(sig && sig.symbol === market && sig.predictedDigit === result.targetDigit);
+          })();
+          if (meetsSignal && gapOk && this._mxConfirmCount >= neededMxConfirm && intelDigitOk) {
             this._matchTargetDigit = result.targetDigit;
             this._mxTicksSinceTrade = 0;
             this._mxConfirmCount = 0;
+            if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelDigitSignal ? { symbol: this._lastIntelDigitSignal.symbol, mode: 'digit', predicted: result.targetDigit } : null;
             this.addLog('win', 'SIGNAL', trig != null
               ? `Trigger digit ${data.digit} printed → betting digit ${result.targetDigit} — ${(result.reasons && result.reasons[0]) || ''}`
               : `Digit ${result.targetDigit} match signal ${result.strength}% (confirmed) — ${(result.reasons && result.reasons[0]) || ''}`);
             this.startChainExecution();
+          } else if (meetsSignal && gapOk && this._mxConfirmCount >= neededMxConfirm && !intelDigitOk) {
+            this.strategyWaitReason = `Confirmed locally but Pattern Intel hasn't cross-confirmed digit ${result.targetDigit} here yet — waiting`;
           }
           this.emit();
           return;
@@ -15294,12 +15532,25 @@ window.NexusStrategies=exports;
           // immediately. No expiry — it just keeps waiting once armed.
           const os = result.oddStrategy || {};
           const pctGateOk = result.probability >= this.config.minSignal;
+          // Intel variant only: don't trust this market's own local read in
+          // isolation — require the shared Pattern Intel Engine to agree
+          // this exact market currently has a CONFIRMED (>1 historical hit)
+          // + cross-market-confirmed (1s twin agrees) parity setup live
+          // right now, predicting ODD. See PatternIntelEngine above.
+          const intelOk = !this.id.endsWith('_intel') || (() => {
+            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestParitySignal();
+            this._lastIntelParitySignal = sig || null;
+            return !!(sig && sig.symbol === market && sig.predictedParity === 'odd');
+          })();
           let fired = false;
           if (this._oddArmed) {
-            if (streak >= this.config.minStreak) {
+            if (streak >= this.config.minStreak && intelOk) {
               fired = true;
               this.strategyWaitReason = `ENTRY — ${streak}-even streak hit, firing ODD`;
               this._oddArmed = false;
+              if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelParitySignal ? { symbol: this._lastIntelParitySignal.symbol, mode: 'parity', predicted: 'odd' } : null;
+            } else if (streak >= this.config.minStreak && !intelOk) {
+              this.strategyWaitReason = `Armed but Pattern Intel hasn't confirmed ODD here yet — waiting`;
             } else if (os.isTouchingNow) {
               this.strategyWaitReason = `Touched digit ${os.coldEvenDigit} again — even streak ${streak}/${this.config.minStreak}`;
             } else {
@@ -15307,13 +15558,14 @@ window.NexusStrategies=exports;
             }
           } else if (pctGateOk && os.isTouchingNow) {
             this._oddArmed = true;
-            if (streak >= this.config.minStreak) {
+            if (streak >= this.config.minStreak && intelOk) {
               // Gate 2 just opened on this exact tick AND the even-streak
               // requirement is already satisfied right now — fire
               // immediately instead of waiting for another tick to confirm.
               fired = true;
               this.strategyWaitReason = `ENTRY — ${streak}-even streak hit, firing ODD`;
               this._oddArmed = false;
+              if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelParitySignal ? { symbol: this._lastIntelParitySignal.symbol, mode: 'parity', predicted: 'odd' } : null;
             } else {
               this.strategyWaitReason = `Armed — touched digit ${os.coldEvenDigit}, counting ${this.config.minStreak}-even streak`;
               this.addLog('engine', 'ARM', this.strategyWaitReason);
@@ -15358,12 +15610,22 @@ window.NexusStrategies=exports;
             : null;
           const isTouchingNow = coldOddDigit != null && data.digit === coldOddDigit;
           const pctGateOk = result.probability >= this.config.minSignal;
+          // Intel variant only — same board-wide, cross-market-confirmed
+          // gate as the Odd Strategy block above, mirrored for EVEN.
+          const intelOk = !this.id.endsWith('_intel') || (() => {
+            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestParitySignal();
+            this._lastIntelParitySignal = sig || null;
+            return !!(sig && sig.symbol === market && sig.predictedParity === 'even');
+          })();
           let fired = false;
           if (this._evenArmed) {
-            if (streak >= this.config.minStreak) {
+            if (streak >= this.config.minStreak && intelOk) {
               fired = true;
               this.strategyWaitReason = `ENTRY — ${streak}-odd streak hit, firing EVEN`;
               this._evenArmed = false;
+              if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelParitySignal ? { symbol: this._lastIntelParitySignal.symbol, mode: 'parity', predicted: 'even' } : null;
+            } else if (streak >= this.config.minStreak && !intelOk) {
+              this.strategyWaitReason = `Armed but Pattern Intel hasn't confirmed EVEN here yet — waiting`;
             } else if (isTouchingNow) {
               this.strategyWaitReason = `Touched digit ${coldOddDigit} again — odd streak ${streak}/${this.config.minStreak}`;
             } else {
@@ -15371,13 +15633,14 @@ window.NexusStrategies=exports;
             }
           } else if (pctGateOk && isTouchingNow) {
             this._evenArmed = true;
-            if (streak >= this.config.minStreak) {
+            if (streak >= this.config.minStreak && intelOk) {
               // Gate 2 just opened on this exact tick AND the odd-streak
               // requirement is already satisfied right now — fire
               // immediately instead of waiting for another tick to confirm.
               fired = true;
               this.strategyWaitReason = `ENTRY — ${streak}-odd streak hit, firing EVEN`;
               this._evenArmed = false;
+              if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelParitySignal ? { symbol: this._lastIntelParitySignal.symbol, mode: 'parity', predicted: 'even' } : null;
             } else {
               this.strategyWaitReason = `Armed — touched digit ${coldOddDigit}, counting ${this.config.minStreak}-odd streak`;
               this.addLog('engine', 'ARM', this.strategyWaitReason);
@@ -16305,6 +16568,17 @@ window.NexusStrategies=exports;
         // real "wins mostly land by step N" ranking over time.
         window.MarketIntelTerminal.recordRecoveryStep(this.id, journalEntry.martingaleStep, win);
       }
+      // Pattern Intel's own recovery ledger — logs this exact pattern
+      // (market + mode + predicted outcome) win/loss at this exact
+      // recovery step, so getPatternRecoveryPlan() below can size the
+      // NEXT step off this pattern's real track record instead of a
+      // blanket multiplier. Intel bots only; _activeIntelPattern is set
+      // right at the fire point above and cleared once logged here.
+      if (window.PatternIntelEngine && this.id.endsWith('_intel') && this._activeIntelPattern && !this._isSacrificeTrade) {
+        const p = this._activeIntelPattern;
+        window.PatternIntelEngine.recordPatternOutcome(p.symbol, p.mode, p.predicted, this.state.martingaleStep, win);
+        if (win) this._activeIntelPattern = null; // recovery chain closed — next entry starts a fresh pattern
+      }
       // Digit-based modes only (Even/Odd/Over/Under/Matches) — Higher/Lower
       // trades on price direction, not a single settled digit, so the
       // "next 3 digits" readout doesn't apply.
@@ -16342,11 +16616,26 @@ window.NexusStrategies=exports;
         const nextStep = this.state.martingaleStep + 1;
         ns.martingaleStep = nextStep; ns.inRecovery = cfg.martingaleEnabled;
         if (cfg.martingaleEnabled) {
+          // Intel variants: let Pattern Intel's own per-pattern ledger
+          // decide the multiplier/stop for THIS pattern's next step, once
+          // it has enough real settled samples there — otherwise fall
+          // back to the configured multiplier/stop-step untouched.
+          let effectiveMultiplier = cfg.martingaleMultiplier;
+          let effectiveStopStep = cfg.martingaleStopStep;
+          if (window.PatternIntelEngine && this.id.endsWith('_intel') && this._activeIntelPattern) {
+            const p = this._activeIntelPattern;
+            const plan = window.PatternIntelEngine.getPatternRecoveryPlan(p.symbol, p.mode, p.predicted, nextStep, cfg.martingaleMultiplier, cfg.martingaleStopStep);
+            effectiveMultiplier = plan.multiplier;
+            if (plan.shouldStop) effectiveStopStep = Math.min(effectiveStopStep, nextStep);
+            if (plan.sample > 0) {
+              this.addLog('engine', 'SMART-REC', `Pattern's own step-${nextStep} record: ${Math.round((plan.winRate || 0) * 100)}% over ${plan.sample} samples — ${plan.multiplier > 1 ? 'escalating' : 'holding flat'}${plan.shouldStop ? ', capping recovery here' : ''}.`);
+            }
+          }
           // Always multiply the stake on loss — even at the stop-step boundary
           // the final recovery trade fires at the escalated amount.
-          const { stake } = this.T.calculateNextStake(this.state.currentStake, cfg.martingaleMultiplier, nextStep, cfg.martingaleStopStep);
+          const { stake } = this.T.calculateNextStake(this.state.currentStake, effectiveMultiplier, nextStep, effectiveStopStep);
           ns.currentStake = stake;
-          if (nextStep >= cfg.martingaleStopStep && cfg.martingaleStopStep !== 999) {
+          if (nextStep >= effectiveStopStep && effectiveStopStep !== 999) {
             if (cfg.martingaleStopStep === 3) {
               this.addLog('loss', 'CRITICAL', `STEP 3 LIMIT HIT — accepting loss, resetting to base stake after this trade.`);
             } else {
@@ -21663,6 +21952,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             eng.dispatch({ type: 'RESET_JOURNAL' });
           }
         });
+        // Intel Auto-Trader bots (even_intel/odd_intel/matches_intel) are
+        // FULLY SEPARATE engines from botIds above (kept out of that list
+        // on purpose so P&L totals aren't double-counted — see
+        // intelBotIdsForTotals). That separation meant CLEAR STATS silently
+        // never reached them: their journal/stats kept accumulating no
+        // matter how many times this button was pressed. Same clearStats()
+        // call, just against the Intel engine instances too.
+        intelBotIdsForTotals.forEach((id) => {
+          const eng = engines[id];
+          if (eng && eng.clearStats) eng.clearStats();
+        });
         render(root, engines);
       });
     }
@@ -26536,7 +26836,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // Master Control — ENGAGE ALL / TERMINATE ALL, the P&L gate, tab dots,
   // and the stake widget all silently skipped it. It's included now.
   const BOT_IDS
- = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
+ = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall',
+    // Intel Auto-Trader bots (even_intel/odd_intel/matches_intel) — fully
+    // separate TitanEngine instances (see ensureTitanEngine's isIntelVariant
+    // handling) that were entirely missing from this list, which is why
+    // pressing ENGAGE ALL / TERMINATE ALL on the Dashboard never armed or
+    // disarmed them — this list is exactly what that button loops over.
+    // ensureTitanOrDifferForControl already knows how to create/fetch them
+    // (falls through to ensureTitanEngine(id) for any id it doesn't
+    // special-case), and refreshTabDots()/the stake widget both already
+    // no-op safely for ids with no matching tab element, so adding them
+    // here is safe everywhere else BOT_IDS is used.
+    'even_intel', 'odd_intel', 'matches_intel'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -29012,12 +29323,33 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   const SMART_DRIVE_KEY = 'mit_smart_stake_drive';
   let smartDriveOn = false;
   try { smartDriveOn = localStorage.getItem(SMART_DRIVE_KEY) === '1'; } catch (e) {}
+  // ── Upgrade state: sort order + name filter for the sidebar list. Kept
+  // in memory only (resets on reload, same as drillSymbol/recoveryFilterBotId
+  // elsewhere on this page) — this is a viewing preference, not a setting
+  // worth persisting.
+  let stakeBoxSort = 'winrate'; // 'winrate' | 'name' | 'armed'
+  let stakeBoxFilter = '';
 
   function stakeBoxEngine(id) {
     const engines = getEngines();
     if (id === 'even_intel' || id === 'odd_intel' || id === 'matches_intel') return intelEngine(id.replace(/_intel$/, ''));
     return engines[id] || null;
   }
+
+  // Same qualifying bar Smart Intel Drive uses to auto-arm — pulled out so
+  // the bulk "Arm All Qualifying" button applies the exact same rule on
+  // demand instead of waiting for the next tick.
+  function qualifiesForAutoArm(eng) {
+    if (!eng || !eng.getSuggestedNextStake) return null;
+    const { winRate, sessions } = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { winRate: null, sessions: 0 };
+    const streak = eng.getSessionWinStreak ? eng.getSessionWinStreak() : 0;
+    if (sessions >= 3 && streak >= 3 && winRate != null && winRate >= 0.6) {
+      const sug = eng.getSuggestedNextStake();
+      if (sug && sug.confidence === 'high' && sug.value > 0) return sug;
+    }
+    return null;
+  }
+
 
   // Runs every render tick when Smart Intel Drive is ON. Purely additive to
   // the manual controls below — it only touches a bot's Stake Addition arm
@@ -29035,9 +29367,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const { winRate, sessions } = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { winRate: null, sessions: 0 };
       const streak = eng.getSessionWinStreak ? eng.getSessionWinStreak() : 0;
       const armed = !!eng.config.stakeAdditionArmed;
-      if (!armed && sessions >= 3 && streak >= 3 && winRate != null && winRate >= 0.6) {
-        const sug = eng.getSuggestedNextStake();
-        if (sug && sug.confidence === 'high' && sug.value > 0) {
+      if (!armed) {
+        const sug = qualifiesForAutoArm(eng);
+        if (sug) {
           eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
           eng.addLog('engine', 'SMART-INTEL', `🧠 Smart Intel Drive auto-armed Stake Addition at $${sug.value.toFixed(2)} — ${streak} winning sessions in a row, ${(winRate * 100).toFixed(0)}% over last ${sessions}.`);
         }
@@ -29048,46 +29380,121 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     });
   }
 
+  // Which mode (parity target, or 'digit') a given Intel bot id trades, for
+  // the Pattern Intel cross-reference chip below. Returns null for non-Intel
+  // bots — they have no Pattern Intel signal to check.
+  function intelPatternModeFor(id) {
+    if (id === 'even_intel') return { mode: 'parity', target: 'even' };
+    if (id === 'odd_intel') return { mode: 'parity', target: 'odd' };
+    if (id === 'matches_intel') return { mode: 'digit' };
+    return null;
+  }
+
+  // Is THIS bot's own currently-selected market the one Pattern Intel
+  // currently rates as the single strongest confirmed + cross-confirmed
+  // setup on the whole board, for this bot's own predicted side? Ties the
+  // sidebar's "watch every bot" promise to the same engine actually gating
+  // Intel bot entries (see PatternIntelEngine, defined earlier in this file).
+  function intelPatternLiveFor(id, eng) {
+    const spec = intelPatternModeFor(id);
+    if (!spec || !window.PatternIntelEngine || !eng || !eng.config) return null;
+    const market = eng.config.selectedMarket;
+    if (!market) return null;
+    const sig = spec.mode === 'parity' ? window.PatternIntelEngine.getBestParitySignal() : window.PatternIntelEngine.getBestDigitSignal();
+    if (!sig || sig.symbol !== market) return null;
+    if (spec.mode === 'parity' && sig.predictedParity !== spec.target) return null;
+    return sig;
+  }
+
   function renderStakeBox() {
     const wrap = document.getElementById('mit-stakebox-wrap');
     if (!wrap) return;
     smartDriveTick();
 
-    const rows = STAKE_BOX_BOT_IDS.map((id) => ({ id, eng: stakeBoxEngine(id) }));
+    let rows = STAKE_BOX_BOT_IDS.map((id) => ({ id, eng: stakeBoxEngine(id), label: recoveryLabel(id) }));
     const withEngine = rows.filter((r) => r.eng);
-    const armedCount = withEngine.filter((r) => !!r.eng.config.stakeAdditionArmed).length;
-    let wrSum = 0, wrCount = 0;
+    // Attach computed metrics once so sort/filter/badges/rendering all read
+    // the exact same numbers instead of recomputing (and risking drift)
+    // three separate times.
     withEngine.forEach((r) => {
-      const s = r.eng.getRecentSessionStats ? r.eng.getRecentSessionStats(10) : { winRate: null };
-      if (s.winRate != null) { wrSum += s.winRate; wrCount++; }
+      r.stats = r.eng.getRecentSessionStats ? r.eng.getRecentSessionStats(10) : { sessions: 0, winRate: null };
+      r.armed = !!r.eng.config.stakeAdditionArmed;
+      r.sparkline = (r.eng.sessionOutcomes || []).slice(-10);
     });
+    const armedCount = withEngine.filter((r) => r.armed).length;
+    let wrSum = 0, wrCount = 0;
+    withEngine.forEach((r) => { if (r.stats.winRate != null) { wrSum += r.stats.winRate; wrCount++; } });
     const combinedWr = wrCount ? Math.round((wrSum / wrCount) * 100) : null;
 
-    const rowsHtml = STAKE_BOX_BOT_IDS.map((id) => {
-      const eng = stakeBoxEngine(id);
-      const label = esc(recoveryLabel(id));
+    // Best/worst callouts — only among bots with an actual sample (>=3
+    // sessions), and only shown at all once there's more than one such bot
+    // (otherwise "best" and "worst" would just both point at the same row).
+    const withSample = withEngine.filter((r) => r.stats.sessions >= 3 && r.stats.winRate != null);
+    let bestId = null, worstId = null;
+    if (withSample.length > 1) {
+      bestId = withSample.reduce((a, b) => (b.stats.winRate > a.stats.winRate ? b : a)).id;
+      worstId = withSample.reduce((a, b) => (b.stats.winRate < a.stats.winRate ? b : a)).id;
+      if (bestId === worstId) { bestId = null; worstId = null; }
+    }
+
+    // ── Filter (by name) then sort (opened bots first, always) ──────────
+    const q = stakeBoxFilter.trim().toLowerCase();
+    const opened = withEngine.filter((r) => !q || r.label.toLowerCase().includes(q));
+    const unopened = rows.filter((r) => !r.eng && (!q || r.label.toLowerCase().includes(q)));
+    opened.sort((a, b) => {
+      if (stakeBoxSort === 'name') return a.label.localeCompare(b.label);
+      if (stakeBoxSort === 'armed') {
+        if (a.armed !== b.armed) return a.armed ? -1 : 1;
+        return (b.stats.winRate ?? -1) - (a.stats.winRate ?? -1);
+      }
+      // 'winrate' default — no-sample bots sink to the bottom of the
+      // opened group rather than sorting arbitrarily by insertion order.
+      const aw = a.stats.winRate, bw = b.stats.winRate;
+      if (aw == null && bw == null) return 0;
+      if (aw == null) return 1;
+      if (bw == null) return -1;
+      return bw - aw;
+    });
+    const orderedRows = [...opened, ...unopened];
+
+    const qualifyingCount = withEngine.filter((r) => !r.armed && qualifiesForAutoArm(r.eng)).length;
+
+    const rowsHtml = orderedRows.map((r) => {
+      const { id, eng, label } = r;
       if (!eng) {
-        return `<div class="mit-sb-row"><div class="mit-sb-row-top"><span class="mit-sb-name">${label}</span></div><div class="mit-sb-unopened">Not opened yet this session — visit its tab once (or start it in Intel Auto-Trader above) to monitor/arm it here.</div></div>`;
+        return `<div class="mit-sb-row"><div class="mit-sb-row-top"><span class="mit-sb-name">${esc(label)}</span></div><div class="mit-sb-unopened">Not opened yet this session — visit its tab once (or start it in Intel Auto-Trader above) to monitor/arm it here.</div></div>`;
       }
       const c = eng.config;
-      const armed = !!c.stakeAdditionArmed;
+      const armed = r.armed;
       const effective = eng.getEffectiveStake ? eng.getEffectiveStake() : c.stake;
-      const stats = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { sessions: 0, winRate: null };
+      const stats = r.stats;
       const wrClass = stats.winRate == null ? 'neutral' : stats.winRate >= 0.6 ? 'good' : stats.winRate < 0.45 ? 'bad' : 'neutral';
       const wrText = stats.winRate != null ? `${Math.round(stats.winRate * 100)}% / ${stats.sessions}` : '—';
       const sug = eng.getSuggestedNextStake ? eng.getSuggestedNextStake() : null;
       const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
+      const badge = id === bestId ? '<span class="mit-sb-badge best" title="Best win rate on this list right now">🔥 BEST</span>'
+        : id === worstId ? '<span class="mit-sb-badge worst" title="Worst win rate on this list right now">⚠ WATCH</span>' : '';
+      const sparkHtml = r.sparkline.length
+        ? `<div class="mit-sb-spark" title="Last ${r.sparkline.length} sessions, oldest → newest">${r.sparkline.map((w) => `<span class="mit-sb-dot ${w ? 'win' : 'loss'}"></span>`).join('')}</div>`
+        : '';
+      const patternSig = intelPatternLiveFor(id, eng);
+      const patternChip = patternSig
+        ? `<div class="mit-sb-hint smart-flag">🎯 Pattern Intel live on ${esc(patternSig.symbol)} — ${esc(patternSig.context)}</div>`
+        : '';
       return `<div class="mit-sb-row ${armed ? 'armed' : ''}">
         <div class="mit-sb-row-top">
-          <span class="mit-sb-name">${label}</span>
+          <span class="mit-sb-name">${esc(label)}</span>
+          ${badge}
           <span class="mit-sb-wr ${wrClass}">${wrText}</span>
         </div>
+        ${sparkHtml}
         <div class="mit-sb-stake">trading at $${effective.toFixed(2)}${armed ? ' (boosted)' : ''}</div>
         <div class="mit-sb-controls" style="margin-top:6px">
           <input type="number" step="0.01" min="0.01" id="mit-sb-next-${id}" value="${nextVal}" placeholder="next $">
           <button type="button" class="mit-sb-arm ${armed ? 'on' : ''}" id="mit-sb-arm-${id}">${armed ? 'DISARM' : 'ARM'}</button>
         </div>
         ${sug ? `<div class="mit-sb-hint ${sug.confidence === 'high' ? 'smart-flag' : ''}">suggested $${sug.value.toFixed(2)} · ${sug.confidence} confidence</div>` : ''}
+        ${patternChip}
       </div>`;
     }).join('');
 
@@ -29108,15 +29515,73 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div class="mit-sd-toggle ${smartDriveOn ? 'on' : ''}" id="mit-sd-toggle"><div class="knob"></div></div>
       </div>
 
-      <div class="mit-stakebox-list">${rowsHtml}</div>
+      <div class="mit-sb-toolbar">
+        <input type="text" id="mit-sb-search" class="mit-sb-search" placeholder="Filter bots…" value="${esc(stakeBoxFilter)}">
+        <select id="mit-sb-sort" class="mit-sb-sort">
+          <option value="winrate"${stakeBoxSort === 'winrate' ? ' selected' : ''}>Sort: Win rate</option>
+          <option value="armed"${stakeBoxSort === 'armed' ? ' selected' : ''}>Sort: Armed first</option>
+          <option value="name"${stakeBoxSort === 'name' ? ' selected' : ''}>Sort: Name</option>
+        </select>
+      </div>
+      <div class="mit-sb-bulkrow">
+        <button type="button" class="mit-sb-bulk" id="mit-sb-arm-qualifying" ${qualifyingCount === 0 ? 'disabled' : ''}>⚡ Arm All Qualifying (${qualifyingCount})</button>
+        <button type="button" class="mit-sb-bulk danger" id="mit-sb-disarm-all" ${armedCount === 0 ? 'disabled' : ''}>⛔ Disarm All (${armedCount})</button>
+      </div>
+
+      <div class="mit-stakebox-list">${rowsHtml || '<div class="mit-sb-unopened">No bots match that filter.</div>'}</div>
       <div class="mit-stakebox-footnote">Arming here (or on a bot's own tab) only promotes stake at the end of a WINNING session, and always resets to the bot's normal Stake $ on page reload — same behavior as before, just watchable from one place now.</div>
     </div>`;
 
+    // Preserve focus + caret + scroll position across the innerHTML swap
+    // below — the search box is exactly the kind of element that gets
+    // destroyed and recreated by setIfChanged, which would otherwise steal
+    // focus out from under every keystroke and make filtering unusable.
+    const focusedId = document.activeElement && document.activeElement.id;
+    const caret = focusedId === 'mit-sb-search' && document.activeElement.selectionStart;
+    const scrollTop = wrap.scrollTop;
+
     if (setIfChanged(wrap, html)) {
+      wrap.scrollTop = scrollTop;
+      if (focusedId) {
+        const toFocus = document.getElementById(focusedId);
+        if (toFocus) {
+          toFocus.focus();
+          if (typeof caret === 'number' && toFocus.setSelectionRange) {
+            try { toFocus.setSelectionRange(caret, caret); } catch (e) {}
+          }
+        }
+      }
       const sdToggle = document.getElementById('mit-sd-toggle');
       if (sdToggle) sdToggle.onclick = () => {
         smartDriveOn = !smartDriveOn;
         try { localStorage.setItem(SMART_DRIVE_KEY, smartDriveOn ? '1' : '0'); } catch (e) {}
+        renderStakeBox();
+      };
+      const searchInp = document.getElementById('mit-sb-search');
+      if (searchInp) searchInp.oninput = (e) => { stakeBoxFilter = e.target.value; renderStakeBox(); };
+      const sortSel = document.getElementById('mit-sb-sort');
+      if (sortSel) sortSel.onchange = (e) => { stakeBoxSort = e.target.value; renderStakeBox(); };
+      const armQualBtn = document.getElementById('mit-sb-arm-qualifying');
+      if (armQualBtn) armQualBtn.onclick = () => {
+        let armedNow = 0;
+        withEngine.forEach((r) => {
+          if (r.armed) return;
+          const sug = qualifiesForAutoArm(r.eng);
+          if (sug) {
+            r.eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
+            r.eng.addLog('engine', 'SMART-INTEL', `⚡ Bulk-armed from Stake Increase Terminal at $${sug.value.toFixed(2)}.`);
+            armedNow++;
+          }
+        });
+        renderStakeBox();
+      };
+      const disarmAllBtn = document.getElementById('mit-sb-disarm-all');
+      if (disarmAllBtn) disarmAllBtn.onclick = () => {
+        withEngine.forEach((r) => {
+          if (!r.armed) return;
+          r.eng.setConfig({ stakeAdditionArmed: false });
+          r.eng.addLog('engine', 'SMART-INTEL', '⛔ Bulk-disarmed from Stake Increase Terminal.');
+        });
         renderStakeBox();
       };
       STAKE_BOX_BOT_IDS.forEach((id) => {
@@ -29146,6 +29611,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       });
     }
   }
+
 
   function injectStyles() {
     const css = document.createElement('style');
@@ -29534,6 +30000,23 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-sb-hint.smart-flag { opacity:.85; color:hsl(var(--primary)); }
       .mit-sb-unopened { font-size:8.5px; opacity:.45; text-align:center; padding:8px 0; font-style:italic; }
       .mit-stakebox-footnote { font-size:7.5px; opacity:.45; line-height:1.5; margin-top:10px; padding-top:9px; border-top:1px dashed hsl(var(--border)/0.4); }
+      .mit-sb-toolbar { display:flex; gap:6px; margin-bottom:8px; }
+      .mit-sb-search { flex:1; padding:7px 9px; border-radius:8px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:9.5px; }
+      .mit-sb-sort { padding:7px 8px; border-radius:8px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-size:8.5px; font-weight:700; cursor:pointer; }
+      .mit-sb-bulkrow { display:flex; gap:6px; margin-bottom:10px; }
+      .mit-sb-bulk { flex:1; padding:8px 6px; border-radius:9px; border:1px solid hsl(var(--primary)/0.5); background:hsl(var(--primary)/0.1);
+        color:hsl(var(--primary)); font-family:'Outfit',sans-serif; font-weight:800; font-size:8px; letter-spacing:.3px; cursor:pointer; }
+      .mit-sb-bulk.danger { border-color:hsl(var(--loss)/0.5); background:hsl(var(--loss)/0.08); color:hsl(var(--loss)); }
+      .mit-sb-bulk:disabled { opacity:.35; cursor:not-allowed; }
+      .mit-sb-badge { font-size:7px; padding:2px 6px; border-radius:999px; font-weight:800; letter-spacing:.3px; white-space:nowrap; }
+      .mit-sb-badge.best { background:hsl(var(--win)/0.18); color:hsl(var(--win)); }
+      .mit-sb-badge.worst { background:hsl(var(--loss)/0.18); color:hsl(var(--loss)); }
+      .mit-sb-spark { display:flex; gap:2px; margin-bottom:6px; }
+      .mit-sb-dot { width:6px; height:6px; border-radius:50%; background:hsl(var(--muted)/0.3); flex:0 0 auto; }
+      .mit-sb-dot.win { background:hsl(var(--win)/0.85); }
+      .mit-sb-dot.loss { background:hsl(var(--loss)/0.6); }
     `;
     document.head.appendChild(css);
   }
