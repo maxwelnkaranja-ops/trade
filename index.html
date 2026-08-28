@@ -14389,6 +14389,13 @@ window.NexusStrategies=exports;
           // Intel never trades with martingale, even before Start is ever
           // clicked from that tab.
           martingaleEnabled: false,
+          // ── Two more confirmation layers on top of the trend gate above
+          // (per request — "confirm the pattern is correct in more than 2
+          // instances... confirm from the corresponding 1s market so as to
+          // be almost sure it will appear next"). See MatchesAnalyzer's
+          // AUTO branch for what these actually check.
+          requireHistoricalConfirm: 3, // must have paid off in 3+ past instances on this same market's own recent history
+          requireCrossMarketConfirm: true, // must also be at/above its fair share on the paired 1s/non-1s market
         } : {}),
       };
       const defaults = {
@@ -14738,6 +14745,21 @@ window.NexusStrategies=exports;
       if ((this.isMeanRevMode || this.isPriceMode) && this.requestContractsFor) this.requestContractsFor(market);
       if (this.isPriceMode || this.isMeanRevMode) this.priceHistory = []; // fresh price series for the new market
       if (this.isMeanRevMode) { this.candles = []; this._mrCandleBuf = []; } // fresh candle series for the new market
+      // Matches' cross-market confirmation (see the analyze() call below)
+      // needs the paired 1s/non-1s market's history flowing too. Subscribed
+      // ONCE per market switch here (not per-tick, which would leak a fresh
+      // no-op callback into the socket's subscriber Set on every single
+      // tick) and unsubscribed alongside the primary market whenever this
+      // bot rotates again.
+      if (this.isMatchMode) {
+        if (this._pairedUnsub) { this._pairedUnsub(); this._pairedUnsub = null; }
+        const pairedSymbol = market.includes('1HZ')
+          ? market.replace('1HZ', 'R_').replace('V', '')
+          : (market.startsWith('R_') ? '1HZ' + market.replace('R_', '') + 'V' : null);
+        this._pairedSymbol = pairedSymbol;
+        this._pairedSymbolLabel = pairedSymbol ? (market.includes('1HZ') ? pairedSymbol.replace('R_', 'V') : `${pairedSymbol} (1s)`) : null;
+        if (pairedSymbol) this._pairedUnsub = this.socket.subscribe(pairedSymbol, () => {});
+      }
       this.tickUnsub = this.socket.subscribe(market, (data) => {
         this.lastTickTime = Date.now();
         const fullHistory = this.socket.getHistory(market);
@@ -14846,7 +14868,12 @@ window.NexusStrategies=exports;
           result = window.MeanReversionAnalyzer.analyze(this.candles, data.quote, this.config);
           this.analysis = result;
         } else if (this.isMatchMode) {
-          result = window.MatchesAnalyzer.analyze(history, tickPeriod, this.config);
+          // Cross-market confirmation feed (only actually required when
+          // cfg.requireCrossMarketConfirm is on — see matchesDefaults'
+          // _intel branch). The paired symbol was already subscribed once
+          // in subscribeToMarket() above, so this just reads its history.
+          const crossMarketData = this._pairedSymbol ? this.socket.getHistory(this._pairedSymbol) : [];
+          result = window.MatchesAnalyzer.analyze(history, tickPeriod, { ...this.config, crossMarketData, crossMarketLabel: this._pairedSymbolLabel });
           this.analysis = result;
         } else if (this.isEvenOddMRMode) {
           // Runs on the shared digit history (capped at 200 ticks by the
@@ -22349,6 +22376,36 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
   const MIN_TICKS = 20;
 
+  // ── HISTORICAL CONFIRMATION (backtest replay) ────────────────────────
+  // Per request: the "Auto" preset should only predict a digit once THIS
+  // SAME setup rule has already proven itself correct in more than 2
+  // instances, not just off the current single live read. Replays the
+  // exact same hottest/rising/gap rule tick-by-tick against recent real
+  // history: every time in the past this rule would have fired on some
+  // digit, check whether that digit actually landed on the very next
+  // tick. Returns how many of those past instances hit vs how many total
+  // — the caller requires at least 3 hits (>2 instances) before trusting
+  // the live signal. Bounded to the trailing ~180 ticks so this stays
+  // cheap even though it's re-run every tick.
+  function backtestAutoSetup(history, tickPeriod, hotPct, gapPct, targetDigit) {
+    const span = (history || []).slice(-180);
+    let hits = 0, total = 0;
+    for (let i = MIN_TICKS; i < span.length - 1; i++) {
+      const { data: pastData, frequencies: pastFreq } = baseFrequencies(span.slice(0, i + 1), tickPeriod);
+      if (pastData.length < MIN_TICKS) continue;
+      const sorted = [...pastFreq].sort((a, b) => b.percentage - a.percentage);
+      const hot = sorted[0], second = sorted[1];
+      if (hot.digit !== targetDigit) continue; // only count instances where THIS digit was the one the rule would have picked
+      const dir = directionOf(pastData, hot.digit);
+      const gap = second ? hot.percentage - second.percentage : 999;
+      if (hot.percentage >= hotPct && dir > 0 && gap >= gapPct) {
+        total++;
+        if (span[i + 1] === targetDigit) hits++;
+      }
+    }
+    return { hits, total };
+  }
+
   function analyze(history, tickPeriod, cfg) {
     tickPeriod = tickPeriod || 50;
     cfg = cfg || {};
@@ -22485,9 +22542,53 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const gap = secondHottest ? hottest.percentage - secondHottest.percentage : 999;
       const setupMet = hottest.percentage >= hotPct && dir > 0 && gap >= gapPct;
       if (setupMet) {
-        targetDigit = hottest.digit;
-        strength = Math.max(0, Math.min(100, Math.round(hottest.percentage * 5 + dir * 3 + gap * 2)));
-        reasons.push(`Digit ${hottest.digit} hottest at ${hottest.percentage.toFixed(1)}%, rising (+${dir.toFixed(1)}pp), ${gap.toFixed(1)}pp clear of #2`);
+        // ── Extra confirmation layers, per request — both OFF by default
+        // (regular Matches tab keeps its original single-read behavior);
+        // Matches Intel turns both on via matchesDefaults' _intel branch.
+        //
+        // 1) HISTORICAL: don't trust this setup off one live read — replay
+        //    it against recent real history and require it to have
+        //    actually paid off in more than 2 separate past instances
+        //    (cfg.requireHistoricalConfirm sets the minimum, default 3).
+        const minHistConfirm = Math.max(0, parseInt(cfg.requireHistoricalConfirm, 10) || 0);
+        let histOk = true, histNote = '';
+        if (minHistConfirm > 0) {
+          const bt = backtestAutoSetup(history, tickPeriod, hotPct, gapPct, hottest.digit);
+          histOk = bt.hits >= minHistConfirm;
+          histNote = `${bt.hits}/${bt.total} past instances confirmed`;
+        }
+        // 2) CROSS-MARKET: also require the SAME digit to be genuinely
+        //    plausible on the corresponding 1s/non-1s counterpart market
+        //    (cfg.crossMarketData — the caller fetches this; see
+        //    TitanEngine's tick handler) — "almost sure it'll appear
+        //    next" means it isn't just this one market's noise. Digit
+        //    needs to be sitting at/above its fair 10% share there (not
+        //    conspicuously cold) and not the single coldest digit.
+        let crossOk = true, crossNote = '';
+        if (cfg.requireCrossMarketConfirm && Array.isArray(cfg.crossMarketData) && cfg.crossMarketData.length >= MIN_TICKS) {
+          const { frequencies: crossFreq } = baseFrequencies(cfg.crossMarketData, tickPeriod);
+          const crossSorted = [...crossFreq].sort((a, b) => a.percentage - b.percentage);
+          const crossEntry = crossFreq[hottest.digit];
+          const crossPct = crossEntry ? crossEntry.percentage : 0;
+          const isColdestThere = crossSorted[0] && crossSorted[0].digit === hottest.digit;
+          crossOk = crossPct >= 10 && !isColdestThere;
+          crossNote = `${cfg.crossMarketLabel || 'paired market'}: digit ${hottest.digit} at ${crossPct.toFixed(1)}%`;
+        } else if (cfg.requireCrossMarketConfirm) {
+          crossOk = false; // demanded but no data yet — stay in "waiting", never fire blind
+          crossNote = 'paired market data still warming up';
+        }
+        if (histOk && crossOk) {
+          targetDigit = hottest.digit;
+          strength = Math.max(0, Math.min(100, Math.round(hottest.percentage * 5 + dir * 3 + gap * 2)));
+          reasons.push(`Digit ${hottest.digit} hottest at ${hottest.percentage.toFixed(1)}%, rising (+${dir.toFixed(1)}pp), ${gap.toFixed(1)}pp clear of #2`);
+          if (histNote) reasons.push(`✓ Confirmed: ${histNote}`);
+          if (crossNote) reasons.push(`✓ Cross-check: ${crossNote}`);
+        } else {
+          const missing = [];
+          if (!histOk) missing.push(`only ${histNote || 'insufficient history'} (need ≥${minHistConfirm})`);
+          if (!crossOk) missing.push(crossNote || 'cross-market not confirmed');
+          reasons.push(`Digit ${hottest.digit} trending (${hottest.percentage.toFixed(1)}%) but not confirmed yet: ` + missing.join(' · '));
+        }
       } else {
         const missing = [];
         if (hottest.percentage < hotPct) missing.push(`hottest digit only ${hottest.percentage.toFixed(1)}% (need ≥${hotPct}%)`);
@@ -24958,6 +25059,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // 15s time-box) so an entry that was never actually ours falls off
       // instead of leaking for the life of the session.
       this._earlyResults = new Map();
+      // ── STALE-CONTRACT RECONCILIATION ──────────────────────────────
+      // Per request: losses were reportedly not making it into the
+      // journal. The most likely real-world cause on a 1-tick DIGITDIFF
+      // contract is a dropped/late push on the shared account-wide
+      // proposal_open_contract stream — the buy confirms fine
+      // (ownContractIds gets the id), but the final is_sold:true message
+      // for THAT specific contract just never arrives (network hiccup,
+      // a burst of several REPEAT trades at once crowding the stream,
+      // etc.), so it sits in ownContractIds forever: no win/loss ever
+      // gets counted, nothing ever reaches the journal, and there's
+      // nothing in the UI to show it even happened. A 1-tick contract
+      // is fully resolved by Deriv within a couple of seconds no matter
+      // what, so anything still sitting unresolved well past that is a
+      // missed push, not a still-open trade — _reconcileStaleContracts
+      // (started in authenticate()) actively re-requests status for any
+      // contract like that instead of waiting for a push that already
+      // failed to arrive once.
+      this._ownContractFiredAt = new Map();
+      this._reconcileAttempts = new Map();
       this._eligibleFromTick = 0;
       this._toFire = null;
       // Set by the loss-streak breaker (see ADD_JOURNAL/_handleTradingMessage)
@@ -25374,11 +25494,46 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // same as Differ — not duplicated here.
     }
 
+    // Re-requests fresh status for any of our own contracts that have sat
+    // unresolved noticeably longer than a 1-tick DIGITDIFF contract ever
+    // legitimately should — see the constructor comment. Deriv's
+    // `proposal_open_contract` accepts a direct { contract_id, req_id }
+    // request outside of the initial buy/subscribe flow and answers with
+    // exactly the same message shape the normal stream would have pushed,
+    // so it flows straight through the existing is_sold handler above —
+    // no special-case processing needed, it just finally gets the push
+    // that was missed. Capped at 4 attempts (~20s) per contract so a
+    // contract that's genuinely stuck for some account-level reason logs
+    // once and stops, instead of hammering the socket forever.
+    _reconcileStaleContracts() {
+      if (!this.socketT || this._ownContractFiredAt.size === 0) return;
+      const now = Date.now();
+      for (const [cid, firedAt] of this._ownContractFiredAt) {
+        if (!this.ownContractIds.has(cid)) { this._ownContractFiredAt.delete(cid); this._reconcileAttempts.delete(cid); continue; }
+        if (now - firedAt < 12000) continue; // a real 1-tick contract is done well before this
+        const attempts = (this._reconcileAttempts.get(cid) || 0) + 1;
+        if (attempts > 4) {
+          window.SysLog && window.SysLog.add('error', `[HotRepeat] Contract ${cid} never settled after 4 reconciliation attempts — giving up on this one (it will not appear in the journal).`);
+          this._ownContractFiredAt.delete(cid); this._reconcileAttempts.delete(cid);
+          continue;
+        }
+        this._reconcileAttempts.set(cid, attempts);
+        window.SysLog && window.SysLog.add('info', `[HotRepeat] Contract ${cid} still unresolved after ${Math.round((now - firedAt) / 1000)}s — re-requesting status directly (attempt ${attempts}/4).`);
+        try { this.socketT.send(JSON.stringify({ proposal_open_contract: 1, contract_id: cid, req_id: window.HubReqId.next() })); } catch (e) {}
+      }
+    }
+
     authenticate() {
       const token = window.HubStore.getState().apiToken;
       if (!token) return;
       this.dispatch({ type: 'SET_CONNECTION_STATUS', status: 'connecting' });
       const _self = this;
+      // Start the stale-contract reconciliation sweep once (guard so
+      // re-authenticating — e.g. after a token change — doesn't stack up
+      // duplicate intervals).
+      if (!this._reconcileTimer) {
+        this._reconcileTimer = setInterval(() => this._reconcileStaleContracts(), 5000);
+      }
       (() => {
         // Shared trading/auth socket — see window.HubTradingSocket, reused
         // here instead of opening a second independent connection to the
@@ -25434,6 +25589,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                 if (c.contract_id && _self.ownContractIds.has(c.contract_id)) {
                   // Normal path: buy was already confirmed, process immediately.
                   _self.ownContractIds.delete(c.contract_id);
+                  _self._ownContractFiredAt.delete(c.contract_id);
+                  _self._reconcileAttempts.delete(c.contract_id);
                   _self._processSettledContract(c, balAfter);
                 } else if (c.contract_id && _self._pendingBuyReqIds.size > 0) {
                   // BUG FIX (race condition): this account-wide settle
@@ -25479,6 +25636,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                     _self._processSettledContract(early, early._balAfter);
                   } else {
                     _self.ownContractIds.add(d.buy.contract_id);
+                    _self._ownContractFiredAt.set(d.buy.contract_id, Date.now());
                   }
                 }
               }
