@@ -10141,9 +10141,36 @@ window.PatternIntelEngine = (function () {
 
   const RUN_LEN = 2;              // parity run length that counts as "a streak" — loosened from 3: with 10 markets watched at once, a 3-run bar made a live setup rare enough that Intel bots barely ever fired
   const MIN_HITS = 2;             // "done that more than once" — hard floor, unchanged
-  const MIN_WIN_RATE = 0.55;      // loosened from 0.60 — still a real edge over a coin flip, not just noise, but not so strict it starves the board of qualifying setups
+  const MIN_WIN_RATE_DEFAULT = 0.55; // fallback if nothing saved yet
   const LOOKBACK = 400;           // ticks of history mined per market
   const REPEAT_WINDOW = 4;        // ticks a digit has to repeat within, for the DIGIT pattern
+  // BUG FIX: this used to be a hardcoded `const MIN_WIN_RATE = 0.55` with
+  // no way to change it from anywhere — every Intel-variant bot
+  // (even_intel/odd_intel/matches_intel) fires its entries straight off
+  // this scanner (see getBestParitySignal/getBestDigitSignal, called from
+  // the isIntel branches in TitanEngine's tick handler), completely
+  // bypassing that bot's own config.minSignal/minStreak. Raising the
+  // "threshold" on the regular Even/Odd/Matches tab therefore did nothing
+  // to the Intel variant's firing rate — this was the actual cause of
+  // "Intel bots keep firing constantly no matter what threshold I set."
+  // Now it's a mutable, persisted value the Intel Auto-Trader panel's
+  // "Confidence Threshold" control can actually move.
+  const MIN_WIN_RATE_KEY = 'pattern_intel_min_win_rate_v1';
+  function loadMinWinRate() {
+    try {
+      const raw = parseFloat(localStorage.getItem(MIN_WIN_RATE_KEY));
+      return (Number.isFinite(raw) && raw >= 0.5 && raw <= 0.95) ? raw : MIN_WIN_RATE_DEFAULT;
+    } catch (e) { return MIN_WIN_RATE_DEFAULT; }
+  }
+  let MIN_WIN_RATE = loadMinWinRate();
+  function setMinWinRate(v) {
+    const n = parseFloat(v);
+    if (!Number.isFinite(n)) return MIN_WIN_RATE;
+    MIN_WIN_RATE = Math.min(0.95, Math.max(0.5, n));
+    try { localStorage.setItem(MIN_WIN_RATE_KEY, String(MIN_WIN_RATE)); } catch (e) {}
+    return MIN_WIN_RATE;
+  }
+  function getMinWinRate() { return MIN_WIN_RATE; }
 
   let watching = false;
   const unsubs = [];
@@ -10327,6 +10354,7 @@ window.PatternIntelEngine = (function () {
 
   return {
     MARKETS, startWatching, getBestParitySignal, getBestDigitSignal,
+    setMinWinRate, getMinWinRate,
     recordPatternOutcome, getPatternRecoveryPlan, patternKey,
   };
 })();
@@ -21981,6 +22009,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // _isSacrificeTrade branch). Tag them so it's obvious why this
       // entry's P&L doesn't move the Net P&L / equity curve.
       const testChip = j.isTest ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--muted-foreground)/0.1);color:hsl(var(--muted-foreground)/0.8);border:1px solid hsl(var(--muted-foreground)/0.25);font-family:'DM Mono',monospace" title="Probe trade — not counted in Net P&amp;L, Win Rate, or the equity curve">TEST</span>` : '';
+      // Contracts that never got a settle confirmation from Deriv after
+      // repeated reconciliation attempts (see _reconcileStaleContracts) —
+      // the stake genuinely left the account but the real outcome is
+      // unknown, so this is neither a WIN nor a LOSS. Tagged distinctly so
+      // it is never silently mistaken for an ordinary loss.
+      const unresolvedChip = j.isUnresolved ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(38 90% 50%/0.12);color:hsl(38 90% 60%);border:1px solid hsl(38 90% 50%/0.4);font-family:'DM Mono',monospace" title="Deriv never confirmed how this contract settled — check your account statement. Not counted as a win or loss.">⚠ UNRESOLVED</span>` : '';
       // Intel Auto-Trader trades — a fully separate engine/journal/stats
       // from this bot's regular tab (see ensureTitanEngine's isIntelVariant
       // handling). Tagged here so it's obvious at a glance this trade did
@@ -22016,6 +22050,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               ${isWin ? '▲ WIN' : '▼ LOSS'}</span>
             ${recoveryChip}
             ${testChip}
+            ${unresolvedChip}
             ${intelChip}
           </div>
           ${j.followingDigits && j.followingDigits.length ? `<div style="font-size:7px;color:hsl(var(--muted-foreground)/0.3);font-family:'DM Mono',monospace;letter-spacing:0.5px;margin-top:1px">next ${j.followingDigits.join(' ')}</div>` : ''}
@@ -25934,7 +25969,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         if (now - firedAt < 12000) continue; // a real 1-tick contract is done well before this
         const attempts = (this._reconcileAttempts.get(cid) || 0) + 1;
         if (attempts > 4) {
-          window.SysLog && window.SysLog.add('error', `[HotRepeat] Contract ${cid} never settled after 4 reconciliation attempts — giving up on this one (it will not appear in the journal).`);
+          window.SysLog && window.SysLog.add('error', `[HotRepeat] Contract ${cid} never settled after 4 reconciliation attempts — recording as UNRESOLVED so the trade isn't lost from the journal.`);
+          // BUG FIX: this contract's stake genuinely left the account (the
+          // buy already confirmed), but until now this branch just dropped
+          // it — no journal entry, no win/loss counted, nothing anywhere to
+          // show it happened. That was the real cause of trades quietly
+          // going missing. We don't know the outcome (Deriv never told us),
+          // so this is deliberately NOT counted as a win or loss in
+          // totalWins/totalLoss/totalProfit — it only gets a visible
+          // UNRESOLVED journal row (see the journal renderer's `isUnresolved`
+          // chip) so the operator can see a real trade happened here and
+          // check it manually in their Deriv statement.
+          const entry = {
+            id: cid, contractId: cid, time: new Date().toLocaleTimeString(), ts: Date.now(),
+            type: 'unresolved', botId: 'hotrepeat', market: this.state.primaryMarket, profit: 0,
+            isUnresolved: true,
+          };
+          this.state = { ...this.state, journal: [entry, ...this.state.journal].slice(0, 500) };
+          this.dispatch({ type: 'NOTIFY', message: `⚠ Contract ${cid} never confirmed settled — logged as UNRESOLVED, check your Deriv statement.`, ntype: 'loss' });
           this._ownContractFiredAt.delete(cid); this._reconcileAttempts.delete(cid);
           continue;
         }
@@ -26083,6 +26135,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
     armSystem() {
       const s = this.state;
+      // BUG FIX: armSystem() had no guard against being called while
+      // already armed. The Dashboard's ENGAGE ALL button polls for auth
+      // every 400ms and calls armSystem() once auth completes (see
+      // bindMasterControl) — if the operator pressed ENGAGE ALL more than
+      // once while it was still waiting (nothing visibly happens during
+      // the wait, so a second click was the natural thing to try), TWO
+      // polling loops ended up calling armSystem() back to back. Every
+      // call re-ran auto-select-market and re-dispatched ARM/NOTIFY, which
+      // is what looked like "Hot Repeat keeps firing when I press Engage"
+      // and doubled up on log/notification spam. Now a second call while
+      // already armed is a silent no-op instead of re-arming.
+      if (s.isArmed) return;
       if (!window.HubStore.isBotEnabled('hotrepeat')) { this.dispatch({ type: 'NOTIFY', message: 'Hot Repeat bot is disabled — enable it from the Dashboard first', ntype: 'loss' }); return; }
       if (!s.isAuthenticated) { this.dispatch({ type: 'NOTIFY', message: 'Add your API token in Settings first', ntype: 'loss' }); return; }
       if (s.isSessionCooldown) { this.dispatch({ type: 'NOTIFY', message: `Still cooling down — ${Math.floor(s.sessionCooldownRemaining / 60)}m ${s.sessionCooldownRemaining % 60}s left.`, ntype: 'info' }); return; }
@@ -26381,19 +26445,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (!s.journal.length) return `<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO TRADES RECORDED</div>`;
     return s.journal.slice(0, 80).map((j) => {
       const isWin = j.type === 'win';
-      const wc = isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))';
+      const isUnresolved = !!j.isUnresolved;
+      const wc = isUnresolved ? 'hsl(38 90% 55%)' : isWin ? 'hsl(var(--win))' : 'hsl(var(--loss))';
       const exD = j.exitDigit ?? '?';
       const enD = j.entryDigit ?? '—';
-      const pl = (j.profit >= 0 ? '+' : '') + j.profit.toFixed(2);
+      // BUG FIX: an unresolved contract (never confirmed settled by Deriv —
+      // see _reconcileStaleContracts) has profit forced to 0 since the real
+      // outcome is unknown. Showing that as "+0.00" looked exactly like a
+      // real $0 win. Show a "—" payout and a distinct ⚠ badge instead so it
+      // reads as "unknown", not "resolved for nothing."
+      const pl = isUnresolved ? '—' : (j.profit >= 0 ? '+' : '') + j.profit.toFixed(2);
       return `<div class="jnl-entry ${j.type}">
         <div class="jnl-top-row">
-          <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
+          <div class="jnl-badge ${j.type}" style="${isUnresolved ? 'background:hsl(38 90% 50%/0.15);color:hsl(38 90% 55%);border-color:hsl(38 90% 50%/0.4)' : ''}">${isUnresolved ? '⚠' : isWin ? 'W' : 'L'}</div>
           <div class="jnl-meta-row">
             <span class="jnl-time">${j.time}</span>
-            <span class="${isWin ? 'jnl-win-tag' : 'jnl-loss-tag'}">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
+            <span class="${isUnresolved ? '' : isWin ? 'jnl-win-tag' : 'jnl-loss-tag'}" style="${isUnresolved ? 'color:hsl(38 90% 55%)' : ''}" title="${isUnresolved ? 'Deriv never confirmed how this settled — check your account statement' : ''}">${isUnresolved ? '⚠ UNRESOLVED' : isWin ? '▲ WIN' : '▼ LOSS'}</span>
             <span class="jnl-ct-pill" style="background:hsl(var(--accent)/0.1);color:hsl(var(--accent));border:1.5px solid hsl(var(--accent)/0.3)">≠${j.barrier}</span>
           </div>
-          <div class="jnl-pnl ${j.type}">${pl}</div>
+          <div class="jnl-pnl ${j.type}" style="${isUnresolved ? 'color:hsl(38 90% 55%)' : ''}">${pl}</div>
         </div>
         <div class="jnl-digit-row">
           <div class="jnl-digit-label">EXIT</div>
@@ -27943,6 +28013,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) {
             if (ui && !ui._initialized) { try { ui.renderFull(eng.state); ui._initialized = true; } catch(_) {} }
             if (!eng.state.isAuthenticated && window.HubStore && window.HubStore.getState().apiToken) {
+              // BUG FIX: this poller used to be a bare local variable with
+              // nothing tracking it on the engine — clicking ENGAGE ALL a
+              // second time while the first click was still waiting on
+              // auth (easy to do, since nothing visibly happens during the
+              // wait) spun up a SECOND independent polling loop. Once auth
+              // completed, both loops fired armSystem() within the same
+              // 400ms tick, doubling every arm/auto-market-select/notify
+              // cycle for that engine — this was the actual cause of
+              // "Hot Repeat keeps firing when I press Engage." Stashing
+              // the timer on the engine itself and clearing any pre-existing
+              // one before starting a new poll makes a repeat click restart
+              // the wait instead of stacking a second one on top of it.
+              if (eng._masterAuthWaitTimer) { clearInterval(eng._masterAuthWaitTimer); eng._masterAuthWaitTimer = null; }
               eng.authenticate();
               // Poll for authentication instead of a blind fixed delay — a
               // real auth round-trip (2 REST calls + a WS handshake) can
@@ -27952,14 +28035,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               // notice, and Engage silently did nothing from the user's
               // point of view. Poll every 400ms for up to 12s instead.
               let waited = 0;
-              const waitForAuth = setInterval(() => {
+              eng._masterAuthWaitTimer = setInterval(() => {
                 waited += 400;
                 if (eng.state.isAuthenticated) {
-                  clearInterval(waitForAuth);
+                  clearInterval(eng._masterAuthWaitTimer);
+                  eng._masterAuthWaitTimer = null;
                   try { eng.armSystem(); } catch(_) {}
                   queueDashboardRender();
                 } else if (waited >= 12000) {
-                  clearInterval(waitForAuth);
+                  clearInterval(eng._masterAuthWaitTimer);
+                  eng._masterAuthWaitTimer = null;
                   try { eng.armSystem(); } catch(_) {} // will surface its own "add a token" notice if still unauthenticated
                   queueDashboardRender();
                 }
@@ -28180,6 +28265,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
     try { eng.saveConfig(); } catch (e) { console.error(`[Hub] stake save error (${id}):`, e); }
   }
+
+  // Shared with the Flip Intell tab's "All Bot Stakes" panel — see
+  // panel-flipintell below — so both places read/write stakes through the
+  // exact same logic instead of two copies that could drift apart.
+  window.HubGetStakeEngine = getStakeEngine;
+  window.HubGetStakeValue = getStakeValue;
+  window.HubSetStakeValue = setStakeValue;
+  window.HubStakeIds = STAKE_IDS;
 
   function populateStakePopup() {
     const list = document.getElementById('dash-stake-list');
@@ -28460,7 +28553,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // everything else (Even/Odd Intel keep their normal recovery behavior).
   // Always overridable per bot below — this is only the first-run default
   // before the user has touched the toggle.
-  function autoMartingaleDefault(id) { return id !== 'matches'; }
+  // BUG FIX: this used to return true for Even/Odd (only Matches was
+  // force-off), so a fresh Intel bot silently started with recovery
+  // martingale ON — a losing streak could turn a $10 stake into ~$156
+  // (2.5x per loss, 3 steps) with nothing more surprising to the operator
+  // than "I set $10." Flat stakes are now the default for every Intel
+  // bot; the Martingale Recovery toggle in each card still lets it be
+  // turned on deliberately, and the max-possible-stake note next to the
+  // Stake field (see renderAutoPanel) makes the ceiling visible before
+  // it's ever hit.
+  function autoMartingaleDefault(id) { return false; }
 
   function loadAutoConfig(id) {
     try {
@@ -28612,6 +28714,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (toggleBtn) { toggleBtn.classList.toggle('on', active); toggleBtn.textContent = active ? 'STOP' : 'START'; }
       if (stakeInput && document.activeElement !== stakeInput && !stakeInput.dataset.userTouched) stakeInput.value = cfg.stake;
       if (runsInput && document.activeElement !== runsInput && !runsInput.dataset.userTouched) runsInput.value = cfg.runs;
+
+      // Worst-case stake preview — see autoMartingaleDefault's note.
+      // Falls back to the same 2.5x/3-step numbers the underlying engine
+      // defaults to when it hasn't been created yet, so the warning is
+      // visible even before Start has ever been pressed.
+      const maxStakeEl = document.getElementById(`mit-auto-maxstake-${id}`);
+      if (maxStakeEl) {
+        if (cfg.martingale) {
+          const mult = (eng && eng.config && eng.config.martingaleMultiplier) || 2.5;
+          const stopStep = (eng && eng.config && eng.config.martingaleStopStep) || 3;
+          const worst = cfg.stake * Math.pow(mult, stopStep);
+          maxStakeEl.innerHTML = `<span style="color:hsl(38 90% 55%)">⚠ Recovery ON — up to $${worst.toFixed(2)} after ${stopStep} losses in a row</span>`;
+        } else {
+          maxStakeEl.innerHTML = `<span style="opacity:0.5">Flat stake — never increases after a loss</span>`;
+        }
+      }
 
       const statusEl = document.getElementById(`mit-auto-status-${id}`);
       let statusHtml;
@@ -29856,6 +29974,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div class="mit-terminal">
           <div class="mit-section-title"><span class="mit-sec-ico">🤖</span>Intel Auto-Trader</div>
           <div class="mit-auto-topnote">Each box below is its own bot with its own Stake, Runs/cycle, and Start/Stop — the SAME Even / Odd / Matches bots as their own tabs, just controlled from here. When running, a bot follows the live scoring matrix above: it sits on whichever market currently shows the strongest dynamic pattern for it (parity dominance, streaks, digit frequency), fires when its own signal + that market's score line up, runs its cycle, cools down, re-reads the scores, and moves on — riding the trend instead of a fixed market. Digits are provider-generated at random — this is a live statistical read, not a guaranteed edge, so only stake what you can afford to lose.</div>
+          <div class="mit-auto-topnote" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.25);border-radius:10px;padding:10px 12px;margin-top:8px">
+            <div style="flex:1;min-width:220px">
+              <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Confidence Threshold — the real firing gate</div>
+              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Every Intel bot (Even/Odd/Matches) fires off THIS number, not the Min Signal field on the regular tabs — those never apply to the Intel variant. Raise it to make every Intel bot fire less often.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              <input id="mit-intel-confidence" type="range" min="50" max="90" step="1" style="width:140px">
+              <span id="mit-intel-confidence-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">55%</span>
+            </div>
+          </div>
           <div class="mit-auto-grid" id="mit-auto-grid"></div>
         </div>
 
@@ -29924,6 +30052,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       mit.setActive(!mit.isActive());
       renderMatrix();
     };
+    (function bindIntelConfidenceSlider() {
+      const slider = document.getElementById('mit-intel-confidence');
+      const valEl = document.getElementById('mit-intel-confidence-val');
+      if (!slider || !valEl || !window.PatternIntelEngine) return;
+      const current = Math.round((window.PatternIntelEngine.getMinWinRate() || 0.55) * 100);
+      slider.value = current;
+      valEl.textContent = `${current}%`;
+      slider.oninput = () => { valEl.textContent = `${slider.value}%`; };
+      slider.onchange = () => {
+        const applied = window.PatternIntelEngine.setMinWinRate(parseInt(slider.value, 10) / 100);
+        valEl.textContent = `${Math.round(applied * 100)}%`;
+      };
+    })();
     document.getElementById('mit-auto-grid').innerHTML = AUTO_BOTS.map((b) => `
       <div class="mit-auto-card" id="mit-auto-card-${b.id}">
         <div class="mit-auto-card-head">
@@ -29933,7 +30074,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
         <div class="mit-auto-card-desc">${b.desc}</div>
         <div class="mit-auto-card-controls">
-          <div class="mit-auto-field"><label>Stake $</label><input id="mit-auto-stake-${b.id}" type="number" min="0.35" step="0.1" value="1"></div>
+          <div class="mit-auto-field"><label>Stake $</label><input id="mit-auto-stake-${b.id}" type="number" min="0.35" step="0.1" value="1"><div class="mit-auto-maxstake" id="mit-auto-maxstake-${b.id}" style="font-size:9px;margin-top:3px;min-height:11px"></div></div>
           <div class="mit-auto-field"><label>Runs/cycle</label><input id="mit-auto-runs-${b.id}" type="number" min="1" step="1" value="5"></div>
           <button type="button" class="mit-auto-card-toggle" id="mit-auto-toggle-${b.id}">START</button>
         </div>
@@ -29979,6 +30120,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           // flipping this mid-session doesn't need a restart.
           const eng = intelEngine(id);
           if (eng && eng.state.active) { eng.setConfig({ martingaleEnabled: on }); eng.saveConfig(); }
+          renderAutoPanel();
         };
       }
       const cfg = loadAutoConfig(id);
