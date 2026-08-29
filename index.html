@@ -446,24 +446,40 @@
         };
       }
 
-      function threshBuildShortSpanSignal(history, winCheck, span) {
+      function threshBuildShortSpanSignal(history, winCheck, span, expectedStayRate) {
         const w = Math.max(6, span || 20);
         const data = (history || []).slice(-w);
-        const empty = { ready: false, span: w, samples: Math.max(0, data.length - 1), dominant: null, dominantPct: 0.5, recommendFlip: false, z: 0 };
+        // p0 is the STAY side's own theoretical baseline win rate for this
+        // barrier (e.g. Under 6 wins on digits 0-5 → 60% baseline even with
+        // zero real short-term skew) — NOT 0.5. This is the actual bug that
+        // made Smart Toggle "not work at all" for Over/Under: it was reusing
+        // parity's flat 50% null hypothesis, so any barrier whose fair win
+        // rate isn't 50% (nearly all of them — Over 3 is 60%, Under 7 is
+        // 70%, etc.) got mistaken for "a dominant recent streak" purely from
+        // its own built-in math, every single time, with no real skew
+        // required. That fired (or withheld) flips essentially at random
+        // relative to what was actually happening on the ticks.
+        const p0 = expectedStayRate != null ? expectedStayRate : 0.5;
+        const empty = { ready: false, span: w, samples: Math.max(0, data.length - 1), dominant: null, dominantPct: p0, recommendFlip: false, z: 0, baseline: p0 };
         if (data.length - 1 < THRESH_SHORT_SPAN_MIN_SAMPLES) return empty;
         let stayCount = 0, flipCount = 0;
         for (let i = 0; i < data.length - 1; i++) {
           if (winCheck(data[i + 1], false)) stayCount++; else flipCount++;
         }
         const total = stayCount + flipCount;
-        const stayPct = total ? stayCount / total : 0.5;
-        const dominant = stayPct >= 0.5 ? 'stay' : 'flip';
-        const dominantPct = Math.max(stayPct, 1 - stayPct);
-        const se = total ? Math.sqrt(0.25 / total) : 0;
-        const z = se ? Math.abs(stayPct - 0.5) / se : 0;
-        const ready = z >= THRESH_SHORT_SPAN_MIN_Z;
+        const stayPct = total ? stayCount / total : p0;
+        // Deviation is measured from THIS barrier's own baseline, not from
+        // 50/50 — a barrier that's winning at exactly its expected rate has
+        // z≈0 here (correctly "nothing unusual happening"), whereas the old
+        // code would've reported that as a strong dominant signal on any
+        // barrier skewed away from 50%.
+        const se = total ? Math.sqrt(p0 * (1 - p0) / total) : 0;
+        const z = se ? (stayPct - p0) / se : 0;
+        const ready = Math.abs(z) >= THRESH_SHORT_SPAN_MIN_Z;
+        const dominant = z >= 0 ? 'stay' : 'flip';
+        const dominantPct = dominant === 'stay' ? stayPct : 1 - stayPct;
         const recommendFlip = ready && dominant === 'stay';
-        return { ready, span: w, samples: total, dominant, dominantPct, stayCount, flipCount, recommendFlip, z };
+        return { ready, span: w, samples: total, dominant, dominantPct, stayCount, flipCount, recommendFlip, z, baseline: p0 };
       }
 
       // Threshold bots (Over/Under): base direction bets over/under a
@@ -477,8 +493,13 @@
           const useBarrier = flip ? 9 - barrier : barrier;
           return useUnder ? nextDigit < useBarrier : nextDigit > useBarrier;
         };
+        // Theoretical win rate of the STAY (base) side against a uniform
+        // 0-9 digit: Under B wins on B of the 10 digits (0..B-1), Over B
+        // wins on (9-B) of them (B+1..9). This is the number the short-span
+        // signal above measures deviation FROM, instead of a flat 50%.
+        const expectedStayRate = isUnderMode ? (barrier / 10) : ((9 - barrier) / 10);
         const data = (history || []).slice(-160);
-        const shortSpan = threshBuildShortSpanSignal(history, winCheck, shortSpanWindow);
+        const shortSpan = threshBuildShortSpanSignal(history, winCheck, shortSpanWindow, expectedStayRate);
         const empty = { patterns: [], reference: [], best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null, shortSpan };
         if (data.length < THRESH_MIN_SAMPLES + 1) return empty;
 
@@ -661,6 +682,11 @@
           <span class="hub-tab-label">Market Intel</span>
           <span class="dot live" id="market-tab-dot" style="display:none"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="flipintell" data-label="Flip Intell" title="Flip Intell — Stake Increase Command Terminal — every bot's Stake Addition arm state in one big console, with an Auto Flip Drive that can run it hands-free">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 11-13h-7l1-7z"/></svg></span>
+          <span class="hub-tab-label">Flip Intell</span>
+          <span class="dot live" id="flipintell-tab-dot" style="display:none"></span>
+        </button>
         <div class="hub-nav-label">Mean Reversion</div>
         <button type="button" class="hub-tab" data-app="risemr" data-label="Rise MR" title="Rise (Mean Reversion) — HIGHER-only ADX/Bollinger/RSI/Stochastic/ATR offset-barrier bot, split from Rise &amp; Fall MR">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l7-10 5 6 4-9"/><path d="M14 5h6v6"/></svg></span>
@@ -770,6 +796,9 @@
 
     <section id="panel-market" class="app-panel" aria-label="Market Intel Terminal">
       <div id="market-root" class="app-root"></div>
+    </section>
+    <section id="panel-flipintell" class="app-panel" aria-label="Flip Intell — Stake Increase Command Terminal">
+      <div id="flipintell-root" class="app-root"></div>
     </section>
 
     <section id="panel-risemr" class="app-panel" aria-label="Rise Mean Reversion dashboard">
@@ -10110,9 +10139,9 @@ window.PatternIntelEngine = (function () {
   const MARKETS = ['1HZ10V', 'R_10', '1HZ25V', 'R_25', '1HZ50V', 'R_50', '1HZ75V', 'R_75', '1HZ100V', 'R_100'];
   const pairOf = (s) => s.startsWith('1HZ') ? s.replace('1HZ', 'R_').replace('V', '') : ('1HZ' + s.replace('R_', '') + 'V');
 
-  const RUN_LEN = 3;              // parity run length that counts as "a streak"
-  const MIN_HITS = 2;             // "done that more than once" — hard floor
-  const MIN_WIN_RATE = 0.60;      // has to actually be good, not just seen
+  const RUN_LEN = 2;              // parity run length that counts as "a streak" — loosened from 3: with 10 markets watched at once, a 3-run bar made a live setup rare enough that Intel bots barely ever fired
+  const MIN_HITS = 2;             // "done that more than once" — hard floor, unchanged
+  const MIN_WIN_RATE = 0.55;      // loosened from 0.60 — still a real edge over a coin flip, not just noise, but not so strict it starves the board of qualifying setups
   const LOOKBACK = 400;           // ticks of history mined per market
   const REPEAT_WINDOW = 4;        // ticks a digit has to repeat within, for the DIGIT pattern
 
@@ -10230,7 +10259,10 @@ window.PatternIntelEngine = (function () {
     const twinRead = mode === 'parity' ? mineParity(twinDigits) : mineDigit(twinDigits);
     if (!twinRead) return false;
     const twinPredicted = mode === 'parity' ? twinRead.predictedParity : twinRead.predictedDigit;
-    return twinPredicted === predicted && twinRead.winRate >= 0.5 && twinRead.total >= MIN_HITS;
+    // Loosened from >=0.5 — the twin just needs to agree on direction and
+    // not be contradicting the read outright, not independently clear the
+    // same high bar the primary market already cleared.
+    return twinPredicted === predicted && twinRead.winRate >= 0.45 && twinRead.total >= MIN_HITS;
   }
 
   // Scans every market and returns the single strongest confirmed + armed
@@ -15268,6 +15300,36 @@ window.NexusStrategies=exports;
           return;
         }
         if (this.isMatchMode) {
+          if (this.id.endsWith('_intel')) {
+            // ── Intel variant: Pattern Intel IS the entry signal ────────────
+            // Same reasoning as the Odd/Even Strategy Intel branches above —
+            // an Intel bot watches all 10 markets, so it goes wherever the
+            // board-wide, cross-market-confirmed digit-repeat setup
+            // currently lives and fires the moment it's live there, instead
+            // of waiting for its own currently-selected market's local
+            // confirm-tick counter to also happen to agree.
+            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestDigitSignal();
+            this._lastIntelDigitSignal = sig || null;
+            if (sig) {
+              if (sig.symbol !== market) {
+                this.strategyWaitReason = `Pattern Intel found a live digit ${sig.predictedDigit} setup on ${sig.symbol} — rotating there`;
+                this.addLog('engine', 'MARKET', this.strategyWaitReason);
+                this.setConfig({ selectedMarket: sig.symbol });
+                this.changeMarket(sig.symbol);
+                this.emit();
+                return;
+              }
+              this._matchTargetDigit = sig.predictedDigit;
+              this._activeIntelPattern = { symbol: sig.symbol, mode: 'digit', predicted: sig.predictedDigit };
+              this.strategyWaitReason = `ENTRY — Pattern Intel confirmed digit ${sig.predictedDigit} on ${market} (${sig.context})`;
+              this.addLog('win', 'SIGNAL', this.strategyWaitReason);
+              this.startChainExecution();
+            } else {
+              this.strategyWaitReason = 'Watching all 10 markets for a confirmed, cross-checked digit-repeat setup…';
+            }
+            this.emit();
+            return;
+          }
           const trig = result.triggerDigit;
           const meetsSignal = result.ready && (trig != null ? data.digit === trig : result.strength >= this.config.minSignal);
           // Tick-gap counter: counts ticks since the last trade fired, reset
@@ -15283,11 +15345,6 @@ window.NexusStrategies=exports;
           // consecutive ticks (same target digit, still meeting the
           // threshold) before firing, same idea as Higher/Lower's gate —
           // filters single-tick noise rather than claiming a new edge.
-          // Confirmation ticks required (default 2, same idea as Higher/
-          // Lower's gate — filters single-tick noise). Configurable via
-          // cfg.matchesConfirmTicks so a caller wanting a sturdier,
-          // higher-confidence read before firing (e.g. Intel Auto-Trader's
-          // Matches bot) can demand more consecutive confirming ticks.
           const neededMxConfirm = Math.max(1, parseInt(this.config.matchesConfirmTicks, 10) || 2);
           if (meetsSignal) {
             if (this._mxConfirmDigit === result.targetDigit) this._mxConfirmCount = (this._mxConfirmCount || 1) + 1;
@@ -15295,26 +15352,14 @@ window.NexusStrategies=exports;
           } else {
             this._mxConfirmDigit = null; this._mxConfirmCount = 0;
           }
-          // Intel variant only — same board-wide Pattern Intel gate as the
-          // Even/Odd Intel bots: this market's own digit-repeat pattern has
-          // to be CONFIRMED (>1 historical repeat) AND cross-confirmed
-          // against the 1s/non-1s twin, live, predicting THIS target digit.
-          const intelDigitOk = !this.id.endsWith('_intel') || (() => {
-            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestDigitSignal();
-            this._lastIntelDigitSignal = sig || null;
-            return !!(sig && sig.symbol === market && sig.predictedDigit === result.targetDigit);
-          })();
-          if (meetsSignal && gapOk && this._mxConfirmCount >= neededMxConfirm && intelDigitOk) {
+          if (meetsSignal && gapOk && this._mxConfirmCount >= neededMxConfirm) {
             this._matchTargetDigit = result.targetDigit;
             this._mxTicksSinceTrade = 0;
             this._mxConfirmCount = 0;
-            if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelDigitSignal ? { symbol: this._lastIntelDigitSignal.symbol, mode: 'digit', predicted: result.targetDigit } : null;
             this.addLog('win', 'SIGNAL', trig != null
               ? `Trigger digit ${data.digit} printed → betting digit ${result.targetDigit} — ${(result.reasons && result.reasons[0]) || ''}`
               : `Digit ${result.targetDigit} match signal ${result.strength}% (confirmed) — ${(result.reasons && result.reasons[0]) || ''}`);
             this.startChainExecution();
-          } else if (meetsSignal && gapOk && this._mxConfirmCount >= neededMxConfirm && !intelDigitOk) {
-            this.strategyWaitReason = `Confirmed locally but Pattern Intel hasn't cross-confirmed digit ${result.targetDigit} here yet — waiting`;
           }
           this.emit();
           return;
@@ -15523,6 +15568,48 @@ window.NexusStrategies=exports;
             }
           }
         } else if (isOddStrat) {
+          const os = result.oddStrategy || {};
+          if (this.id.endsWith('_intel')) {
+            // ── Intel variant: Pattern Intel IS the entry signal ────────────
+            // Intel bots watch all 10 markets at once (see PatternIntelEngine
+            // above), so instead of waiting for THIS one market's own local
+            // touch→streak engine to happen to line up, go wherever the
+            // board-wide, cross-market-confirmed setup currently lives and
+            // fire the moment it's live there. The local touch/streak state
+            // machine in the else-branch below is for the regular
+            // (single-market) Odd Strategy tab only — an Intel bot doesn't
+            // need its own local read to also agree; the whole point of
+            // watching every market is that opportunities show up far more
+            // often than any one market's local streak would allow.
+            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestParitySignal();
+            this._lastIntelParitySignal = sig || null;
+            let fired = false;
+            if (sig && sig.predictedParity === 'odd') {
+              if (sig.symbol !== market) {
+                this.strategyWaitReason = `Pattern Intel found a live ODD setup on ${sig.symbol} — rotating there`;
+                this.addLog('engine', 'MARKET', this.strategyWaitReason);
+                this.setConfig({ selectedMarket: sig.symbol });
+                this.changeMarket(sig.symbol);
+                this.emit();
+                return;
+              }
+              fired = true;
+              this.strategyWaitReason = `ENTRY — Pattern Intel confirmed ODD on ${market} (${sig.context})`;
+              this._activeIntelPattern = { symbol: sig.symbol, mode: 'parity', predicted: 'odd' };
+            } else {
+              this.strategyWaitReason = 'Watching all 10 markets for a confirmed, cross-checked ODD setup…';
+            }
+            if (fired) {
+              this.strategyPhase = 'firing';
+              this.addLog('win', 'ENTRY', this.strategyWaitReason);
+              this.startChainExecution();
+              setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
+            } else {
+              this.strategyPhase = 'waiting';
+            }
+            this.emit();
+            return;
+          }
           // Odd Strategy 2026 — two gates, no time limit:
           // Gate 1: live percentage vs Min Signal % — has to be true before
           // anything can arm.
@@ -15530,27 +15617,13 @@ window.NexusStrategies=exports;
           // moment that happens, the even-digit streak starts counting.
           // As soon as that streak reaches Min Streak, it fires ODD
           // immediately. No expiry — it just keeps waiting once armed.
-          const os = result.oddStrategy || {};
           const pctGateOk = result.probability >= this.config.minSignal;
-          // Intel variant only: don't trust this market's own local read in
-          // isolation — require the shared Pattern Intel Engine to agree
-          // this exact market currently has a CONFIRMED (>1 historical hit)
-          // + cross-market-confirmed (1s twin agrees) parity setup live
-          // right now, predicting ODD. See PatternIntelEngine above.
-          const intelOk = !this.id.endsWith('_intel') || (() => {
-            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestParitySignal();
-            this._lastIntelParitySignal = sig || null;
-            return !!(sig && sig.symbol === market && sig.predictedParity === 'odd');
-          })();
           let fired = false;
           if (this._oddArmed) {
-            if (streak >= this.config.minStreak && intelOk) {
+            if (streak >= this.config.minStreak) {
               fired = true;
               this.strategyWaitReason = `ENTRY — ${streak}-even streak hit, firing ODD`;
               this._oddArmed = false;
-              if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelParitySignal ? { symbol: this._lastIntelParitySignal.symbol, mode: 'parity', predicted: 'odd' } : null;
-            } else if (streak >= this.config.minStreak && !intelOk) {
-              this.strategyWaitReason = `Armed but Pattern Intel hasn't confirmed ODD here yet — waiting`;
             } else if (os.isTouchingNow) {
               this.strategyWaitReason = `Touched digit ${os.coldEvenDigit} again — even streak ${streak}/${this.config.minStreak}`;
             } else {
@@ -15558,14 +15631,13 @@ window.NexusStrategies=exports;
             }
           } else if (pctGateOk && os.isTouchingNow) {
             this._oddArmed = true;
-            if (streak >= this.config.minStreak && intelOk) {
+            if (streak >= this.config.minStreak) {
               // Gate 2 just opened on this exact tick AND the even-streak
               // requirement is already satisfied right now — fire
               // immediately instead of waiting for another tick to confirm.
               fired = true;
               this.strategyWaitReason = `ENTRY — ${streak}-even streak hit, firing ODD`;
               this._oddArmed = false;
-              if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelParitySignal ? { symbol: this._lastIntelParitySignal.symbol, mode: 'parity', predicted: 'odd' } : null;
             } else {
               this.strategyWaitReason = `Armed — touched digit ${os.coldEvenDigit}, counting ${this.config.minStreak}-even streak`;
               this.addLog('engine', 'ARM', this.strategyWaitReason);
@@ -15609,23 +15681,45 @@ window.NexusStrategies=exports;
             ? (shape.redPct <= shape.yellowPct ? shape.red : shape.yellow)
             : null;
           const isTouchingNow = coldOddDigit != null && data.digit === coldOddDigit;
-          const pctGateOk = result.probability >= this.config.minSignal;
-          // Intel variant only — same board-wide, cross-market-confirmed
-          // gate as the Odd Strategy block above, mirrored for EVEN.
-          const intelOk = !this.id.endsWith('_intel') || (() => {
+          if (this.id.endsWith('_intel')) {
+            // ── Intel variant: Pattern Intel IS the entry signal — see the
+            // matching Odd Strategy branch above for the full rationale.
             const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestParitySignal();
             this._lastIntelParitySignal = sig || null;
-            return !!(sig && sig.symbol === market && sig.predictedParity === 'even');
-          })();
+            let fired = false;
+            if (sig && sig.predictedParity === 'even') {
+              if (sig.symbol !== market) {
+                this.strategyWaitReason = `Pattern Intel found a live EVEN setup on ${sig.symbol} — rotating there`;
+                this.addLog('engine', 'MARKET', this.strategyWaitReason);
+                this.setConfig({ selectedMarket: sig.symbol });
+                this.changeMarket(sig.symbol);
+                this.emit();
+                return;
+              }
+              fired = true;
+              this.strategyWaitReason = `ENTRY — Pattern Intel confirmed EVEN on ${market} (${sig.context})`;
+              this._activeIntelPattern = { symbol: sig.symbol, mode: 'parity', predicted: 'even' };
+            } else {
+              this.strategyWaitReason = 'Watching all 10 markets for a confirmed, cross-checked EVEN setup…';
+            }
+            if (fired) {
+              this.strategyPhase = 'firing';
+              this.addLog('win', 'ENTRY', this.strategyWaitReason);
+              this.startChainExecution();
+              setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
+            } else {
+              this.strategyPhase = 'waiting';
+            }
+            this.emit();
+            return;
+          }
+          const pctGateOk = result.probability >= this.config.minSignal;
           let fired = false;
           if (this._evenArmed) {
-            if (streak >= this.config.minStreak && intelOk) {
+            if (streak >= this.config.minStreak) {
               fired = true;
               this.strategyWaitReason = `ENTRY — ${streak}-odd streak hit, firing EVEN`;
               this._evenArmed = false;
-              if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelParitySignal ? { symbol: this._lastIntelParitySignal.symbol, mode: 'parity', predicted: 'even' } : null;
-            } else if (streak >= this.config.minStreak && !intelOk) {
-              this.strategyWaitReason = `Armed but Pattern Intel hasn't confirmed EVEN here yet — waiting`;
             } else if (isTouchingNow) {
               this.strategyWaitReason = `Touched digit ${coldOddDigit} again — odd streak ${streak}/${this.config.minStreak}`;
             } else {
@@ -15633,14 +15727,13 @@ window.NexusStrategies=exports;
             }
           } else if (pctGateOk && isTouchingNow) {
             this._evenArmed = true;
-            if (streak >= this.config.minStreak && intelOk) {
+            if (streak >= this.config.minStreak) {
               // Gate 2 just opened on this exact tick AND the odd-streak
               // requirement is already satisfied right now — fire
               // immediately instead of waiting for another tick to confirm.
               fired = true;
               this.strategyWaitReason = `ENTRY — ${streak}-odd streak hit, firing EVEN`;
               this._evenArmed = false;
-              if (this.id.endsWith('_intel')) this._activeIntelPattern = this._lastIntelParitySignal ? { symbol: this._lastIntelParitySignal.symbol, mode: 'parity', predicted: 'even' } : null;
             } else {
               this.strategyWaitReason = `Armed — touched digit ${coldOddDigit}, counting ${this.config.minStreak}-odd streak`;
               this.addLog('engine', 'ARM', this.strategyWaitReason);
@@ -16209,6 +16302,9 @@ window.NexusStrategies=exports;
     // loss (recovery exhausted without a win) — "that pattern lost, try a
     // different one next time" rather than sticking with a losing shape.
     _rotateAltPattern() {
+      // Intel bots are locked to Smart/Dynamic Recovery (see ensureTitanEngine) —
+      // never rotate them into a fixed/random Alt mode after a loss.
+      if (this.id.endsWith('_intel')) return;
       const cfg = this.config;
       const order = ['altA', 'altB', 'altC', 'altR'];
       const current = cfg.alternatingRecovery ? 'altA' : cfg.alternatingRecoveryB ? 'altB' : cfg.alternatingRecoveryC ? 'altC' : cfg.alternatingRecoveryR ? 'altR' : null;
@@ -19045,6 +19141,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
 
         <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
+        ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) ? (engine.id.endsWith('_intel') ? `
+        <div class="cp-mart-card selected" style="cursor:default">
+          <div class="cp-mart-card-row">
+            <span class="cp-mart-card-icon">🧠</span>
+            <div class="cp-mart-card-body">
+              <div class="cp-mart-card-title">Smart Toggle (locked)</div>
+              <div class="cp-mart-card-desc">Intel bots always recover off the Recovery Pattern Engine's own live read of this bot's tick history — not a fixed or random Alt cycle. This is what makes it an "Intel" bot.</div>
+            </div>
+            <span class="cp-mart-card-dot"></span>
+          </div>
+        </div>` : `
         <div style="display:flex;flex-direction:column;gap:5px">
           ${(() => {
             const base = isOver ? 'OVER' : isUnder ? 'UNDER' : (c.tradeMode === 'odd' ? 'ODD' : 'EVEN');
@@ -19069,13 +19176,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               ${rm.sel?`<span class="cp-mart-card-dot"></span>`:''}
             </div>
           </div>`).join('')}
-        </div>
+        </div>`) : ''}
 
-        ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) ? `
+        ${((engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) && !engine.id.endsWith('_intel')) ? `
         <div style="margin-top:8px;padding:8px 10px;border-radius:9px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border)/0.4);font-size:8.5px;color:hsl(var(--muted-foreground));display:flex;align-items:center;gap:6px">
           <span>🧠</span><span>Live pattern rankings for Smart Toggle now live in the <b style="color:hsl(var(--primary))">Recovery Pattern Engine</b> terminal below the journal →</span>
         </div>` : ''}
 
+        ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) && !engine.id.endsWith('_intel') ? `
         <div class="cp-toggle-row" style="margin-top:10px;padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border))">
           <div style="display:flex;align-items:center;gap:10px">
             <button class="titan-toggle ${c.altAutomation?'on':''}" id="${rootId}-alt-auto" onclick="event.stopPropagation()"></button>
@@ -19084,7 +19192,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Session ends in a loss → auto-switch to the next pattern (A→B→C→R→A…)</div>
             </div>
           </div>
-        </div>
+        </div>` : ''}
       </div>
     </div>
 
@@ -24846,6 +24954,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       ${window.renderStakeAdditionTerminal(engine, rootId, c)}
 
 
+          ${engine.id.endsWith('_intel') ? `
+          <div class="cp-mart-card selected" style="cursor:default">
+            <div class="cp-mart-card-row">
+              <span class="cp-mart-card-icon">🧠</span>
+              <div class="cp-mart-card-body">
+                <div class="cp-mart-card-title">Smart Toggle (locked)</div>
+                <div class="cp-mart-card-desc">Intel bots always recover off the Recovery Pattern Engine's own live read of this bot's tick history — not a fixed or random Alt cycle. This is what makes it an "Intel" bot.</div>
+              </div>
+              <span class="cp-mart-card-dot"></span>
+            </div>
+          </div>` : `
           <div style="display:flex;flex-direction:column;gap:5px">
             ${(() => {
               const base = (c.tradeMode || engine.fixedTradeMode) === 'odd' ? 'ODD' : 'EVEN';
@@ -24870,12 +24989,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                 ${rm.sel?`<span class="cp-mart-card-dot"></span>`:''}
               </div>
             </div>`).join('')}
-          </div>
+          </div>`}
 
+          ${!engine.id.endsWith('_intel') ? `
           <div style="margin-top:8px;padding:8px 10px;border-radius:9px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border)/0.4);font-size:8.5px;color:hsl(var(--muted-foreground));display:flex;align-items:center;gap:6px">
             <span>🧠</span><span>Live pattern rankings for Smart Toggle now live in the <b style="color:hsl(var(--primary))">Recovery Pattern Engine</b> terminal below the journal →</span>
-          </div>
+          </div>` : ''}
 
+          ${!engine.id.endsWith('_intel') ? `
           <div class="cp-toggle-row" style="margin-top:10px;padding:9px 10px;border-radius:10px;background:hsl(var(--bg)/0.5);border:1px solid hsl(var(--border))">
             <div style="display:flex;align-items:center;gap:10px">
               <button class="titan-toggle ${c.altAutomation?'on':''}" id="${rootId}-alt-auto" onclick="event.stopPropagation()"></button>
@@ -24884,7 +25005,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                 <div style="font-size:9px;color:hsl(var(--muted-foreground));margin-top:1px">Session ends in a loss → auto-switch to the next pattern (A→B→C→R→A…)</div>
               </div>
             </div>
-          </div>
+          </div>` : ''}
         </div>
       </div>
 
@@ -26859,7 +26980,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market', 'flipintell'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
@@ -27050,6 +27171,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         };
     let eng;
     try { eng = new window.TitanEngine(opts); } catch(e) { console.error('[Hub] TitanEngine init failed:', e); return null; }
+    // Intel bots must always drive recovery off the Recovery Pattern Engine
+    // (Smart Toggle / smartRecovery) — the whole point of an "Intel" bot is
+    // that ITS pattern reading decides what happens next, not a fixed or
+    // random A/B/C/R flip cycle. If this engine's own persisted config (or
+    // a leftover Alt Automation rotation — see _rotateAltPattern) has it
+    // sitting on any Alt mode, force it back to Smart/Dynamic here, every
+    // time the engine is (re)built, and save so it sticks.
+    if (isIntelVariant && eng.config && !eng.config.smartRecovery) {
+      eng.setConfig({
+        smartRecovery: true,
+        alternatingRecovery: false, alternatingRecoveryB: false, alternatingRecoveryC: false, alternatingRecoveryR: false,
+        altAutomation: false, // would otherwise rotate it right back off Smart after a bad recovery chain
+      });
+      eng.saveConfig();
+    }
     eng.onUpdate = function () {
       const rootId = id + '-root';
       if (activeApp === id && titanBuilt[id]) {
@@ -27068,6 +27204,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function initBotTab(id) {
     if (id === 'market') {
       if (window.MarketIntelPanel) window.MarketIntelPanel.activate();
+      return;
+    }
+    if (id === 'flipintell') {
+      if (window.FlipIntellPanel) window.FlipIntellPanel.activate();
       return;
     }
     if (id === 'differ') {
@@ -27115,6 +27255,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function switchApp(id) {
     if (!VALID_APPS.includes(id)) id = 'dashboard';
     if (activeApp === 'market' && id !== 'market' && window.MarketIntelPanel) window.MarketIntelPanel.deactivate();
+    if (activeApp === 'flipintell' && id !== 'flipintell' && window.FlipIntellPanel) window.FlipIntellPanel.deactivate();
     activeApp = id;
     try { localStorage.setItem('hub_active_app', id); } catch (e) { /* storage unavailable — tab still switches for this session */ }
     const activeBtn = document.querySelector(`.hub-tab[data-app="${id}"]`);
@@ -29239,9 +29380,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // the in-memory recoveryLog array).
     renderRecoveryPanel();
 
-    // Stake Increase Terminal — sidebar box, also drives Smart Intel Drive
-    // (auto arm/disarm) as a side effect when that toggle is on.
-    renderStakeBox();
+    // Stake Increase Terminal used to render here as a sidebar box — it now
+    // lives in its own, much bigger "Flip Intell" tab (see the FLIP INTELL
+    // COMMAND TERMINAL script block near the end of this file), which runs
+    // its own independent render/tick loop while that tab is active.
   }
 
   // ── DYNAMIC RECOVERY INTEL TERMINAL ─────────────────────────────────────
@@ -29304,311 +29446,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (clearBtn) clearBtn.onclick = () => {
         if (confirm('Clear all logged recovery-step data? This cannot be undone.')) { mit.clearRecoveryStats(); renderRecoveryPanel(); }
       };
-    }
-  }
-
-  // ── STAKE INCREASE TERMINAL (sidebar) ───────────────────────────────────
-  // A single aggregate control surface over every bot's existing Stake
-  // Addition terminal (see renderStakeAdditionTerminal/bindStakeAdditionTerminal
-  // — this reads and writes the EXACT SAME engine.config.stakeAdditionArmed /
-  // stakeAdditionNextStake fields those per-tab terminals use, so arming a
-  // bot here shows up as armed on its own tab too, and vice versa — nothing
-  // here is a separate/parallel system. Only lists bots whose engine has
-  // already been built (i.e. its tab has been opened at least once, or it's
-  // one of the three Intel Auto-Trader engines) — it deliberately does NOT
-  // force-construct every bot's engine just because this tab is open, since
-  // that would open live market subscriptions for bots the operator may
-  // never intend to run.
-  const STAKE_BOX_BOT_IDS = ['even', 'odd', 'oldeven', 'oldodd', 'evenmr', 'oddmr', 'nexus', 'under', 'meanrev', 'risemr', 'fallmr', 'oldrisefall', 'matches', 'even_intel', 'odd_intel', 'matches_intel'];
-  const SMART_DRIVE_KEY = 'mit_smart_stake_drive';
-  let smartDriveOn = false;
-  try { smartDriveOn = localStorage.getItem(SMART_DRIVE_KEY) === '1'; } catch (e) {}
-  // ── Upgrade state: sort order + name filter for the sidebar list. Kept
-  // in memory only (resets on reload, same as drillSymbol/recoveryFilterBotId
-  // elsewhere on this page) — this is a viewing preference, not a setting
-  // worth persisting.
-  let stakeBoxSort = 'winrate'; // 'winrate' | 'name' | 'armed'
-  let stakeBoxFilter = '';
-
-  function stakeBoxEngine(id) {
-    const engines = getEngines();
-    if (id === 'even_intel' || id === 'odd_intel' || id === 'matches_intel') return intelEngine(id.replace(/_intel$/, ''));
-    return engines[id] || null;
-  }
-
-  // Same qualifying bar Smart Intel Drive uses to auto-arm — pulled out so
-  // the bulk "Arm All Qualifying" button applies the exact same rule on
-  // demand instead of waiting for the next tick.
-  function qualifiesForAutoArm(eng) {
-    if (!eng || !eng.getSuggestedNextStake) return null;
-    const { winRate, sessions } = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { winRate: null, sessions: 0 };
-    const streak = eng.getSessionWinStreak ? eng.getSessionWinStreak() : 0;
-    if (sessions >= 3 && streak >= 3 && winRate != null && winRate >= 0.6) {
-      const sug = eng.getSuggestedNextStake();
-      if (sug && sug.confidence === 'high' && sug.value > 0) return sug;
-    }
-    return null;
-  }
-
-
-  // Runs every render tick when Smart Intel Drive is ON. Purely additive to
-  // the manual controls below — it only touches a bot's Stake Addition arm
-  // state, never its base Stake $, never starts/stops the bot itself, and
-  // every action it takes is written to that bot's own log (addLog) so
-  // nothing happens silently. Simple hysteresis so it doesn't flip a bot's
-  // arm state back and forth on every tick: arms only on a genuinely strong
-  // read (3+ win streak, high suggestion confidence, ≥60% over last 10
-  // sessions), disarms only once the picture has clearly turned (<45%).
-  function smartDriveTick() {
-    if (!smartDriveOn) return;
-    STAKE_BOX_BOT_IDS.forEach((id) => {
-      const eng = stakeBoxEngine(id);
-      if (!eng || !eng.getSuggestedNextStake) return;
-      const { winRate, sessions } = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { winRate: null, sessions: 0 };
-      const streak = eng.getSessionWinStreak ? eng.getSessionWinStreak() : 0;
-      const armed = !!eng.config.stakeAdditionArmed;
-      if (!armed) {
-        const sug = qualifiesForAutoArm(eng);
-        if (sug) {
-          eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
-          eng.addLog('engine', 'SMART-INTEL', `🧠 Smart Intel Drive auto-armed Stake Addition at $${sug.value.toFixed(2)} — ${streak} winning sessions in a row, ${(winRate * 100).toFixed(0)}% over last ${sessions}.`);
-        }
-      } else if (armed && winRate != null && sessions >= 3 && winRate < 0.45) {
-        eng.setConfig({ stakeAdditionArmed: false });
-        eng.addLog('engine', 'SMART-INTEL', `🧠 Smart Intel Drive auto-disarmed Stake Addition — win rate dropped to ${(winRate * 100).toFixed(0)}% over last ${sessions} sessions.`);
-      }
-    });
-  }
-
-  // Which mode (parity target, or 'digit') a given Intel bot id trades, for
-  // the Pattern Intel cross-reference chip below. Returns null for non-Intel
-  // bots — they have no Pattern Intel signal to check.
-  function intelPatternModeFor(id) {
-    if (id === 'even_intel') return { mode: 'parity', target: 'even' };
-    if (id === 'odd_intel') return { mode: 'parity', target: 'odd' };
-    if (id === 'matches_intel') return { mode: 'digit' };
-    return null;
-  }
-
-  // Is THIS bot's own currently-selected market the one Pattern Intel
-  // currently rates as the single strongest confirmed + cross-confirmed
-  // setup on the whole board, for this bot's own predicted side? Ties the
-  // sidebar's "watch every bot" promise to the same engine actually gating
-  // Intel bot entries (see PatternIntelEngine, defined earlier in this file).
-  function intelPatternLiveFor(id, eng) {
-    const spec = intelPatternModeFor(id);
-    if (!spec || !window.PatternIntelEngine || !eng || !eng.config) return null;
-    const market = eng.config.selectedMarket;
-    if (!market) return null;
-    const sig = spec.mode === 'parity' ? window.PatternIntelEngine.getBestParitySignal() : window.PatternIntelEngine.getBestDigitSignal();
-    if (!sig || sig.symbol !== market) return null;
-    if (spec.mode === 'parity' && sig.predictedParity !== spec.target) return null;
-    return sig;
-  }
-
-  function renderStakeBox() {
-    const wrap = document.getElementById('mit-stakebox-wrap');
-    if (!wrap) return;
-    smartDriveTick();
-
-    let rows = STAKE_BOX_BOT_IDS.map((id) => ({ id, eng: stakeBoxEngine(id), label: recoveryLabel(id) }));
-    const withEngine = rows.filter((r) => r.eng);
-    // Attach computed metrics once so sort/filter/badges/rendering all read
-    // the exact same numbers instead of recomputing (and risking drift)
-    // three separate times.
-    withEngine.forEach((r) => {
-      r.stats = r.eng.getRecentSessionStats ? r.eng.getRecentSessionStats(10) : { sessions: 0, winRate: null };
-      r.armed = !!r.eng.config.stakeAdditionArmed;
-      r.sparkline = (r.eng.sessionOutcomes || []).slice(-10);
-    });
-    const armedCount = withEngine.filter((r) => r.armed).length;
-    let wrSum = 0, wrCount = 0;
-    withEngine.forEach((r) => { if (r.stats.winRate != null) { wrSum += r.stats.winRate; wrCount++; } });
-    const combinedWr = wrCount ? Math.round((wrSum / wrCount) * 100) : null;
-
-    // Best/worst callouts — only among bots with an actual sample (>=3
-    // sessions), and only shown at all once there's more than one such bot
-    // (otherwise "best" and "worst" would just both point at the same row).
-    const withSample = withEngine.filter((r) => r.stats.sessions >= 3 && r.stats.winRate != null);
-    let bestId = null, worstId = null;
-    if (withSample.length > 1) {
-      bestId = withSample.reduce((a, b) => (b.stats.winRate > a.stats.winRate ? b : a)).id;
-      worstId = withSample.reduce((a, b) => (b.stats.winRate < a.stats.winRate ? b : a)).id;
-      if (bestId === worstId) { bestId = null; worstId = null; }
-    }
-
-    // ── Filter (by name) then sort (opened bots first, always) ──────────
-    const q = stakeBoxFilter.trim().toLowerCase();
-    const opened = withEngine.filter((r) => !q || r.label.toLowerCase().includes(q));
-    const unopened = rows.filter((r) => !r.eng && (!q || r.label.toLowerCase().includes(q)));
-    opened.sort((a, b) => {
-      if (stakeBoxSort === 'name') return a.label.localeCompare(b.label);
-      if (stakeBoxSort === 'armed') {
-        if (a.armed !== b.armed) return a.armed ? -1 : 1;
-        return (b.stats.winRate ?? -1) - (a.stats.winRate ?? -1);
-      }
-      // 'winrate' default — no-sample bots sink to the bottom of the
-      // opened group rather than sorting arbitrarily by insertion order.
-      const aw = a.stats.winRate, bw = b.stats.winRate;
-      if (aw == null && bw == null) return 0;
-      if (aw == null) return 1;
-      if (bw == null) return -1;
-      return bw - aw;
-    });
-    const orderedRows = [...opened, ...unopened];
-
-    const qualifyingCount = withEngine.filter((r) => !r.armed && qualifiesForAutoArm(r.eng)).length;
-
-    const rowsHtml = orderedRows.map((r) => {
-      const { id, eng, label } = r;
-      if (!eng) {
-        return `<div class="mit-sb-row"><div class="mit-sb-row-top"><span class="mit-sb-name">${esc(label)}</span></div><div class="mit-sb-unopened">Not opened yet this session — visit its tab once (or start it in Intel Auto-Trader above) to monitor/arm it here.</div></div>`;
-      }
-      const c = eng.config;
-      const armed = r.armed;
-      const effective = eng.getEffectiveStake ? eng.getEffectiveStake() : c.stake;
-      const stats = r.stats;
-      const wrClass = stats.winRate == null ? 'neutral' : stats.winRate >= 0.6 ? 'good' : stats.winRate < 0.45 ? 'bad' : 'neutral';
-      const wrText = stats.winRate != null ? `${Math.round(stats.winRate * 100)}% / ${stats.sessions}` : '—';
-      const sug = eng.getSuggestedNextStake ? eng.getSuggestedNextStake() : null;
-      const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
-      const badge = id === bestId ? '<span class="mit-sb-badge best" title="Best win rate on this list right now">🔥 BEST</span>'
-        : id === worstId ? '<span class="mit-sb-badge worst" title="Worst win rate on this list right now">⚠ WATCH</span>' : '';
-      const sparkHtml = r.sparkline.length
-        ? `<div class="mit-sb-spark" title="Last ${r.sparkline.length} sessions, oldest → newest">${r.sparkline.map((w) => `<span class="mit-sb-dot ${w ? 'win' : 'loss'}"></span>`).join('')}</div>`
-        : '';
-      const patternSig = intelPatternLiveFor(id, eng);
-      const patternChip = patternSig
-        ? `<div class="mit-sb-hint smart-flag">🎯 Pattern Intel live on ${esc(patternSig.symbol)} — ${esc(patternSig.context)}</div>`
-        : '';
-      return `<div class="mit-sb-row ${armed ? 'armed' : ''}">
-        <div class="mit-sb-row-top">
-          <span class="mit-sb-name">${esc(label)}</span>
-          ${badge}
-          <span class="mit-sb-wr ${wrClass}">${wrText}</span>
-        </div>
-        ${sparkHtml}
-        <div class="mit-sb-stake">trading at $${effective.toFixed(2)}${armed ? ' (boosted)' : ''}</div>
-        <div class="mit-sb-controls" style="margin-top:6px">
-          <input type="number" step="0.01" min="0.01" id="mit-sb-next-${id}" value="${nextVal}" placeholder="next $">
-          <button type="button" class="mit-sb-arm ${armed ? 'on' : ''}" id="mit-sb-arm-${id}">${armed ? 'DISARM' : 'ARM'}</button>
-        </div>
-        ${sug ? `<div class="mit-sb-hint ${sug.confidence === 'high' ? 'smart-flag' : ''}">suggested $${sug.value.toFixed(2)} · ${sug.confidence} confidence</div>` : ''}
-        ${patternChip}
-      </div>`;
-    }).join('');
-
-    const html = `<div class="mit-stakebox">
-      <div class="mit-stakebox-head"><span style="font-size:16px">📈</span><span class="mit-stakebox-title">STAKE INCREASE TERMINAL</span></div>
-      <div class="mit-stakebox-sub">One place to watch every bot's win rate and set/arm each one's Stake Addition — same underlying setting as each bot's own tab, individual controls there are untouched. Only bots opened at least once this session appear fully below.</div>
-
-      <div class="mit-stakebox-kpis">
-        <div class="mit-sbk-cell"><div class="mit-sbk-label">Combined win rate</div><div class="mit-sbk-val">${combinedWr != null ? combinedWr + '%' : '—'}</div></div>
-        <div class="mit-sbk-cell"><div class="mit-sbk-label">Bots armed</div><div class="mit-sbk-val">${armedCount} / ${withEngine.length}</div></div>
-      </div>
-
-      <div class="mit-smartdrive-row">
-        <div class="mit-smartdrive-label">
-          <span class="mit-smartdrive-title">🧠 Smart Intel Drive</span>
-          <span class="mit-smartdrive-desc">Auto-arms a bot's Stake Addition on a strong streak, auto-disarms it if win rate drops. You can still arm/disarm any bot manually below regardless of this setting.</span>
-        </div>
-        <div class="mit-sd-toggle ${smartDriveOn ? 'on' : ''}" id="mit-sd-toggle"><div class="knob"></div></div>
-      </div>
-
-      <div class="mit-sb-toolbar">
-        <input type="text" id="mit-sb-search" class="mit-sb-search" placeholder="Filter bots…" value="${esc(stakeBoxFilter)}">
-        <select id="mit-sb-sort" class="mit-sb-sort">
-          <option value="winrate"${stakeBoxSort === 'winrate' ? ' selected' : ''}>Sort: Win rate</option>
-          <option value="armed"${stakeBoxSort === 'armed' ? ' selected' : ''}>Sort: Armed first</option>
-          <option value="name"${stakeBoxSort === 'name' ? ' selected' : ''}>Sort: Name</option>
-        </select>
-      </div>
-      <div class="mit-sb-bulkrow">
-        <button type="button" class="mit-sb-bulk" id="mit-sb-arm-qualifying" ${qualifyingCount === 0 ? 'disabled' : ''}>⚡ Arm All Qualifying (${qualifyingCount})</button>
-        <button type="button" class="mit-sb-bulk danger" id="mit-sb-disarm-all" ${armedCount === 0 ? 'disabled' : ''}>⛔ Disarm All (${armedCount})</button>
-      </div>
-
-      <div class="mit-stakebox-list">${rowsHtml || '<div class="mit-sb-unopened">No bots match that filter.</div>'}</div>
-      <div class="mit-stakebox-footnote">Arming here (or on a bot's own tab) only promotes stake at the end of a WINNING session, and always resets to the bot's normal Stake $ on page reload — same behavior as before, just watchable from one place now.</div>
-    </div>`;
-
-    // Preserve focus + caret + scroll position across the innerHTML swap
-    // below — the search box is exactly the kind of element that gets
-    // destroyed and recreated by setIfChanged, which would otherwise steal
-    // focus out from under every keystroke and make filtering unusable.
-    const focusedId = document.activeElement && document.activeElement.id;
-    const caret = focusedId === 'mit-sb-search' && document.activeElement.selectionStart;
-    const scrollTop = wrap.scrollTop;
-
-    if (setIfChanged(wrap, html)) {
-      wrap.scrollTop = scrollTop;
-      if (focusedId) {
-        const toFocus = document.getElementById(focusedId);
-        if (toFocus) {
-          toFocus.focus();
-          if (typeof caret === 'number' && toFocus.setSelectionRange) {
-            try { toFocus.setSelectionRange(caret, caret); } catch (e) {}
-          }
-        }
-      }
-      const sdToggle = document.getElementById('mit-sd-toggle');
-      if (sdToggle) sdToggle.onclick = () => {
-        smartDriveOn = !smartDriveOn;
-        try { localStorage.setItem(SMART_DRIVE_KEY, smartDriveOn ? '1' : '0'); } catch (e) {}
-        renderStakeBox();
-      };
-      const searchInp = document.getElementById('mit-sb-search');
-      if (searchInp) searchInp.oninput = (e) => { stakeBoxFilter = e.target.value; renderStakeBox(); };
-      const sortSel = document.getElementById('mit-sb-sort');
-      if (sortSel) sortSel.onchange = (e) => { stakeBoxSort = e.target.value; renderStakeBox(); };
-      const armQualBtn = document.getElementById('mit-sb-arm-qualifying');
-      if (armQualBtn) armQualBtn.onclick = () => {
-        let armedNow = 0;
-        withEngine.forEach((r) => {
-          if (r.armed) return;
-          const sug = qualifiesForAutoArm(r.eng);
-          if (sug) {
-            r.eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
-            r.eng.addLog('engine', 'SMART-INTEL', `⚡ Bulk-armed from Stake Increase Terminal at $${sug.value.toFixed(2)}.`);
-            armedNow++;
-          }
-        });
-        renderStakeBox();
-      };
-      const disarmAllBtn = document.getElementById('mit-sb-disarm-all');
-      if (disarmAllBtn) disarmAllBtn.onclick = () => {
-        withEngine.forEach((r) => {
-          if (!r.armed) return;
-          r.eng.setConfig({ stakeAdditionArmed: false });
-          r.eng.addLog('engine', 'SMART-INTEL', '⛔ Bulk-disarmed from Stake Increase Terminal.');
-        });
-        renderStakeBox();
-      };
-      STAKE_BOX_BOT_IDS.forEach((id) => {
-        const eng = stakeBoxEngine(id);
-        if (!eng) return;
-        const nextInp = document.getElementById(`mit-sb-next-${id}`);
-        if (nextInp) nextInp.onchange = (e) => {
-          const v = parseFloat(e.target.value);
-          eng.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
-        };
-        const armBtn = document.getElementById(`mit-sb-arm-${id}`);
-        if (armBtn) armBtn.onclick = () => {
-          const arming = !eng.config.stakeAdditionArmed;
-          if (arming) {
-            const v = parseFloat((document.getElementById(`mit-sb-next-${id}`) || {}).value);
-            if (isNaN(v) || v <= 0) {
-              const inp = document.getElementById(`mit-sb-next-${id}`);
-              if (inp) { inp.style.borderColor = 'hsl(var(--loss))'; inp.placeholder = 'Enter a stake first!'; inp.focus(); setTimeout(() => { inp.style.borderColor = ''; }, 1500); }
-              return;
-            }
-            eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: v });
-          } else {
-            eng.setConfig({ stakeAdditionArmed: false });
-          }
-          renderStakeBox();
-        };
-      });
     }
   }
 
@@ -29927,15 +29764,26 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-auto-jempty { font-size:9px; opacity:.4; text-align:center; padding:8px 0; }
       .mit-auto-topnote { font-size:9px; opacity:.6; line-height:1.55; margin-bottom:8px; padding:9px 12px; border-radius:9px; border:1px solid hsl(var(--border)/0.45); background:hsl(var(--card)/0.4); }
 
-      /* ── Two-column body: main content + sticky right sidebar ────────── */
+      /* ── Body: single column — the Stake Increase Terminal that used to
+         live in a sticky right sidebar here now lives in its own, much
+         bigger "Flip Intell" tab (see the FLIP INTELL COMMAND TERMINAL
+         script block near the end of the file). ── */
       .mit-body-grid { display:grid; grid-template-columns:1fr; gap:16px; align-items:start; }
-      @media (min-width: 980px) {
-        .mit-body-grid { grid-template-columns:minmax(0,1fr) 360px; }
-        .mit-side-col { position:sticky; top:12px; max-height:calc(100vh - 24px); overflow-y:auto; }
-        .mit-side-col::-webkit-scrollbar { width:3px; }
-        .mit-side-col::-webkit-scrollbar-thumb { background:hsl(0 0% 100%/0.12); border-radius:3px; }
-      }
       .mit-main-col { min-width:0; }
+
+      /* ── Pointer card to the new Flip Intell tab (replaces the old
+         inline Stake Increase Terminal sidebar) ──────────────────────── */
+      .mit-flipintell-pointer { position:relative; overflow:hidden; display:flex; align-items:center; gap:12px; margin-top:4px; margin-bottom:18px; padding:14px 16px; border-radius:14px; text-decoration:none;
+        border:1px solid hsl(var(--primary)/0.4); background:linear-gradient(115deg, hsl(var(--primary)/0.16), hsl(var(--win)/0.08)); backdrop-filter:blur(10px); cursor:pointer;
+        box-shadow:0 0 0 1px hsl(var(--primary)/0.08), 0 0 26px hsl(var(--primary)/0.14); transition:transform .2s cubic-bezier(.16,1,.3,1), box-shadow .25s ease, border-color .25s ease; }
+      .mit-flipintell-pointer:hover { transform:translateY(-2px); border-color:hsl(var(--primary)/0.65); box-shadow:0 10px 30px hsl(0 0% 0%/0.35), 0 0 34px hsl(var(--primary)/0.22); }
+      .mit-flipintell-pointer::before { content:''; position:absolute; top:0; left:-30%; width:30%; height:100%; background:linear-gradient(90deg, transparent, hsl(255 100% 100%/0.10), transparent); transform:skewX(-18deg); animation:mit-shimmer-sweep 4.5s ease-in-out infinite; }
+      .mit-flipintell-pointer-ico { font-size:22px; flex:0 0 auto; filter:drop-shadow(0 0 8px hsl(var(--primary)/0.7)); animation:mit-pulse-dot 2.2s ease-in-out infinite; }
+      .mit-flipintell-pointer-text { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+      .mit-flipintell-pointer-title { font-family:'Outfit',sans-serif; font-weight:800; font-size:12px; color:hsl(var(--foreground)); }
+      .mit-flipintell-pointer-sub { font-size:9.5px; opacity:.65; line-height:1.4; }
+      .mit-flipintell-pointer-go { flex:0 0 auto; font-family:'Outfit',sans-serif; font-weight:800; font-size:10px; letter-spacing:.3px; padding:8px 12px; border-radius:9px;
+        background:hsl(var(--primary)/0.22); border:1px solid hsl(var(--primary)/0.55); color:hsl(var(--foreground)); white-space:nowrap; }
 
       /* ── Dynamic Recovery Intel Terminal ─────────────────────────────── */
       .mit-recovery-box { position:relative; overflow:hidden; border-radius:14px; padding:14px 15px; border:1px solid hsl(var(--border)/0.55);
@@ -29959,64 +29807,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-rstep .rs-c { font-size:7px; opacity:.6; margin-top:1px; }
       .mit-recovery-empty { font-size:9.5px; opacity:.5; text-align:center; padding:12px 0; }
 
-      /* ── Stake Increase Terminal (big sidebar box) ───────────────────── */
-      .mit-stakebox { position:relative; overflow:hidden; border-radius:16px; padding:16px; border:1.5px solid hsl(var(--primary)/0.4);
-        background:linear-gradient(160deg, hsl(var(--card)/0.92) 0%, hsl(var(--bg-soft)/0.7) 100%); backdrop-filter:blur(14px);
-        box-shadow:0 4px 22px hsl(0 0% 0%/0.35), 0 0 30px hsl(var(--primary)/0.08), inset 0 1px 0 hsl(255 100% 100%/0.06); }
-      .mit-stakebox-head { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
-      .mit-stakebox-title { font-family:'Outfit',sans-serif; font-weight:900; font-size:16px; letter-spacing:.6px; text-transform:uppercase;
-        color:hsl(var(--primary)); text-shadow:0 0 12px hsl(var(--primary)/0.65), 0 0 26px hsl(var(--primary)/0.3); }
-      .mit-stakebox-sub { font-size:8.5px; opacity:.55; line-height:1.5; margin-bottom:12px; }
-      .mit-stakebox-kpis { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
-      .mit-sbk-cell { padding:9px 10px; border-radius:10px; border:1px solid hsl(var(--border)/0.4); background:hsl(var(--bg)/0.4); text-align:center; }
-      .mit-sbk-label { font-size:7px; letter-spacing:.6px; opacity:.55; text-transform:uppercase; }
-      .mit-sbk-val { font-family:'Outfit',sans-serif; font-size:16px; font-weight:900; margin-top:2px; }
-      .mit-smartdrive-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; border-radius:11px;
-        border:1px solid hsl(var(--border)/0.5); background:hsl(var(--card)/0.5); margin-bottom:12px; }
-      .mit-smartdrive-label { display:flex; flex-direction:column; gap:1px; }
-      .mit-smartdrive-title { font-family:'Outfit',sans-serif; font-size:10px; font-weight:800; }
-      .mit-smartdrive-desc { font-size:8px; opacity:.55; line-height:1.4; max-width:210px; }
-      .mit-sd-toggle { position:relative; width:38px; height:20px; border-radius:999px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.3); cursor:pointer; flex:0 0 auto; }
-      .mit-sd-toggle.on { background:linear-gradient(90deg, hsl(var(--primary)/0.55), hsl(var(--primary)/0.3)); border-color:hsl(var(--primary)/0.7); }
-      .mit-sd-toggle .knob { position:absolute; top:1px; left:1px; width:16px; height:16px; border-radius:50%; background:#fff; transition:transform .18s ease; }
-      .mit-sd-toggle.on .knob { transform:translateX(18px); }
-      .mit-stakebox-list { display:flex; flex-direction:column; gap:8px; }
-      .mit-sb-row { padding:9px 10px; border-radius:11px; border:1px solid hsl(var(--border)/0.45); background:hsl(var(--bg)/0.35); }
-      .mit-sb-row.armed { border-color:hsl(var(--win)/0.5); background:hsl(var(--win)/0.06); }
-      .mit-sb-row-top { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
-      .mit-sb-name { font-family:'Outfit',sans-serif; font-weight:800; font-size:10.5px; flex:1; }
-      .mit-sb-wr { font-size:8.5px; padding:2px 6px; border-radius:999px; font-weight:700; }
-      .mit-sb-wr.good { background:hsl(var(--win)/0.15); color:hsl(var(--win)); }
-      .mit-sb-wr.bad { background:hsl(var(--loss)/0.15); color:hsl(var(--loss)); }
-      .mit-sb-wr.neutral { background:hsl(var(--muted)/0.25); color:hsl(var(--muted-foreground)); }
-      .mit-sb-stake { font-size:8.5px; opacity:.7; font-variant-numeric:tabular-nums; }
-      .mit-sb-controls { display:flex; align-items:center; gap:6px; }
-      .mit-sb-controls input { width:100%; padding:5px 7px; border-radius:7px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
-        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10px; text-align:center; }
-      .mit-sb-arm { padding:6px 9px; border-radius:7px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.25);
-        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-weight:800; font-size:8px; letter-spacing:.3px; cursor:pointer; white-space:nowrap; flex:0 0 auto; }
-      .mit-sb-arm.on { background:linear-gradient(90deg, hsl(var(--win)/0.3), hsl(var(--win)/0.14)); border-color:hsl(var(--win)/0.6); color:hsl(var(--win)); }
-      .mit-sb-hint { font-size:7.5px; opacity:.5; margin-top:5px; line-height:1.4; }
-      .mit-sb-hint.smart-flag { opacity:.85; color:hsl(var(--primary)); }
-      .mit-sb-unopened { font-size:8.5px; opacity:.45; text-align:center; padding:8px 0; font-style:italic; }
-      .mit-stakebox-footnote { font-size:7.5px; opacity:.45; line-height:1.5; margin-top:10px; padding-top:9px; border-top:1px dashed hsl(var(--border)/0.4); }
-      .mit-sb-toolbar { display:flex; gap:6px; margin-bottom:8px; }
-      .mit-sb-search { flex:1; padding:7px 9px; border-radius:8px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
-        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:9.5px; }
-      .mit-sb-sort { padding:7px 8px; border-radius:8px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
-        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-size:8.5px; font-weight:700; cursor:pointer; }
-      .mit-sb-bulkrow { display:flex; gap:6px; margin-bottom:10px; }
-      .mit-sb-bulk { flex:1; padding:8px 6px; border-radius:9px; border:1px solid hsl(var(--primary)/0.5); background:hsl(var(--primary)/0.1);
-        color:hsl(var(--primary)); font-family:'Outfit',sans-serif; font-weight:800; font-size:8px; letter-spacing:.3px; cursor:pointer; }
-      .mit-sb-bulk.danger { border-color:hsl(var(--loss)/0.5); background:hsl(var(--loss)/0.08); color:hsl(var(--loss)); }
-      .mit-sb-bulk:disabled { opacity:.35; cursor:not-allowed; }
-      .mit-sb-badge { font-size:7px; padding:2px 6px; border-radius:999px; font-weight:800; letter-spacing:.3px; white-space:nowrap; }
-      .mit-sb-badge.best { background:hsl(var(--win)/0.18); color:hsl(var(--win)); }
-      .mit-sb-badge.worst { background:hsl(var(--loss)/0.18); color:hsl(var(--loss)); }
-      .mit-sb-spark { display:flex; gap:2px; margin-bottom:6px; }
-      .mit-sb-dot { width:6px; height:6px; border-radius:50%; background:hsl(var(--muted)/0.3); flex:0 0 auto; }
-      .mit-sb-dot.win { background:hsl(var(--win)/0.85); }
-      .mit-sb-dot.loss { background:hsl(var(--loss)/0.6); }
     `;
     document.head.appendChild(css);
   }
@@ -30106,9 +29896,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div id="mit-live-container"></div>
         </div>
 
-        </div>
-        <div class="mit-side-col">
-          <div id="mit-stakebox-wrap"></div>
+        <a href="javascript:void(0)" class="mit-flipintell-pointer" id="mit-flipintell-pointer">
+          <span class="mit-flipintell-pointer-ico">⚡</span>
+          <span class="mit-flipintell-pointer-text">
+            <span class="mit-flipintell-pointer-title">Stake Increase Terminal has moved → Flip Intell</span>
+            <span class="mit-flipintell-pointer-sub">Every bot's Stake Addition arm state, win-rate ranking and Auto Flip Drive now live in their own full-size command tab.</span>
+          </span>
+          <span class="mit-flipintell-pointer-go">Open Flip Intell →</span>
+        </a>
+
         </div>
         </div>
       </div>`;
@@ -30118,6 +29914,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.classList.toggle('on', alertsEnabled);
       if (!alertsEnabled) { pendingSignal = null; lastAlertBanner = null; }
     };
+    const flipPointer = document.getElementById('mit-flipintell-pointer');
+    if (flipPointer) flipPointer.onclick = () => { if (window.UnifiedHub) window.UnifiedHub.switchApp('flipintell'); };
     document.getElementById('mit-master-toggle').onclick = function () {
       const mit = window.MarketIntelTerminal;
       if (!mit) return;
@@ -30218,6 +30016,710 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   window.MarketIntelPanel = { activate, deactivate };
+})();
+</script>
+
+<script>
+// ── FLIP INTELL COMMAND TERMINAL ───────────────────────────────────────────
+// A regular sidebar tab (data-app="flipintell" → #panel-flipintell). This is
+// the upgraded, full-size home for what used to be the small "Stake Increase
+// Terminal" sidebar box on the Market Intel tab — same underlying engine
+// fields (engine.config.stakeAdditionArmed / stakeAdditionNextStake), same
+// per-bot own-tab controls untouched, just a much bigger console with every
+// bot as its own animated card, plus a new master "Auto Flip Drive" toggle
+// that can run the whole thing hands-free.
+(function () {
+  'use strict';
+  let mounted = false;
+  let refreshTimer = null;
+
+  const lastHtml = new Map(); // elementId -> last-written HTML string
+  function setIfChanged(el, html) {
+    if (!el) return false;
+    if (lastHtml.get(el.id) === html) return false;
+    lastHtml.set(el.id, html);
+    el.innerHTML = html;
+    return true;
+  }
+  function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+  // Every bot this console can see — the exact same set the old sidebar box
+  // watched (13 regular/old-version bots + the 3 fully-separate Intel
+  // Auto-Trader engines).
+  const FLIP_LABELS = {
+    even:          { label: 'Even Omega',          icon: '🎯' },
+    odd:           { label: 'Odd Omega',           icon: '🎯' },
+    oldeven:       { label: 'Even Omega (Old)',    icon: '🎯' },
+    oldodd:        { label: 'Odd Omega (Old)',     icon: '🎯' },
+    evenmr:        { label: 'Even MR',             icon: '🎯' },
+    oddmr:         { label: 'Odd MR',              icon: '🎯' },
+    nexus:         { label: 'Over (Nexus)',        icon: '📈' },
+    under:         { label: 'Under (Nexus)',       icon: '📉' },
+    meanrev:       { label: 'Rise & Fall MR',      icon: '📊' },
+    risemr:        { label: 'Rise MR',             icon: '📊' },
+    fallmr:        { label: 'Fall MR',             icon: '📊' },
+    oldrisefall:   { label: 'Higher/Lower (Old)',  icon: '📊' },
+    matches:       { label: 'Matches',             icon: '🔢' },
+    even_intel:    { label: 'Even (Intel)',        icon: '🤖' },
+    odd_intel:     { label: 'Odd (Intel)',         icon: '🤖' },
+    matches_intel: { label: 'Matches (Intel)',     icon: '🤖' },
+  };
+  const FLIP_BOT_IDS = Object.keys(FLIP_LABELS);
+  function flipLabel(id) { return (FLIP_LABELS[id] || {}).label || id; }
+  function flipIcon(id) { return (FLIP_LABELS[id] || {}).icon || '🤖'; }
+
+  function getEngines() { return window.__BotEngines || window._hubEngines || {}; }
+
+  // Fully-separate even_intel/odd_intel/matches_intel engines get force-
+  // constructed via window.ensureBotEngine (they're pre-created at page
+  // load anyway, see the Hub controller's init()). Every other bot is only
+  // read from the live engines map — this deliberately does NOT open a
+  // bot's live market subscription just because this tab is open; a bot
+  // only shows up fully once its own tab (or Intel Auto-Trader) has built it.
+  function flipEngine(id) {
+    const engines = getEngines();
+    if (id === 'even_intel' || id === 'odd_intel' || id === 'matches_intel') {
+      const baseId = id;
+      let eng = engines[baseId];
+      if (!eng && window.ensureBotEngine) {
+        try { eng = window.ensureBotEngine(baseId); } catch (e) { console.error(`[FlipIntell] ensureBotEngine(${baseId}) error:`, e); }
+      }
+      return eng || null;
+    }
+    return engines[id] || null;
+  }
+
+  // ── Auto Flip Drive state ─────────────────────────────────────────────
+  // Migrates the old Market Intel sidebar's "Smart Intel Drive" preference
+  // once, so upgrading doesn't silently reset anyone's setting, then lives
+  // under its own key from here on.
+  const DRIVE_KEY = 'flipintell_auto_drive';
+  const LEGACY_DRIVE_KEY = 'mit_smart_stake_drive';
+  let driveOn = false;
+  try {
+    const stored = localStorage.getItem(DRIVE_KEY);
+    if (stored != null) driveOn = stored === '1';
+    else driveOn = localStorage.getItem(LEGACY_DRIVE_KEY) === '1';
+  } catch (e) {}
+
+  let sortMode = 'winrate'; // 'winrate' | 'name' | 'armed'
+  let filterText = '';
+  let driveLog = []; // recent auto-drive actions, newest first, capped
+
+  // ── Risk Amount — the amount a bot goes to next when YOU decide to press,
+  // not the system's own win-streak suggestion. Lives in its own field below
+  // "Next $" on every card; if it's filled, arming uses it instead of the
+  // suggested value. Persisted per bot so a risk amount you set sticks
+  // around (unlike stakeAdditionNextStake, which the engine always resets
+  // to unarmed on reload).
+  function riskKey(id) { return `flip_risk_${id}`; }
+  function loadRiskAmount(id) {
+    try { const v = parseFloat(localStorage.getItem(riskKey(id))); return (!isNaN(v) && v > 0) ? v : null; } catch (e) { return null; }
+  }
+  function saveRiskAmount(id, v) {
+    try { if (v > 0) localStorage.setItem(riskKey(id), String(v)); else localStorage.removeItem(riskKey(id)); } catch (e) {}
+  }
+
+  // ── Session Risk Cap — an optional ceiling (in $) on total extra stake
+  // armed across every bot at once. Empty/0 = unlimited. This is the one
+  // thing standing between "triple it" and the board quietly stacking up
+  // more exposure than intended — it blocks BOTH manual arms and Auto Flip
+  // Drive once the cap would be crossed, and is the first mechanical
+  // safety valve of a few described in the drive panel.
+  const RISK_CAP_KEY = 'flipintell_risk_cap';
+  let riskCap = null;
+  try { const v = parseFloat(localStorage.getItem(RISK_CAP_KEY)); riskCap = (!isNaN(v) && v > 0) ? v : null; } catch (e) {}
+
+  function totalArmedExposure(excludeId) {
+    let sum = 0;
+    FLIP_BOT_IDS.forEach((id) => {
+      if (id === excludeId) return;
+      const eng = flipEngine(id);
+      if (eng && eng.config && eng.config.stakeAdditionArmed && eng.config.stakeAdditionNextStake > 0) sum += eng.config.stakeAdditionNextStake;
+    });
+    return sum;
+  }
+  function capBlocks(id, amount) {
+    if (!riskCap) return false;
+    return (totalArmedExposure(id) + amount) > riskCap + 1e-9;
+  }
+
+  function pushDriveLog(text) {
+    driveLog.unshift({ t: Date.now(), text });
+    if (driveLog.length > 12) driveLog.length = 12;
+  }
+
+  // Same qualifying bar the old Smart Intel Drive used — pulled out so the
+  // bulk "Arm All Qualifying" button applies the exact same rule on demand
+  // instead of waiting for the next auto-drive tick.
+  function qualifiesForAutoArm(eng) {
+    if (!eng || !eng.getSuggestedNextStake) return null;
+    const { winRate, sessions } = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { winRate: null, sessions: 0 };
+    const streak = eng.getSessionWinStreak ? eng.getSessionWinStreak() : 0;
+    if (sessions >= 3 && streak >= 3 && winRate != null && winRate >= 0.6) {
+      const sug = eng.getSuggestedNextStake();
+      if (sug && sug.confidence === 'high' && sug.value > 0) return sug;
+    }
+    return null;
+  }
+
+  // Runs every render tick while Auto Flip Drive is ON. Purely additive to
+  // the manual controls below — only touches stakeAdditionArmed/
+  // stakeAdditionNextStake, never a bot's base Stake $ and never starts/
+  // stops a bot itself. Every action is written to that bot's own log
+  // (addLog) so nothing happens silently, same as before.
+  function driveTick() {
+    if (!driveOn) return;
+    FLIP_BOT_IDS.forEach((id) => {
+      const eng = flipEngine(id);
+      if (!eng || !eng.getSuggestedNextStake) return;
+      const { winRate, sessions } = eng.getRecentSessionStats ? eng.getRecentSessionStats(10) : { winRate: null, sessions: 0 };
+      const streak = eng.getSessionWinStreak ? eng.getSessionWinStreak() : 0;
+      const armed = !!eng.config.stakeAdditionArmed;
+      if (!armed) {
+        const sug = qualifiesForAutoArm(eng);
+        if (sug) {
+          if (capBlocks(id, sug.value)) {
+            const msg = `⏸ Would have armed at $${sug.value.toFixed(2)} but that crosses your $${riskCap.toFixed(2)} Session Risk Cap — skipped.`;
+            pushDriveLog(`${flipLabel(id)}: ${msg}`);
+            return;
+          }
+          eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
+          const msg = `🚀 Auto Flip Drive armed at $${sug.value.toFixed(2)} — ${streak} winning sessions in a row, ${(winRate * 100).toFixed(0)}% over last ${sessions}.`;
+          eng.addLog('engine', 'FLIP-INTELL', msg);
+          pushDriveLog(`${flipLabel(id)}: ${msg}`);
+        }
+      } else if (armed && winRate != null && sessions >= 3 && winRate < 0.45) {
+        eng.setConfig({ stakeAdditionArmed: false });
+        const msg = `⛔ Auto Flip Drive disarmed — win rate dropped to ${(winRate * 100).toFixed(0)}% over last ${sessions} sessions.`;
+        eng.addLog('engine', 'FLIP-INTELL', msg);
+        pushDriveLog(`${flipLabel(id)}: ${msg}`);
+      }
+    });
+  }
+
+  // Flipping the master toggle ON hands control to the driver — any bot a
+  // person armed by hand is disarmed first (logged, on that bot's own
+  // journal too) so there's exactly one thing deciding arm state from that
+  // point on, instead of a manual arm silently fighting the automation on
+  // the very next tick.
+  function engageDrive() {
+    let disarmedCount = 0;
+    FLIP_BOT_IDS.forEach((id) => {
+      const eng = flipEngine(id);
+      if (!eng || !eng.config || !eng.config.stakeAdditionArmed) return;
+      eng.setConfig({ stakeAdditionArmed: false });
+      const msg = '⛔ Disarmed — Auto Flip Drive just took over manual control.';
+      eng.addLog('engine', 'FLIP-INTELL', msg);
+      pushDriveLog(`${flipLabel(id)}: ${msg}`);
+      disarmedCount++;
+    });
+    driveOn = true;
+    try { localStorage.setItem(DRIVE_KEY, '1'); } catch (e) {}
+    pushDriveLog(disarmedCount
+      ? `🚀 Auto Flip Drive engaged — took over from ${disarmedCount} manually-armed bot${disarmedCount === 1 ? '' : 's'}.`
+      : '🚀 Auto Flip Drive engaged.');
+  }
+  function disengageDrive() {
+    driveOn = false;
+    try { localStorage.setItem(DRIVE_KEY, '0'); } catch (e) {}
+    pushDriveLog('⏸ Auto Flip Drive switched off — arming is manual again.');
+  }
+
+  function renderFlip() {
+    const grid = document.getElementById('fi-grid');
+    if (!grid) return;
+    driveTick();
+
+    let rows = FLIP_BOT_IDS.map((id) => ({ id, eng: flipEngine(id), label: flipLabel(id), icon: flipIcon(id) }));
+    const withEngine = rows.filter((r) => r.eng);
+    withEngine.forEach((r) => {
+      r.stats = r.eng.getRecentSessionStats ? r.eng.getRecentSessionStats(10) : { sessions: 0, winRate: null };
+      r.armed = !!r.eng.config.stakeAdditionArmed;
+      r.streak = r.eng.getSessionWinStreak ? r.eng.getSessionWinStreak() : 0;
+      r.sparkline = (r.eng.sessionOutcomes || []).slice(-10);
+    });
+    const armedCount = withEngine.filter((r) => r.armed).length;
+    let wrSum = 0, wrCount = 0;
+    withEngine.forEach((r) => { if (r.stats.winRate != null) { wrSum += r.stats.winRate; wrCount++; } });
+    const combinedWr = wrCount ? Math.round((wrSum / wrCount) * 100) : null;
+
+    const withSample = withEngine.filter((r) => r.stats.sessions >= 3 && r.stats.winRate != null);
+    let bestId = null, worstId = null;
+    if (withSample.length > 1) {
+      bestId = withSample.reduce((a, b) => (b.stats.winRate > a.stats.winRate ? b : a)).id;
+      worstId = withSample.reduce((a, b) => (b.stats.winRate < a.stats.winRate ? b : a)).id;
+      if (bestId === worstId) { bestId = null; worstId = null; }
+    }
+
+    const q = filterText.trim().toLowerCase();
+    const opened = withEngine.filter((r) => !q || r.label.toLowerCase().includes(q));
+    const unopened = rows.filter((r) => !r.eng && (!q || r.label.toLowerCase().includes(q)));
+    opened.sort((a, b) => {
+      if (sortMode === 'name') return a.label.localeCompare(b.label);
+      if (sortMode === 'armed') {
+        if (a.armed !== b.armed) return a.armed ? -1 : 1;
+        return (b.stats.winRate ?? -1) - (a.stats.winRate ?? -1);
+      }
+      const aw = a.stats.winRate, bw = b.stats.winRate;
+      if (aw == null && bw == null) return 0;
+      if (aw == null) return 1;
+      if (bw == null) return -1;
+      return bw - aw;
+    });
+    const orderedRows = [...opened, ...unopened];
+    const qualifyingCount = withEngine.filter((r) => !r.armed && qualifiesForAutoArm(r.eng)).length;
+
+    // ── KPI strip ──────────────────────────────────────────────────────
+    const kpiHtml = `
+      <div class="fi-kpi ${combinedWr != null && combinedWr >= 55 ? 'fi-kpi-good' : combinedWr != null && combinedWr < 45 ? 'fi-kpi-bad' : 'fi-kpi-mid'}">
+        <div class="fi-kpi-label">Combined win rate</div><div class="fi-kpi-val">${combinedWr != null ? combinedWr + '%' : '—'}</div>
+      </div>
+      <div class="fi-kpi ${armedCount ? 'fi-kpi-good' : 'fi-kpi-mid'}">
+        <div class="fi-kpi-label">Bots armed</div><div class="fi-kpi-val">${armedCount} / ${withEngine.length}</div>
+      </div>
+      <div class="fi-kpi fi-kpi-mid">
+        <div class="fi-kpi-label">Qualifying now</div><div class="fi-kpi-val">${qualifyingCount}</div>
+      </div>
+      <div class="fi-kpi ${driveOn ? 'fi-kpi-good' : 'fi-kpi-mid'}">
+        <div class="fi-kpi-label">Auto Flip Drive</div><div class="fi-kpi-val">${driveOn ? 'ON' : 'OFF'}</div>
+      </div>`;
+    setIfChanged(document.getElementById('fi-kpi-row'), kpiHtml);
+
+    // ── Drive panel ──────────────────────────────────────────────────
+    const driveToggle = document.getElementById('fi-drive-toggle');
+    if (driveToggle) {
+      driveToggle.classList.toggle('on', driveOn);
+      const lbl = driveToggle.querySelector('.fi-drive-toggle-label');
+      if (lbl) lbl.textContent = driveOn ? 'DRIVING' : 'OFF';
+    }
+    const panel = document.getElementById('fi-drive-panel');
+    if (panel) panel.classList.toggle('on', driveOn);
+    const noteHtml = driveOn
+      ? `Auto Flip Drive is live: arming bots on a genuine hot streak (3+ winning sessions in a row, ≥60% over the last 10, high-confidence suggestion) and disarming anything whose win rate has clearly turned (&lt;45% over 3+ sessions). Manual ARM/DISARM below is disabled while it's driving — flip it off to take back manual control.`
+      : `Off — arming is fully manual below, exactly like each bot's own tab. Turn this on to hand stake-increase decisions to the same rules, running continuously across every bot at once.`;
+    setIfChanged(document.getElementById('fi-drive-note'), noteHtml);
+    const logHtml = driveLog.length
+      ? driveLog.map((l) => `<div class="fi-drive-log-row">${esc(l.text)}</div>`).join('')
+      : '<div class="fi-drive-log-empty">No auto-drive actions yet this session.</div>';
+    setIfChanged(document.getElementById('fi-drive-log'), logHtml);
+
+    const tabDot = document.getElementById('flipintell-tab-dot');
+    if (tabDot) tabDot.style.display = driveOn ? '' : 'none';
+    const headerArmed = document.getElementById('fi-header-armed');
+    if (headerArmed) headerArmed.textContent = `${armedCount} armed / ${withEngine.length} watched`;
+    const capCurrent = document.getElementById('fi-riskcap-current');
+    if (capCurrent) {
+      const exposure = totalArmedExposure(null);
+      capCurrent.textContent = riskCap ? `$${exposure.toFixed(2)} / $${riskCap.toFixed(2)} armed` : `$${exposure.toFixed(2)} armed`;
+      capCurrent.classList.toggle('over', !!riskCap && exposure >= riskCap * 0.9);
+    }
+
+    // ── Bot roster grid ──────────────────────────────────────────────
+    const cardsHtml = orderedRows.map((r, idx) => {
+      const { id, eng, label, icon } = r;
+      if (!eng) {
+        return `<div class="fi-card fi-card-unopened" style="--fi-i:${idx}">
+          <div class="fi-card-top"><span class="fi-card-icon">${icon}</span><span class="fi-card-name">${esc(label)}</span></div>
+          <div class="fi-card-unopened-note">Not opened yet this session — visit its tab once (or start it in Intel Auto-Trader) to watch/arm it here.</div>
+        </div>`;
+      }
+      const c = eng.config;
+      const armed = r.armed;
+      const effective = eng.getEffectiveStake ? eng.getEffectiveStake() : c.stake;
+      const stats = r.stats;
+      const wrClass = stats.winRate == null ? 'neutral' : stats.winRate >= 0.6 ? 'good' : stats.winRate < 0.45 ? 'bad' : 'neutral';
+      const wrText = stats.winRate != null ? `${Math.round(stats.winRate * 100)}% / ${stats.sessions}` : '—';
+      const sug = eng.getSuggestedNextStake ? eng.getSuggestedNextStake() : null;
+      const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
+      const riskVal = loadRiskAmount(id) || '';
+      const badge = id === bestId ? '<span class="fi-badge best" title="Best win rate on this board right now">🔥 BEST</span>'
+        : id === worstId ? '<span class="fi-badge worst" title="Worst win rate on this board right now">⚠ WATCH</span>' : '';
+      const sparkHtml = r.sparkline.length
+        ? `<div class="fi-spark" title="Last ${r.sparkline.length} sessions, oldest → newest">${r.sparkline.map((w) => `<span class="fi-dot ${w ? 'win' : 'loss'}"></span>`).join('')}</div>`
+        : '';
+      const streakHtml = r.streak >= 2 ? `<span class="fi-streak">🔥 ${r.streak}-win streak</span>` : '';
+      return `<div class="fi-card ${armed ? 'armed' : ''}" style="--fi-i:${idx}">
+        <div class="fi-card-accent"></div>
+        <div class="fi-card-top">
+          <span class="fi-card-icon">${icon}</span>
+          <span class="fi-card-name">${esc(label)}</span>
+          ${badge}
+        </div>
+        <div class="fi-card-mid">
+          <span class="fi-card-wr ${wrClass}">${wrText}</span>
+          ${streakHtml}
+        </div>
+        ${sparkHtml}
+        <div class="fi-card-stake">trading at $${effective.toFixed(2)}${armed ? ' <span class="fi-boosted">(boosted)</span>' : ''}</div>
+        <div class="fi-card-controls">
+          <input type="number" step="0.01" min="0.01" id="fi-next-${id}" value="${nextVal}" placeholder="next $" ${driveOn ? 'disabled' : ''}>
+          <button type="button" class="fi-arm ${armed ? 'on' : ''}" id="fi-arm-${id}" ${driveOn ? 'disabled title="Auto Flip Drive is managing this — turn it off to arm/disarm by hand"' : ''}>${armed ? 'DISARM' : 'ARM'}</button>
+        </div>
+        <div class="fi-risk-row">
+          <div class="fi-risk-label">Risk amount — when you're ready to go big, this wins over the suggestion above.</div>
+          <div class="fi-risk-controls">
+            <input type="number" step="0.01" min="0.01" id="fi-risk-${id}" value="${riskVal}" placeholder="risk $" ${driveOn ? 'disabled' : ''}>
+            <button type="button" class="fi-risk-x" id="fi-riskx2-${id}" ${driveOn ? 'disabled' : ''} title="Set risk amount to 2× base stake">×2</button>
+            <button type="button" class="fi-risk-x" id="fi-riskx3-${id}" ${driveOn ? 'disabled' : ''} title="Set risk amount to 3× base stake">×3</button>
+          </div>
+        </div>
+        ${sug ? `<div class="fi-hint ${sug.confidence === 'high' ? 'smart-flag' : ''}">suggested $${sug.value.toFixed(2)} · ${sug.confidence} confidence</div>` : ''}
+      </div>`;
+    }).join('');
+
+    const focusedId = document.activeElement && document.activeElement.id;
+    const caret = focusedId && focusedId.startsWith('fi-') && document.activeElement.selectionStart;
+    if (setIfChanged(grid, cardsHtml || '<div class="fi-card-unopened" style="grid-column:1/-1;text-align:center;padding:24px 0">No bots match that filter.</div>')) {
+      if (focusedId) {
+        const toFocus = document.getElementById(focusedId);
+        if (toFocus) {
+          toFocus.focus();
+          if (typeof caret === 'number' && toFocus.setSelectionRange) { try { toFocus.setSelectionRange(caret, caret); } catch (e) {} }
+        }
+      }
+      FLIP_BOT_IDS.forEach((id) => {
+        const eng = flipEngine(id);
+        if (!eng) return;
+        const nextInp = document.getElementById(`fi-next-${id}`);
+        if (nextInp) nextInp.onchange = (e) => {
+          const v = parseFloat(e.target.value);
+          eng.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
+        };
+        const riskInp = document.getElementById(`fi-risk-${id}`);
+        if (riskInp) riskInp.onchange = (e) => {
+          const v = parseFloat(e.target.value);
+          saveRiskAmount(id, (!isNaN(v) && v > 0) ? v : 0);
+        };
+        const baseStakeFor = () => (eng.config && eng.config.stake > 0) ? eng.config.stake : 1;
+        const x2Btn = document.getElementById(`fi-riskx2-${id}`);
+        if (x2Btn) x2Btn.onclick = () => {
+          const v = +(baseStakeFor() * 2).toFixed(2);
+          saveRiskAmount(id, v);
+          renderFlip();
+        };
+        const x3Btn = document.getElementById(`fi-riskx3-${id}`);
+        if (x3Btn) x3Btn.onclick = () => {
+          const v = +(baseStakeFor() * 3).toFixed(2);
+          saveRiskAmount(id, v);
+          renderFlip();
+        };
+        const armBtn = document.getElementById(`fi-arm-${id}`);
+        if (armBtn) armBtn.onclick = () => {
+          if (driveOn) return; // belt-and-braces — button is disabled while driving anyway
+          const arming = !eng.config.stakeAdditionArmed;
+          if (arming) {
+            // Risk $ wins over Next $ when both are set — this is the field
+            // for "I've decided to go bigger than the system suggested."
+            const riskV = parseFloat((document.getElementById(`fi-risk-${id}`) || {}).value);
+            const nextV = parseFloat((document.getElementById(`fi-next-${id}`) || {}).value);
+            const v = (!isNaN(riskV) && riskV > 0) ? riskV : nextV;
+            if (isNaN(v) || v <= 0) {
+              const inp = document.getElementById(`fi-risk-${id}`) || document.getElementById(`fi-next-${id}`);
+              if (inp) { inp.style.borderColor = 'hsl(var(--loss))'; inp.placeholder = 'Enter an amount first!'; inp.focus(); setTimeout(() => { inp.style.borderColor = ''; }, 1500); }
+              return;
+            }
+            if (capBlocks(id, v)) {
+              const inp = document.getElementById(`fi-risk-${id}`) || document.getElementById(`fi-next-${id}`);
+              if (inp) { inp.style.borderColor = 'hsl(var(--loss))'; inp.title = `Blocked — this would push total armed exposure past your $${riskCap.toFixed(2)} Session Risk Cap.`; setTimeout(() => { inp.style.borderColor = ''; }, 1800); }
+              pushDriveLog(`${flipLabel(id)}: ⏸ Manual arm at $${v.toFixed(2)} blocked — would cross the $${riskCap.toFixed(2)} Session Risk Cap.`);
+              renderFlip();
+              return;
+            }
+            eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: v });
+            if (!isNaN(riskV) && riskV > 0) saveRiskAmount(id, riskV);
+          } else {
+            eng.setConfig({ stakeAdditionArmed: false });
+          }
+          renderFlip();
+        };
+      });
+    }
+
+    // ── Toolbar / bulk buttons — rebind lightweight bits every tick is
+    // cheap here since these live outside the setIfChanged-guarded grid.
+    const armQualBtn = document.getElementById('fi-arm-qualifying');
+    if (armQualBtn) {
+      armQualBtn.disabled = qualifyingCount === 0 || driveOn;
+      armQualBtn.textContent = `⚡ Arm All Qualifying (${qualifyingCount})`;
+      armQualBtn.onclick = () => {
+        withEngine.forEach((r) => {
+          if (r.armed) return;
+          const sug = qualifiesForAutoArm(r.eng);
+          if (sug && !capBlocks(r.id, sug.value)) {
+            r.eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
+            r.eng.addLog('engine', 'FLIP-INTELL', `⚡ Bulk-armed from Flip Intell at $${sug.value.toFixed(2)}.`);
+          }
+        });
+        renderFlip();
+      };
+    }
+    const disarmAllBtn = document.getElementById('fi-disarm-all');
+    if (disarmAllBtn) {
+      disarmAllBtn.disabled = armedCount === 0 || driveOn;
+      disarmAllBtn.textContent = `⛔ Disarm All (${armedCount})`;
+      disarmAllBtn.onclick = () => {
+        withEngine.forEach((r) => {
+          if (!r.armed) return;
+          r.eng.setConfig({ stakeAdditionArmed: false });
+          r.eng.addLog('engine', 'FLIP-INTELL', '⛔ Bulk-disarmed from Flip Intell.');
+        });
+        renderFlip();
+      };
+    }
+  }
+
+  function injectStyles() {
+    const css = document.createElement('style');
+    css.textContent = `
+      @keyframes fi-fade-in { from { opacity:0; } to { opacity:1; } }
+      @keyframes fi-pulse-dot { 0%,100% { opacity:1; box-shadow:0 0 0 0 hsl(var(--win)/0.5); } 50% { opacity:.65; box-shadow:0 0 0 6px hsl(var(--win)/0); } }
+      @keyframes fi-grid-drift { from { background-position:0 0, 0 0; } to { background-position:70px 70px, 70px 70px; } }
+      @keyframes fi-blob-float1 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(46px,-34px) scale(1.14); } }
+      @keyframes fi-blob-float2 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(-55px,28px) scale(1.1); } }
+      @keyframes fi-shimmer-sweep { 0% { transform:translateX(-120%) skewX(-15deg); } 100% { transform:translateX(220%) skewX(-15deg); } }
+      @keyframes fi-header-sweep { 0% { background-position:-200% 0; } 100% { background-position:200% 0; } }
+      @keyframes fi-card-enter { from { opacity:0; transform:translateY(18px) scale(.96); filter:blur(4px); } to { opacity:1; transform:translateY(0) scale(1); filter:blur(0); } }
+      @keyframes fi-drive-glow { 0%,100% { box-shadow:0 0 26px hsl(var(--win)/0.22), inset 0 0 30px hsl(var(--win)/0.06); } 50% { box-shadow:0 0 42px hsl(var(--win)/0.38), inset 0 0 40px hsl(var(--win)/0.1); } }
+      @keyframes fi-streak-bounce { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-2px); } }
+
+      #panel-flipintell.app-panel.active { position:relative; overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflow-scrolling:touch; }
+      #flipintell-root.app-root { overflow:visible !important; }
+      #panel-flipintell .fi-bgfx { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+      #panel-flipintell .fi-bgfx-grid { position:absolute; inset:-60px; opacity:.28;
+        background-image:linear-gradient(hsl(var(--border)/0.5) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--border)/0.5) 1px, transparent 1px);
+        background-size:70px 70px; animation:fi-grid-drift 20s linear infinite; mask-image:radial-gradient(ellipse 68% 55% at 50% 12%, black, transparent 78%); }
+      #panel-flipintell .fi-bgfx-glow { position:absolute; width:500px; height:500px; border-radius:50%; filter:blur(130px); opacity:.12; }
+      #panel-flipintell .fi-bgfx-glow1 { top:-140px; left:4%; background:hsl(var(--win)); animation:fi-blob-float1 18s ease-in-out infinite; }
+      #panel-flipintell .fi-bgfx-glow2 { top:300px; right:2%; background:hsl(var(--primary)); animation:fi-blob-float2 22s ease-in-out infinite; }
+
+      #panel-flipintell .fi-wrap { position:relative; z-index:1; max-width:1320px; margin:0 auto; padding:12px 8px 40px; font-family:'DM Mono',monospace; font-size:11px; color:hsl(var(--foreground)); animation:fi-fade-in .5s ease; }
+
+      #panel-flipintell .fi-header { position:relative; overflow:hidden; display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; padding:14px 18px; border-radius:16px;
+        border:1px solid hsl(var(--primary)/0.5); background:linear-gradient(135deg, hsl(var(--card)/0.92) 0%, hsl(var(--bg)/0.62) 100%); backdrop-filter:blur(18px) saturate(150%);
+        box-shadow:0 12px 34px hsl(0 0% 0%/0.5), inset 0 1px 0 hsl(255 100% 100%/0.06); }
+      #panel-flipintell .fi-header::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; z-index:1;
+        background:linear-gradient(90deg, transparent, hsl(var(--primary)/0.8), hsl(var(--win)/0.6), transparent); background-size:200% 100%; animation:fi-header-sweep 5s linear infinite; }
+      #panel-flipintell .fi-header-left { display:flex; align-items:center; gap:12px; }
+      #panel-flipintell .fi-icon-badge { width:38px; height:38px; flex:0 0 38px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:19px;
+        background:linear-gradient(155deg, hsl(var(--primary)/0.3), hsl(var(--win)/0.2)); border:1px solid hsl(var(--primary)/0.7); box-shadow:0 0 22px hsl(var(--primary)/0.28) inset, 0 0 18px hsl(var(--primary)/0.3); }
+      #panel-flipintell .fi-title { font-family:'Outfit',sans-serif; font-size:17px; font-weight:900; letter-spacing:.2px; display:flex; align-items:center; gap:8px; color:hsl(var(--foreground)); }
+      #panel-flipintell .fi-title-pulse { width:7px; height:7px; border-radius:50%; background:hsl(var(--win)); flex-shrink:0; animation:fi-pulse-dot 1.8s ease-in-out infinite; }
+      #panel-flipintell .fi-subtitle { opacity:.55; font-size:9.5px; margin-top:3px; letter-spacing:.1px; font-weight:400; }
+      #panel-flipintell .fi-header-armed { font-family:'Outfit',sans-serif; font-size:10px; font-weight:800; padding:7px 12px; border-radius:999px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--muted)/0.2); white-space:nowrap; }
+
+      #panel-flipintell .fi-kpi-row { display:grid; grid-template-columns:repeat(4, 1fr); gap:9px; margin-bottom:14px; }
+      #panel-flipintell .fi-kpi { position:relative; overflow:hidden; border-radius:13px; padding:12px 14px; border:1px solid hsl(var(--border)/0.5);
+        background:linear-gradient(135deg, hsl(var(--card)/0.92) 0%, hsl(var(--bg)/0.62) 100%); backdrop-filter:blur(14px);
+        box-shadow:0 3px 14px hsl(0 0% 0%/0.32), inset 0 1px 0 hsl(255 100% 100%/0.05);
+        transition:transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s ease, border-color .2s ease; }
+      #panel-flipintell .fi-kpi:hover { transform:translateY(-3px); box-shadow:0 14px 30px hsl(0 0% 0%/0.38); }
+      #panel-flipintell .fi-kpi-label { font-family:'Outfit',sans-serif; font-size:8.5px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; opacity:.55; margin-bottom:5px; }
+      #panel-flipintell .fi-kpi-val { font-family:'Outfit',sans-serif; font-size:19px; font-weight:900; letter-spacing:-.3px; font-variant-numeric:tabular-nums; }
+      #panel-flipintell .fi-kpi-good .fi-kpi-val { color:hsl(var(--win)); }
+      #panel-flipintell .fi-kpi-good { border-color:hsl(var(--win)/0.35); }
+      #panel-flipintell .fi-kpi-bad .fi-kpi-val { color:hsl(var(--loss)); }
+      #panel-flipintell .fi-kpi-bad { border-color:hsl(var(--loss)/0.35); }
+      #panel-flipintell .fi-kpi-mid .fi-kpi-val { color:hsl(var(--muted-foreground)); }
+      @media (max-width:640px) { #panel-flipintell .fi-kpi-row { grid-template-columns:repeat(2, 1fr); } }
+
+      /* ── Auto Flip Drive — big, unmissable master control ─────────── */
+      #panel-flipintell .fi-drive-panel { position:relative; overflow:hidden; display:flex; align-items:center; justify-content:space-between; gap:16px;
+        padding:18px 20px; border-radius:18px; margin-bottom:8px; border:1.5px solid hsl(var(--border)/0.6);
+        background:linear-gradient(135deg, hsl(var(--card)/0.9), hsl(var(--bg)/0.6)); backdrop-filter:blur(16px);
+        transition:border-color .35s ease, background .4s ease, box-shadow .4s ease; }
+      #panel-flipintell .fi-drive-panel.on { border-color:hsl(var(--win)/0.7); background:linear-gradient(135deg, hsl(var(--win)/0.14), hsl(var(--win)/0.04)); animation:fi-drive-glow 2.6s ease-in-out infinite; }
+      #panel-flipintell .fi-drive-title { font-family:'Outfit',sans-serif; font-size:14px; font-weight:900; letter-spacing:.6px; display:flex; align-items:center; gap:8px; }
+      #panel-flipintell .fi-drive-desc { font-size:9.5px; opacity:.6; margin-top:4px; max-width:520px; line-height:1.5; }
+      #panel-flipintell .fi-drive-toggle { position:relative; overflow:hidden; flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:11px 18px 11px 14px; border-radius:99px;
+        border:1px solid hsl(var(--border)/0.7); background:hsl(var(--muted)/0.18); cursor:pointer; font-family:'Outfit',sans-serif; font-size:11px; font-weight:900; letter-spacing:.5px;
+        color:hsl(var(--muted-foreground)); transition:border-color .3s ease, background .35s ease, box-shadow .35s ease; }
+      #panel-flipintell .fi-drive-toggle:hover { border-color:hsl(var(--border-bright, var(--border))); }
+      #panel-flipintell .fi-drive-toggle-track { position:relative; flex:0 0 46px; width:46px; height:25px; border-radius:99px; background:hsl(var(--muted)/0.5); border:1px solid hsl(var(--border)/0.7); transition:background .3s ease, border-color .3s ease; }
+      #panel-flipintell .fi-drive-toggle-knob { position:absolute; top:2px; left:2px; width:19px; height:19px; border-radius:50%; background:hsl(var(--muted-foreground)); transition:transform .28s cubic-bezier(.34,1.5,.64,1), background .3s ease; }
+      #panel-flipintell .fi-drive-toggle.on .fi-drive-toggle-track { background:hsl(var(--win)/0.4); border-color:hsl(var(--win)/0.8); }
+      #panel-flipintell .fi-drive-toggle.on .fi-drive-toggle-knob { transform:translateX(21px); background:hsl(var(--win)); box-shadow:0 0 12px hsl(var(--win)/0.85); }
+      #panel-flipintell .fi-drive-toggle.on { color:hsl(var(--win)); border-color:hsl(var(--win)/0.6); background:linear-gradient(90deg, hsl(var(--win)/0.18), hsl(var(--win)/0.06)); box-shadow:0 0 26px hsl(var(--win)/0.2); }
+      #panel-flipintell .fi-drive-toggle-shimmer { position:absolute; top:0; left:0; width:35%; height:100%; background:linear-gradient(90deg, transparent, hsl(var(--foreground)/0.12), transparent); pointer-events:none; }
+      #panel-flipintell .fi-drive-toggle.on .fi-drive-toggle-shimmer { animation:fi-shimmer-sweep 3s ease-in-out infinite; background:linear-gradient(90deg, transparent, hsl(var(--win)/0.3), transparent); }
+      #panel-flipintell .fi-drive-note { font-size:9.5px; line-height:1.55; opacity:.75; padding:10px 14px; border-radius:11px; border:1px solid hsl(var(--border)/0.45); background:hsl(var(--card)/0.4); backdrop-filter:blur(8px); margin-bottom:10px; }
+
+      /* ── Session Risk Cap row ─────────────────────────────────────── */
+      #panel-flipintell .fi-riskcap-row { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+        padding:12px 16px; border-radius:14px; margin-bottom:8px; border:1px solid hsl(var(--loss)/0.35); background:hsl(var(--loss)/0.05); backdrop-filter:blur(10px); }
+      #panel-flipintell .fi-riskcap-label { display:flex; flex-direction:column; gap:2px; }
+      #panel-flipintell .fi-riskcap-title { font-family:'Outfit',sans-serif; font-size:10.5px; font-weight:800; }
+      #panel-flipintell .fi-riskcap-desc { font-size:8.5px; opacity:.6; max-width:460px; line-height:1.5; }
+      #panel-flipintell .fi-riskcap-controls { display:flex; align-items:center; gap:7px; flex:0 0 auto; }
+      #panel-flipintell .fi-riskcap-dollar { opacity:.5; font-weight:700; }
+      #panel-flipintell .fi-riskcap-input { width:96px; padding:8px 10px; border-radius:9px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.55);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10.5px; }
+      #panel-flipintell .fi-riskcap-current { font-size:8.5px; opacity:.6; font-variant-numeric:tabular-nums; white-space:nowrap; }
+      #panel-flipintell .fi-riskcap-current.over { opacity:1; color:hsl(var(--loss)); font-weight:700; }
+      #panel-flipintell .fi-drive-log { display:flex; flex-direction:column; gap:5px; margin-bottom:16px; max-height:120px; overflow-y:auto; }
+      #panel-flipintell .fi-drive-log-row { font-size:9px; opacity:.7; padding:6px 10px; border-radius:8px; background:hsl(var(--card)/0.35); border:1px solid hsl(var(--border)/0.35); }
+      #panel-flipintell .fi-drive-log-empty { font-size:9px; opacity:.4; text-align:center; padding:10px 0; font-style:italic; }
+
+      /* ── Toolbar / bulk actions ────────────────────────────────────── */
+      #panel-flipintell .fi-toolbar { display:flex; gap:8px; margin-bottom:8px; }
+      #panel-flipintell .fi-search { flex:1; padding:9px 12px; border-radius:10px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10.5px; }
+      #panel-flipintell .fi-sort { padding:9px 10px; border-radius:10px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10.5px; }
+      #panel-flipintell .fi-bulkrow { display:flex; gap:8px; margin-bottom:16px; }
+      #panel-flipintell .fi-bulk { flex:1; padding:11px 8px; border-radius:12px; border:1px solid hsl(var(--primary)/0.55); background:hsl(var(--primary)/0.12);
+        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-weight:800; font-size:10.5px; letter-spacing:.3px; cursor:pointer; transition:transform .15s ease, box-shadow .2s ease; }
+      #panel-flipintell .fi-bulk:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 8px 20px hsl(0 0% 0%/0.3); }
+      #panel-flipintell .fi-bulk.danger { border-color:hsl(var(--loss)/0.55); background:hsl(var(--loss)/0.1); color:hsl(var(--loss)); }
+      #panel-flipintell .fi-bulk:disabled { opacity:.35; cursor:not-allowed; }
+
+      /* ── Bot roster — big animated cards, grid layout ────────────────── */
+      #panel-flipintell .fi-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px; margin-bottom:14px; }
+      #panel-flipintell .fi-card { position:relative; overflow:hidden; border-radius:16px; padding:14px 15px 12px; border:1px solid hsl(var(--border)/0.55);
+        background:linear-gradient(160deg, hsl(var(--card)/0.9) 0%, hsl(var(--bg-soft, var(--bg))/0.65) 100%); backdrop-filter:blur(12px);
+        box-shadow:0 4px 16px hsl(0 0% 0%/0.3), inset 0 1px 0 hsl(255 100% 100%/0.04);
+        animation:fi-card-enter .45s cubic-bezier(.16,1,.3,1) both; animation-delay:calc(var(--fi-i, 0) * 28ms);
+        transition:transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s ease, border-color .25s ease; }
+      #panel-flipintell .fi-card:hover { transform:translateY(-4px) scale(1.015); border-color:hsl(var(--border-bright, var(--border))); box-shadow:0 14px 32px hsl(0 0% 0%/0.4); }
+      #panel-flipintell .fi-card.armed { border-color:hsl(var(--win)/0.65); box-shadow:0 0 0 1px hsl(var(--win)/0.15), 0 4px 20px hsl(var(--win)/0.16); background:linear-gradient(160deg, hsl(var(--win)/0.1) 0%, hsl(var(--card)/0.85) 100%); }
+      #panel-flipintell .fi-card-accent { position:absolute; top:0; left:0; right:0; height:2.5px; background:linear-gradient(90deg, hsl(var(--primary)/0.7), hsl(var(--win)/0.5)); opacity:0; transition:opacity .25s ease; }
+      #panel-flipintell .fi-card.armed .fi-card-accent { opacity:1; }
+      #panel-flipintell .fi-card-top { display:flex; align-items:center; gap:7px; margin-bottom:7px; }
+      #panel-flipintell .fi-card-icon { font-size:15px; flex:0 0 auto; }
+      #panel-flipintell .fi-card-name { font-family:'Outfit',sans-serif; font-weight:800; font-size:11.5px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #panel-flipintell .fi-card-mid { display:flex; align-items:center; gap:7px; margin-bottom:6px; flex-wrap:wrap; }
+      #panel-flipintell .fi-card-wr { font-size:9px; padding:3px 7px; border-radius:999px; font-weight:800; }
+      #panel-flipintell .fi-card-wr.good { background:hsl(var(--win)/0.18); color:hsl(var(--win)); }
+      #panel-flipintell .fi-card-wr.bad { background:hsl(var(--loss)/0.18); color:hsl(var(--loss)); }
+      #panel-flipintell .fi-card-wr.neutral { background:hsl(var(--muted)/0.28); color:hsl(var(--muted-foreground)); }
+      #panel-flipintell .fi-streak { font-size:8.5px; opacity:.85; color:hsl(var(--win)); animation:fi-streak-bounce 1.6s ease-in-out infinite; }
+      #panel-flipintell .fi-spark { display:flex; gap:2.5px; margin-bottom:7px; }
+      #panel-flipintell .fi-dot { width:6.5px; height:6.5px; border-radius:50%; background:hsl(var(--muted)/0.3); flex:0 0 auto; }
+      #panel-flipintell .fi-dot.win { background:hsl(var(--win)/0.9); }
+      #panel-flipintell .fi-dot.loss { background:hsl(var(--loss)/0.65); }
+      #panel-flipintell .fi-card-stake { font-size:9px; opacity:.75; font-variant-numeric:tabular-nums; margin-bottom:9px; }
+      #panel-flipintell .fi-boosted { color:hsl(var(--win)); font-weight:700; }
+      #panel-flipintell .fi-card-controls { display:flex; align-items:center; gap:7px; }
+      #panel-flipintell .fi-card-controls input { width:100%; padding:7px 9px; border-radius:9px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10px; }
+      #panel-flipintell .fi-card-controls input:disabled { opacity:.4; cursor:not-allowed; }
+
+      /* ── Risk Amount row — the field that wins over the suggestion ──── */
+      #panel-flipintell .fi-risk-row { margin-top:8px; padding-top:8px; border-top:1px dashed hsl(var(--border)/0.4); }
+      #panel-flipintell .fi-risk-label { font-size:7.5px; opacity:.55; line-height:1.4; margin-bottom:6px; }
+      #panel-flipintell .fi-risk-controls { display:flex; align-items:center; gap:5px; }
+      #panel-flipintell .fi-risk-controls input { flex:1; min-width:0; padding:7px 8px; border-radius:8px; border:1px solid hsl(var(--loss)/0.4); background:hsl(var(--loss)/0.05);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10px; }
+      #panel-flipintell .fi-risk-controls input:disabled { opacity:.4; cursor:not-allowed; }
+      #panel-flipintell .fi-risk-x { flex:0 0 auto; padding:7px 9px; border-radius:8px; border:1px solid hsl(var(--loss)/0.5); background:hsl(var(--loss)/0.1);
+        color:hsl(var(--loss)); font-family:'Outfit',sans-serif; font-weight:900; font-size:9.5px; cursor:pointer; transition:transform .15s ease, box-shadow .2s ease; }
+      #panel-flipintell .fi-risk-x:hover:not(:disabled) { transform:translateY(-1px) scale(1.05); box-shadow:0 4px 12px hsl(var(--loss)/0.25); }
+      #panel-flipintell .fi-risk-x:disabled { opacity:.35; cursor:not-allowed; }
+      #panel-flipintell .fi-arm { padding:8px 12px; border-radius:9px; border:1px solid hsl(var(--border)/0.65); background:hsl(var(--muted)/0.25);
+        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-weight:800; font-size:9.5px; letter-spacing:.3px; cursor:pointer; white-space:nowrap; transition:transform .15s ease, box-shadow .2s ease; }
+      #panel-flipintell .fi-arm:hover:not(:disabled) { transform:translateY(-1px); }
+      #panel-flipintell .fi-arm.on { background:linear-gradient(90deg, hsl(var(--win)/0.35), hsl(var(--win)/0.16)); border-color:hsl(var(--win)/0.7); color:hsl(var(--win)); box-shadow:0 0 14px hsl(var(--win)/0.25); }
+      #panel-flipintell .fi-arm:disabled { opacity:.4; cursor:not-allowed; }
+      #panel-flipintell .fi-hint { font-size:8px; opacity:.55; margin-top:6px; line-height:1.4; }
+      #panel-flipintell .fi-hint.smart-flag { opacity:.9; color:hsl(var(--primary)); }
+      #panel-flipintell .fi-badge { font-size:7.5px; padding:2.5px 7px; border-radius:999px; font-weight:800; letter-spacing:.3px; white-space:nowrap; }
+      #panel-flipintell .fi-badge.best { background:hsl(var(--win)/0.2); color:hsl(var(--win)); }
+      #panel-flipintell .fi-badge.worst { background:hsl(var(--loss)/0.2); color:hsl(var(--loss)); }
+      #panel-flipintell .fi-card-unopened { text-align:center; }
+      #panel-flipintell .fi-card-unopened-note { font-size:9px; opacity:.5; text-align:center; padding:10px 0; font-style:italic; line-height:1.4; }
+
+      #panel-flipintell .fi-footnote { font-size:8.5px; opacity:.45; line-height:1.6; padding-top:12px; border-top:1px dashed hsl(var(--border)/0.4); }
+    `;
+    document.head.appendChild(css);
+  }
+
+  function injectDom() {
+    const root = document.getElementById('flipintell-root');
+    if (!root || root.dataset.fiBuilt) return;
+    root.dataset.fiBuilt = '1';
+    root.innerHTML = `
+      <div class="fi-bgfx"><div class="fi-bgfx-grid"></div><div class="fi-bgfx-glow fi-bgfx-glow1"></div><div class="fi-bgfx-glow fi-bgfx-glow2"></div></div>
+      <div class="fi-wrap">
+        <div class="fi-header">
+          <div class="fi-header-left">
+            <div class="fi-icon-badge">⚡</div>
+            <div>
+              <div class="fi-title">Flip Intell — Stake Increase Command Terminal</div>
+              <div class="fi-subtitle">Every bot's Stake Addition arm state, win-rate ranking and recovery data in one big console — same underlying setting as each bot's own tab.</div>
+            </div>
+          </div>
+          <div class="fi-header-armed" id="fi-header-armed"></div>
+        </div>
+
+        <div class="fi-kpi-row" id="fi-kpi-row"></div>
+
+        <div class="fi-drive-panel" id="fi-drive-panel">
+          <div>
+            <div class="fi-drive-title">🚀 AUTO FLIP DRIVE</div>
+            <div class="fi-drive-desc">Turn this on and it drives the whole board: arms bots on a genuine hot streak, disarms them if the picture turns, and disarms any bot that's currently armed by hand the moment you engage it — so exactly one thing is deciding stake increases at a time.</div>
+          </div>
+          <button type="button" id="fi-drive-toggle" class="fi-drive-toggle"><span class="fi-drive-toggle-shimmer"></span><span class="fi-drive-toggle-track"><span class="fi-drive-toggle-knob"></span></span><span class="fi-drive-toggle-label">OFF</span></button>
+        </div>
+        <div class="fi-riskcap-row">
+          <div class="fi-riskcap-label">
+            <span class="fi-riskcap-title">🛑 Session Risk Cap</span>
+            <span class="fi-riskcap-desc">Total boosted stake allowed armed across every bot at once — blocks both manual ARM and Auto Flip Drive the moment it would be crossed. Leave blank for no cap.</span>
+          </div>
+          <div class="fi-riskcap-controls">
+            <span class="fi-riskcap-dollar">$</span>
+            <input type="number" step="1" min="0" id="fi-riskcap" placeholder="no cap" class="fi-riskcap-input">
+            <span class="fi-riskcap-current" id="fi-riskcap-current"></span>
+          </div>
+        </div>
+        <div id="fi-drive-note" class="fi-drive-note"></div>
+        <div id="fi-drive-log" class="fi-drive-log"></div>
+
+        <div class="fi-toolbar">
+          <input type="text" id="fi-search" class="fi-search" placeholder="Filter bots…">
+          <select id="fi-sort" class="fi-sort">
+            <option value="winrate">Sort: Win rate</option>
+            <option value="armed">Sort: Armed first</option>
+            <option value="name">Sort: Name</option>
+          </select>
+        </div>
+        <div class="fi-bulkrow">
+          <button type="button" class="fi-bulk" id="fi-arm-qualifying">⚡ Arm All Qualifying</button>
+          <button type="button" class="fi-bulk danger" id="fi-disarm-all">⛔ Disarm All</button>
+        </div>
+
+        <div class="fi-grid" id="fi-grid"></div>
+        <div class="fi-footnote">Arming here (or on a bot's own tab) only promotes stake at the end of a WINNING session, and always resets to the bot's normal Stake $ on page reload. Digits are provider-generated at random — this is a live statistical read, not a guaranteed edge, so only stake what you can afford to lose.</div>
+      </div>`;
+
+    document.getElementById('fi-drive-toggle').onclick = () => {
+      if (driveOn) disengageDrive(); else engageDrive();
+      renderFlip();
+    };
+    document.getElementById('fi-search').oninput = (e) => { filterText = e.target.value; renderFlip(); };
+    document.getElementById('fi-sort').onchange = (e) => { sortMode = e.target.value; renderFlip(); };
+    const capInp = document.getElementById('fi-riskcap');
+    if (capInp) {
+      if (riskCap) capInp.value = riskCap;
+      capInp.onchange = (e) => {
+        const v = parseFloat(e.target.value);
+        riskCap = (!isNaN(v) && v > 0) ? v : null;
+        try { if (riskCap) localStorage.setItem(RISK_CAP_KEY, String(riskCap)); else localStorage.removeItem(RISK_CAP_KEY); } catch (err) {}
+        renderFlip();
+      };
+    }
+  }
+
+  function activate() {
+    if (!mounted) { injectStyles(); injectDom(); mounted = true; }
+    renderFlip();
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(renderFlip, 1000);
+  }
+  function deactivate() {
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  }
+
+  window.FlipIntellPanel = { activate, deactivate };
 })();
 </script>
 </body>
