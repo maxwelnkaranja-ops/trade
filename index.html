@@ -10161,8 +10161,8 @@ window.PatternIntelEngine = (function () {
   // consistent with every other Even/Odd-only change in this engine
   // (Test Trade, Martingale, 1-minute cooldown) that explicitly excludes
   // Matches.
-  const MIN_WIN_RATE_PARITY_DEFAULT = 0.72; // Even/Odd — raised for more certainty per explicit request (was a shared 0.6 default)
-  const MIN_WIN_RATE_DIGIT_DEFAULT = 0.72;  // Matches — raised for more certainty too, per explicit follow-up request (scope confirmed as confidence-threshold only: still flat-stake, no Test Trade, no Martingale, no 1-min cooldown for Matches)
+  const MIN_WIN_RATE_PARITY_DEFAULT = 0.65; // Even — lowered a bit per explicit request (was 0.72), Odd removed from Intel so this now only gates Even
+  const MIN_WIN_RATE_DIGIT_DEFAULT = 0.82;  // Matches — raised per explicit request (was 0.72) because Matches Intel was firing too often; scope confirmed as confidence-threshold only: still flat-stake, no Test Trade, no Martingale, no 1-min cooldown for Matches
   const MIN_WIN_RATE_PARITY_KEY = 'pattern_intel_min_win_rate_parity_v1';
   const MIN_WIN_RATE_DIGIT_KEY = 'pattern_intel_min_win_rate_digit_v1';
   function loadMinWinRate(key, def) {
@@ -30208,21 +30208,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="mit-auto-topnote" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.25);border-radius:10px;padding:10px 12px;margin-top:8px">
             <div style="flex:1;min-width:220px">
               <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Even Confidence Threshold — the real firing gate</div>
-              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Even Intel fires off THIS number, not the Min Signal field on the regular tab — that never applies to the Intel variant. Raised for more certainty per request. Matches Intel has its own separate threshold below and never moves with this slider.</div>
+              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Even Intel fires off THIS number, not the Min Signal field on the regular tab — that never applies to the Intel variant. Lowered a bit per request (was 72%, now 65%) to fire more readily. Matches Intel has its own separate threshold below and never moves with this slider.</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
               <input id="mit-intel-confidence" type="range" min="50" max="90" step="1" style="width:140px">
-              <span id="mit-intel-confidence-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">72%</span>
+              <span id="mit-intel-confidence-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">65%</span>
             </div>
           </div>
           <div class="mit-auto-topnote" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.25);border-radius:10px;padding:10px 12px;margin-top:8px">
             <div style="flex:1;min-width:220px">
               <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Matches Confidence Threshold — the real firing gate</div>
-              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Matches Intel's own separate threshold — raised for more certainty per request. Matches stays flat-stake with no Test Trade, Martingale, or 1-minute cooldown; only this number changed.</div>
+              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Matches Intel's own separate threshold — raised per request (was 72%, now 82%) since it was firing too often. Matches stays flat-stake with no Test Trade, Martingale, or 1-minute cooldown; only this number changed.</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
               <input id="mit-intel-confidence-matches" type="range" min="50" max="90" step="1" style="width:140px">
-              <span id="mit-intel-confidence-matches-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">72%</span>
+              <span id="mit-intel-confidence-matches-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">82%</span>
             </div>
           </div>
           <div class="mit-auto-grid" id="mit-auto-grid"></div>
@@ -30300,7 +30300,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // Even (parity) only now — Odd Bot removed from Market Intel, Matches
       // keeps its own separate threshold, set via
       // getMinWinRateDigit/setMinWinRateDigit, untouched by this slider.
-      const current = Math.round((window.PatternIntelEngine.getMinWinRateParity() || 0.72) * 100);
+      const current = Math.round((window.PatternIntelEngine.getMinWinRateParity() || 0.65) * 100);
       slider.value = current;
       valEl.textContent = `${current}%`;
       slider.oninput = () => { valEl.textContent = `${slider.value}%`; };
@@ -30316,7 +30316,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // Matches (digit) only — per explicit request, Matches gets ONLY the
       // raised confidence threshold, no Test Trade/Martingale/1-min
       // cooldown, so this is deliberately its own independent slider.
-      const current = Math.round((window.PatternIntelEngine.getMinWinRateDigit() || 0.72) * 100);
+      const current = Math.round((window.PatternIntelEngine.getMinWinRateDigit() || 0.82) * 100);
       slider.value = current;
       valEl.textContent = `${current}%`;
       slider.oninput = () => { valEl.textContent = `${slider.value}%`; };
