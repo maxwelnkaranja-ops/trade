@@ -10141,7 +10141,6 @@ window.PatternIntelEngine = (function () {
 
   const RUN_LEN = 3;              // parity run length that counts as "a streak" — restored to 3: with 10 markets watched at once, the loosened RUN_LEN=2 made setups qualify too easily and Intel bots fired excessively
   const MIN_HITS = 2;             // "done that more than once" — hard floor, unchanged
-  const MIN_WIN_RATE_DEFAULT = 0.6; // fallback if nothing saved yet — raised from 0.55, a firmer confidence bar before a setup counts as confirmed
   const LOOKBACK = 400;           // ticks of history mined per market
   const REPEAT_WINDOW = 4;        // ticks a digit has to repeat within, for the DIGIT pattern
   // BUG FIX: this used to be a hardcoded `const MIN_WIN_RATE = 0.55` with
@@ -10155,22 +10154,46 @@ window.PatternIntelEngine = (function () {
   // "Intel bots keep firing constantly no matter what threshold I set."
   // Now it's a mutable, persisted value the Intel Auto-Trader panel's
   // "Confidence Threshold" control can actually move.
-  const MIN_WIN_RATE_KEY = 'pattern_intel_min_win_rate_v1';
-  function loadMinWinRate() {
+  //
+  // Split in two, per explicit request: Even/Odd (parity signals) and
+  // Matches (digit signals) get their OWN threshold, so raising Even/Odd's
+  // bar for more certainty never touches Matches' firing rate at all —
+  // consistent with every other Even/Odd-only change in this engine
+  // (Test Trade, Martingale, 1-minute cooldown) that explicitly excludes
+  // Matches.
+  const MIN_WIN_RATE_PARITY_DEFAULT = 0.72; // Even/Odd — raised for more certainty per explicit request (was a shared 0.6 default)
+  const MIN_WIN_RATE_DIGIT_DEFAULT = 0.72;  // Matches — raised for more certainty too, per explicit follow-up request (scope confirmed as confidence-threshold only: still flat-stake, no Test Trade, no Martingale, no 1-min cooldown for Matches)
+  const MIN_WIN_RATE_PARITY_KEY = 'pattern_intel_min_win_rate_parity_v1';
+  const MIN_WIN_RATE_DIGIT_KEY = 'pattern_intel_min_win_rate_digit_v1';
+  function loadMinWinRate(key, def) {
     try {
-      const raw = parseFloat(localStorage.getItem(MIN_WIN_RATE_KEY));
-      return (Number.isFinite(raw) && raw >= 0.5 && raw <= 0.95) ? raw : MIN_WIN_RATE_DEFAULT;
-    } catch (e) { return MIN_WIN_RATE_DEFAULT; }
+      const raw = parseFloat(localStorage.getItem(key));
+      return (Number.isFinite(raw) && raw >= 0.5 && raw <= 0.95) ? raw : def;
+    } catch (e) { return def; }
   }
-  let MIN_WIN_RATE = loadMinWinRate();
-  function setMinWinRate(v) {
+  let MIN_WIN_RATE_PARITY = loadMinWinRate(MIN_WIN_RATE_PARITY_KEY, MIN_WIN_RATE_PARITY_DEFAULT);
+  let MIN_WIN_RATE_DIGIT = loadMinWinRate(MIN_WIN_RATE_DIGIT_KEY, MIN_WIN_RATE_DIGIT_DEFAULT);
+  function setMinWinRateParity(v) {
     const n = parseFloat(v);
-    if (!Number.isFinite(n)) return MIN_WIN_RATE;
-    MIN_WIN_RATE = Math.min(0.95, Math.max(0.5, n));
-    try { localStorage.setItem(MIN_WIN_RATE_KEY, String(MIN_WIN_RATE)); } catch (e) {}
-    return MIN_WIN_RATE;
+    if (!Number.isFinite(n)) return MIN_WIN_RATE_PARITY;
+    MIN_WIN_RATE_PARITY = Math.min(0.95, Math.max(0.5, n));
+    try { localStorage.setItem(MIN_WIN_RATE_PARITY_KEY, String(MIN_WIN_RATE_PARITY)); } catch (e) {}
+    return MIN_WIN_RATE_PARITY;
   }
-  function getMinWinRate() { return MIN_WIN_RATE; }
+  function getMinWinRateParity() { return MIN_WIN_RATE_PARITY; }
+  function setMinWinRateDigit(v) {
+    const n = parseFloat(v);
+    if (!Number.isFinite(n)) return MIN_WIN_RATE_DIGIT;
+    MIN_WIN_RATE_DIGIT = Math.min(0.95, Math.max(0.5, n));
+    try { localStorage.setItem(MIN_WIN_RATE_DIGIT_KEY, String(MIN_WIN_RATE_DIGIT)); } catch (e) {}
+    return MIN_WIN_RATE_DIGIT;
+  }
+  function getMinWinRateDigit() { return MIN_WIN_RATE_DIGIT; }
+  // Back-compat aliases — kept so any other caller still asking for a single
+  // "the" threshold gets the Even/Odd (parity) one, the bot type this whole
+  // control was originally built for.
+  function setMinWinRate(v) { return setMinWinRateParity(v); }
+  function getMinWinRate() { return getMinWinRateParity(); }
 
   let watching = false;
   const unsubs = [];
@@ -10239,7 +10262,7 @@ window.PatternIntelEngine = (function () {
     const oppParity = predictedParity === 'even' ? 'odd' : 'even';
     const tailIsRun = tail.length === RUN_LEN && tail.every((d) => (d % 2 === 0 ? 'even' : 'odd') === oppParity);
     return {
-      confirmed: winRate >= MIN_WIN_RATE && hits >= MIN_HITS,
+      confirmed: winRate >= MIN_WIN_RATE_PARITY && hits >= MIN_HITS,
       live: tailIsRun,
       predictedParity, hits, total, winRate,
       context: `${RUN_LEN}-${oppParity} run → ${predictedParity} (${hits}/${total})`,
@@ -10268,7 +10291,7 @@ window.PatternIntelEngine = (function () {
     if (bestDigit < 0 || bestHits < MIN_HITS) return null;
     const lastDigit = digits[digits.length - 1];
     return {
-      confirmed: bestRate >= MIN_WIN_RATE && bestHits >= MIN_HITS,
+      confirmed: bestRate >= MIN_WIN_RATE_DIGIT && bestHits >= MIN_HITS,
       live: lastDigit === bestDigit,
       predictedDigit: bestDigit, hits: bestHits, total: bestTotal, winRate: bestRate,
       context: `digit ${bestDigit} repeats within ${REPEAT_WINDOW} ticks (${bestHits}/${bestTotal})`,
@@ -10356,6 +10379,7 @@ window.PatternIntelEngine = (function () {
   return {
     MARKETS, startWatching, getBestParitySignal, getBestDigitSignal,
     setMinWinRate, getMinWinRate,
+    setMinWinRateParity, getMinWinRateParity, setMinWinRateDigit, getMinWinRateDigit,
     recordPatternOutcome, getPatternRecoveryPlan, patternKey,
   };
 })();
@@ -16468,11 +16492,31 @@ window.NexusStrategies=exports;
       const cd = forcedCooldownSeconds != null ? forcedCooldownSeconds
         : isEvenOddIntel ? 60
         : (5 + Math.floor(Math.random() * 21)); // randomized 5-25s (doc: COOLDOWN_MIN/MAX), or the longer Risk Cooldown after a risk-session loss
-      this.cooldownTime = cd;
-      this._cdMax = cd; // store for tab ring arc
       this._skipAutoPilotResume = skipAutoPilotResume;
       this._inRiskCooldown = !!forcedCooldownSeconds;
-      this.addLog('engine', 'SYSTEM', forcedCooldownTitle ? `${forcedCooldownTitle} — ${Math.round(cd / 60)}m before this bot can trade again` : `COOLING DOWN ${cd}s — scanning for best market...`);
+      this._beginCooldown(cd, { forcedTitle: forcedCooldownTitle, reEngageAfter: true });
+    }
+
+    // ── Shared cooldown starter ─────────────────────────────────────────
+    // Extracted out of completeSession() so a rejected Test Trade probe
+    // (see the '_isSacrificeTrade' loss branch in handleContractResult)
+    // can also put the engine into a real, visible cooldown instead of
+    // going straight back to scouting with no pause at all. Previously a
+    // session cooldown only ever followed a COMPLETED run cycle — a
+    // rejected probe never reached completeSession(), so a bot that kept
+    // getting its test trade rejected could fire another probe
+    // immediately, over and over, with the 1-minute Even/Odd Intel
+    // cooldown never once visible.
+    // opts.reEngageAfter: when the cooldown ends, resume into the normal
+    // "active, waiting for triggers" state (the completed-session case).
+    // When false (probe-reject case) just clear isCooldown and drop back
+    // to watching — there's no finished session to resume, the engine
+    // was already watching before the probe fired.
+    _beginCooldown(cd, opts = {}) {
+      const { forcedTitle = null, reEngageAfter = false } = opts;
+      this.cooldownTime = cd;
+      this._cdMax = cd; // store for tab ring arc
+      this.addLog('engine', 'SYSTEM', forcedTitle ? `${forcedTitle} — ${Math.round(cd / 60)}m before this bot can trade again` : `COOLING DOWN ${cd}s — scanning for best market...`);
       this.runsSinceRefresh++;
       if (this.config.autoRefresh && this.runsSinceRefresh >= 4) {
         this.runsSinceRefresh = 0;
@@ -16484,7 +16528,7 @@ window.NexusStrategies=exports;
         }, (this.cooldownTime || 5) * 1000 + 500);
       }
       // Show cooldown overlay popup on this engine's tab
-      this._showCooldownOverlay(cd, forcedCooldownTitle || undefined, forcedCooldownTitle ? '⛔ Risk session lost — no recovery, re-arm manually when ready' : undefined);
+      this._showCooldownOverlay(cd, forcedTitle || undefined, forcedTitle ? '⛔ Risk session lost — no recovery, re-arm manually when ready' : undefined);
       if (this.cooldownTimer) clearInterval(this.cooldownTimer);
       this.cooldownTimer = setInterval(() => {
         this.cooldownTime--;
@@ -16512,7 +16556,7 @@ window.NexusStrategies=exports;
               this.changeMarket(best.symbol);
             }
           }
-          if (this.config.autoPilot && !this._skipAutoPilotResume) {
+          if (reEngageAfter && this.config.autoPilot && !this._skipAutoPilotResume) {
             setTimeout(() => {
               if (!this.state.isCooldown) {
                 this.state = {
@@ -16528,7 +16572,7 @@ window.NexusStrategies=exports;
                 this.emit();
               }
             }, 1500);
-          } else if (this._skipAutoPilotResume) {
+          } else if (reEngageAfter && this._skipAutoPilotResume) {
             this.addLog('engine', 'ENGINE', 'Risk Cooldown ended — staying OFF. Re-engage manually when ready.');
           }
           this._skipAutoPilotResume = false;
@@ -16779,8 +16823,21 @@ window.NexusStrategies=exports;
           this.addLog('win', 'TEST-STAKE', `Test stake WON (not counted) — firing real entry now at $${this.getEffectiveStake().toFixed(2)}.`);
           this.executeBoltPurchase();
         } else {
-          this.addLog('loss', 'TEST-STAKE', `Test stake LOST (not counted) — signal rejected, real run skipped. Back to scouting for the next signal.`);
-          this.state = { ...this.state, isLocked: false };
+          // A rejected probe used to drop straight back to watching with
+          // no pause at all, which is why the 1-minute Even/Odd Intel
+          // cooldown could look like it never ran — completeSession()
+          // (the only place that used to set a cooldown) only fires
+          // after a COMPLETED run cycle, and a rejected test trade never
+          // reaches it. Route this through the same cooldown starter so
+          // the bot actually rests before scouting again: 60s fixed for
+          // even_intel/odd_intel, the normal randomized 5-25s for
+          // everything else (matches_intel included — it never enables
+          // Test Trade in the first place, so it can't reach this branch).
+          const isEvenOddIntel = this.id === 'even_intel' || this.id === 'odd_intel';
+          const cd = isEvenOddIntel ? 60 : (5 + Math.floor(Math.random() * 21));
+          this.addLog('loss', 'TEST-STAKE', `Test stake LOST (not counted) — signal rejected. Cooling down ${cd}s before scouting again.`);
+          this.state = { ...this.state, isLocked: false, isCooldown: true };
+          this._beginCooldown(cd, { reEngageAfter: false });
         }
         this.emit();
         return;
@@ -28864,7 +28921,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             const isWin = j.type === 'win';
             const pl = typeof j.profit === 'number' ? `${j.profit >= 0 ? '+' : ''}${j.profit.toFixed(2)}` : '';
             const exitD = (j.exitDigit != null && j.exitDigit !== '?') ? j.exitDigit : '—';
-            return `<div class="mit-auto-jrow ${isWin ? 'win' : 'loss'}"><span class="jd">${exitD}</span><span>${esc(j.market || '')}</span><span class="jp">${pl}</span></div>`;
+            // Sacrifice/probe trades (see startChainExecution's testTrade
+            // gate) were rendering identically to real runs here, so there
+            // was no visible sign the test-trade step ever fired — tag
+            // them distinctly, same language as the Dashboard journal's
+            // TEST chip, and mute the row so real runs stay the visual
+            // focus.
+            const testChip = j.isTest ? `<span class="jt" title="Probe trade — stake not counted toward Run/Result above">TEST</span>` : '';
+            return `<div class="mit-auto-jrow ${isWin ? 'win' : 'loss'}${j.isTest ? ' is-test' : ''}"><span class="jd">${exitD}</span><span>${esc(j.market || '')}</span>${testChip}<span class="jp">${pl}</span></div>`;
           }).join('')
         : `<div class="mit-auto-jempty">No trades yet this session.</div>`;
       setIfChanged(journalEl, jHtml);
@@ -29981,6 +30045,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       .mit-auto-jrow.win .jd { color:hsl(var(--win)); }
       .mit-auto-jrow.loss .jd { color:hsl(var(--loss)/0.7); }
       .mit-auto-jrow .jp { margin-left:auto; font-variant-numeric:tabular-nums; opacity:.85; }
+      .mit-auto-jrow.is-test { opacity:.55; border-left-style:dashed; }
+      .mit-auto-jrow.is-test .jp { margin-left:0; }
+      .mit-auto-jrow .jt { font-size:7px; font-weight:900; letter-spacing:.4px; padding:1px 5px; border-radius:999px; background:hsl(var(--muted-foreground)/0.12); color:hsl(var(--muted-foreground)/0.9); border:1px solid hsl(var(--muted-foreground)/0.3); margin-left:auto; }
       .mit-auto-jempty { font-size:9px; opacity:.4; text-align:center; padding:8px 0; }
       .mit-auto-topnote { font-size:9px; opacity:.6; line-height:1.55; margin-bottom:8px; padding:9px 12px; border-radius:9px; border:1px solid hsl(var(--border)/0.45); background:hsl(var(--card)/0.4); }
 
@@ -30078,12 +30145,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="mit-auto-topnote">Each box below is its own bot with its own Stake, Runs/cycle, and Start/Stop — the SAME Even / Odd / Matches bots as their own tabs, just controlled from here. When running, a bot follows the live scoring matrix above: it sits on whichever market currently shows the strongest dynamic pattern for it (parity dominance, streaks, digit frequency), fires when its own signal + that market's score line up, runs its cycle, cools down, re-reads the scores, and moves on — riding the trend instead of a fixed market. Digits are provider-generated at random — this is a live statistical read, not a guaranteed edge, so only stake what you can afford to lose.</div>
           <div class="mit-auto-topnote" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.25);border-radius:10px;padding:10px 12px;margin-top:8px">
             <div style="flex:1;min-width:220px">
-              <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Confidence Threshold — the real firing gate</div>
-              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Every Intel bot (Even/Odd/Matches) fires off THIS number, not the Min Signal field on the regular tabs — those never apply to the Intel variant. Raise it to make every Intel bot fire less often.</div>
+              <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Even/Odd Confidence Threshold — the real firing gate</div>
+              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Even/Odd Intel fires off THIS number, not the Min Signal field on the regular tabs — that never applies to the Intel variant. Raised for more certainty per request. Matches Intel has its own separate threshold below and never moves with this slider.</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
               <input id="mit-intel-confidence" type="range" min="50" max="90" step="1" style="width:140px">
-              <span id="mit-intel-confidence-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">55%</span>
+              <span id="mit-intel-confidence-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">72%</span>
+            </div>
+          </div>
+          <div class="mit-auto-topnote" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.25);border-radius:10px;padding:10px 12px;margin-top:8px">
+            <div style="flex:1;min-width:220px">
+              <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Matches Confidence Threshold — the real firing gate</div>
+              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Matches Intel's own separate threshold — raised for more certainty per request. Matches stays flat-stake with no Test Trade, Martingale, or 1-minute cooldown; only this number changed.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              <input id="mit-intel-confidence-matches" type="range" min="50" max="90" step="1" style="width:140px">
+              <span id="mit-intel-confidence-matches-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">72%</span>
             </div>
           </div>
           <div class="mit-auto-grid" id="mit-auto-grid"></div>
@@ -30158,12 +30235,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const slider = document.getElementById('mit-intel-confidence');
       const valEl = document.getElementById('mit-intel-confidence-val');
       if (!slider || !valEl || !window.PatternIntelEngine) return;
-      const current = Math.round((window.PatternIntelEngine.getMinWinRate() || 0.55) * 100);
+      // Even/Odd (parity) only — Matches keeps its own separate threshold,
+      // set via getMinWinRateDigit/setMinWinRateDigit, untouched by this slider.
+      const current = Math.round((window.PatternIntelEngine.getMinWinRateParity() || 0.72) * 100);
       slider.value = current;
       valEl.textContent = `${current}%`;
       slider.oninput = () => { valEl.textContent = `${slider.value}%`; };
       slider.onchange = () => {
-        const applied = window.PatternIntelEngine.setMinWinRate(parseInt(slider.value, 10) / 100);
+        const applied = window.PatternIntelEngine.setMinWinRateParity(parseInt(slider.value, 10) / 100);
+        valEl.textContent = `${Math.round(applied * 100)}%`;
+      };
+    })();
+    (function bindIntelConfidenceSliderMatches() {
+      const slider = document.getElementById('mit-intel-confidence-matches');
+      const valEl = document.getElementById('mit-intel-confidence-matches-val');
+      if (!slider || !valEl || !window.PatternIntelEngine) return;
+      // Matches (digit) only — per explicit request, Matches gets ONLY the
+      // raised confidence threshold, no Test Trade/Martingale/1-min
+      // cooldown, so this is deliberately its own independent slider.
+      const current = Math.round((window.PatternIntelEngine.getMinWinRateDigit() || 0.72) * 100);
+      slider.value = current;
+      valEl.textContent = `${current}%`;
+      slider.oninput = () => { valEl.textContent = `${slider.value}%`; };
+      slider.onchange = () => {
+        const applied = window.PatternIntelEngine.setMinWinRateDigit(parseInt(slider.value, 10) / 100);
         valEl.textContent = `${Math.round(applied * 100)}%`;
       };
     })();
