@@ -10139,9 +10139,9 @@ window.PatternIntelEngine = (function () {
   const MARKETS = ['1HZ10V', 'R_10', '1HZ25V', 'R_25', '1HZ50V', 'R_50', '1HZ75V', 'R_75', '1HZ100V', 'R_100'];
   const pairOf = (s) => s.startsWith('1HZ') ? s.replace('1HZ', 'R_').replace('V', '') : ('1HZ' + s.replace('R_', '') + 'V');
 
-  const RUN_LEN = 2;              // parity run length that counts as "a streak" — loosened from 3: with 10 markets watched at once, a 3-run bar made a live setup rare enough that Intel bots barely ever fired
+  const RUN_LEN = 3;              // parity run length that counts as "a streak" — restored to 3: with 10 markets watched at once, the loosened RUN_LEN=2 made setups qualify too easily and Intel bots fired excessively
   const MIN_HITS = 2;             // "done that more than once" — hard floor, unchanged
-  const MIN_WIN_RATE_DEFAULT = 0.55; // fallback if nothing saved yet
+  const MIN_WIN_RATE_DEFAULT = 0.6; // fallback if nothing saved yet — raised from 0.55, a firmer confidence bar before a setup counts as confirmed
   const LOOKBACK = 400;           // ticks of history mined per market
   const REPEAT_WINDOW = 4;        // ticks a digit has to repeat within, for the DIGIT pattern
   // BUG FIX: this used to be a hardcoded `const MIN_WIN_RATE = 0.55` with
@@ -10286,10 +10286,11 @@ window.PatternIntelEngine = (function () {
     const twinRead = mode === 'parity' ? mineParity(twinDigits) : mineDigit(twinDigits);
     if (!twinRead) return false;
     const twinPredicted = mode === 'parity' ? twinRead.predictedParity : twinRead.predictedDigit;
-    // Loosened from >=0.5 — the twin just needs to agree on direction and
-    // not be contradicting the read outright, not independently clear the
-    // same high bar the primary market already cleared.
-    return twinPredicted === predicted && twinRead.winRate >= 0.45 && twinRead.total >= MIN_HITS;
+    // Restored to >=0.5 — the twin still just needs to agree on direction
+    // rather than independently clear the same high bar the primary market
+    // already cleared, but it should at least be doing better than a coin
+    // flip, not confirming while itself sitting below 50%.
+    return twinPredicted === predicted && twinRead.winRate >= 0.5 && twinRead.total >= MIN_HITS;
   }
 
   // Scans every market and returns the single strongest confirmed + armed
@@ -14274,6 +14275,17 @@ window.NexusStrategies=exports;
       // but the actual elevated number in effect resets to nothing the
       // instant the page reloads — see getEffectiveStake().
       this.sessionStakeOverride = null;
+      // Risk Stake tracking (Flip Intell) — also plain instance properties,
+      // never persisted, same reasoning as sessionStakeOverride above.
+      // _riskSessionActive: true for exactly the one session currently
+      // trading at Risk $ (flat, no recovery — see completeSession/
+      // _chainAfterResult). _riskSessionStake: the amount that session is
+      // using, for logging/UI. _inRiskCooldown: true while sitting out the
+      // extended cooldown that follows a lost risk session — surfaced in
+      // the Flip Intell card's stake LED.
+      this._riskSessionActive = false;
+      this._riskSessionStake = null;
+      this._inRiskCooldown = false;
       // Rolling analytics for the Stake Addition terminal's suggestion —
       // NOT persisted (deliberately; a fresh page load starts counting
       // fresh, same spirit as the stake override itself).
@@ -16377,33 +16389,62 @@ window.NexusStrategies=exports;
       this.executionGuard = false; this.pendingTrade = null;
       this._skipArmed = false; this._isSacrificeTrade = false;
       this.sessionOutcomes = [...this.sessionOutcomes, !!wonSession].slice(-20);
-      // ── STAKE ADDITION (all bots) ──────────────────────────────────────
+      // ── STAKE ADDITION — Risk Stake (one-shot, no recovery) ─────────────
       // Fires exactly once per completed TRADING SESSION (this function —
       // the point where the bot goes into cooldown), not per individual
-      // trade. wonSession === true covers both a clean run and a fully
-      // recovered martingale chain finishing the session in profit;
-      // wonSession === false covers stop-loss / martingale-stop-step /
-      // any other session-ending loss. Only a win-finished session ever
-      // promotes the stake, and only if the operator armed it — a lost
-      // session never touches the stake in any way, boosted or not.
+      // trade.
       //
-      // STANDING switch, not one-shot: arming it no longer auto-disarms
-      // after firing — it stays armed and keeps promoting the stake at
-      // the end of every winning session until the operator manually
-      // switches it off. The boost itself lives in this.sessionStakeOverride
-      // (see getEffectiveStake()), never in this.config, so it can never
-      // get written to disk — a page reload always drops back to the
-      // plain Stake $ value, armed or not, exactly like flipping a light
-      // switch that resets when the power cycles but stays flipped
-      // otherwise. Available on every bot, not just Even/Odd.
-      if (wonSession && this.config.stakeAdditionArmed) {
-        const nextHigh = parseFloat(this.config.stakeAdditionNextStake);
-        if (!isNaN(nextHigh) && nextHigh > 0) {
-          const fromStake = this.getEffectiveStake();
-          this.addLog('engine', 'STAKE-ADD', `Session finished in a WIN — Stake Addition promoting stake from $${fromStake.toFixed(2)} to $${nextHigh.toFixed(2)} for the next session. Still armed for the session after that too.`);
-          this.sessionStakeOverride = nextHigh;
+      // ONE-SHOT, not standing: arming no longer promotes the stake at the
+      // end of every winning session forever. Instead, once armed, the
+      // engine waits for a configurable consecutive-session WIN STREAK
+      // (this.config.stakeAdditionStreakRequired, default 2) before it
+      // queues Risk $ for exactly the next session. That next session
+      // trades completely flat — see _chainAfterResult()'s risk-session
+      // branch, which resolves it after this ONE trade instead of letting
+      // it enter the bot's normal martingale/target-runs flow — and:
+      //   WIN  → logged, drops straight back to the normal Stake $, and
+      //          Stake Addition needs a fresh qualifying streak to fire
+      //          again (it does NOT keep firing every session after).
+      //   LOSS → no recovery is attempted at all. Stake Addition disarms
+      //          itself and the bot enters an extended Risk Cooldown
+      //          (this.config.stakeAdditionCooldownMinutes, default 30)
+      //          instead of the normal short between-session cooldown,
+      //          and does NOT auto-resume via Auto Pilot afterward — it
+      //          needs to be manually re-armed/re-engaged.
+      // The boost itself still lives in this.sessionStakeOverride (see
+      // getEffectiveStake()), never in this.config, so it can never get
+      // written to disk — a page reload always drops back to the plain
+      // Stake $ value. Available on every bot, not just Even/Odd.
+      let forcedCooldownSeconds = null;
+      let forcedCooldownTitle = null;
+      let skipAutoPilotResume = false;
+      if (this._riskSessionActive) {
+        this._riskSessionActive = false;
+        this.sessionStakeOverride = null;
+        const usedStake = this._riskSessionStake || this.getEffectiveStake();
+        if (wonSession) {
+          this.addLog('engine', 'STAKE-ADD', `🎯 Risk session WON at $${usedStake.toFixed(2)} — back to normal stake ($${this.config.stake.toFixed(2)}). Needs a fresh win streak to fire again.`);
         } else {
-          this.addLog('engine', 'STAKE-ADD', `Stake Addition is armed but no valid Next High Stake was set — skipped this time.`);
+          this.config.stakeAdditionArmed = false;
+          const mins = Math.max(1, parseFloat(this.config.stakeAdditionCooldownMinutes) || 30);
+          forcedCooldownSeconds = Math.round(mins * 60);
+          forcedCooldownTitle = 'RISK COOLDOWN';
+          skipAutoPilotResume = true;
+          this.addLog('engine', 'STAKE-ADD', `⛔ Risk session LOST at $${usedStake.toFixed(2)} — no recovery attempted. Disarmed and entering a ${mins}-minute Risk Cooldown.`);
+        }
+      } else if (wonSession && this.config.stakeAdditionArmed) {
+        const req = Math.max(1, parseInt(this.config.stakeAdditionStreakRequired, 10) || 2);
+        const streak = this.getSessionWinStreak();
+        const nextHigh = parseFloat(this.config.stakeAdditionNextStake);
+        if (streak >= req) {
+          if (!isNaN(nextHigh) && nextHigh > 0) {
+            this.sessionStakeOverride = nextHigh;
+            this._riskSessionActive = true;
+            this._riskSessionStake = nextHigh;
+            this.addLog('engine', 'STAKE-ADD', `🚀 ${streak}-session win streak reached — Risk $${nextHigh.toFixed(2)} queued for the next session only (flat, no recovery).`);
+          } else {
+            this.addLog('engine', 'STAKE-ADD', `Stake Addition is armed but no valid Risk $ was set — skipped this time.`);
+          }
         }
       }
       // Alt Automation: if this session ended in a loss (recovery exhausted,
@@ -16419,10 +16460,12 @@ window.NexusStrategies=exports;
       // regardless of what step the current session ended on (stop-loss, max step, TP, etc.)
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false,
         currentRuns: 0, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
-      const cd = 5 + Math.floor(Math.random() * 21); // randomized 5-25s (doc: COOLDOWN_MIN/MAX)
+      const cd = forcedCooldownSeconds != null ? forcedCooldownSeconds : (5 + Math.floor(Math.random() * 21)); // randomized 5-25s (doc: COOLDOWN_MIN/MAX), or the longer Risk Cooldown after a risk-session loss
       this.cooldownTime = cd;
       this._cdMax = cd; // store for tab ring arc
-      this.addLog('engine', 'SYSTEM', `COOLING DOWN ${cd}s — scanning for best market...`);
+      this._skipAutoPilotResume = skipAutoPilotResume;
+      this._inRiskCooldown = !!forcedCooldownSeconds;
+      this.addLog('engine', 'SYSTEM', forcedCooldownTitle ? `${forcedCooldownTitle} — ${Math.round(cd / 60)}m before this bot can trade again` : `COOLING DOWN ${cd}s — scanning for best market...`);
       this.runsSinceRefresh++;
       if (this.config.autoRefresh && this.runsSinceRefresh >= 4) {
         this.runsSinceRefresh = 0;
@@ -16434,7 +16477,7 @@ window.NexusStrategies=exports;
         }, (this.cooldownTime || 5) * 1000 + 500);
       }
       // Show cooldown overlay popup on this engine's tab
-      this._showCooldownOverlay(cd);
+      this._showCooldownOverlay(cd, forcedCooldownTitle || undefined, forcedCooldownTitle ? '⛔ Risk session lost — no recovery, re-arm manually when ready' : undefined);
       if (this.cooldownTimer) clearInterval(this.cooldownTimer);
       this.cooldownTimer = setInterval(() => {
         this.cooldownTime--;
@@ -16446,6 +16489,7 @@ window.NexusStrategies=exports;
           // stake the instant cooldown ends, no matter what step/TP/SL/abort
           // path got us here, and regardless of whether Auto Pilot is on.
           this.state = { ...this.state, isCooldown: false, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
+          this._inRiskCooldown = false;
           this._hideCooldownOverlay();
           this._rerollShuffles();
           // Market switch: every cooldown, always rotate onto a new market —
@@ -16461,7 +16505,7 @@ window.NexusStrategies=exports;
               this.changeMarket(best.symbol);
             }
           }
-          if (this.config.autoPilot) {
+          if (this.config.autoPilot && !this._skipAutoPilotResume) {
             setTimeout(() => {
               if (!this.state.isCooldown) {
                 this.state = {
@@ -16477,7 +16521,10 @@ window.NexusStrategies=exports;
                 this.emit();
               }
             }, 1500);
+          } else if (this._skipAutoPilotResume) {
+            this.addLog('engine', 'ENGINE', 'Risk Cooldown ended — staying OFF. Re-engage manually when ready.');
           }
+          this._skipAutoPilotResume = false;
         }
         this.emit();
       }, 1000);
@@ -16775,6 +16822,17 @@ window.NexusStrategies=exports;
 
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
+      // ── RISK SESSION (Stake Addition's one-shot Risk $ trade) ────────────
+      // Deliberately flat and has NO recovery: it resolves after exactly
+      // this one trade — win or lose — instead of continuing into the
+      // bot's normal martingale/target-runs flow below. martingaleStep was
+      // just reset to 0 by handleContractResult on a win, or bumped to >=1
+      // on a loss, so that's a reliable read of this trade's outcome here.
+      // See completeSession() for what happens on each outcome.
+      if (this._riskSessionActive) {
+        this.completeSession(st.martingaleStep === 0);
+        return;
+      }
       if (st.active) {
         // Higher/Lower and Matches have no session-level TP/SL
         // of their own anymore — they always defer to whatever is set in
@@ -30248,20 +30306,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   let filterText = '';
   let driveLog = []; // recent auto-drive actions, newest first, capped
 
-  // ── Risk Amount — the amount a bot goes to next when YOU decide to press,
-  // not the system's own win-streak suggestion. Lives in its own field below
-  // "Next $" on every card; if it's filled, arming uses it instead of the
-  // suggested value. Persisted per bot so a risk amount you set sticks
-  // around (unlike stakeAdditionNextStake, which the engine always resets
-  // to unarmed on reload).
-  function riskKey(id) { return `flip_risk_${id}`; }
-  function loadRiskAmount(id) {
-    try { const v = parseFloat(localStorage.getItem(riskKey(id))); return (!isNaN(v) && v > 0) ? v : null; } catch (e) { return null; }
-  }
-  function saveRiskAmount(id, v) {
-    try { if (v > 0) localStorage.setItem(riskKey(id), String(v)); else localStorage.removeItem(riskKey(id)); } catch (e) {}
-  }
-
   // ── Session Risk Cap — an optional ceiling (in $) on total extra stake
   // armed across every bot at once. Empty/0 = unlimited. This is the one
   // thing standing between "triple it" and the board quietly stacking up
@@ -30380,6 +30424,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       r.armed = !!r.eng.config.stakeAdditionArmed;
       r.streak = r.eng.getSessionWinStreak ? r.eng.getSessionWinStreak() : 0;
       r.sparkline = (r.eng.sessionOutcomes || []).slice(-10);
+      // Stake mode LED — which stake this bot is actually trading with
+      // right now, so it's visible at a glance instead of having to open
+      // the bot's own tab: a live Risk Stake trade, a post-loss Risk
+      // Cooldown, or just plain Normal Stake.
+      r.riskActive = !!r.eng._riskSessionActive;
+      r.riskCooldown = !!r.eng._inRiskCooldown;
+      r.cooldownSecs = r.eng.cooldownTime || 0;
     });
     const armedCount = withEngine.filter((r) => r.armed).length;
     let wrSum = 0, wrCount = 0;
@@ -30473,14 +30524,28 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const wrClass = stats.winRate == null ? 'neutral' : stats.winRate >= 0.6 ? 'good' : stats.winRate < 0.45 ? 'bad' : 'neutral';
       const wrText = stats.winRate != null ? `${Math.round(stats.winRate * 100)}% / ${stats.sessions}` : '—';
       const sug = eng.getSuggestedNextStake ? eng.getSuggestedNextStake() : null;
-      const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
-      const riskVal = loadRiskAmount(id) || '';
+      const normalStakeVal = c.stake != null ? c.stake : '';
+      const riskVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
+      const streakReqVal = c.stakeAdditionStreakRequired != null ? c.stakeAdditionStreakRequired : 2;
+      const cooldownMinVal = c.stakeAdditionCooldownMinutes != null ? c.stakeAdditionCooldownMinutes : 30;
       const badge = id === bestId ? '<span class="fi-badge best" title="Best win rate on this board right now">🔥 BEST</span>'
         : id === worstId ? '<span class="fi-badge worst" title="Worst win rate on this board right now">⚠ WATCH</span>' : '';
       const sparkHtml = r.sparkline.length
         ? `<div class="fi-spark" title="Last ${r.sparkline.length} sessions, oldest → newest">${r.sparkline.map((w) => `<span class="fi-dot ${w ? 'win' : 'loss'}"></span>`).join('')}</div>`
         : '';
       const streakHtml = r.streak >= 2 ? `<span class="fi-streak">🔥 ${r.streak}-win streak</span>` : '';
+
+      // ── Stake mode LED — glanceable readout of what this bot is
+      // actually trading with right now.
+      let ledMode = 'normal', ledText = `NORMAL · $${(parseFloat(c.stake) || 0).toFixed(2)}`;
+      if (r.riskActive) {
+        ledMode = 'risk'; ledText = `RISK STAKE LIVE · $${effective.toFixed(2)}`;
+      } else if (r.riskCooldown) {
+        const secs = Math.max(0, r.cooldownSecs || 0);
+        const mm = Math.floor(secs / 60), ss = secs % 60;
+        ledMode = 'cooldown'; ledText = `RISK COOLDOWN · ${mm}:${String(ss).padStart(2, '0')}`;
+      }
+
       return `<div class="fi-card ${armed ? 'armed' : ''}" style="--fi-i:${idx}">
         <div class="fi-card-accent"></div>
         <div class="fi-card-top">
@@ -30493,19 +30558,35 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           ${streakHtml}
         </div>
         ${sparkHtml}
-        <div class="fi-card-stake">trading at $${effective.toFixed(2)}${armed ? ' <span class="fi-boosted">(boosted)</span>' : ''}</div>
-        <div class="fi-card-controls">
-          <input type="number" step="0.01" min="0.01" id="fi-next-${id}" value="${nextVal}" placeholder="next $" ${driveOn ? 'disabled' : ''}>
-          <button type="button" class="fi-arm ${armed ? 'on' : ''}" id="fi-arm-${id}" ${driveOn ? 'disabled title="Auto Flip Drive is managing this — turn it off to arm/disarm by hand"' : ''}>${armed ? 'DISARM' : 'ARM'}</button>
+        <div class="fi-led-row fi-led-${ledMode}" title="${ledMode === 'risk' ? 'This bot is trading its one-shot Risk Stake right now — flat, no recovery.' : ledMode === 'cooldown' ? 'Sitting out after a lost Risk Stake trade — no auto-resume until this ends.' : 'Trading its normal, everyday stake.'}">
+          <span class="fi-led-dot"></span><span class="fi-led-text">${ledText}</span>
         </div>
-        <div class="fi-risk-row">
-          <div class="fi-risk-label">Risk amount — when you're ready to go big, this wins over the suggestion above.</div>
-          <div class="fi-risk-controls">
-            <input type="number" step="0.01" min="0.01" id="fi-risk-${id}" value="${riskVal}" placeholder="risk $" ${driveOn ? 'disabled' : ''}>
-            <button type="button" class="fi-risk-x" id="fi-riskx2-${id}" ${driveOn ? 'disabled' : ''} title="Set risk amount to 2× base stake">×2</button>
-            <button type="button" class="fi-risk-x" id="fi-riskx3-${id}" ${driveOn ? 'disabled' : ''} title="Set risk amount to 3× base stake">×3</button>
-          </div>
+        <div class="fi-stake-grid">
+          <label class="fi-field">
+            <span class="fi-field-label">Normal stake</span>
+            <input type="number" step="0.01" min="0.01" id="fi-stake-${id}" value="${normalStakeVal}" placeholder="stake $" ${driveOn ? 'disabled' : ''}>
+          </label>
+          <label class="fi-field">
+            <span class="fi-field-label">Risk $ <span class="fi-field-sub">(one-shot)</span></span>
+            <div class="fi-risk-controls">
+              <input type="number" step="0.01" min="0.01" id="fi-risk-${id}" value="${riskVal}" placeholder="risk $" ${driveOn ? 'disabled' : ''}>
+              <button type="button" class="fi-risk-x" id="fi-riskx2-${id}" ${driveOn ? 'disabled' : ''} title="Set Risk $ to 2× normal stake">×2</button>
+              <button type="button" class="fi-risk-x" id="fi-riskx3-${id}" ${driveOn ? 'disabled' : ''} title="Set Risk $ to 3× normal stake">×3</button>
+            </div>
+          </label>
         </div>
+        <div class="fi-mini-grid">
+          <label class="fi-field">
+            <span class="fi-field-label">Fires after win streak</span>
+            <input type="number" step="1" min="1" id="fi-streak-${id}" value="${streakReqVal}" ${driveOn ? 'disabled' : ''}>
+          </label>
+          <label class="fi-field">
+            <span class="fi-field-label">Risk cooldown (min)</span>
+            <input type="number" step="1" min="1" id="fi-cd-${id}" value="${cooldownMinVal}" ${driveOn ? 'disabled' : ''}>
+          </label>
+        </div>
+        <div class="fi-risk-label">Fires ONCE — a flat trade with no martingale recovery. Win → straight back to normal stake. Lose → disarms and cools down for the minutes set above.</div>
+        <button type="button" class="fi-arm ${armed ? 'on' : ''}" id="fi-arm-${id}" ${driveOn ? 'disabled title="Auto Flip Drive is managing this — turn it off to arm/disarm by hand"' : ''}>${armed ? 'DISARM' : 'ARM'}</button>
         ${sug ? `<div class="fi-hint ${sug.confidence === 'high' ? 'smart-flag' : ''}">suggested $${sug.value.toFixed(2)} · ${sug.confidence} confidence</div>` : ''}
       </div>`;
     }).join('');
@@ -30523,27 +30604,39 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       FLIP_BOT_IDS.forEach((id) => {
         const eng = flipEngine(id);
         if (!eng) return;
-        const nextInp = document.getElementById(`fi-next-${id}`);
-        if (nextInp) nextInp.onchange = (e) => {
+        const baseStakeFor = () => (eng.config && eng.config.stake > 0) ? eng.config.stake : 1;
+
+        const stakeInp = document.getElementById(`fi-stake-${id}`);
+        if (stakeInp) stakeInp.onchange = (e) => {
           const v = parseFloat(e.target.value);
-          eng.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
+          if (!isNaN(v) && v > 0) eng.setConfig({ stake: v });
+          else e.target.value = eng.config.stake;
         };
         const riskInp = document.getElementById(`fi-risk-${id}`);
         if (riskInp) riskInp.onchange = (e) => {
           const v = parseFloat(e.target.value);
-          saveRiskAmount(id, (!isNaN(v) && v > 0) ? v : 0);
+          eng.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
         };
-        const baseStakeFor = () => (eng.config && eng.config.stake > 0) ? eng.config.stake : 1;
+        const streakInp = document.getElementById(`fi-streak-${id}`);
+        if (streakInp) streakInp.onchange = (e) => {
+          const v = parseInt(e.target.value, 10);
+          eng.setConfig({ stakeAdditionStreakRequired: (!isNaN(v) && v >= 1) ? v : 2 });
+        };
+        const cdInp = document.getElementById(`fi-cd-${id}`);
+        if (cdInp) cdInp.onchange = (e) => {
+          const v = parseFloat(e.target.value);
+          eng.setConfig({ stakeAdditionCooldownMinutes: (!isNaN(v) && v >= 1) ? v : 30 });
+        };
         const x2Btn = document.getElementById(`fi-riskx2-${id}`);
         if (x2Btn) x2Btn.onclick = () => {
           const v = +(baseStakeFor() * 2).toFixed(2);
-          saveRiskAmount(id, v);
+          eng.setConfig({ stakeAdditionNextStake: v });
           renderFlip();
         };
         const x3Btn = document.getElementById(`fi-riskx3-${id}`);
         if (x3Btn) x3Btn.onclick = () => {
           const v = +(baseStakeFor() * 3).toFixed(2);
-          saveRiskAmount(id, v);
+          eng.setConfig({ stakeAdditionNextStake: v });
           renderFlip();
         };
         const armBtn = document.getElementById(`fi-arm-${id}`);
@@ -30551,25 +30644,27 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           if (driveOn) return; // belt-and-braces — button is disabled while driving anyway
           const arming = !eng.config.stakeAdditionArmed;
           if (arming) {
-            // Risk $ wins over Next $ when both are set — this is the field
-            // for "I've decided to go bigger than the system suggested."
-            const riskV = parseFloat((document.getElementById(`fi-risk-${id}`) || {}).value);
-            const nextV = parseFloat((document.getElementById(`fi-next-${id}`) || {}).value);
-            const v = (!isNaN(riskV) && riskV > 0) ? riskV : nextV;
+            const v = parseFloat((document.getElementById(`fi-risk-${id}`) || {}).value);
             if (isNaN(v) || v <= 0) {
-              const inp = document.getElementById(`fi-risk-${id}`) || document.getElementById(`fi-next-${id}`);
-              if (inp) { inp.style.borderColor = 'hsl(var(--loss))'; inp.placeholder = 'Enter an amount first!'; inp.focus(); setTimeout(() => { inp.style.borderColor = ''; }, 1500); }
+              const inp = document.getElementById(`fi-risk-${id}`);
+              if (inp) { inp.style.borderColor = 'hsl(var(--loss))'; inp.placeholder = 'Enter a Risk $ first!'; inp.focus(); setTimeout(() => { inp.style.borderColor = ''; }, 1500); }
               return;
             }
             if (capBlocks(id, v)) {
-              const inp = document.getElementById(`fi-risk-${id}`) || document.getElementById(`fi-next-${id}`);
+              const inp = document.getElementById(`fi-risk-${id}`);
               if (inp) { inp.style.borderColor = 'hsl(var(--loss))'; inp.title = `Blocked — this would push total armed exposure past your $${riskCap.toFixed(2)} Session Risk Cap.`; setTimeout(() => { inp.style.borderColor = ''; }, 1800); }
               pushDriveLog(`${flipLabel(id)}: ⏸ Manual arm at $${v.toFixed(2)} blocked — would cross the $${riskCap.toFixed(2)} Session Risk Cap.`);
               renderFlip();
               return;
             }
-            eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: v });
-            if (!isNaN(riskV) && riskV > 0) saveRiskAmount(id, riskV);
+            const streakV = parseInt((document.getElementById(`fi-streak-${id}`) || {}).value, 10);
+            const cdV = parseFloat((document.getElementById(`fi-cd-${id}`) || {}).value);
+            eng.setConfig({
+              stakeAdditionArmed: true,
+              stakeAdditionNextStake: v,
+              stakeAdditionStreakRequired: (!isNaN(streakV) && streakV >= 1) ? streakV : 2,
+              stakeAdditionCooldownMinutes: (!isNaN(cdV) && cdV >= 1) ? cdV : 30,
+            });
           } else {
             eng.setConfig({ stakeAdditionArmed: false });
           }
@@ -30716,7 +30811,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #panel-flipintell .fi-bulk:disabled { opacity:.35; cursor:not-allowed; }
 
       /* ── Bot roster — big animated cards, grid layout ────────────────── */
-      #panel-flipintell .fi-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px; margin-bottom:14px; }
+      #panel-flipintell .fi-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(266px, 1fr)); gap:12px; margin-bottom:14px; }
       #panel-flipintell .fi-card { position:relative; overflow:hidden; border-radius:16px; padding:14px 15px 12px; border:1px solid hsl(var(--border)/0.55);
         background:linear-gradient(160deg, hsl(var(--card)/0.9) 0%, hsl(var(--bg-soft, var(--bg))/0.65) 100%); backdrop-filter:blur(12px);
         box-shadow:0 4px 16px hsl(0 0% 0%/0.3), inset 0 1px 0 hsl(255 100% 100%/0.04);
@@ -30739,16 +30834,29 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #panel-flipintell .fi-dot { width:6.5px; height:6.5px; border-radius:50%; background:hsl(var(--muted)/0.3); flex:0 0 auto; }
       #panel-flipintell .fi-dot.win { background:hsl(var(--win)/0.9); }
       #panel-flipintell .fi-dot.loss { background:hsl(var(--loss)/0.65); }
-      #panel-flipintell .fi-card-stake { font-size:9px; opacity:.75; font-variant-numeric:tabular-nums; margin-bottom:9px; }
-      #panel-flipintell .fi-boosted { color:hsl(var(--win)); font-weight:700; }
-      #panel-flipintell .fi-card-controls { display:flex; align-items:center; gap:7px; }
-      #panel-flipintell .fi-card-controls input { width:100%; padding:7px 9px; border-radius:9px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
-        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10px; }
-      #panel-flipintell .fi-card-controls input:disabled { opacity:.4; cursor:not-allowed; }
+      /* ── Stake mode LED — glanceable readout of normal vs risk vs cooldown ── */
+      #panel-flipintell .fi-led-row { display:flex; align-items:center; gap:7px; padding:6px 10px; border-radius:999px; margin-bottom:10px;
+        border:1px solid hsl(var(--border)/0.5); background:hsl(var(--bg)/0.4); font-family:'Outfit',sans-serif; font-weight:800; font-size:8.5px; letter-spacing:.4px; }
+      #panel-flipintell .fi-led-dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:hsl(var(--muted-foreground)/0.5); }
+      #panel-flipintell .fi-led-text { font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #panel-flipintell .fi-led-normal .fi-led-dot { background:hsl(var(--muted-foreground)); }
+      #panel-flipintell .fi-led-normal .fi-led-text { color:hsl(var(--muted-foreground)); }
+      #panel-flipintell .fi-led-risk { border-color:hsl(var(--win)/0.6); background:hsl(var(--win)/0.1); }
+      #panel-flipintell .fi-led-risk .fi-led-dot { background:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.9); animation:fi-led-pulse 1.1s ease-in-out infinite; }
+      #panel-flipintell .fi-led-risk .fi-led-text { color:hsl(var(--win)); }
+      #panel-flipintell .fi-led-cooldown { border-color:hsl(var(--loss)/0.55); background:hsl(var(--loss)/0.08); }
+      #panel-flipintell .fi-led-cooldown .fi-led-dot { background:hsl(var(--loss)); box-shadow:0 0 8px hsl(var(--loss)/0.8); animation:fi-led-pulse 1.6s ease-in-out infinite; }
+      #panel-flipintell .fi-led-cooldown .fi-led-text { color:hsl(var(--loss)); }
+      @keyframes fi-led-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(.8); } }
 
-      /* ── Risk Amount row — the field that wins over the suggestion ──── */
-      #panel-flipintell .fi-risk-row { margin-top:8px; padding-top:8px; border-top:1px dashed hsl(var(--border)/0.4); }
-      #panel-flipintell .fi-risk-label { font-size:7.5px; opacity:.55; line-height:1.4; margin-bottom:6px; }
+      /* ── Field grids — Normal Stake / Risk $, then Win-Streak Trigger / Risk Cooldown ── */
+      #panel-flipintell .fi-stake-grid, #panel-flipintell .fi-mini-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+      #panel-flipintell .fi-field { display:flex; flex-direction:column; gap:4px; min-width:0; }
+      #panel-flipintell .fi-field-label { font-size:7.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; opacity:.55; }
+      #panel-flipintell .fi-field-sub { text-transform:none; opacity:.7; font-weight:500; }
+      #panel-flipintell .fi-field input { width:100%; padding:7px 9px; border-radius:9px; border:1px solid hsl(var(--border)/0.6); background:hsl(var(--bg)/0.5);
+        color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10px; }
+      #panel-flipintell .fi-field input:disabled { opacity:.4; cursor:not-allowed; }
       #panel-flipintell .fi-risk-controls { display:flex; align-items:center; gap:5px; }
       #panel-flipintell .fi-risk-controls input { flex:1; min-width:0; padding:7px 8px; border-radius:8px; border:1px solid hsl(var(--loss)/0.4); background:hsl(var(--loss)/0.05);
         color:hsl(var(--foreground)); font-family:'DM Mono',monospace; font-size:10px; }
@@ -30757,8 +30865,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         color:hsl(var(--loss)); font-family:'Outfit',sans-serif; font-weight:900; font-size:9.5px; cursor:pointer; transition:transform .15s ease, box-shadow .2s ease; }
       #panel-flipintell .fi-risk-x:hover:not(:disabled) { transform:translateY(-1px) scale(1.05); box-shadow:0 4px 12px hsl(var(--loss)/0.25); }
       #panel-flipintell .fi-risk-x:disabled { opacity:.35; cursor:not-allowed; }
-      #panel-flipintell .fi-arm { padding:8px 12px; border-radius:9px; border:1px solid hsl(var(--border)/0.65); background:hsl(var(--muted)/0.25);
-        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-weight:800; font-size:9.5px; letter-spacing:.3px; cursor:pointer; white-space:nowrap; transition:transform .15s ease, box-shadow .2s ease; }
+      #panel-flipintell .fi-risk-label { font-size:7.5px; opacity:.55; line-height:1.4; margin-bottom:8px; padding-top:6px; border-top:1px dashed hsl(var(--border)/0.4); }
+      #panel-flipintell .fi-arm { width:100%; padding:9px 12px; border-radius:10px; border:1px solid hsl(var(--border)/0.65); background:hsl(var(--muted)/0.25);
+        color:hsl(var(--foreground)); font-family:'Outfit',sans-serif; font-weight:800; font-size:10px; letter-spacing:.5px; cursor:pointer; white-space:nowrap; transition:transform .15s ease, box-shadow .2s ease; }
       #panel-flipintell .fi-arm:hover:not(:disabled) { transform:translateY(-1px); }
       #panel-flipintell .fi-arm.on { background:linear-gradient(90deg, hsl(var(--win)/0.35), hsl(var(--win)/0.16)); border-color:hsl(var(--win)/0.7); color:hsl(var(--win)); box-shadow:0 0 14px hsl(var(--win)/0.25); }
       #panel-flipintell .fi-arm:disabled { opacity:.4; cursor:not-allowed; }
