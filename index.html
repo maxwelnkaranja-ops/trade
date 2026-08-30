@@ -10162,7 +10162,7 @@ window.PatternIntelEngine = (function () {
   // (Test Trade, Martingale, 1-minute cooldown) that explicitly excludes
   // Matches.
   const MIN_WIN_RATE_PARITY_DEFAULT = 0.65; // Even — lowered a bit per explicit request (was 0.72), Odd removed from Intel so this now only gates Even
-  const MIN_WIN_RATE_DIGIT_DEFAULT = 0.82;  // Matches — raised per explicit request (was 0.72) because Matches Intel was firing too often; scope confirmed as confidence-threshold only: still flat-stake, no Test Trade, no Martingale, no 1-min cooldown for Matches
+  const MIN_WIN_RATE_DIGIT_DEFAULT = 0.92;  // Matches — raised per explicit follow-up request (was 0.82, then 0.72) because Matches Intel kept firing too often; scope confirmed as confidence-threshold only: still flat-stake, no Test Trade, no Martingale, no 1-min cooldown for Matches
   const MIN_WIN_RATE_PARITY_KEY = 'pattern_intel_min_win_rate_parity_v1';
   const MIN_WIN_RATE_DIGIT_KEY = 'pattern_intel_min_win_rate_digit_v1';
   function loadMinWinRate(key, def) {
@@ -27212,17 +27212,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // and the stake widget all silently skipped it. It's included now.
   const BOT_IDS
  = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall',
-    // Intel Auto-Trader bots (even_intel/odd_intel/matches_intel) — fully
-    // separate TitanEngine instances (see ensureTitanEngine's isIntelVariant
+    // Intel Auto-Trader bots (even_intel/matches_intel) — fully separate
+    // TitanEngine instances (see ensureTitanEngine's isIntelVariant
     // handling) that were entirely missing from this list, which is why
     // pressing ENGAGE ALL / TERMINATE ALL on the Dashboard never armed or
     // disarmed them — this list is exactly what that button loops over.
+    // odd_intel deliberately excluded — the Odd Bot card was removed from
+    // the Market Intel tab, but this list still had 'odd_intel' in it,
+    // which is why ENGAGE ALL / a stray autoPilot resume kept trading it
+    // even with no UI left to control it. Left out now so nothing in this
+    // file can ever engage it again.
     // ensureTitanOrDifferForControl already knows how to create/fetch them
     // (falls through to ensureTitanEngine(id) for any id it doesn't
     // special-case), and refreshTabDots()/the stake widget both already
     // no-op safely for ids with no matching tab element, so adding them
     // here is safe everywhere else BOT_IDS is used.
-    'even_intel', 'odd_intel', 'matches_intel'];
+    'even_intel', 'matches_intel'];
 
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
@@ -27425,6 +27430,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         };
     let eng;
     try { eng = new window.TitanEngine(opts); } catch(e) { console.error('[Hub] TitanEngine init failed:', e); return null; }
+    // Hard kill-switch for the retired odd_intel bot. Its UI card was
+    // removed from Market Intel, but a couple of other lists (Dashboard's
+    // ENGAGE ALL, Flip Intell) used to still reference it and could get it
+    // constructed/engaged with no Start/Stop control left anywhere to stop
+    // it again. Those lists are fixed now, but this stays as a backstop:
+    // if anything anywhere ever asks for 'odd_intel', it's force-stopped
+    // the instant it's built, so it can never place another trade.
+    if (id === 'odd_intel') {
+      eng.state.active = false;
+      eng.setConfig({ autoPilot: false });
+    }
     // Intel bots must always drive recovery off the Recovery Pattern Engine
     // (Smart Toggle / smartRecovery) — the whole point of an "Intel" bot is
     // that ITS pattern reading decides what happens next, not a fixed or
@@ -29741,9 +29757,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // the operator can see where recovery money is actually landing instead
   // of guessing a Smart Recovery cap.
   const RECOVERY_LABELS = Object.assign({}, BOT_META, {
-    even_intel: { label: 'Even (Intel)' }, odd_intel: { label: 'Odd (Intel)' }, matches_intel: { label: 'Matches (Intel)' },
+    even_intel: { label: 'Even (Intel)' }, matches_intel: { label: 'Matches (Intel)' },
   });
-  const RECOVERY_BOT_IDS = ['even', 'odd', 'oldeven', 'oldodd', 'evenmr', 'oddmr', 'nexus', 'under', 'meanrev', 'risemr', 'fallmr', 'oldrisefall', 'matches', 'even_intel', 'odd_intel', 'matches_intel'];
+  const RECOVERY_BOT_IDS = ['even', 'odd', 'oldeven', 'oldodd', 'evenmr', 'oddmr', 'nexus', 'under', 'meanrev', 'risemr', 'fallmr', 'oldrisefall', 'matches', 'even_intel', 'matches_intel'];
   let recoveryFilterBotId = 'all';
 
   function recoveryLabel(id) { return (RECOVERY_LABELS[id] || {}).label || id; }
@@ -30218,11 +30234,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="mit-auto-topnote" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.25);border-radius:10px;padding:10px 12px;margin-top:8px">
             <div style="flex:1;min-width:220px">
               <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Matches Confidence Threshold — the real firing gate</div>
-              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Matches Intel's own separate threshold — raised per request (was 72%, now 82%) since it was firing too often. Matches stays flat-stake with no Test Trade, Martingale, or 1-minute cooldown; only this number changed.</div>
+              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Matches Intel's own separate threshold — raised again per request (was 82%, now 92%) since it was still firing too often. Matches stays flat-stake with no Test Trade, Martingale, or 1-minute cooldown; only this number changed.</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-              <input id="mit-intel-confidence-matches" type="range" min="50" max="90" step="1" style="width:140px">
-              <span id="mit-intel-confidence-matches-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">82%</span>
+              <input id="mit-intel-confidence-matches" type="range" min="50" max="95" step="1" style="width:140px">
+              <span id="mit-intel-confidence-matches-val" style="font-family:'DM Mono',monospace;font-weight:800;color:hsl(var(--accent));min-width:38px;text-align:right">92%</span>
             </div>
           </div>
           <div class="mit-auto-grid" id="mit-auto-grid"></div>
@@ -30316,7 +30332,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // Matches (digit) only — per explicit request, Matches gets ONLY the
       // raised confidence threshold, no Test Trade/Martingale/1-min
       // cooldown, so this is deliberately its own independent slider.
-      const current = Math.round((window.PatternIntelEngine.getMinWinRateDigit() || 0.82) * 100);
+      const current = Math.round((window.PatternIntelEngine.getMinWinRateDigit() || 0.92) * 100);
       slider.value = current;
       valEl.textContent = `${current}%`;
       slider.oninput = () => { valEl.textContent = `${slider.value}%`; };
@@ -30490,8 +30506,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
   // Every bot this console can see — the exact same set the old sidebar box
-  // watched (13 regular/old-version bots + the 3 fully-separate Intel
-  // Auto-Trader engines).
+  // watched (13 regular/old-version bots + the 2 remaining fully-separate
+  // Intel Auto-Trader engines — odd_intel is deliberately excluded here:
+  // the Odd Bot card was removed from Market Intel, and this tab used to
+  // force-construct/arm odd_intel just by being opened, which was another
+  // path that kept it trading with no UI left to control it).
   const FLIP_LABELS = {
     even:          { label: 'Even Omega',          icon: '🎯' },
     odd:           { label: 'Odd Omega',           icon: '🎯' },
@@ -30507,7 +30526,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     oldrisefall:   { label: 'Higher/Lower (Old)',  icon: '📊' },
     matches:       { label: 'Matches',             icon: '🔢' },
     even_intel:    { label: 'Even (Intel)',        icon: '🤖' },
-    odd_intel:     { label: 'Odd (Intel)',         icon: '🤖' },
     matches_intel: { label: 'Matches (Intel)',     icon: '🤖' },
   };
   const FLIP_BOT_IDS = Object.keys(FLIP_LABELS);
@@ -30516,15 +30534,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
   function getEngines() { return window.__BotEngines || window._hubEngines || {}; }
 
-  // Fully-separate even_intel/odd_intel/matches_intel engines get force-
-  // constructed via window.ensureBotEngine (they're pre-created at page
-  // load anyway, see the Hub controller's init()). Every other bot is only
-  // read from the live engines map — this deliberately does NOT open a
-  // bot's live market subscription just because this tab is open; a bot
-  // only shows up fully once its own tab (or Intel Auto-Trader) has built it.
+  // Fully-separate even_intel/matches_intel engines get force-constructed
+  // via window.ensureBotEngine (they're pre-created at page load anyway,
+  // see the Hub controller's init()). Every other bot is only read from
+  // the live engines map — this deliberately does NOT open a bot's live
+  // market subscription just because this tab is open; a bot only shows up
+  // fully once its own tab (or Intel Auto-Trader) has built it.
   function flipEngine(id) {
     const engines = getEngines();
-    if (id === 'even_intel' || id === 'odd_intel' || id === 'matches_intel') {
+    if (id === 'even_intel' || id === 'matches_intel') {
       const baseId = id;
       let eng = engines[baseId];
       if (!eng && window.ensureBotEngine) {
