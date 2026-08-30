@@ -21752,18 +21752,23 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       }
     });
 
-    // BUG FIX: Intel Auto-Trader bots (even_intel/odd_intel/matches_intel —
-    // fully separate engines driven from the Market Intel tab) place real
-    // money trades but were entirely excluded from Net P&L / Win Rate /
-    // Won-Lost above — those numbers only ever reflected the regular tabs.
-    // Their stats now fold into the same totals (their journal entries are
-    // merged into the equity curve / dashboard journal further below).
-    const intelBotIdsForTotals = ['even_intel', 'odd_intel', 'matches_intel'];
+    // BUG FIX: Intel Auto-Trader bots (even_intel/matches_intel — fully
+    // separate engines driven from the Market Intel tab; odd_intel was
+    // removed along with the Odd Bot card on that tab) place real money
+    // trades but were entirely excluded from Net P&L / Win Rate / Won-Lost
+    // above — those numbers only ever reflected the regular tabs. Their
+    // stats now fold into the same totals (their journal entries are
+    // merged into the equity curve / dashboard journal further below), and
+    // they also get their own perBot entry so they show up in the Engine
+    // Overview rank grid and the "Top Bots" equity rail alongside the
+    // regular bots (see rankBotIds below).
+    const intelBotIdsForTotals = ['even_intel', 'matches_intel'];
     intelBotIdsForTotals.forEach((id) => {
       try {
         const engine = engines[id];
-        if (!engine) return;
+        if (!engine) { perBot[id] = { trades: 0, win: 0, loss: 0, profit: 0, active: false }; return; }
         const stats = getBotStats(engine, id);
+        perBot[id] = { ...stats, active: isBotActive(engine, id) };
         totalProfit += stats.profit; totalWin += stats.win; totalLoss += stats.loss;
         getBotJournal(engine, id).forEach((j) => {
           if (j.isTest) return;
@@ -21771,8 +21776,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         });
       } catch (e) {
         console.error(`[Hub] Intel totals aggregation error for "${id}":`, e);
+        perBot[id] = { trades: 0, win: 0, loss: 0, profit: 0, active: false };
       }
     });
+    // Combined id list used ONLY for the two rank displays (Engine Overview
+    // grid + "Top Bots" equity rail) — deliberately kept separate from
+    // botIds, which also drives the enable/disable toggles, ENGAGE ALL,
+    // Full Automation, and the cooldown/exec rows. The Intel bots are
+    // started/stopped from their own dedicated cards on the Market Intel
+    // tab, not from here, so they're excluded from botIds itself.
+    const rankBotIds = botIds.concat(intelBotIdsForTotals);
 
     const displayCurrency = hub.displayCurrency || 'USD';
     const conversionRate = 129.5;
@@ -21915,7 +21928,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // compact list so it fits the narrow strip next to the chart.
     const rankRailList = el('dash-equity-rankrail-list', root);
     if (rankRailList) {
-      const ranked = botIds
+      const ranked = rankBotIds
         .map((id) => ({ id, meta: BOT_META[id], ...perBot[id] }))
         .filter((b) => b.trades > 0)
         .sort((a, b) => b.profit - a.profit);
@@ -21936,13 +21949,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (global.setHtmlIfChanged(rankRailList, rankRailHtml)) {
         rankRailList.querySelectorAll('[data-nav-bot]').forEach((row) => {
           row.onclick = () => {
-            if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(row.dataset.navBot);
+            // Intel Auto-Trader bots have no tab of their own — they live
+            // inside the Market Intel tab's Intel Auto-Trader section, so
+            // route those clicks there instead of switchApp's dashboard
+            // fallback (which would otherwise just re-open this tab).
+            const navId = row.dataset.navBot.endsWith('_intel') ? 'market' : row.dataset.navBot;
+            if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(navId);
           };
         });
       }
     }
 
-    const perBotHtml = botIds.map((id) => {
+    const perBotHtml = rankBotIds.map((id) => {
       const meta = BOT_META[id]; const b = perBot[id];
       const wr2 = b.trades ? ((b.win / b.trades) * 100).toFixed(1) : '0.0';
       return `<div class="glass-panel bot-card" data-nav-bot="${id}" style="cursor:pointer" title="Open ${meta.label}">
@@ -21958,7 +21976,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       el('dash-perbot', root).querySelectorAll('[data-nav-bot]').forEach((card) => {
         card.onclick = () => {
           const botId = card.dataset.navBot;
-          if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(botId);
+          // Same Intel routing as the equity rank rail above — even_intel/
+          // matches_intel have no dedicated tab, they live on Market Intel.
+          const navId = botId.endsWith('_intel') ? 'market' : botId;
+          if (window.UnifiedHub && window.UnifiedHub.switchApp) window.UnifiedHub.switchApp(navId);
         };
       });
     }
@@ -28685,7 +28706,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // touch Odd or Matches.
   const AUTO_BOTS = [
     { id: 'even', label: 'Even Bot', icon: '🎯', desc: 'Bets DIGITEVEN each qualifying tick — trades whichever market is currently showing the strongest even-parity pattern.' },
-    { id: 'odd', label: 'Odd Bot', icon: '🎯', desc: 'Bets DIGITODD each qualifying tick — trades whichever market is currently showing the strongest odd-parity pattern.' },
     { id: 'matches', label: 'Matches Bot', icon: '🔢', desc: 'Reads live digit frequency and predicts one digit (DIGITMATCH) — trades whichever market currently shows the clearest frequency skew.' },
   ];
   const AUTO_IDS = AUTO_BOTS.map((b) => b.id);
@@ -29697,8 +29717,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     updateLiveDigits(mit, liveEl);
 
     // Intel Auto-Trader status rows — reflects the fully separate
-    // even_intel/odd_intel/matches_intel engines (see engineIdFor above),
-    // never the regular tabs' engines.
+    // even_intel/matches_intel engines (see engineIdFor above; Odd Intel
+    // was removed, only Even and Matches remain here), never the regular
+    // tabs' engines.
     renderAutoPanel();
 
     // Dynamic Recovery Intel — always render, cheap (just filters/sorts
@@ -30183,11 +30204,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
         <div class="mit-terminal">
           <div class="mit-section-title"><span class="mit-sec-ico">🤖</span>Intel Auto-Trader</div>
-          <div class="mit-auto-topnote">Each box below is its own bot with its own Stake, Runs/cycle, and Start/Stop — the SAME Even / Odd / Matches bots as their own tabs, just controlled from here. When running, a bot follows the live scoring matrix above: it sits on whichever market currently shows the strongest dynamic pattern for it (parity dominance, streaks, digit frequency), fires when its own signal + that market's score line up, runs its cycle, cools down, re-reads the scores, and moves on — riding the trend instead of a fixed market. Digits are provider-generated at random — this is a live statistical read, not a guaranteed edge, so only stake what you can afford to lose.</div>
+          <div class="mit-auto-topnote">Each box below is its own bot with its own Stake, Runs/cycle, and Start/Stop — the SAME Even / Matches bots as their own tabs, just controlled from here. When running, a bot follows the live scoring matrix above: it sits on whichever market currently shows the strongest dynamic pattern for it (parity dominance, streaks, digit frequency), fires when its own signal + that market's score line up, runs its cycle, cools down, re-reads the scores, and moves on — riding the trend instead of a fixed market. Digits are provider-generated at random — this is a live statistical read, not a guaranteed edge, so only stake what you can afford to lose.</div>
           <div class="mit-auto-topnote" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.25);border-radius:10px;padding:10px 12px;margin-top:8px">
             <div style="flex:1;min-width:220px">
-              <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Even/Odd Confidence Threshold — the real firing gate</div>
-              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Even/Odd Intel fires off THIS number, not the Min Signal field on the regular tabs — that never applies to the Intel variant. Raised for more certainty per request. Matches Intel has its own separate threshold below and never moves with this slider.</div>
+              <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Even Confidence Threshold — the real firing gate</div>
+              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Even Intel fires off THIS number, not the Min Signal field on the regular tab — that never applies to the Intel variant. Raised for more certainty per request. Matches Intel has its own separate threshold below and never moves with this slider.</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
               <input id="mit-intel-confidence" type="range" min="50" max="90" step="1" style="width:140px">
@@ -30276,8 +30297,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const slider = document.getElementById('mit-intel-confidence');
       const valEl = document.getElementById('mit-intel-confidence-val');
       if (!slider || !valEl || !window.PatternIntelEngine) return;
-      // Even/Odd (parity) only — Matches keeps its own separate threshold,
-      // set via getMinWinRateDigit/setMinWinRateDigit, untouched by this slider.
+      // Even (parity) only now — Odd Bot removed from Market Intel, Matches
+      // keeps its own separate threshold, set via
+      // getMinWinRateDigit/setMinWinRateDigit, untouched by this slider.
       const current = Math.round((window.PatternIntelEngine.getMinWinRateParity() || 0.72) * 100);
       slider.value = current;
       valEl.textContent = `${current}%`;
