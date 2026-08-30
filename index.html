@@ -10338,6 +10338,42 @@ window.PatternIntelEngine = (function () {
   function getBestParitySignal() { return scan('parity'); }
   function getBestDigitSignal() { return scan('digit'); }
 
+  // ── Matches Intel: Strategy Two, board-wide ──────────────────────────
+  // Per explicit request, Matches Intel no longer runs its own simple
+  // digit-repeat mining (mineDigit/scan('digit') above) — it now runs the
+  // EXACT same analysis as the regular Matches tab's "Strategy Two" preset
+  // (window.MatchesAnalyzer.analyze with strategyGroup:'two' — tight
+  // #1/#2 frequency gap + rising #2 momentum, bet the #2 digit, fire when
+  // the #1 digit prints), just applied across all 10 markets instead of
+  // being locked to whichever single market is currently selected on the
+  // regular tab. Confidence gating reuses Matches Intel's own raised
+  // threshold (MIN_WIN_RATE_DIGIT, 0.5-0.95) read as a 0-100 strength
+  // floor, so the "Matches Confidence Threshold" slider still controls
+  // how choosy this is.
+  function getBestStrategyTwoSignal(tickPeriod) {
+    startWatching();
+    if (!window.MatchesAnalyzer) return null;
+    const tp = tickPeriod || 50;
+    const minStrength = Math.round(MIN_WIN_RATE_DIGIT * 100);
+    let best = null;
+    MARKETS.forEach((symbol) => {
+      const digits = digitsOf(symbol);
+      if (digits.length < 20) return;
+      const a = window.MatchesAnalyzer.analyze(digits, tp, { strategyGroup: 'two' });
+      if (!a || !a.ready || a.targetDigit == null || a.strength < minStrength) return;
+      if (!best || a.strength > best.strength) {
+        best = {
+          symbol,
+          predictedDigit: a.targetDigit,
+          triggerDigit: a.triggerDigit,
+          strength: a.strength,
+          context: (a.reasons && a.reasons[a.reasons.length - 1]) || `Strategy Two setup on digit ${a.targetDigit}`,
+        };
+      }
+    });
+    return best;
+  }
+
   // ── Dynamic recovery ledger — keyed per pattern signature so each
   // pattern's OWN track record (not a global blanket assumption) drives
   // how hard the bot leans into a recovery step.
@@ -10380,6 +10416,7 @@ window.PatternIntelEngine = (function () {
     MARKETS, startWatching, getBestParitySignal, getBestDigitSignal,
     setMinWinRate, getMinWinRate,
     setMinWinRateParity, getMinWinRateParity, setMinWinRateDigit, getMinWinRateDigit,
+    getBestStrategyTwoSignal,
     recordPatternOutcome, getPatternRecoveryPlan, patternKey,
   };
 })();
@@ -14687,19 +14724,13 @@ window.NexusStrategies=exports;
         followDynamicPattern: true,
         // ── Intel Auto-Trader's Matches bot: fire on a genuine
         // high-percentage trend only, not often ─────────────────────────
-        // Per request: Matches Intel was predicting/firing too often off
-        // a thin, noisy edge. autoHotPct/autoGapPct raise the bar the
-        // 'auto' preset's hottest-digit outlier check demands (see
-        // MatchesAnalyzer.analyze's AUTO branch above — a bigger gap over
-        // the field and a higher outright percentage before it'll even
-        // consider a digit "hot"), minSignal raises the strength floor the
-        // resulting read then has to clear, matchesConfirmTicks demands
-        // more consecutive confirming ticks before the trade actually
-        // fires, and a longer cooldown means it doesn't immediately hunt
-        // for the next entry right after one settles. Net effect: it
-        // predicts a digit only once a clear, sustained trend is showing,
-        // and trades noticeably less often — never touches the regular
-        // Matches tab's own (looser) defaults above.
+        // NOTE: entry detection for matches_intel no longer reads
+        // minSignal/autoHotPct/autoGapPct/matchesConfirmTicks below at
+        // all — it now runs getBestStrategyTwoSignal() (Strategy Two,
+        // board-wide) instead of its own local 'auto'-preset read, per
+        // explicit request. Left in place harmlessly (matchesCooldownTicks
+        // and martingaleEnabled below are still read elsewhere), but the
+        // trend-strictness fields no longer drive when matches_intel fires.
         ...(this.id === 'matches_intel' ? {
           minSignal: 78,
           autoHotPct: 18,
@@ -15365,31 +15396,41 @@ window.NexusStrategies=exports;
         }
         if (this.isMatchMode) {
           if (this.id.endsWith('_intel')) {
-            // ── Intel variant: Pattern Intel IS the entry signal ────────────
-            // Same reasoning as the Odd/Even Strategy Intel branches above —
-            // an Intel bot watches all 10 markets, so it goes wherever the
-            // board-wide, cross-market-confirmed digit-repeat setup
-            // currently lives and fires the moment it's live there, instead
-            // of waiting for its own currently-selected market's local
-            // confirm-tick counter to also happen to agree.
-            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestDigitSignal();
+            // ── Intel variant: Matches Strategy Two, board-wide ─────────────
+            // Per explicit request, this now runs the SAME analysis as the
+            // regular Matches tab's Strategy Two preset (tight #1/#2 gap +
+            // rising #2 momentum, bet #2, fire when #1 prints) via
+            // getBestStrategyTwoSignal() — the only difference is it's not
+            // tied to one market like the regular Matches bot: it watches
+            // all 10 and goes wherever that exact setup currently lives.
+            const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestStrategyTwoSignal(this.config.tickPeriod);
             this._lastIntelDigitSignal = sig || null;
             if (sig) {
               if (sig.symbol !== market) {
-                this.strategyWaitReason = `Pattern Intel found a live digit ${sig.predictedDigit} setup on ${sig.symbol} — rotating there`;
+                this.strategyWaitReason = `Strategy Two found a live #2-digit ${sig.predictedDigit} setup on ${sig.symbol} — rotating there`;
                 this.addLog('engine', 'MARKET', this.strategyWaitReason);
                 this.setConfig({ selectedMarket: sig.symbol });
                 this.changeMarket(sig.symbol);
                 this.emit();
                 return;
               }
+              // Strategy Two only fires the instant its trigger digit (the
+              // #1/hottest digit) actually prints on the live tick — same
+              // gate the regular Matches tab applies (see `trig` below) —
+              // not the moment the setup is merely detected.
+              const triggerOk = sig.triggerDigit == null || data.digit === sig.triggerDigit;
+              if (!triggerOk) {
+                this.strategyWaitReason = `Strategy Two armed on ${market} — betting ${sig.predictedDigit}, waiting for digit ${sig.triggerDigit} to print to fire`;
+                this.emit();
+                return;
+              }
               this._matchTargetDigit = sig.predictedDigit;
-              this._activeIntelPattern = { symbol: sig.symbol, mode: 'digit', predicted: sig.predictedDigit };
-              this.strategyWaitReason = `ENTRY — Pattern Intel confirmed digit ${sig.predictedDigit} on ${market} (${sig.context})`;
+              this._activeIntelPattern = { symbol: sig.symbol, mode: 'strategy2', predicted: sig.predictedDigit };
+              this.strategyWaitReason = `ENTRY — Strategy Two confirmed digit ${sig.predictedDigit} on ${market} (${sig.context})`;
               this.addLog('win', 'SIGNAL', this.strategyWaitReason);
               this.startChainExecution();
             } else {
-              this.strategyWaitReason = 'Watching all 10 markets for a confirmed, cross-checked digit-repeat setup…';
+              this.strategyWaitReason = 'Watching all 10 markets for a Strategy Two setup (tight #1/#2 gap + rising #2 momentum)…';
             }
             this.emit();
             return;
