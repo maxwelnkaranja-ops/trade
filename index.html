@@ -16460,7 +16460,14 @@ window.NexusStrategies=exports;
       // regardless of what step the current session ended on (stop-loss, max step, TP, etc.)
       this.state = { ...this.state, isLocked: false, isCooldown: true, active: false,
         currentRuns: 0, currentStake: this.getEffectiveStake(), martingaleStep: 0, inRecovery: false };
-      const cd = forcedCooldownSeconds != null ? forcedCooldownSeconds : (5 + Math.floor(Math.random() * 21)); // randomized 5-25s (doc: COOLDOWN_MIN/MAX), or the longer Risk Cooldown after a risk-session loss
+      // Even/Odd Intel bots (even_intel/odd_intel — NOT matches_intel, and NOT
+      // their regular even/odd tabs) get a fixed 1-minute cooldown between
+      // sessions instead of the usual randomized 5-25s window, per explicit
+      // request. Everything else keeps the original randomized cooldown.
+      const isEvenOddIntel = this.id === 'even_intel' || this.id === 'odd_intel';
+      const cd = forcedCooldownSeconds != null ? forcedCooldownSeconds
+        : isEvenOddIntel ? 60
+        : (5 + Math.floor(Math.random() * 21)); // randomized 5-25s (doc: COOLDOWN_MIN/MAX), or the longer Risk Cooldown after a risk-session loss
       this.cooldownTime = cd;
       this._cdMax = cd; // store for tab ring arc
       this._skipAutoPilotResume = skipAutoPilotResume;
@@ -28637,14 +28644,31 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // it back on for Matches. Every other Intel bot (Even/Odd) keeps
         // its own togglable martingale, defaulting per autoMartingaleDefault.
         martingale: id === 'matches' ? false : ((typeof raw.martingale === 'boolean') ? raw.martingale : autoMartingaleDefault(id)),
+        // Martingale Step (max recovery steps before the session accepts a
+        // loss and cools down) — Even/Odd Intel only, same field the
+        // regular tabs call martingaleStopStep. Matches Intel never
+        // recovers at all (see martingale above), so this is irrelevant
+        // for it and is just left at the harmless default.
+        martingaleStep: (typeof raw.martingaleStep === 'number' && raw.martingaleStep > 0) ? raw.martingaleStep : 3,
+        // Test Trade (a.k.a. First-Tick Handling's "sacrifice"/Test Stake
+        // mode): fires a small probe trade the instant a signal is spotted
+        // instead of the real stake. WIN → the real run fires right after
+        // and then the bot works through Runs/cycle as normal. LOSS → the
+        // signal is rejected and the bot goes back to scouting, no real
+        // stake ever placed on it. Per request this defaults ON for
+        // Even/Odd Intel and is HARD-LOCKED OFF for Matches Intel — same
+        // "id === 'matches' forced" pattern as martingale above.
+        testTrade: id === 'matches' ? false : ((typeof raw.testTrade === 'boolean') ? raw.testTrade : true),
+        testStake: (typeof raw.testStake === 'number' && raw.testStake > 0) ? raw.testStake : 0.35,
       };
-    } catch (e) { return { stake: 1, runs: 5, enabled: false, martingale: autoMartingaleDefault(id) }; }
+    } catch (e) { return { stake: 1, runs: 5, enabled: false, martingale: autoMartingaleDefault(id), martingaleStep: 3, testTrade: id !== 'matches', testStake: 0.35 }; }
   }
 
   function saveAutoConfig(id, cfg) {
-    // Belt-and-braces: never persist martingale:true for Matches, even if
-    // some future caller forgets the id==='matches' check above.
-    if (id === 'matches' && cfg && cfg.martingale) cfg = { ...cfg, martingale: false };
+    // Belt-and-braces: never persist martingale:true or testTrade:true for
+    // Matches, even if some future caller forgets the id==='matches' checks
+    // above.
+    if (id === 'matches' && cfg && (cfg.martingale || cfg.testTrade)) cfg = { ...cfg, martingale: false, testTrade: false };
     try { localStorage.setItem(autoCfgKey(id), JSON.stringify(cfg)); } catch (e) {}
   }
 
@@ -28663,11 +28687,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     } else if (field === 'runs') {
       const v = Math.round(parseFloat(rawValue));
       if (!isNaN(v) && v > 0) cfg.runs = v;
+    } else if (field === 'martingaleStep') {
+      const v = Math.round(parseFloat(rawValue));
+      if (!isNaN(v) && v > 0) cfg.martingaleStep = Math.min(5, Math.max(1, v));
+    } else if (field === 'testStake') {
+      const v = parseFloat(rawValue);
+      if (!isNaN(v) && v > 0) cfg.testStake = v;
     }
     saveAutoConfig(id, cfg);
     const eng = intelEngine(id);
     if (eng && eng.state.active) {
-      eng.setConfig({ stake: cfg.stake, targetRuns: cfg.runs, martingaleEnabled: cfg.martingale });
+      eng.setConfig({
+        stake: cfg.stake, targetRuns: cfg.runs, martingaleEnabled: cfg.martingale,
+        martingaleStopStep: cfg.martingaleStep,
+        firstTickMode: cfg.testTrade ? 'sacrifice' : 'normal', firstTickStake: cfg.testStake,
+      });
       eng.saveConfig();
     }
   }
@@ -28683,7 +28717,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function applyAutoConfigToEngine(id, cfg) {
     const eng = intelEngine(id);
     if (!eng) return;
-    eng.setConfig({ stake: cfg.stake, targetRuns: cfg.runs, autoPilot: true, martingaleEnabled: !!cfg.martingale });
+    eng.setConfig({
+      stake: cfg.stake, targetRuns: cfg.runs, autoPilot: true, martingaleEnabled: !!cfg.martingale,
+      martingaleStopStep: cfg.martingaleStep,
+      firstTickMode: cfg.testTrade ? 'sacrifice' : 'normal', firstTickStake: cfg.testStake,
+    });
     eng.saveConfig();
     // Enable the Intel engine's OWN kill-switch id (e.g. 'even_intel'), not
     // the regular tab's id — forcing 'even' enabled here used to silently
@@ -28772,6 +28810,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (toggleBtn) { toggleBtn.classList.toggle('on', active); toggleBtn.textContent = active ? 'STOP' : 'START'; }
       if (stakeInput && document.activeElement !== stakeInput && !stakeInput.dataset.userTouched) stakeInput.value = cfg.stake;
       if (runsInput && document.activeElement !== runsInput && !runsInput.dataset.userTouched) runsInput.value = cfg.runs;
+      const martStepInput = document.getElementById(`mit-auto-martstep-${id}`);
+      if (martStepInput && document.activeElement !== martStepInput && !martStepInput.dataset.userTouched) martStepInput.value = cfg.martingaleStep;
+      const testStakeInput = document.getElementById(`mit-auto-teststake-${id}`);
+      if (testStakeInput && document.activeElement !== testStakeInput && !testStakeInput.dataset.userTouched) testStakeInput.value = cfg.testStake;
+      const testBtnLive = document.getElementById(`mit-auto-test-${id}`);
+      if (testBtnLive) { testBtnLive.classList.toggle('on', cfg.testTrade); testBtnLive.textContent = cfg.testTrade ? 'ON' : 'OFF'; }
 
       // Worst-case stake preview — see autoMartingaleDefault's note.
       // Falls back to the same 2.5x/3-step numbers the underlying engine
@@ -28802,7 +28846,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const pnlStr = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`;
         const info = autoBotScoreInfo(mit, id, c.selectedMarket);
         const scoreStr = info ? `${info.score}/100` : 'warming up';
-        const phaseLabel = s.isLocked ? 'trading' : s.isCooldown ? 'cooldown' : 'watching for a pattern';
+        const phaseLabel = s.isLocked ? (eng._isSacrificeTrade ? '🧪 test trade' : 'trading') : s.isCooldown ? 'cooldown' : 'watching for a pattern';
         statusHtml = `
           <div class="mit-auto-status-row"><span>Market</span><b>${esc(c.selectedMarket || '—')} (score ${scoreStr})</b></div>
           <div class="mit-auto-status-row"><span>Phase</span><b>${phaseLabel}</b></div>
@@ -30136,14 +30180,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="mit-auto-field"><label>Runs/cycle</label><input id="mit-auto-runs-${b.id}" type="number" min="1" step="1" value="5"></div>
           <button type="button" class="mit-auto-card-toggle" id="mit-auto-toggle-${b.id}">START</button>
         </div>
-        <div class="mit-auto-card-controls" style="border-bottom:none;padding-bottom:0;margin-bottom:8px">
+        <div class="mit-auto-card-controls" style="border-bottom:none;${b.id === 'matches' ? 'padding-bottom:0;margin-bottom:8px' : 'padding-bottom:8px'}">
           <div class="mit-auto-field" style="flex:1;min-width:0">
             <label>Martingale Recovery</label>
             ${b.id === 'matches'
               ? `<button type="button" class="mit-auto-mart-toggle locked" id="mit-auto-mart-${b.id}" disabled title="Matches Intel always trades flat stakes — recovery martingale is locked off for this bot and can't be enabled.">🔒 LOCKED OFF</button>`
               : `<button type="button" class="mit-auto-mart-toggle" id="mit-auto-mart-${b.id}" title="When OFF, this bot always trades its flat Stake $ — it never doubles/steps up after a loss.">OFF</button>`}
           </div>
+          ${b.id !== 'matches' ? `
+          <div class="mit-auto-field">
+            <label>Mart. Step</label>
+            <input id="mit-auto-martstep-${b.id}" type="number" min="1" max="5" step="1" value="3" title="How many recovery steps to escalate through after a loss before the session accepts it and cools down.">
+          </div>` : ''}
         </div>
+        ${b.id !== 'matches' ? `
+        <div class="mit-auto-card-controls" style="padding-bottom:0;margin-bottom:8px;border-bottom:none">
+          <div class="mit-auto-field" style="flex:1;min-width:0">
+            <label>Test Trade</label>
+            <button type="button" class="mit-auto-mart-toggle" id="mit-auto-test-${b.id}" title="When ON, the very first trade on a fresh signal is a small probe at Test Stake $. WIN → the real run fires immediately after and Runs/cycle proceeds as normal. LOSS → the signal is rejected, no real stake is placed, and the bot goes back to watching.">ON</button>
+          </div>
+          <div class="mit-auto-field">
+            <label>Test Stake $</label>
+            <input id="mit-auto-teststake-${b.id}" type="number" min="0.35" step="0.05" value="0.35">
+          </div>
+        </div>` : ''}
         <div class="mit-auto-status" id="mit-auto-status-${b.id}"></div>
         <div class="mit-auto-jtitle">Journal</div>
         <div class="mit-auto-journal" id="mit-auto-journal-${b.id}"></div>
@@ -30154,8 +30214,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const eng = intelEngine(id);
         if (eng && eng.state.active) stopAutoTradeBot(id); else startAutoTradeBot(id);
       };
-      ['stake', 'runs'].forEach((field) => {
-        const inp = document.getElementById(`mit-auto-${field}-${id}`);
+      ['stake', 'runs', 'martingaleStep', 'testStake'].forEach((field) => {
+        const domField = field === 'martingaleStep' ? 'martstep' : field === 'testStake' ? 'teststake' : field;
+        const inp = document.getElementById(`mit-auto-${domField}-${id}`);
         if (!inp) return;
         inp.addEventListener('input', () => {
           inp.dataset.userTouched = '1';
@@ -30181,16 +30242,43 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           renderAutoPanel();
         };
       }
+      // Test Trade toggle — Even/Odd Intel only (never rendered for
+      // Matches, see the card markup above), so this element simply won't
+      // exist there.
+      const testBtn = document.getElementById(`mit-auto-test-${id}`);
+      if (testBtn) {
+        testBtn.onclick = () => {
+          const cfg2 = loadAutoConfig(id);
+          const on = !cfg2.testTrade;
+          saveAutoConfig(id, { ...cfg2, testTrade: on });
+          testBtn.classList.toggle('on', on);
+          testBtn.textContent = on ? 'ON' : 'OFF';
+          const eng = intelEngine(id);
+          if (eng && eng.state.active) {
+            eng.setConfig({ firstTickMode: on ? 'sacrifice' : 'normal', firstTickStake: cfg2.testStake });
+            eng.saveConfig();
+          }
+          renderAutoPanel();
+        };
+      }
       const cfg = loadAutoConfig(id);
       document.getElementById(`mit-auto-stake-${id}`).value = cfg.stake;
       document.getElementById(`mit-auto-runs-${id}`).value = cfg.runs;
       if (martBtn && id !== 'matches') { martBtn.classList.toggle('on', cfg.martingale); martBtn.textContent = cfg.martingale ? 'ON' : 'OFF'; }
-      // Also force the live engine's own martingaleEnabled off for Matches
-      // right away if an engine already exists (e.g. survived from before
-      // this lock existed) — belt-and-braces alongside applyAutoConfigToEngine.
+      const martStepInp = document.getElementById(`mit-auto-martstep-${id}`);
+      if (martStepInp) martStepInp.value = cfg.martingaleStep;
+      const testStakeInp = document.getElementById(`mit-auto-teststake-${id}`);
+      if (testStakeInp) testStakeInp.value = cfg.testStake;
+      if (testBtn) { testBtn.classList.toggle('on', cfg.testTrade); testBtn.textContent = cfg.testTrade ? 'ON' : 'OFF'; }
+      // Also force the live engine's own martingaleEnabled/firstTickMode off
+      // for Matches right away if an engine already exists (e.g. survived
+      // from before this lock existed) — belt-and-braces alongside
+      // applyAutoConfigToEngine.
       if (id === 'matches') {
         const mEng = intelEngine(id);
-        if (mEng && mEng.config && mEng.config.martingaleEnabled) { mEng.setConfig({ martingaleEnabled: false }); mEng.saveConfig(); }
+        if (mEng && mEng.config && (mEng.config.martingaleEnabled || mEng.config.firstTickMode === 'sacrifice')) {
+          mEng.setConfig({ martingaleEnabled: false, firstTickMode: 'normal' }); mEng.saveConfig();
+        }
       }
     });
     // Delegated click handling — bound once on the persistent wrapper,
