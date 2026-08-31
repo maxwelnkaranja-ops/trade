@@ -15405,12 +15405,32 @@ window.NexusStrategies=exports;
             // all 10 and goes wherever that exact setup currently lives.
             const sig = window.PatternIntelEngine && window.PatternIntelEngine.getBestStrategyTwoSignal(this.config.tickPeriod);
             this._lastIntelDigitSignal = sig || null;
+            // BUG FIX: this branch used to have NO gap between fires at all
+            // — the regular (non-Intel) Matches bot below always waits
+            // matchesCooldownTicks ticks and requires the signal to hold
+            // for matchesConfirmTicks in a row before firing, but the Intel
+            // branch skipped both, so as soon as ANY of the 10 markets had
+            // a confirmed setup whose trigger digit printed, it fired
+            // immediately — every time, on every qualifying tick, with
+            // nothing throttling how often that could happen. That's the
+            // "another gateway" that kept it firing a lot even with the
+            // Confidence Threshold raised: the threshold only gates HOW
+            // GOOD a setup has to be, not how OFTEN it's allowed to act on
+            // one. Same two gates as the regular Matches bot now apply here.
+            this._mxTicksSinceTrade = (this._mxTicksSinceTrade || 0) + 1;
+            const gapTicks = Math.max(0, parseInt(this.config.matchesCooldownTicks, 10) || 3);
+            const gapOk = this._mxTicksSinceTrade >= gapTicks;
             if (sig) {
               if (sig.symbol !== market) {
                 this.strategyWaitReason = `Strategy Two found a live #2-digit ${sig.predictedDigit} setup on ${sig.symbol} — rotating there`;
                 this.addLog('engine', 'MARKET', this.strategyWaitReason);
                 this.setConfig({ selectedMarket: sig.symbol });
                 this.changeMarket(sig.symbol);
+                this.emit();
+                return;
+              }
+              if (!gapOk) {
+                this.strategyWaitReason = `Strategy Two armed on ${market} — cooling down (${gapTicks - this._mxTicksSinceTrade} tick${gapTicks - this._mxTicksSinceTrade === 1 ? '' : 's'} left) before it can fire again`;
                 this.emit();
                 return;
               }
@@ -15424,12 +15444,26 @@ window.NexusStrategies=exports;
                 this.emit();
                 return;
               }
+              // 2-tick confirmation, same idea as the regular Matches bot's
+              // neededMxConfirm gate below — the setup has to still be
+              // holding (same predicted digit) across consecutive ticks
+              // rather than firing off one single tick's read.
+              const neededMxConfirm = Math.max(1, parseInt(this.config.matchesConfirmTicks, 10) || 2);
+              if (this._mxConfirmDigit === sig.predictedDigit) this._mxConfirmCount = (this._mxConfirmCount || 1) + 1;
+              else { this._mxConfirmDigit = sig.predictedDigit; this._mxConfirmCount = 1; }
+              if (this._mxConfirmCount < neededMxConfirm) {
+                this.strategyWaitReason = `Strategy Two confirming digit ${sig.predictedDigit} on ${market} (${this._mxConfirmCount}/${neededMxConfirm} ticks)…`;
+                this.emit();
+                return;
+              }
               this._matchTargetDigit = sig.predictedDigit;
               this._activeIntelPattern = { symbol: sig.symbol, mode: 'strategy2', predicted: sig.predictedDigit };
+              this._mxTicksSinceTrade = 0; this._mxConfirmCount = 0;
               this.strategyWaitReason = `ENTRY — Strategy Two confirmed digit ${sig.predictedDigit} on ${market} (${sig.context})`;
               this.addLog('win', 'SIGNAL', this.strategyWaitReason);
               this.startChainExecution();
             } else {
+              this._mxConfirmDigit = null; this._mxConfirmCount = 0;
               this.strategyWaitReason = 'Watching all 10 markets for a Strategy Two setup (tight #1/#2 gap + rising #2 momentum)…';
             }
             this.emit();
@@ -25719,6 +25753,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this._ownContractFiredAt = new Map();
       this._reconcileAttempts = new Map();
       this._eligibleFromTick = 0;
+      this._ticksSinceArm = 0;
       this._toFire = null;
       // Set by the loss-streak breaker (see ADD_JOURNAL/_handleTradingMessage)
       // to force the NEXT rotation off the current market even if its
@@ -25817,11 +25852,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         case 'SET_CONNECTION_STATUS': s.connectionStatus = action.status; break;
         case 'SET_MARKET':
           s.primaryMarket = action.market; s.history = []; s.armToFireOnNextTick = false; s.fireBarrier = null;
-          this._eligibleFromTick = 0;
+          this._eligibleFromTick = 0; this._ticksSinceArm = 0;
           break;
         case 'TICK': {
           const digit = action.digit;
           this.tickIndex++;
+          if (s.isArmed) this._ticksSinceArm = (this._ticksSinceArm || 0) + 1;
           s.currentTick = digit;
           if (s.armToFireOnNextTick) {
             this._toFire = s.fireBarrier;
@@ -25835,7 +25871,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             if (streakOk) {
               for (let i = 1; i < k; i++) { if (s.history[n - 1 - i] !== digit) { streakOk = false; break; } }
             }
-            if (streakOk && this.tickIndex >= this._eligibleFromTick) {
+            // BUG FIX: pressing Engage used to fire almost instantly whenever
+            // the live feed already happened to be mid-streak the moment you
+            // armed — the k-in-a-row check above only looks at the tail of
+            // s.history, which still includes ticks from BEFORE arming, so
+            // a single fresh tick could complete a streak that was mostly
+            // already sitting there. this._ticksSinceArm only starts
+            // counting on ARM (reset above and on DISARM/SET_MARKET below)
+            // and requires at least k genuinely NEW ticks to have arrived
+            // since arming before a streak can qualify, so every digit in
+            // the qualifying window is guaranteed to be post-arm, not stale
+            // pre-arm history.
+            if (streakOk && this.tickIndex >= this._eligibleFromTick && (this._ticksSinceArm || 0) >= k) {
               let ok = true;
               if (s.filtersActive) {
                 const win = s.history.slice(-30);
@@ -25867,7 +25914,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             if (check && ownStreak >= HR_STREAK_LIMIT && check.symbol !== s.primaryMarket) {
               const prevSymbol = s.primaryMarket;
               s.primaryMarket = check.symbol; s.history = []; s.armToFireOnNextTick = false; s.fireBarrier = null;
-              this._eligibleFromTick = this.tickIndex + 1;
+              this._eligibleFromTick = this.tickIndex + 1; this._ticksSinceArm = 0;
               // Pushed directly (not via this.dispatch) since we're already
               // inside a dispatch call for TICK — avoids re-entrant dispatch.
               const id = Date.now().toString() + Math.random().toString(36).slice(2, 6);
@@ -25890,8 +25937,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         case 'SET_MIN_STREAK': s.minStreak = action.value; break;
         case 'SET_BATCH': s.batchSize = action.value; break;
         case 'SET_SPEED': s.speed = action.value; break;
-        case 'ARM': s.isArmed = true; s.armToFireOnNextTick = false; this._eligibleFromTick = this.tickIndex; break;
-        case 'DISARM': s.isArmed = false; s.isRunning = false; s.armToFireOnNextTick = false; break;
+        case 'ARM': s.isArmed = true; s.armToFireOnNextTick = false; this._eligibleFromTick = this.tickIndex; this._ticksSinceArm = 0; break;
+        case 'DISARM': s.isArmed = false; s.isRunning = false; s.armToFireOnNextTick = false; this._ticksSinceArm = 0; break;
         case 'FIRING': s.isRunning = true; break;
         case 'FIRE_COMPLETE': s.isRunning = false; break;
         case 'TOGGLE_AUTO': s.autoMode = !s.autoMode; break;
@@ -26025,7 +26072,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
     connectAnalysis() {
       try { if (this.socketP) { this.socketP.onclose = null; this.socketP.close(); } } catch (e) {}
-      this.tickIndex = 0; this._eligibleFromTick = 0;
+      this.tickIndex = 0; this._eligibleFromTick = 0; this._ticksSinceArm = 0;
       this._confirmedFirstTick = false;
       if (this.analysisReconnectAttempts == null) this.analysisReconnectAttempts = 0;
       const ws = new WebSocket(hrGetPublicWsUrl());
@@ -30234,7 +30281,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="mit-auto-topnote" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:hsl(var(--accent)/0.06);border:1px solid hsl(var(--accent)/0.25);border-radius:10px;padding:10px 12px;margin-top:8px">
             <div style="flex:1;min-width:220px">
               <div style="font-weight:800;color:hsl(var(--accent));font-size:11px;letter-spacing:0.5px">⚡ Matches Confidence Threshold — the real firing gate</div>
-              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Matches Intel's own separate threshold — raised to the max per request (was 92%, now 100%). At 100% it only fires on a perfect-strength read, so expect it to sit idle far more than it trades. Matches stays flat-stake with no Test Trade, Martingale, or 1-minute cooldown; only this number changed.</div>
+              <div style="font-size:10.5px;opacity:0.75;margin-top:2px">Matches Intel's own separate threshold — raised to the max per request (was 92%, now 100%). At 100% it only fires on a perfect-strength read, so expect it to sit idle far more than it trades. It also now waits out its own cooldown + 2-tick confirmation between fires (previously missing — see Cooldown Ticks / Confirm Ticks on the regular Matches tab, shared by this bot), on top of staying flat-stake with no Test Trade or Martingale.</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
               <input id="mit-intel-confidence-matches" type="range" min="50" max="100" step="1" style="width:140px">
