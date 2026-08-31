@@ -7398,8 +7398,8 @@ html body #panel-dashboard .journal-entry {
   transition: border-color .3s, box-shadow .3s;
 }
 .sa-terminal.sa-armed {
-  border-color: hsl(140 85% 45% / 0.55);
-  box-shadow: inset 0 1px 0 hsl(255 100% 100% / 0.04), 0 0 0 1px hsl(140 85% 45% / 0.15), 0 0 34px hsl(140 85% 45% / 0.18), 0 10px 30px rgba(0,0,0,0.5);
+  border-color: hsl(45 95% 55% / 0.55);
+  box-shadow: inset 0 1px 0 hsl(255 100% 100% / 0.04), 0 0 0 1px hsl(45 95% 55% / 0.15), 0 0 34px hsl(45 95% 55% / 0.18), 0 10px 30px rgba(0,0,0,0.5);
 }
 .sa-terminal-scanlines {
   position: absolute; inset: 0; pointer-events: none; opacity: .5;
@@ -7411,7 +7411,7 @@ html body #panel-dashboard .journal-entry {
   background: hsl(var(--muted-foreground)/0.4); flex-shrink: 0;
 }
 .sa-terminal-dot.sa-dot-on {
-  background: hsl(140 85% 55%); box-shadow: 0 0 10px hsl(140 85% 55%), 0 0 20px hsl(140 85% 55% / 0.6);
+  background: hsl(45 95% 58%); box-shadow: 0 0 10px hsl(45 95% 58%), 0 0 20px hsl(45 95% 58% / 0.6);
   animation: sa-blink 1.4s ease-in-out infinite;
 }
 @keyframes sa-blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
@@ -7426,7 +7426,7 @@ html body #panel-dashboard .journal-entry {
   border: 1px solid hsl(var(--border)/0.5);
 }
 .sa-terminal.sa-armed .sa-terminal-status {
-  color: hsl(140 85% 70%); background: hsl(140 85% 45% / 0.12); border-color: hsl(140 85% 45% / 0.4);
+  color: hsl(45 95% 70%); background: hsl(45 95% 55% / 0.14); border-color: hsl(45 95% 55% / 0.4);
 }
 .sa-terminal-sub {
   position: relative; z-index: 1; margin-top: 6px; font-size: 9px; line-height: 1.5;
@@ -7447,7 +7447,7 @@ html body #panel-dashboard .journal-entry {
 .sa-terminal-bignum {
   font-size: 24px; font-weight: 800; color: hsl(0 0% 92%); letter-spacing: -0.5px;
 }
-.sa-terminal-bignum.sa-boosted { color: hsl(140 85% 60%); text-shadow: 0 0 14px hsl(140 85% 45% / 0.5); }
+.sa-terminal-bignum.sa-boosted { color: hsl(45 95% 60%); text-shadow: 0 0 14px hsl(45 95% 50% / 0.5); }
 .sa-terminal-caption { font-size: 8px; color: hsl(var(--muted-foreground)/0.6); margin-top: 2px; }
 .sa-terminal-input {
   width: 100%; background: hsl(0 0% 100% / 0.03); border: 1px solid hsl(140 40% 40% / 0.3);
@@ -7465,7 +7465,8 @@ html body #panel-dashboard .journal-entry {
 }
 .sa-terminal-armbtn:hover { background: hsl(140 85% 45% / 0.18); transform: translateY(-1px); }
 .sa-terminal-armbtn.sa-armed {
-  background: hsl(140 85% 45% / 0.22); box-shadow: 0 0 20px hsl(140 85% 45% / 0.3);
+  background: hsl(45 95% 55% / 0.2); box-shadow: 0 0 20px hsl(45 95% 55% / 0.28);
+  border-color: hsl(45 95% 55% / 0.5); color: hsl(45 95% 70%);
 }
 .sa-terminal-analysis {
   position: relative; z-index: 1; margin-top: 12px; padding-top: 10px;
@@ -7495,8 +7496,8 @@ html body #panel-dashboard .journal-entry {
 .sa-terminal-usebtn:hover { background: hsl(140 85% 45% / 0.28); }
 .sa-terminal-armed-banner {
   position: relative; z-index: 1; margin-top: 10px; padding: 8px 10px; border-radius: 8px;
-  background: hsl(140 85% 45% / 0.1); border: 1px solid hsl(140 85% 45% / 0.3);
-  font-size: 9px; color: hsl(140 85% 75%); letter-spacing: .3px;
+  background: hsl(45 95% 55% / 0.12); border: 1px solid hsl(45 95% 55% / 0.35);
+  font-size: 9px; color: hsl(45 95% 68%); letter-spacing: .3px;
 }
 /* ── INTEL IS DRIVING — blue override when Auto Flip Drive (not the
    person) armed Stake Addition. Layers on top of every green .sa-armed
