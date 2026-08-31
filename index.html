@@ -1837,6 +1837,25 @@ html.light .terminal-input, html.light .terminal-select {
 }
 .jnl-entry.win::before { background:linear-gradient(180deg,hsl(var(--win)),hsl(var(--win)/0.4)); box-shadow:0 0 12px hsl(var(--win)/0.7); }
 .jnl-entry.loss::before { background:linear-gradient(180deg,hsl(var(--loss)),hsl(var(--loss)/0.4)); box-shadow:0 0 12px hsl(var(--loss)/0.6); }
+/* Increased stake (this trade fired at an escalated/recovery martingale
+   step, not base stake) — yellow glow layered on top of the normal
+   win/loss styling above, added to .jnl-entry wherever a trade's
+   martingaleStep > 0. Normal-stake trades are untouched, exactly as
+   requested. This block is shared by every journal renderer in the file
+   (regular + old bot tabs, Dashboard's merged journal, Flip Intell's
+   own Hot Repeat journal), so tagging the class in each renderer is all
+   that's needed — no per-panel CSS duplication. */
+.jnl-entry.increased-stake {
+  border-color:hsl(45 95% 55%/0.55) !important;
+  box-shadow:0 0 0 1px hsl(45 95% 55%/0.25), 0 0 18px hsl(45 95% 55%/0.22), 0 3px 16px hsl(0 0% 0%/0.15) !important;
+}
+.jnl-entry.increased-stake::before { background:linear-gradient(180deg,hsl(45 95% 55%),hsl(45 95% 55%/0.4)) !important; box-shadow:0 0 12px hsl(45 95% 55%/0.8) !important; }
+.jnl-entry.increased-stake:hover { box-shadow:0 0 0 1px hsl(45 95% 55%/0.35), 0 0 24px hsl(45 95% 55%/0.3), 0 6px 24px hsl(0 0% 0%/0.2) !important; }
+.jnl-stake-tag {
+  font-size:8.5px; font-weight:800; letter-spacing:0.5px; padding:1px 7px; border-radius:999px;
+  background:hsl(45 95% 55%/0.16); color:hsl(45 95% 60%); border:1px solid hsl(45 95% 55%/0.4);
+  font-family:'DM Mono',monospace; white-space:nowrap;
+}
 .jnl-top-row { display:flex; align-items:center; gap:10px; padding:11px 14px 8px 18px; }
 .jnl-digit-row {
   display:flex; align-items:center; gap:0;
@@ -7414,7 +7433,7 @@ html body #panel-dashboard .journal-entry {
   color: hsl(var(--muted-foreground)/0.75); max-width: 480px;
 }
 .sa-terminal-grid {
-  position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
   margin-top: 14px;
 }
 .sa-terminal-cell {
@@ -7478,6 +7497,29 @@ html body #panel-dashboard .journal-entry {
   position: relative; z-index: 1; margin-top: 10px; padding: 8px 10px; border-radius: 8px;
   background: hsl(140 85% 45% / 0.1); border: 1px solid hsl(140 85% 45% / 0.3);
   font-size: 9px; color: hsl(140 85% 75%); letter-spacing: .3px;
+}
+/* ── INTEL IS DRIVING — blue override when Auto Flip Drive (not the
+   person) armed Stake Addition. Layers on top of every green .sa-armed
+   rule above so the whole terminal reads unmistakably "an automation
+   did this", not "you did this". ── */
+.sa-terminal.sa-intel-driving {
+  border-color: hsl(210 90% 60% / 0.6);
+  box-shadow: inset 0 1px 0 hsl(255 100% 100% / 0.04), 0 0 0 1px hsl(210 90% 60% / 0.18), 0 0 34px hsl(210 90% 60% / 0.22), 0 10px 30px rgba(0,0,0,0.5);
+}
+.sa-terminal-dot.sa-dot-intel {
+  background: hsl(210 90% 62%); box-shadow: 0 0 10px hsl(210 90% 62%), 0 0 20px hsl(210 90% 62% / 0.6);
+}
+.sa-terminal.sa-intel-driving .sa-terminal-status {
+  color: hsl(210 90% 78%); background: hsl(210 90% 60% / 0.15); border-color: hsl(210 90% 60% / 0.45);
+}
+.sa-terminal.sa-intel-driving .sa-terminal-armbtn {
+  border-color: hsl(210 60% 55% / 0.5); background: hsl(210 90% 60% / 0.14); color: hsl(210 90% 80%);
+  cursor: not-allowed; opacity: .85;
+}
+.sa-terminal.sa-intel-driving .sa-terminal-armbtn:hover { transform: none; background: hsl(210 90% 60% / 0.14); }
+.sa-terminal-intel-banner {
+  background: hsl(210 90% 60% / 0.12) !important; border-color: hsl(210 90% 60% / 0.4) !important;
+  color: hsl(210 90% 80%) !important;
 }
 @media (max-width: 560px) { .sa-terminal-grid { grid-template-columns: 1fr; } }
 
@@ -17591,41 +17633,59 @@ window.NexusStrategies=exports;
 // ══════════════════════════════════════════════════════════════════════
 window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine, rootId, c) {
   const armed = !!c.stakeAdditionArmed;
+  const drivenByIntel = armed && !!c.stakeAdditionArmedByDrive;
   const effective = engine.getEffectiveStake ? engine.getEffectiveStake() : c.stake;
   const boosted = effective > (c.stake || 0) + 0.001;
   const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
+  const streakReqVal = c.stakeAdditionStreakRequired != null ? c.stakeAdditionStreakRequired : 2;
   const sug = engine.getSuggestedNextStake ? engine.getSuggestedNextStake() : null;
   const streak = engine.getSessionWinStreak ? engine.getSessionWinStreak() : 0;
   const stats = engine.getRecentSessionStats ? engine.getRecentSessionStats(10) : { sessions: 0, winRate: null };
+  const riskActive = !!engine._riskSessionActive;
+  const riskCooldown = !!engine._inRiskCooldown;
   return `
-  <div class="sa-terminal ${armed ? 'sa-armed' : ''}" id="${rootId}-sa-terminal">
+  <div class="sa-terminal ${armed ? 'sa-armed' : ''}${drivenByIntel ? ' sa-intel-driving' : ''}" id="${rootId}-sa-terminal">
     <div class="sa-terminal-scanlines"></div>
     <div class="sa-terminal-topbar">
-      <span class="sa-terminal-dot ${armed ? 'sa-dot-on' : ''}"></span>
+      <span class="sa-terminal-dot ${armed ? 'sa-dot-on' : ''}${drivenByIntel ? ' sa-dot-intel' : ''}"></span>
       <span class="sa-terminal-title">📈 STAKE&nbsp;ADDITION</span>
-      <span class="sa-terminal-status">${armed ? 'ARMED — STANDING' : 'OFF'}</span>
+      <span class="sa-terminal-status">${drivenByIntel ? '🔵 INTEL DRIVING' : armed ? 'ARMED' : 'OFF'}</span>
     </div>
-    <div class="sa-terminal-sub">Promotes stake to Next High Stake at the end of every WINNING session. Stays on until YOU turn it off. Resets to normal Stake $ on page reload — never on a loss.</div>
+    <!-- BUG FIX: this used to say "promotes stake at the end of every
+         WINNING session... stays on until you turn it off", which is not
+         what the engine actually does (see completeSession()'s Stake
+         Addition block) — it's ONE-SHOT: it needs a win STREAK of the
+         length set below before it queues the boosted stake for exactly
+         the next session, then drops back to normal after that one
+         session resolves either way. The old text is why a single win
+         looked like "it doesn't work" — this now matches the real logic,
+         and the streak requirement (previously only editable from Flip
+         Intell) is exposed here too. -->
+    <div class="sa-terminal-sub">${drivenByIntel ? 'Auto Flip Drive armed this automatically off a hot streak — see Flip Intell.' : 'Needs a win STREAK (set below) before it fires — not just one win.'} Once that streak is hit, the NEXT session trades flat at Next High Stake (no recovery): win → straight back to normal stake, needs a fresh streak to fire again; lose → disarms and cools down. Resets to normal Stake $ on page reload.</div>
 
     <div class="sa-terminal-grid">
       <div class="sa-terminal-cell">
         <div class="sa-terminal-label">Currently trading at</div>
         <div class="sa-terminal-bignum ${boosted ? 'sa-boosted' : ''}">$${effective.toFixed(2)}</div>
-        <div class="sa-terminal-caption">${boosted ? `boosted from base $${(c.stake||0).toFixed(2)}` : 'normal Stake $'}</div>
+        <div class="sa-terminal-caption">${riskActive ? 'RISK SESSION LIVE — flat, no recovery' : riskCooldown ? 'in Risk Cooldown after a lost risk session' : boosted ? `boosted from base $${(c.stake||0).toFixed(2)}` : 'normal Stake $'}</div>
       </div>
       <div class="sa-terminal-cell">
         <div class="sa-terminal-label">Next High Stake $</div>
-        <input class="sa-terminal-input" type="number" step="0.01" min="0.01" id="${rootId}-stakeadd-next" value="${nextVal}" placeholder="e.g. 5.00">
+        <input class="sa-terminal-input" type="number" step="0.01" min="0.01" id="${rootId}-stakeadd-next" value="${nextVal}" placeholder="e.g. 5.00" ${drivenByIntel ? 'disabled' : ''}>
+      </div>
+      <div class="sa-terminal-cell">
+        <div class="sa-terminal-label">Fires after win streak</div>
+        <input class="sa-terminal-input" type="number" step="1" min="1" id="${rootId}-stakeadd-streak" value="${streakReqVal}" ${drivenByIntel ? 'disabled' : ''}>
       </div>
     </div>
 
-    <button class="sa-terminal-armbtn ${armed ? 'sa-armed' : ''}" id="${rootId}-stakeadd">
-      ${armed ? '⏸ DISARM' : '▶ ARM STAKE ADDITION'}
+    <button class="sa-terminal-armbtn ${armed ? 'sa-armed' : ''}" id="${rootId}-stakeadd" ${drivenByIntel ? 'disabled title="Auto Flip Drive is managing this — disarm/re-arm from Flip Intell, or arm it here to take back manual control"' : ''}>
+      ${drivenByIntel ? '🔵 INTEL IS DRIVING' : armed ? '⏸ DISARM' : '▶ ARM STAKE ADDITION'}
     </button>
 
     <div class="sa-terminal-analysis">
       <div class="sa-terminal-analysis-row">
-        <span>Session win streak</span><b class="${streak > 0 ? 'sa-good' : ''}">${streak}</b>
+        <span>Session win streak</span><b class="${streak > 0 ? 'sa-good' : ''}">${streak} / ${streakReqVal} needed</b>
       </div>
       <div class="sa-terminal-analysis-row">
         <span>Last ${stats.sessions} sessions win rate</span><b>${stats.winRate != null ? (stats.winRate * 100).toFixed(0) + '%' : '—'}</b>
@@ -17633,11 +17693,13 @@ window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine
       ${sug ? `
       <div class="sa-terminal-suggestion sa-conf-${sug.confidence}">
         <div class="sa-terminal-suggestion-text"><b>Suggested: $${sug.value.toFixed(2)}</b> <span class="sa-conf-tag">${sug.confidence} confidence</span><br>${sug.reason}</div>
-        <button class="sa-terminal-usebtn" id="${rootId}-stakeadd-usesuggested" data-val="${sug.value}">USE</button>
+        <button class="sa-terminal-usebtn" id="${rootId}-stakeadd-usesuggested" data-val="${sug.value}" ${drivenByIntel ? 'disabled' : ''}>USE</button>
       </div>` : ''}
     </div>
 
-    ${armed ? `<div class="sa-terminal-armed-banner">⏳ ARMED — waiting for a winning session to finish, then jumps to $${nextVal !== '' ? parseFloat(nextVal).toFixed(2) : '—'}.</div>` : ''}
+    ${drivenByIntel
+      ? `<div class="sa-terminal-armed-banner sa-terminal-intel-banner">🔵 INTEL IS DRIVING STAKE INCREASE — Flip Intell armed this off a hot streak; jumps to $${nextVal !== '' ? parseFloat(nextVal).toFixed(2) : '—'} once the streak requirement is met.</div>`
+      : armed ? `<div class="sa-terminal-armed-banner">⏳ ARMED — ${streak}/${streakReqVal} session win streak. Once it hits ${streakReqVal}, the next session fires at $${nextVal !== '' ? parseFloat(nextVal).toFixed(2) : '—'}.</div>` : ''}
   </div>`;
 };
 
@@ -17775,9 +17837,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           engine.addLog('engine', 'STAKE-ADD', 'Set a valid Next High Stake $ before arming Stake Addition.');
           return;
         }
-        engine.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: liveVal });
+        // Manual arm from the bot's own tab — always takes explicit
+        // ownership away from Auto Flip Drive, even if Drive was the one
+        // that armed it moments ago, so the blue "INTEL IS DRIVING" banner
+        // correctly disappears the instant a person touches this by hand.
+        engine.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: liveVal, stakeAdditionArmedByDrive: false });
       } else {
-        engine.setConfig({ stakeAdditionArmed: false });
+        engine.setConfig({ stakeAdditionArmed: false, stakeAdditionArmedByDrive: false });
       }
       rerender();
     };
@@ -17787,6 +17853,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     nextEl.onchange = (e) => {
       const v = parseFloat(e.target.value);
       engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
+    };
+  }
+  const streakEl = elFn(`${rootId}-stakeadd-streak`, host);
+  if (streakEl) {
+    streakEl.onchange = (e) => {
+      const v = parseInt(e.target.value, 10);
+      engine.setConfig({ stakeAdditionStreakRequired: (!isNaN(v) && v >= 1) ? v : 2 });
     };
   }
   const useBtn = elFn(`${rootId}-stakeadd-usesuggested`, host);
@@ -20333,13 +20406,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         } else if (j.barrier != null) {
           barrierChip = `<span class="jnl-ct-pill" style="background:hsl(var(--accent)/0.12);color:hsl(var(--accent));border:1.5px solid hsl(var(--accent)/0.3)">B:${j.barrier}</span>`;
         }
-        return `<div class="jnl-entry ${j.type}">
+        return `<div class="jnl-entry ${j.type}${j.martingaleStep > 0 ? ' increased-stake' : ''}">
           <!-- TOP ROW: badge + meta + P&L -->
           <div class="jnl-top-row">
             <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
             <div class="jnl-meta-row">
               <span class="jnl-time">${j.time || ''}</span>
               <span class="${isWin ? 'jnl-win-tag' : 'jnl-loss-tag'}">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
+              ${j.martingaleStep > 0 ? `<span class="jnl-stake-tag" title="Fired at an escalated (recovery) stake, not base stake">⚡ STEP ${j.martingaleStep}</span>` : ''}
               ${recoveryMode ? `<span class="jnl-rec-tag">${recoveryMode}</span>` : ''}
               ${barrierChip}
             </div>
@@ -21789,7 +21863,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const engine = engines[id];
         const stats = getBotStats(engine, id);
         const journal = getBotJournal(engine, id);
-        perBot[id] = { ...stats, active: isBotActive(engine, id) };
+        perBot[id] = { ...stats, active: isBotActive(engine, id), increasedStake: !!(engine && engine.state && engine.state.martingaleStep > 0) };
         totalProfit += stats.profit; totalWin += stats.win; totalLoss += stats.loss;
         journal.forEach((j) => {
           allEntries.push(j);
@@ -21830,7 +21904,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const engine = engines[id];
         if (!engine) { perBot[id] = { trades: 0, win: 0, loss: 0, profit: 0, active: false }; return; }
         const stats = getBotStats(engine, id);
-        perBot[id] = { ...stats, active: isBotActive(engine, id) };
+        perBot[id] = { ...stats, active: isBotActive(engine, id), increasedStake: !!(engine.state && engine.state.martingaleStep > 0) };
         totalProfit += stats.profit; totalWin += stats.win; totalLoss += stats.loss;
         getBotJournal(engine, id).forEach((j) => {
           if (j.isTest) return;
@@ -21998,9 +22072,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         ? ranked.map((b, idx) => {
             const isProfit = b.profit >= 0;
             const color = isProfit ? 'hsl(var(--win))' : 'hsl(var(--loss))';
-            return `<div class="eq-rank-row" data-nav-bot="${b.id}" title="${b.meta.label} — ${b.trades} trades, ${b.win}W/${b.loss}L">
+            const stakeGlow = b.active && b.increasedStake;
+            return `<div class="eq-rank-row${stakeGlow ? ' increased-stake' : ''}" data-nav-bot="${b.id}" style="${stakeGlow ? 'box-shadow:0 0 0 1px hsl(45 95% 55%/0.3);border-radius:8px' : ''}" title="${b.meta.label} — ${b.trades} trades, ${b.win}W/${b.loss}L${stakeGlow ? ' — trading an increased recovery stake right now' : ''}">
               <span class="eq-rank-rail-pos">#${idx + 1}</span>
-              <span class="eq-rank-rail-dot" style="background:${b.active ? b.meta.dot : 'hsl(var(--border))'}"></span>
+              <span class="eq-rank-rail-dot" style="background:${stakeGlow ? 'hsl(45 95% 55%)' : b.active ? b.meta.dot : 'hsl(var(--border))'};${stakeGlow ? 'box-shadow:0 0 6px hsl(45 95% 55%/0.8)' : ''}"></span>
               <div class="eq-rank-rail-body">
                 <span class="eq-rank-rail-name">${b.meta.label.replace(' Bot', '')}</span>
                 <span class="eq-rank-rail-val" style="color:${color}">${isProfit ? '+' : ''}$${b.profit.toFixed(2)}</span>
@@ -22025,8 +22100,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const perBotHtml = rankBotIds.map((id) => {
       const meta = BOT_META[id]; const b = perBot[id];
       const wr2 = b.trades ? ((b.win / b.trades) * 100).toFixed(1) : '0.0';
-      return `<div class="glass-panel bot-card" data-nav-bot="${id}" style="cursor:pointer" title="Open ${meta.label}">
-        <div class="bot-card-head"><span class="bot-card-dot" style="background:${b.active ? meta.dot : 'hsl(var(--border))'}"></span>${meta.label}${b.active ? ' <span class=\"text-success\" style=\"font-size:9px;margin-left:auto\">● LIVE</span>' : '<span class=\"text-muted\" style=\"font-size:9px;margin-left:auto\">OPEN →</span>'}</div>
+      // Increased stake (live, right now — this bot is mid-recovery on a
+      // martingale step) — yellow glow on the card itself, same treatment
+      // as the journal entries and Flip Intell's cards, per explicit
+      // request that this show up "all places dashboard".
+      const stakeGlow = b.active && b.increasedStake;
+      return `<div class="glass-panel bot-card${stakeGlow ? ' increased-stake' : ''}" data-nav-bot="${id}" style="cursor:pointer${stakeGlow ? ';border-color:hsl(45 95% 55%/0.55);box-shadow:0 0 0 1px hsl(45 95% 55%/0.2),0 0 16px hsl(45 95% 55%/0.2)' : ''}" title="Open ${meta.label}${stakeGlow ? ' — currently trading an increased (recovery) stake' : ''}">
+        <div class="bot-card-head"><span class="bot-card-dot" style="background:${b.active ? meta.dot : 'hsl(var(--border))'}"></span>${meta.label}${stakeGlow ? ' <span style="font-size:9px;margin-left:auto;color:hsl(45 95% 60%);font-weight:800" title="Trading an escalated recovery stake right now">⚡ +STAKE</span>' : b.active ? ' <span class=\"text-success\" style=\"font-size:9px;margin-left:auto\">● LIVE</span>' : '<span class=\"text-muted\" style=\"font-size:9px;margin-left:auto\">OPEN →</span>'}</div>
         <div class="bot-card-value ${b.profit >= 0 ? 'text-success' : 'text-destructive'}">${b.profit >= 0 ? '+' : ''}$${b.profit.toFixed(2)}</div>
         <div class="bot-card-meta"><span>${b.trades} trades</span><span>${wr2}% win</span></div>
         <div class="bar-track"><div class="bar-fill-win" style="width:${wr2}%"></div></div>
@@ -22266,10 +22346,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // handling). Tagged here so it's obvious at a glance this trade did
       // NOT come from — and never touches — the matching regular tab.
       const intelChip = j.isIntel ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(var(--accent)/0.12);color:hsl(var(--accent));border:1px solid hsl(var(--accent)/0.35);font-family:'DM Mono',monospace" title="Placed by the Intel Auto-Trader — a fully separate engine, journal, and stats from this bot's regular tab">🧠 INTEL</span>` : '';
-      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}"
+      // Increased stake (fired at a martingale/recovery step, not base
+      // stake) — yellow tag + glow, per explicit request, matching the
+      // .jnl-entry.increased-stake rule used by every other journal panel
+      // in the file. Dashboard's journal uses its own inline-styled
+      // .journal-entry markup rather than .jnl-entry, so this needs its
+      // own explicit border/glow override rather than just adding a class.
+      const increasedStake = j.martingaleStep > 0;
+      const stakeChip = increasedStake ? `<span style="font-size:9px;padding:1px 6px;border-radius:999px;background:hsl(45 95% 55%/0.16);color:hsl(45 95% 60%);border:1px solid hsl(45 95% 55%/0.4);font-family:'DM Mono',monospace" title="Fired at an escalated (recovery) stake, not base stake">⚡ STEP ${j.martingaleStep}</span>` : '';
+      return `<div class="journal-entry ${j.type}${j.isHistory ? ' history' : ''}${increasedStake ? ' increased-stake' : ''}"
         data-nav-jnl="${j.botId || ''}"
         style="padding:8px 12px;min-height:0;gap:10px;cursor:${j.botId && !j.isHistory ? 'pointer' : 'default'};
-               background:hsl(0 0% 4%);border:1px solid hsl(${isWin?'var(--win)/0.16':'var(--loss)/0.12'});
+               background:hsl(0 0% 4%);border:1px solid ${increasedStake ? 'hsl(45 95% 55%/0.45)' : `hsl(${isWin?'var(--win)/0.16':'var(--loss)/0.12'})`};
+               ${increasedStake ? 'box-shadow:0 0 14px hsl(45 95% 55%/0.18);' : ''}
                border-radius:10px;margin-bottom:5px;display:flex;align-items:center;
                transition:border-color .15s,transform .15s;"
         onmouseover="if(this.dataset.navJnl&&!${j.isHistory||false})this.style.transform='translateX(3px)'"
@@ -22295,6 +22384,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                            : 'color:hsl(var(--loss)/0.5);'}">
               ${isWin ? '▲ WIN' : '▼ LOSS'}</span>
             ${recoveryChip}
+            ${stakeChip}
             ${testChip}
             ${unresolvedChip}
             ${intelChip}
@@ -24170,13 +24260,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           const entrySpot = j.entrySpot != null ? j.entrySpot.toFixed(4) : '—';
           const exitSpot = j.exitSpot != null ? j.exitSpot.toFixed(4) : '—';
           const pl = (j.profit >= 0 ? '+' : '') + '$' + Math.abs(j.profit).toFixed(2);
-          return `<div class="jnl-entry ${j.type}">
+          return `<div class="jnl-entry ${j.type}${j.martingaleStep > 0 ? ' increased-stake' : ''}">
             <!-- TOP ROW: badge + meta + P&L — matches the Even/Odd/Over/Under journal layout -->
             <div class="jnl-top-row">
               <div class="jnl-badge ${j.type}">${isWin ? 'W' : 'L'}</div>
               <div class="jnl-meta-row">
                 <span class="jnl-time">${j.time || ''}</span>
                 <span class="${isWin ? 'jnl-win-tag' : 'jnl-loss-tag'}">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
+                ${j.martingaleStep > 0 ? `<span class="jnl-stake-tag" title="Fired at an escalated (recovery) stake, not base stake">⚡ STEP ${j.martingaleStep}</span>` : ''}
                 ${j.inRecovery ? `<span class="jnl-rec-tag">${j.recoveryMode||'REC'}</span>` : ''}
                 <span class="jnl-ct-pill" style="background:${dirColor}15;color:${dirColor};border:1.5px solid ${dirColor}44">${isMultJournal ? (isCall?'📈 MULTUP':'📉 MULTDOWN') : (isCall?'📈 HIGHER':'📉 LOWER')}</span>
               </div>
@@ -30709,13 +30800,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             pushDriveLog(`${flipLabel(id)}: ${msg}`);
             return;
           }
-          eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
+          eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value, stakeAdditionArmedByDrive: true });
           const msg = `🚀 Auto Flip Drive armed at $${sug.value.toFixed(2)} — ${streak} winning sessions in a row, ${(winRate * 100).toFixed(0)}% over last ${sessions}.`;
           eng.addLog('engine', 'FLIP-INTELL', msg);
           pushDriveLog(`${flipLabel(id)}: ${msg}`);
         }
       } else if (armed && winRate != null && sessions >= 3 && winRate < 0.45) {
-        eng.setConfig({ stakeAdditionArmed: false });
+        eng.setConfig({ stakeAdditionArmed: false, stakeAdditionArmedByDrive: false });
         const msg = `⛔ Auto Flip Drive disarmed — win rate dropped to ${(winRate * 100).toFixed(0)}% over last ${sessions} sessions.`;
         eng.addLog('engine', 'FLIP-INTELL', msg);
         pushDriveLog(`${flipLabel(id)}: ${msg}`);
@@ -30733,7 +30824,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     FLIP_BOT_IDS.forEach((id) => {
       const eng = flipEngine(id);
       if (!eng || !eng.config || !eng.config.stakeAdditionArmed) return;
-      eng.setConfig({ stakeAdditionArmed: false });
+      eng.setConfig({ stakeAdditionArmed: false, stakeAdditionArmedByDrive: false });
       const msg = '⛔ Disarmed — Auto Flip Drive just took over manual control.';
       eng.addLog('engine', 'FLIP-INTELL', msg);
       pushDriveLog(`${flipLabel(id)}: ${msg}`);
@@ -30770,6 +30861,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       r.riskActive = !!r.eng._riskSessionActive;
       r.riskCooldown = !!r.eng._inRiskCooldown;
       r.cooldownSecs = r.eng.cooldownTime || 0;
+      // Increased stake (recovery/martingale step >= 1) — yellow tag,
+      // per explicit request, everywhere a bot's stake status shows.
+      // martingaleStep is 0 at base stake, >=1 once a loss has escalated
+      // it; _riskSessionActive/_inRiskCooldown are a fully separate flow
+      // (Stake Addition's one-shot Risk $ trade, never martingale) so
+      // this only lights up for genuine recovery-step trades.
+      r.increasedStake = !!(r.eng.state && r.eng.state.martingaleStep > 0);
+      r.stakeStep = (r.eng.state && r.eng.state.martingaleStep) || 0;
     });
     const armedCount = withEngine.filter((r) => r.armed).length;
     let wrSum = 0, wrCount = 0;
@@ -30883,9 +30982,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const secs = Math.max(0, r.cooldownSecs || 0);
         const mm = Math.floor(secs / 60), ss = secs % 60;
         ledMode = 'cooldown'; ledText = `RISK COOLDOWN · ${mm}:${String(ss).padStart(2, '0')}`;
+      } else if (r.increasedStake) {
+        ledMode = 'recovery'; ledText = `RECOVERY STAKE · $${effective.toFixed(2)} (step ${r.stakeStep})`;
       }
 
-      return `<div class="fi-card ${armed ? 'armed' : ''}" style="--fi-i:${idx}">
+      return `<div class="fi-card ${armed ? 'armed' : ''}${r.increasedStake ? ' increased-stake' : ''}" style="--fi-i:${idx}">
         <div class="fi-card-accent"></div>
         <div class="fi-card-top">
           <span class="fi-card-icon">${icon}</span>
@@ -30897,7 +30998,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           ${streakHtml}
         </div>
         ${sparkHtml}
-        <div class="fi-led-row fi-led-${ledMode}" title="${ledMode === 'risk' ? 'This bot is trading its one-shot Risk Stake right now — flat, no recovery.' : ledMode === 'cooldown' ? 'Sitting out after a lost Risk Stake trade — no auto-resume until this ends.' : 'Trading its normal, everyday stake.'}">
+        <div class="fi-led-row fi-led-${ledMode}" title="${ledMode === 'risk' ? 'This bot is trading its one-shot Risk Stake right now — flat, no recovery.' : ledMode === 'cooldown' ? 'Sitting out after a lost Risk Stake trade — no auto-resume until this ends.' : ledMode === 'recovery' ? 'This bot just took a loss and is now trading an escalated (martingale) stake trying to recover it.' : 'Trading its normal, everyday stake.'}">
           <span class="fi-led-dot"></span><span class="fi-led-text">${ledText}</span>
         </div>
         <div class="fi-stake-grid">
@@ -31003,9 +31104,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               stakeAdditionNextStake: v,
               stakeAdditionStreakRequired: (!isNaN(streakV) && streakV >= 1) ? streakV : 2,
               stakeAdditionCooldownMinutes: (!isNaN(cdV) && cdV >= 1) ? cdV : 30,
+              stakeAdditionArmedByDrive: false,
             });
           } else {
-            eng.setConfig({ stakeAdditionArmed: false });
+            eng.setConfig({ stakeAdditionArmed: false, stakeAdditionArmedByDrive: false });
           }
           renderFlip();
         };
@@ -31023,7 +31125,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           if (r.armed) return;
           const sug = qualifiesForAutoArm(r.eng);
           if (sug && !capBlocks(r.id, sug.value)) {
-            r.eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value });
+            r.eng.setConfig({ stakeAdditionArmed: true, stakeAdditionNextStake: sug.value, stakeAdditionArmedByDrive: false });
             r.eng.addLog('engine', 'FLIP-INTELL', `⚡ Bulk-armed from Flip Intell at $${sug.value.toFixed(2)}.`);
           }
         });
@@ -31037,7 +31139,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       disarmAllBtn.onclick = () => {
         withEngine.forEach((r) => {
           if (!r.armed) return;
-          r.eng.setConfig({ stakeAdditionArmed: false });
+          r.eng.setConfig({ stakeAdditionArmed: false, stakeAdditionArmedByDrive: false });
           r.eng.addLog('engine', 'FLIP-INTELL', '⛔ Bulk-disarmed from Flip Intell.');
         });
         renderFlip();
@@ -31186,6 +31288,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #panel-flipintell .fi-led-cooldown { border-color:hsl(var(--loss)/0.55); background:hsl(var(--loss)/0.08); }
       #panel-flipintell .fi-led-cooldown .fi-led-dot { background:hsl(var(--loss)); box-shadow:0 0 8px hsl(var(--loss)/0.8); animation:fi-led-pulse 1.6s ease-in-out infinite; }
       #panel-flipintell .fi-led-cooldown .fi-led-text { color:hsl(var(--loss)); }
+      /* Increased-stake (recovery/martingale step >= 1) — yellow, everywhere
+         a bot's stake status is shown: this LED, plus the card glow below,
+         plus the matching .jnl-entry.increased-stake rule used by every
+         journal renderer (Dashboard, Flip Intell's own hotrepeat journal,
+         and every regular/old bot's own journal panel). */
+      #panel-flipintell .fi-led-recovery { border-color:hsl(45 95% 55%/0.6); background:hsl(45 95% 55%/0.12); }
+      #panel-flipintell .fi-led-recovery .fi-led-dot { background:hsl(45 95% 55%); box-shadow:0 0 8px hsl(45 95% 55%/0.9); animation:fi-led-pulse 1.1s ease-in-out infinite; }
+      #panel-flipintell .fi-led-recovery .fi-led-text { color:hsl(45 95% 60%); }
+      #panel-flipintell .fi-card.increased-stake { border-color:hsl(45 95% 55%/0.65); box-shadow:0 0 0 1px hsl(45 95% 55%/0.15), 0 4px 20px hsl(45 95% 55%/0.18); }
+      #panel-flipintell .fi-card.increased-stake .fi-card-accent { opacity:1; background:linear-gradient(90deg, hsl(45 95% 55%/0.85), hsl(45 95% 55%/0.35)); }
       @keyframes fi-led-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(.8); } }
 
       /* ── Field grids — Normal Stake / Risk $, then Win-Streak Trigger / Risk Cooldown ── */
