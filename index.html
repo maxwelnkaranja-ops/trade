@@ -318,7 +318,12 @@
         const emptyReference = PATTERN_DEFS.map((p) => ({ id: p.id, label: p.label, icon: p.icon, rate: 0, hits: 0, attempts: 0 }));
         const emptyDynamic = { id: 'dynamic', label: 'Dynamic Pattern', icon: '🧬', rate: 0, hits: 0, attempts: 0 };
         const shortSpan = buildShortSpanSignal(history, winCheck, shortSpanWindow);
-        const empty = { patterns: [...emptyReference, emptyDynamic], reference: emptyReference, best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null, shortSpan };
+        // Regime read (see window.classifyRegime below) — attached here so
+        // shouldFlipForStep can tell whether the short-span contrarian
+        // signal is actually appropriate to trust right now. See the big
+        // comment on shouldFlipForStep for why this matters.
+        const regime = window.classifyRegime ? window.classifyRegime(history, shortSpanWindow) : null;
+        const empty = { patterns: [...emptyReference, emptyDynamic], reference: emptyReference, best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null, shortSpan, regime };
         if (data.length < MIN_SAMPLES + 1) return empty;
 
         // Reference-only backtest of the 5 fixed patterns. Shown in the
@@ -345,7 +350,7 @@
         return {
           patterns: [...reference, dynamic], reference,
           best: ready ? dynamic.id : null, bestRate: ready ? dynamic.rate : 0,
-          ready, samples: data.length, dynamicMask: dynamic.mask, shortSpan,
+          ready, samples: data.length, dynamicMask: dynamic.mask, shortSpan, regime,
         };
       }
 
@@ -500,7 +505,8 @@
         const expectedStayRate = isUnderMode ? (barrier / 10) : ((9 - barrier) / 10);
         const data = (history || []).slice(-160);
         const shortSpan = threshBuildShortSpanSignal(history, winCheck, shortSpanWindow, expectedStayRate);
-        const empty = { patterns: [], reference: [], best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null, shortSpan };
+        const regime = window.classifyRegime ? window.classifyRegime(history, shortSpanWindow) : null;
+        const empty = { patterns: [], reference: [], best: null, bestRate: 0, ready: false, samples: data.length, dynamicMask: null, shortSpan, regime };
         if (data.length < THRESH_MIN_SAMPLES + 1) return empty;
 
         // Reference-only backtest of the 5 fixed patterns — shown in the
@@ -521,28 +527,43 @@
         return {
           patterns: [...reference, dynamic], reference,
           best: ready ? dynamic.id : null, bestRate: ready ? dynamic.rate : 0,
-          ready, samples: data.length, dynamicMask: dynamic.mask, shortSpan,
+          ready, samples: data.length, dynamicMask: dynamic.mask, shortSpan, regime,
         };
       }
 
       // Applies the engine's live self-built signal to a given martingale
       // step, returning whether THIS step should flip.
       //
-      // PRIMARY driver is now the short-span contrarian read: it only
-      // needs ~10-20 ticks to become trustworthy, versus the long-window
-      // per-step mask below, which needs ~70+ ticks before a SPECIFIC
-      // step accumulates enough of its own samples (each step only gets
-      // hit every 9th tick). That gap was the real reason Smart Recovery
-      // kept losing — for most of a session, most steps just fell back to
-      // "stay" (repeat the base direction) not because that was the right
-      // call, just because the slow long-window mask hadn't gathered
-      // enough evidence yet to say anything else.
+      // PRIMARY driver is the short-span contrarian read: it only needs
+      // ~10-20 ticks to become trustworthy, versus the long-window per-step
+      // mask below, which needs ~70+ ticks before a SPECIFIC step
+      // accumulates enough of its own samples.
+      //
+      // BIG FIX (per "lots of losses, no recovery"): the short-span signal
+      // is a FADE — it bets against whichever side has been dominant over
+      // the last ~20 ticks. Fading only works when the market is actually
+      // CHOPPY (alternating/reverting more than chance), because that's
+      // the regime where "the dominant side is due to swing back" is true.
+      // In a TRENDING market (streaking/repeating more than chance), the
+      // dominant side tends to KEEP winning, and fading it is betting
+      // directly against the market's own momentum — this was firing
+      // exactly as confidently in both regimes, so every recovery step
+      // taken during a trending run was working against the trend, not
+      // with it, which is precisely the "recovery keeps losing" pattern.
+      // Now: only trust the short-span fade when the market isn't
+      // confidently TRENDING (see window.classifyRegime below); a
+      // confirmed trend instead falls through to the long-window mask —
+      // and if that's also not ready, holds the base direction rather than
+      // fighting the trend on a guess.
       //
       // Long-window mask is now only consulted as a fallback for the
-      // early window before the short span itself has enough ticks.
+      // early window before the short span itself has enough ticks (or
+      // while the market is trending and the fade is being deliberately
+      // sat out).
       function shouldFlipForStep(ranking, step) {
         if (!ranking) return false;
-        if (ranking.shortSpan && ranking.shortSpan.ready) return !!ranking.shortSpan.recommendFlip;
+        const regimeSafe = !ranking.regime || !ranking.regime.ready || ranking.regime.regime !== 'TRENDING';
+        if (ranking.shortSpan && ranking.shortSpan.ready && regimeSafe) return !!ranking.shortSpan.recommendFlip;
         if (!ranking.ready || !ranking.dynamicMask) return false;
         const cycleStep = ((step - 1) % CYCLE) + 1;
         return !!ranking.dynamicMask[cycleStep];
@@ -17648,6 +17669,8 @@ window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(en
   const dynamicP = ranking.patterns && ranking.patterns.find((p) => p.id === 'dynamic');
   const stepDetail = dynamicP && dynamicP.detail ? dynamicP.detail : null;
   const ss = ranking.shortSpan || { ready: false, span: 20, samples: 0, dominant: null, dominantPct: 0.5, recommendFlip: false };
+  const regime = ranking.regime || { ready: false, regime: 'WARMING', trendScore: 50 };
+  const regimeSafe = !regime.ready || regime.regime !== 'TRENDING';
   const cfgWindow = engine && engine.config ? engine.config.smartRecoveryShortSpan : null;
   const editable = rootId && engine; // Differ's read-only call passes neither
 
@@ -17665,9 +17688,14 @@ window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(en
       </label>` : ''}
     </div>
     <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.6;margin-bottom:10px">
-      Looks only at the last ${ss.span} ticks, finds whichever side has been most used recently, and bets the opposite — ready almost immediately instead of the ~70+ ticks a specific recovery step needs before the long-window pattern below can say anything about it. This is what actually drives live flips now; the long-window pattern only fills in before this has enough ticks.
+      Looks only at the last ${ss.span} ticks, finds whichever side has been most used recently, and bets the opposite — ready almost immediately instead of the ~70+ ticks a specific recovery step needs before the long-window pattern below can say anything about it. This is what drives live flips <b>while the market is CHOPPY</b>; a confirmed TRENDING market sits this signal out instead (fading a real trend just loses into it — see REGIME below), falling back to the long-window pattern.
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid ${regime.ready ? (regime.regime === 'TRENDING' ? 'hsl(var(--loss)/0.4)' : regime.regime === 'CHOPPY' ? 'hsl(var(--win)/0.35)' : 'hsl(var(--border)/0.3)') : 'hsl(var(--border)/0.3)'}">
+        <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">REGIME</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${!regime.ready ? 'hsl(var(--muted-foreground))' : regime.regime === 'TRENDING' ? 'hsl(var(--loss))' : regime.regime === 'CHOPPY' ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${regime.ready ? regime.regime : 'WARMING'}</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${regime.ready ? (regime.regime === 'TRENDING' ? 'fade sitting out — trend usually keeps winning' : regime.regime === 'CHOPPY' ? 'fade favored — dominant side tends to swing back' : 'no strong bias either way') : 'buffering…'}</div>
+      </div>
       <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid ${ss.ready ? 'hsl(var(--win)/0.35)' : 'hsl(var(--border)/0.3)'}">
         <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">MOST-USED RECENTLY</div>
         <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${ss.ready ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${ss.dominant ? (ss.dominant === 'stay' ? 'BASE SIDE' : 'FLIPPED SIDE') : '—'}</div>
@@ -17675,8 +17703,8 @@ window.renderRecoveryPatternAnalysis = function renderRecoveryPatternAnalysis(en
       </div>
       <div style="padding:14px;background:hsl(var(--bg)/0.7);border-radius:12px;border:1px solid hsl(var(--border)/0.3)">
         <div style="font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--muted-foreground));margin-bottom:5px">DECISION</div>
-        <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${ss.ready ? (ss.recommendFlip ? 'hsl(var(--win))' : 'hsl(var(--primary))') : 'hsl(var(--muted-foreground))'}">${ss.ready ? (ss.recommendFlip ? 'FIRE OPPOSITE' : 'STAY BASE') : '—'}</div>
-        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">fading whichever side has been dominant</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:20px;font-weight:900;color:${!ss.ready ? 'hsl(var(--muted-foreground))' : !regimeSafe ? 'hsl(var(--loss))' : (ss.recommendFlip ? 'hsl(var(--win))' : 'hsl(var(--primary))')}">${!ss.ready ? '—' : !regimeSafe ? 'SITTING OUT' : (ss.recommendFlip ? 'FIRE OPPOSITE' : 'STAY BASE')}</div>
+        <div style="font-size:8.5px;color:hsl(var(--muted-foreground));margin-top:3px">${!regimeSafe && ss.ready ? 'trending — fade withheld this tick' : 'fading whichever side has been dominant'}</div>
       </div>
     </div>
 
