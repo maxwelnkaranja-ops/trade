@@ -16586,7 +16586,7 @@ window.NexusStrategies=exports;
         this.sessionStakeOverride = null;
         const usedStake = this._riskSessionStake || this.getEffectiveStake();
         if (wonSession) {
-          this.addLog('engine', 'STAKE-ADD', `🎯 Risk session WON at $${usedStake.toFixed(2)} — back to normal stake ($${this.config.stake.toFixed(2)}). Needs a fresh win streak to fire again.`);
+          this.addLog('engine', 'STAKE-ADD', `🎯 Risk session WON — ${this.state.currentRuns} run${this.state.currentRuns === 1 ? '' : 's'} at $${usedStake.toFixed(2)} — back to normal stake ($${this.config.stake.toFixed(2)}). Needs a fresh win streak to fire again.`);
         } else {
           this.config.stakeAdditionArmed = false;
           const mins = Math.max(1, parseFloat(this.config.stakeAdditionCooldownMinutes) || 30);
@@ -16604,7 +16604,7 @@ window.NexusStrategies=exports;
             this.sessionStakeOverride = nextHigh;
             this._riskSessionActive = true;
             this._riskSessionStake = nextHigh;
-            this.addLog('engine', 'STAKE-ADD', `🚀 ${streak}-session win streak reached — Risk $${nextHigh.toFixed(2)} queued for the next session only (flat, no recovery).`);
+            this.addLog('engine', 'STAKE-ADD', `🚀 ${streak}-session win streak reached — Risk $${nextHigh.toFixed(2)} queued for the next session (runs your normal Runs/cycle count at that stake, flat — no recovery on a loss).`);
           } else {
             this.addLog('engine', 'STAKE-ADD', `Stake Addition is armed but no valid Risk $ was set — skipped this time.`);
           }
@@ -17025,15 +17025,28 @@ window.NexusStrategies=exports;
 
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
-      // ── RISK SESSION (Stake Addition's one-shot Risk $ trade) ────────────
-      // Deliberately flat and has NO recovery: it resolves after exactly
-      // this one trade — win or lose — instead of continuing into the
-      // bot's normal martingale/target-runs flow below. martingaleStep was
-      // just reset to 0 by handleContractResult on a win, or bumped to >=1
-      // on a loss, so that's a reliable read of this trade's outcome here.
-      // See completeSession() for what happens on each outcome.
+      // ── RISK SESSION (Stake Addition's boosted-stake session) ────────
+      // BUG FIX: this used to hard-complete after exactly ONE trade no
+      // matter what Runs/cycle (targetRuns) was set to — "3 runs" would
+      // only ever fire once at the boosted stake before dropping back to
+      // normal. It now follows the same win-count-to-targetRuns flow as
+      // every regular session (see the st.active block below), so a
+      // Runs/cycle of 3 really does mean 3 wins in a row at the boosted
+      // stake. Still deliberately flat with NO martingale recovery: any
+      // single loss ends the risk session immediately (win or lose is
+      // decided by st.inRecovery, exactly like the sacrifice-trade check
+      // above), it just no longer force-ends after a single win either.
       if (this._riskSessionActive) {
-        this.completeSession(st.martingaleStep === 0);
+        if (st.inRecovery) { this.completeSession(false); return; }
+        if (st.currentRuns >= cfg.targetRuns) {
+          this.addLog('win', 'ENGINE', `RISK STAKE: TARGET ${cfg.targetRuns} RUNS COMPLETE! Entering cooldown.`);
+          this.completeSession(true);
+          return;
+        }
+        if (st.currentRuns > 0) {
+          this.executionGuard = false;
+          this.executeBoltPurchase();
+        }
         return;
       }
       if (st.active) {
@@ -17662,7 +17675,7 @@ window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine
          looked like "it doesn't work" — this now matches the real logic,
          and the streak requirement (previously only editable from Flip
          Intell) is exposed here too. -->
-    <div class="sa-terminal-sub">${drivenByIntel ? 'Auto Flip Drive armed this automatically off a hot streak — see Flip Intell.' : 'Needs a win STREAK (set below) before it fires — not just one win.'} Once that streak is hit, the NEXT session trades flat at Next High Stake (no recovery): win → straight back to normal stake, needs a fresh streak to fire again; lose → disarms and cools down. Resets to normal Stake $ on page reload.</div>
+    <div class="sa-terminal-sub">${drivenByIntel ? 'Auto Flip Drive armed this automatically off a hot streak — see Flip Intell.' : 'Needs a win STREAK (set below) before it fires — not just one win.'} Once that streak is hit, the NEXT session trades at Next High Stake for your normal Runs/cycle count (flat, no recovery on a loss — a single loss ends the risk session immediately): win the full session → straight back to normal stake, needs a fresh streak to fire again; any loss → disarms and cools down. Resets to normal Stake $ on page reload.</div>
 
     <div class="sa-terminal-grid">
       <div class="sa-terminal-cell">
@@ -21134,6 +21147,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <!-- Engage button -->
           <button id="dash-master-toggle" style="margin:0;padding:13px 26px;font-size:10px;letter-spacing:3px;border-radius:12px;border:none;background:linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary-2)));color:#fff;font-family:'Outfit',sans-serif;font-weight:900;cursor:pointer;transition:all .2s;align-self:flex-end;flex-shrink:0;min-width:148px;white-space:nowrap">
             ⚡ ENGAGE ALL
+          </button>
+          <!-- Differ's own small standalone CTA — per explicit request,
+               removed from ENGAGE ALL / TERMINATE ALL entirely (Differ's
+               default Echo mode fires the instant it's armed, so bundling
+               it into a bulk click meant an unrelated bulk action could
+               fire a real contract with no separate confirmation). This
+               is the only way to arm/disarm Differ from the Dashboard now
+               — it still shows up in the P&L safety gate and tab dots. -->
+          <button id="dash-differ-toggle" title="Differ has its own switch here, separate from ENGAGE ALL — its default Echo mode fires the instant it's armed" style="margin:0;padding:13px 18px;font-size:9px;letter-spacing:2px;border-radius:12px;border:1.5px solid hsl(var(--border)/0.6);background:hsl(var(--card)/0.6);color:hsl(var(--foreground)/0.85);font-family:'Outfit',sans-serif;font-weight:800;cursor:pointer;transition:all .2s;align-self:flex-end;flex-shrink:0;white-space:nowrap">
+            🎯 ENGAGE DIFFER
           </button>
         </div>
 
@@ -27396,6 +27419,20 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // here is safe everywhere else BOT_IDS is used.
     'even_intel', 'matches_intel'];
 
+  // Differ's default cold-pick method (Echo) fires the instant it's armed
+  // — that's the strategy, not a bug — but bundling it into a bulk
+  // ENGAGE ALL click meant an unrelated bulk action could fire a real
+  // Differ contract with no separate confirmation. Per explicit request:
+  // ENGAGE ALL / TERMINATE ALL, the P&L-gate auto-resume clicks, and the
+  // master button's own on/off label all now ignore Differ entirely —
+  // it gets its own small standalone Engage/Disarm CTA on the dashboard
+  // instead (see dash-differ-engage). It's deliberately NOT removed from
+  // the plain BOT_IDS above, since the P&L safety gate (terminateAllEngines,
+  // getSessionPnl), the tab-dot indicator, and the stake widget should all
+  // still see and be able to kill/display Differ regardless of how it was
+  // armed.
+  const ENGAGE_BOT_IDS = BOT_IDS.filter((id) => id !== 'differ');
+
   const THEMES = [
     { v: 'luminous', i: '💎', label: 'Theme One — Luminous' },
     { v: 'void',     i: '⬛', label: 'Theme Two — Void'     },
@@ -28254,13 +28291,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       resetPnlAndStakeForAllBots();
       resetPnlGateLatch();
       applyMasterTpSlToAllEngines();
-      const engagedCount = BOT_IDS.filter((id) => {
+      const engagedCount = ENGAGE_BOT_IDS.filter((id) => {
         const eng = engines[id];
         if (!eng) return false;
-        return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+        return (id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
       }).length;
       const masterBtn = document.getElementById('dash-master-toggle');
-      if (engagedCount < BOT_IDS.length && masterBtn) masterBtn.click();
+      if (engagedCount < ENGAGE_BOT_IDS.length && masterBtn) masterBtn.click();
       queueDashboardRender();
       const t2 = document.getElementById('global-error-toast');
       if (t2) {
@@ -28308,13 +28345,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       }
     });
     resetPnlGateLatch();
-    const engagedCount = BOT_IDS.filter((id) => {
+    const engagedCount = ENGAGE_BOT_IDS.filter((id) => {
       const eng = engines[id];
       if (!eng) return false;
-      return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+      return (id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
     }).length;
     const masterBtn = document.getElementById('dash-master-toggle');
-    if (engagedCount < BOT_IDS.length && masterBtn) masterBtn.click();
+    if (engagedCount < ENGAGE_BOT_IDS.length && masterBtn) masterBtn.click();
     queueDashboardRender();
     const toast = document.getElementById('global-error-toast');
     if (toast) {
@@ -28364,19 +28401,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // visible toast + console log instead of dying silently.
       const failedIds = [];
       try {
-      const engagedCount = BOT_IDS.filter((id) => {
+      const engagedCount = ENGAGE_BOT_IDS.filter((id) => {
         const eng = engines[id];
         if (!eng) return false;
-        return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+        return (id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
       }).length;
-      const turnOn = engagedCount < BOT_IDS.length;
+      const turnOn = engagedCount < ENGAGE_BOT_IDS.length;
       if (turnOn) { applyMasterTpSlToAllEngines(); resetPnlGateLatch(); }
-      BOT_IDS.forEach((id) => {
+      ENGAGE_BOT_IDS.forEach((id) => {
        try {
         const eng = ensureTitanOrDifferForControl(id);
         if (!eng) return;
-        if (id === 'differ' || id === 'hotrepeat') {
-          const ui = id === 'differ' ? window.BenzUI : window.HotRepeatUI;
+        if (id === 'hotrepeat') {
+          const ui = window.HotRepeatUI;
           if (turnOn && !(eng.state.isArmed || eng.state.isRunning)) {
             if (ui && !ui._initialized) { try { ui.renderFull(eng.state); ui._initialized = true; } catch(_) {} }
             if (!eng.state.isAuthenticated && window.HubStore && window.HubStore.getState().apiToken) {
@@ -28488,10 +28525,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       setTimeout(() => {
         const masterBtn = document.getElementById('dash-master-toggle');
         if (masterBtn) {
-          const nowEngaged = BOT_IDS.filter((id) => {
+          const nowEngaged = ENGAGE_BOT_IDS.filter((id) => {
             const eng = engines[id];
             if (!eng) return false;
-            return (id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+            return (id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
           }).length;
           if (nowEngaged > 0) {
             masterBtn.textContent = '⛔ TERMINATE ALL';
@@ -28502,6 +28539,39 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           }
         }
       }, 200);
+      queueDashboardRender();
+    });
+    // Differ's own small standalone CTA (see the comment on the button
+    // itself, and on ENGAGE_BOT_IDS above) — a direct arm/disarm, fully
+    // separate from the ENGAGE ALL / TERMINATE ALL loop.
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('#dash-differ-toggle');
+      if (!btn) return;
+      try {
+        const eng = ensureTitanOrDifferForControl('differ');
+        if (!eng) return;
+        if (eng.state.isArmed || eng.state.isRunning) {
+          eng.abortTrades(); eng.disarmSystem();
+        } else {
+          if (!eng.state.isAuthenticated && window.HubStore && window.HubStore.getState().apiToken) {
+            eng.authenticate();
+            let waited = 0;
+            if (eng._masterAuthWaitTimer) { clearInterval(eng._masterAuthWaitTimer); eng._masterAuthWaitTimer = null; }
+            eng._masterAuthWaitTimer = setInterval(() => {
+              waited += 400;
+              if (eng.state.isAuthenticated || waited >= 12000) {
+                clearInterval(eng._masterAuthWaitTimer);
+                eng._masterAuthWaitTimer = null;
+                try { eng.armSystem(); } catch(_) {}
+                queueDashboardRender();
+              }
+            }, 400);
+          } else {
+            eng.armSystem();
+          }
+        }
+      } catch (err) { console.error('[Hub] Differ toggle error:', err); }
+      setTimeout(refreshDifferToggleLabel, 200);
       queueDashboardRender();
     });
     // Apply TP/SL when values change
@@ -28603,6 +28673,28 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const active = eng && ((id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
       dot.classList.toggle('live', !!active);
     });
+    refreshDifferToggleLabel();
+  }
+
+  // Keeps the small standalone Differ CTA's label/color in sync with its
+  // actual armed state — called from the same tick refreshTabDots already
+  // runs on, so it never drifts.
+  function refreshDifferToggleLabel() {
+    const btn = document.getElementById('dash-differ-toggle');
+    if (!btn) return;
+    const eng = engines['differ'];
+    const armed = !!(eng && eng.state && (eng.state.isArmed || eng.state.isRunning));
+    if (armed) {
+      btn.textContent = '⏸ DISARM DIFFER';
+      btn.style.background = 'hsl(var(--loss)/0.14)';
+      btn.style.borderColor = 'hsl(var(--loss)/0.5)';
+      btn.style.color = 'hsl(var(--loss))';
+    } else {
+      btn.textContent = '🎯 ENGAGE DIFFER';
+      btn.style.background = 'hsl(var(--card)/0.6)';
+      btn.style.borderColor = 'hsl(var(--border)/0.6)';
+      btn.style.color = 'hsl(var(--foreground)/0.85)';
+    }
   }
 
   // ── STAKE WIDGET (Master Control) ───────────────────────────────────────
