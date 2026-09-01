@@ -16570,7 +16570,7 @@ window.NexusStrategies=exports;
       //          again (it does NOT keep firing every session after).
       //   LOSS → no recovery is attempted at all. Stake Addition disarms
       //          itself and the bot enters an extended Risk Cooldown
-      //          (this.config.stakeAdditionCooldownMinutes, default 30)
+      //          (this.config.stakeAdditionCooldownMinutes, clamped 1-2 min, default 2)
       //          instead of the normal short between-session cooldown,
       //          and does NOT auto-resume via Auto Pilot afterward — it
       //          needs to be manually re-armed/re-engaged.
@@ -16589,7 +16589,7 @@ window.NexusStrategies=exports;
           this.addLog('engine', 'STAKE-ADD', `🎯 Risk session WON — ${this.state.currentRuns} run${this.state.currentRuns === 1 ? '' : 's'} at $${usedStake.toFixed(2)} — back to normal stake ($${this.config.stake.toFixed(2)}). Needs a fresh win streak to fire again.`);
         } else {
           this.config.stakeAdditionArmed = false;
-          const mins = Math.max(1, parseFloat(this.config.stakeAdditionCooldownMinutes) || 30);
+          const mins = Math.min(2, Math.max(1, parseFloat(this.config.stakeAdditionCooldownMinutes) || 2));
           forcedCooldownSeconds = Math.round(mins * 60);
           forcedCooldownTitle = 'RISK COOLDOWN';
           skipAutoPilotResume = true;
@@ -21877,7 +21877,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function render(root, engines) {
     if (!el('dash-netpl', root)) buildShell(root);
     const hub = global.HubStore.getState();
-    const botIds = ['hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
+    // 'differ' used to be left out of this list — every helper it feeds
+    // (getBotStats/getBotJournal/isBotActive/getBotFlowStage, the exec rows,
+    // the master-status "N engaged" count) already had a working
+    // `id === 'differ'` branch written for it, but since it was never in
+    // this array those branches were dead code: Differ's wins/losses never
+    // reached the Trade Journal, Net P&L, Win Rate, Won/Lost, the equity
+    // curve, or the Engine Overview grid — even though the master TP/SL
+    // gate (a separate BOT_IDS list below) already counted its P&L toward
+    // the take-profit/stop-loss total. Added here so the visible dashboard
+    // totals/journal finally match what the gate was already enforcing.
+    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -31058,7 +31068,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const normalStakeVal = c.stake != null ? c.stake : '';
       const riskVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
       const streakReqVal = c.stakeAdditionStreakRequired != null ? c.stakeAdditionStreakRequired : 2;
-      const cooldownMinVal = c.stakeAdditionCooldownMinutes != null ? c.stakeAdditionCooldownMinutes : 30;
+      const cooldownMinVal = c.stakeAdditionCooldownMinutes != null ? c.stakeAdditionCooldownMinutes : 2;
       const badge = id === bestId ? '<span class="fi-badge best" title="Best win rate on this board right now">🔥 BEST</span>'
         : id === worstId ? '<span class="fi-badge worst" title="Worst win rate on this board right now">⚠ WATCH</span>' : '';
       const sparkHtml = r.sparkline.length
@@ -31115,7 +31125,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           </label>
           <label class="fi-field">
             <span class="fi-field-label">Risk cooldown (min)</span>
-            <input type="number" step="1" min="1" id="fi-cd-${id}" value="${cooldownMinVal}" ${driveOn ? 'disabled' : ''}>
+            <input type="number" step="1" min="1" max="2" id="fi-cd-${id}" value="${cooldownMinVal}" ${driveOn ? 'disabled' : ''}>
           </label>
         </div>
         <div class="fi-risk-label">Fires ONCE — a flat trade with no martingale recovery. Win → straight back to normal stake. Lose → disarms and cools down for the minutes set above.</div>
@@ -31158,7 +31168,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const cdInp = document.getElementById(`fi-cd-${id}`);
         if (cdInp) cdInp.onchange = (e) => {
           const v = parseFloat(e.target.value);
-          eng.setConfig({ stakeAdditionCooldownMinutes: (!isNaN(v) && v >= 1) ? v : 30 });
+          eng.setConfig({ stakeAdditionCooldownMinutes: (!isNaN(v) && v >= 1) ? Math.min(2, v) : 2 });
         };
         const x2Btn = document.getElementById(`fi-riskx2-${id}`);
         if (x2Btn) x2Btn.onclick = () => {
@@ -31196,7 +31206,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               stakeAdditionArmed: true,
               stakeAdditionNextStake: v,
               stakeAdditionStreakRequired: (!isNaN(streakV) && streakV >= 1) ? streakV : 2,
-              stakeAdditionCooldownMinutes: (!isNaN(cdV) && cdV >= 1) ? cdV : 30,
+              stakeAdditionCooldownMinutes: (!isNaN(cdV) && cdV >= 1) ? Math.min(2, cdV) : 2,
               stakeAdditionArmedByDrive: false,
             });
           } else {
