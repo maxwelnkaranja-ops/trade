@@ -16552,24 +16552,27 @@ window.NexusStrategies=exports;
       this.executionGuard = false; this.pendingTrade = null;
       this._skipArmed = false; this._isSacrificeTrade = false;
       this.sessionOutcomes = [...this.sessionOutcomes, !!wonSession].slice(-20);
-      // ── STAKE ADDITION — Risk Stake (one-shot, no recovery) ─────────────
+      // ── STAKE ADDITION — Risk Stake (trades normally, martingale as usual) ──
       // Fires exactly once per completed TRADING SESSION (this function —
       // the point where the bot goes into cooldown), not per individual
       // trade.
       //
       // ONE-SHOT, not standing: arming no longer promotes the stake at the
       // end of every winning session forever. Instead, once armed, the
-      // engine waits for a configurable consecutive-session WIN STREAK
-      // (this.config.stakeAdditionStreakRequired, default 2) before it
-      // queues Risk $ for exactly the next session. That next session
-      // trades completely flat — see _chainAfterResult()'s risk-session
-      // branch, which resolves it after this ONE trade instead of letting
-      // it enter the bot's normal martingale/target-runs flow — and:
+      // engine waits for a win streak of 1 (locked — see the req = 1 below)
+      // before it queues Risk $ for exactly the next session. That next
+      // session trades completely normally at the boosted stake — see
+      // _chainAfterResult(), which now lets it run through the bot's usual
+      // TP/SL, martingale-recovery, and target-runs flow instead of ending
+      // flat after one trade — and:
       //   WIN  → logged, drops straight back to the normal Stake $, and
-      //          Stake Addition needs a fresh qualifying streak to fire
-      //          again (it does NOT keep firing every session after).
-      //   LOSS → no recovery is attempted at all. Stake Addition disarms
-      //          itself and the bot enters an extended Risk Cooldown
+      //          Stake Addition needs a fresh win to fire again (it does
+      //          NOT keep firing every session after).
+      //   LOSS → normal martingale recovery is attempted first, same as
+      //          any other session; only once recovery is exhausted (stop
+      //          step / max recovery hit) does the session actually end in
+      //          a loss. Stake Addition then disarms itself and the bot
+      //          enters an extended Risk Cooldown
       //          (this.config.stakeAdditionCooldownMinutes, clamped 1-2 min, default 2)
       //          instead of the normal short between-session cooldown,
       //          and does NOT auto-resume via Auto Pilot afterward — it
@@ -16586,17 +16589,23 @@ window.NexusStrategies=exports;
         this.sessionStakeOverride = null;
         const usedStake = this._riskSessionStake || this.getEffectiveStake();
         if (wonSession) {
-          this.addLog('engine', 'STAKE-ADD', `🎯 Risk session WON — ${this.state.currentRuns} run${this.state.currentRuns === 1 ? '' : 's'} at $${usedStake.toFixed(2)} — back to normal stake ($${this.config.stake.toFixed(2)}). Needs a fresh win streak to fire again.`);
+          this.addLog('engine', 'STAKE-ADD', `🎯 Risk session WON — ${this.state.currentRuns} run${this.state.currentRuns === 1 ? '' : 's'} at $${usedStake.toFixed(2)} — back to normal stake ($${this.config.stake.toFixed(2)}). Needs a fresh win to fire again.`);
         } else {
           this.config.stakeAdditionArmed = false;
           const mins = Math.min(2, Math.max(1, parseFloat(this.config.stakeAdditionCooldownMinutes) || 2));
           forcedCooldownSeconds = Math.round(mins * 60);
           forcedCooldownTitle = 'RISK COOLDOWN';
           skipAutoPilotResume = true;
-          this.addLog('engine', 'STAKE-ADD', `⛔ Risk session LOST at $${usedStake.toFixed(2)} — no recovery attempted. Disarmed and entering a ${mins}-minute Risk Cooldown.`);
+          this.addLog('engine', 'STAKE-ADD', `⛔ Risk session LOST at $${usedStake.toFixed(2)} after martingale recovery was exhausted. Disarmed and entering a ${mins}-minute Risk Cooldown.`);
         }
       } else if (wonSession && this.config.stakeAdditionArmed) {
-        const req = Math.max(1, parseInt(this.config.stakeAdditionStreakRequired, 10) || 2);
+        // Win-streak requirement is locked to 1 for every bot: Stake
+        // Addition fires off the very next win once armed, it no longer
+        // waits for a multi-session streak. (Previously configurable via
+        // stakeAdditionStreakRequired, default 2 — that config value is
+        // now ignored so this can never drift back to requiring more
+        // than one win, even from an old saved setting.)
+        const req = 1;
         const streak = this.getSessionWinStreak();
         const nextHigh = parseFloat(this.config.stakeAdditionNextStake);
         if (streak >= req) {
@@ -16604,7 +16613,7 @@ window.NexusStrategies=exports;
             this.sessionStakeOverride = nextHigh;
             this._riskSessionActive = true;
             this._riskSessionStake = nextHigh;
-            this.addLog('engine', 'STAKE-ADD', `🚀 ${streak}-session win streak reached — Risk $${nextHigh.toFixed(2)} queued for the next session (runs your normal Runs/cycle count at that stake, flat — no recovery on a loss).`);
+            this.addLog('engine', 'STAKE-ADD', `🚀 Win streak reached — Risk $${nextHigh.toFixed(2)} queued for the next session (trades your normal Runs/cycle count at that stake, with martingale recovery as usual on a loss).`);
           } else {
             this.addLog('engine', 'STAKE-ADD', `Stake Addition is armed but no valid Risk $ was set — skipped this time.`);
           }
@@ -17026,29 +17035,15 @@ window.NexusStrategies=exports;
     _chainAfterResult() {
       const cfg = this.config, st = this.state;
       // ── RISK SESSION (Stake Addition's boosted-stake session) ────────
-      // BUG FIX: this used to hard-complete after exactly ONE trade no
-      // matter what Runs/cycle (targetRuns) was set to — "3 runs" would
-      // only ever fire once at the boosted stake before dropping back to
-      // normal. It now follows the same win-count-to-targetRuns flow as
-      // every regular session (see the st.active block below), so a
-      // Runs/cycle of 3 really does mean 3 wins in a row at the boosted
-      // stake. Still deliberately flat with NO martingale recovery: any
-      // single loss ends the risk session immediately (win or lose is
-      // decided by st.inRecovery, exactly like the sacrifice-trade check
-      // above), it just no longer force-ends after a single win either.
-      if (this._riskSessionActive) {
-        if (st.inRecovery) { this.completeSession(false); return; }
-        if (st.currentRuns >= cfg.targetRuns) {
-          this.addLog('win', 'ENGINE', `RISK STAKE: TARGET ${cfg.targetRuns} RUNS COMPLETE! Entering cooldown.`);
-          this.completeSession(true);
-          return;
-        }
-        if (st.currentRuns > 0) {
-          this.executionGuard = false;
-          this.executeBoltPurchase();
-        }
-        return;
-      }
+      // Trades AS NORMAL: the boosted-stake session no longer gets any
+      // special-cased handling here. It falls straight through into the
+      // exact same TP/SL, stop-step, recovery, and target-runs logic
+      // every regular session uses below — so a loss now martingales its
+      // way back out at the boosted stake exactly like a normal session
+      // would, instead of ending the session flat after one trade.
+      // completeSession() still knows when a risk session finishes (win
+      // or loss, after recovery has played out) via this._riskSessionActive
+      // and handles resetting back to normal stake / re-arming from there.
       if (st.active) {
         // Higher/Lower and Matches have no session-level TP/SL
         // of their own anymore — they always defer to whatever is set in
@@ -17651,7 +17646,10 @@ window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine
   const effective = engine.getEffectiveStake ? engine.getEffectiveStake() : c.stake;
   const boosted = effective > (c.stake || 0) + 0.001;
   const nextVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
-  const streakReqVal = c.stakeAdditionStreakRequired != null ? c.stakeAdditionStreakRequired : 2;
+  // Locked to 1 for every bot — Stake Addition fires off the very next
+  // win once armed, and the boosted session trades normally afterward
+  // (see completeSession()/_chainAfterResult() for the enforcement).
+  const streakReqVal = 1;
   const sug = engine.getSuggestedNextStake ? engine.getSuggestedNextStake() : null;
   const streak = engine.getSessionWinStreak ? engine.getSessionWinStreak() : 0;
   const stats = engine.getRecentSessionStats ? engine.getRecentSessionStats(10) : { sessions: 0, winRate: null };
@@ -17675,13 +17673,13 @@ window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine
          looked like "it doesn't work" — this now matches the real logic,
          and the streak requirement (previously only editable from Flip
          Intell) is exposed here too. -->
-    <div class="sa-terminal-sub">${drivenByIntel ? 'Auto Flip Drive armed this automatically off a hot streak — see Flip Intell.' : 'Needs a win STREAK (set below) before it fires — not just one win.'} Once that streak is hit, the NEXT session trades at Next High Stake for your normal Runs/cycle count (flat, no recovery on a loss — a single loss ends the risk session immediately): win the full session → straight back to normal stake, needs a fresh streak to fire again; any loss → disarms and cools down. Resets to normal Stake $ on page reload.</div>
+    <div class="sa-terminal-sub">${drivenByIntel ? 'Auto Flip Drive armed this automatically off a hot streak — see Flip Intell.' : 'Fires after just 1 win — locked, for every bot.'} Once armed, the very next win queues the NEXT session at Next High Stake for your normal Runs/cycle count — that session trades completely normally, with martingale recovery as usual on a loss: win the full session → straight back to normal stake, needs a fresh win to fire again; only if recovery is fully exhausted and the session is lost → disarms and cools down. Resets to normal Stake $ on page reload.</div>
 
     <div class="sa-terminal-grid">
       <div class="sa-terminal-cell">
         <div class="sa-terminal-label">Currently trading at</div>
         <div class="sa-terminal-bignum ${boosted ? 'sa-boosted' : ''}">$${effective.toFixed(2)}</div>
-        <div class="sa-terminal-caption">${riskActive ? 'RISK SESSION LIVE — flat, no recovery' : riskCooldown ? 'in Risk Cooldown after a lost risk session' : boosted ? `boosted from base $${(c.stake||0).toFixed(2)}` : 'normal Stake $'}</div>
+        <div class="sa-terminal-caption">${riskActive ? 'RISK SESSION LIVE — trading normally, martingale as usual' : riskCooldown ? 'in Risk Cooldown after a lost risk session' : boosted ? `boosted from base $${(c.stake||0).toFixed(2)}` : 'normal Stake $'}</div>
       </div>
       <div class="sa-terminal-cell">
         <div class="sa-terminal-label">Next High Stake $</div>
@@ -17689,7 +17687,7 @@ window.renderStakeAdditionTerminal = function renderStakeAdditionTerminal(engine
       </div>
       <div class="sa-terminal-cell">
         <div class="sa-terminal-label">Fires after win streak</div>
-        <input class="sa-terminal-input" type="number" step="1" min="1" id="${rootId}-stakeadd-streak" value="${streakReqVal}" ${drivenByIntel ? 'disabled' : ''}>
+        <input class="sa-terminal-input" type="number" step="1" min="1" id="${rootId}-stakeadd-streak" value="1" disabled title="Locked to 1 for every bot">
       </div>
     </div>
 
@@ -17869,13 +17867,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
     };
   }
-  const streakEl = elFn(`${rootId}-stakeadd-streak`, host);
-  if (streakEl) {
-    streakEl.onchange = (e) => {
-      const v = parseInt(e.target.value, 10);
-      engine.setConfig({ stakeAdditionStreakRequired: (!isNaN(v) && v >= 1) ? v : 2 });
-    };
-  }
+  // Win-streak requirement field is locked to 1 (disabled) — no onchange
+  // binding needed; the engine enforces req = 1 unconditionally.
   const useBtn = elFn(`${rootId}-stakeadd-usesuggested`, host);
   if (useBtn) {
     useBtn.onclick = (e) => {
@@ -31067,7 +31060,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const sug = eng.getSuggestedNextStake ? eng.getSuggestedNextStake() : null;
       const normalStakeVal = c.stake != null ? c.stake : '';
       const riskVal = c.stakeAdditionNextStake != null ? c.stakeAdditionNextStake : '';
-      const streakReqVal = c.stakeAdditionStreakRequired != null ? c.stakeAdditionStreakRequired : 2;
+      const streakReqVal = 1; // locked — see completeSession()'s req = 1
       const cooldownMinVal = c.stakeAdditionCooldownMinutes != null ? c.stakeAdditionCooldownMinutes : 2;
       const badge = id === bestId ? '<span class="fi-badge best" title="Best win rate on this board right now">🔥 BEST</span>'
         : id === worstId ? '<span class="fi-badge worst" title="Worst win rate on this board right now">⚠ WATCH</span>' : '';
@@ -31101,7 +31094,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           ${streakHtml}
         </div>
         ${sparkHtml}
-        <div class="fi-led-row fi-led-${ledMode}" title="${ledMode === 'risk' ? 'This bot is trading its one-shot Risk Stake right now — flat, no recovery.' : ledMode === 'cooldown' ? 'Sitting out after a lost Risk Stake trade — no auto-resume until this ends.' : ledMode === 'recovery' ? 'This bot just took a loss and is now trading an escalated (martingale) stake trying to recover it.' : 'Trading its normal, everyday stake.'}">
+        <div class="fi-led-row fi-led-${ledMode}" title="${ledMode === 'risk' ? 'This bot is trading its one-shot Risk Stake right now — normally, with martingale recovery as usual.' : ledMode === 'cooldown' ? 'Sitting out after a lost Risk Stake trade — no auto-resume until this ends.' : ledMode === 'recovery' ? 'This bot just took a loss and is now trading an escalated (martingale) stake trying to recover it.' : 'Trading its normal, everyday stake.'}">
           <span class="fi-led-dot"></span><span class="fi-led-text">${ledText}</span>
         </div>
         <div class="fi-stake-grid">
@@ -31121,14 +31114,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div class="fi-mini-grid">
           <label class="fi-field">
             <span class="fi-field-label">Fires after win streak</span>
-            <input type="number" step="1" min="1" id="fi-streak-${id}" value="${streakReqVal}" ${driveOn ? 'disabled' : ''}>
+            <input type="number" step="1" min="1" id="fi-streak-${id}" value="${streakReqVal}" disabled title="Locked to 1 for every bot">
           </label>
           <label class="fi-field">
             <span class="fi-field-label">Risk cooldown (min)</span>
             <input type="number" step="1" min="1" max="2" id="fi-cd-${id}" value="${cooldownMinVal}" ${driveOn ? 'disabled' : ''}>
           </label>
         </div>
-        <div class="fi-risk-label">Fires ONCE — a flat trade with no martingale recovery. Win → straight back to normal stake. Lose → disarms and cools down for the minutes set above.</div>
+        <div class="fi-risk-label">Fires after 1 win — trades normally, with martingale recovery as usual. Win the full session → straight back to normal stake. Lose (after recovery is exhausted) → disarms and cools down for the minutes set above.</div>
         <button type="button" class="fi-arm ${armed ? 'on' : ''}" id="fi-arm-${id}" ${driveOn ? 'disabled title="Auto Flip Drive is managing this — turn it off to arm/disarm by hand"' : ''}>${armed ? 'DISARM' : 'ARM'}</button>
         ${sug ? `<div class="fi-hint ${sug.confidence === 'high' ? 'smart-flag' : ''}">suggested $${sug.value.toFixed(2)} · ${sug.confidence} confidence</div>` : ''}
       </div>`;
@@ -31160,11 +31153,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           const v = parseFloat(e.target.value);
           eng.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
         };
-        const streakInp = document.getElementById(`fi-streak-${id}`);
-        if (streakInp) streakInp.onchange = (e) => {
-          const v = parseInt(e.target.value, 10);
-          eng.setConfig({ stakeAdditionStreakRequired: (!isNaN(v) && v >= 1) ? v : 2 });
-        };
+        // fi-streak-${id} is now disabled/locked to 1 — no onchange binding needed.
         const cdInp = document.getElementById(`fi-cd-${id}`);
         if (cdInp) cdInp.onchange = (e) => {
           const v = parseFloat(e.target.value);
@@ -31200,12 +31189,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               renderFlip();
               return;
             }
-            const streakV = parseInt((document.getElementById(`fi-streak-${id}`) || {}).value, 10);
             const cdV = parseFloat((document.getElementById(`fi-cd-${id}`) || {}).value);
             eng.setConfig({
               stakeAdditionArmed: true,
               stakeAdditionNextStake: v,
-              stakeAdditionStreakRequired: (!isNaN(streakV) && streakV >= 1) ? streakV : 2,
               stakeAdditionCooldownMinutes: (!isNaN(cdV) && cdV >= 1) ? Math.min(2, cdV) : 2,
               stakeAdditionArmedByDrive: false,
             });
