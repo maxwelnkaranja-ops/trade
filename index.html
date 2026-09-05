@@ -708,6 +708,11 @@
           <span class="hub-tab-label">Flip Intell</span>
           <span class="dot live" id="flipintell-tab-dot" style="display:none"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="bulktrade" data-label="Bulk Trade" title="Bulk Trade — AI Market Scanner that scans Even/Odd, Over/Under, Differs and Rise/Fall across every market, then fires a whole cluster of contracts at once on a qualifying signal">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
+          <span class="hub-tab-label">Bulk Trade</span>
+          <span class="dot live" id="bulktrade-tab-dot" style="display:none"></span>
+        </button>
         <div class="hub-nav-label">Mean Reversion</div>
         <button type="button" class="hub-tab" data-app="risemr" data-label="Rise MR" title="Rise (Mean Reversion) — HIGHER-only ADX/Bollinger/RSI/Stochastic/ATR offset-barrier bot, split from Rise &amp; Fall MR">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l7-10 5 6 4-9"/><path d="M14 5h6v6"/></svg></span>
@@ -820,6 +825,9 @@
     </section>
     <section id="panel-flipintell" class="app-panel" aria-label="Flip Intell — Stake Increase Command Terminal">
       <div id="flipintell-root" class="app-root"></div>
+    </section>
+    <section id="panel-bulktrade" class="app-panel" aria-label="Bulk Trade — AI Market Scanner">
+      <div id="bulktrade-root" class="app-root"></div>
     </section>
 
     <section id="panel-risemr" class="app-panel" aria-label="Rise Mean Reversion dashboard">
@@ -27446,7 +27454,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market', 'flipintell'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market', 'flipintell', 'bulktrade'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
@@ -27687,6 +27695,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (window.FlipIntellPanel) window.FlipIntellPanel.activate();
       return;
     }
+    if (id === 'bulktrade') {
+      if (window.BulkTradePanel) window.BulkTradePanel.activate();
+      return;
+    }
     if (id === 'differ') {
       const eng = ensureDifferEngine();
       if (!eng) return;
@@ -27733,6 +27745,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (!VALID_APPS.includes(id)) id = 'dashboard';
     if (activeApp === 'market' && id !== 'market' && window.MarketIntelPanel) window.MarketIntelPanel.deactivate();
     if (activeApp === 'flipintell' && id !== 'flipintell' && window.FlipIntellPanel) window.FlipIntellPanel.deactivate();
+    if (activeApp === 'bulktrade' && id !== 'bulktrade' && window.BulkTradePanel) window.BulkTradePanel.deactivate();
     activeApp = id;
     try { localStorage.setItem('hub_active_app', id); } catch (e) { /* storage unavailable — tab still switches for this session */ }
     const activeBtn = document.querySelector(`.hub-tab[data-app="${id}"]`);
@@ -31512,6 +31525,750 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   window.FlipIntellPanel = { activate, deactivate };
+})();
+</script>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════
+// BULK TRADE — AI MARKET SCANNER (data-app="bulktrade" → #panel-bulktrade)
+// ══════════════════════════════════════════════════════════════════════
+// New, single-instance tab (same pattern as Market Intel / Flip Intell —
+// one shared engine, activate()/deactivate() driven by the hub tab
+// switcher) rather than a per-symbol bot. What it does:
+//
+//   1. Runs its OWN dedicated public tick feed (BulkTickSocket below),
+//      subscribed to all 10 standard synthetic-index markets at once, so
+//      it can score every market continuously without needing any other
+//      bot's tab to be open.
+//   2. For whichever TRADE TYPE is selected (Even/Odd, Over/Under,
+//      Differs, Rise/Fall — same four families every other bot on this
+//      hub already trades), computes a signal per market: which side is
+//      currently favoured, a confidence %, a z-score (how many standard
+//      errors the observed digit/tick distribution sits from the 10%-per-
+//      digit / 50-50 baseline you'd expect from a fair generator), and a
+//      short-vs-long-window agreement % (MTF Agree) — conceptually the
+//      same short/long-window agreement idea used by Even Omega's own
+//      analyzeMultiTimeframe(), just generalized across all four trade
+//      families here instead of just Even/Odd.
+//   3. Once a market clears the confidence bar, "Scan & Run Bulk Trade"
+//      (or the manual button) fires a whole CLUSTER of contracts at once
+//      — the same batched-burst mechanism the Differ bot's "Hot Repeat"-
+//      style executeBurst() already uses (see BenzEngine.executeBurst
+//      above), generalized to whichever contract_type/barrier the scan
+//      picked instead of always DIGITDIFF.
+//   4. A cluster that nets a loss escalates the next cluster's stake by
+//      Martingale Multiplier (and, for Over/Under, swaps to Prediction
+//      After Loss) — recovers as usual, exactly like every other bot's
+//      martingale — then a net-win cluster drops straight back to the
+//      base Stake $ / Prediction Before Loss.
+//
+// Trades over the SAME shared, already-authenticated window.HubTradingSocket
+// every other bot uses (see its big comment block above) — no separate
+// trading connection, just its own listener filtered by its own
+// req_id/contract_id sets, identical in shape to BenzEngine's.
+(function () {
+  'use strict';
+
+  const MARKETS = ['1HZ10V', 'R_10', '1HZ25V', 'R_25', '1HZ50V', 'R_50', '1HZ75V', 'R_75', '1HZ100V', 'R_100'];
+  const MARKET_NAMES = {
+    '1HZ10V': 'Volatility 10 (1s)', 'R_10': 'Volatility 10', '1HZ25V': 'Volatility 25 (1s)', 'R_25': 'Volatility 25',
+    '1HZ50V': 'Volatility 50 (1s)', 'R_50': 'Volatility 50', '1HZ75V': 'Volatility 75 (1s)', 'R_75': 'Volatility 75',
+    '1HZ100V': 'Volatility 100 (1s)', 'R_100': 'Volatility 100',
+  };
+  function marketName(sym) { return MARKET_NAMES[sym] || sym; }
+
+  // Same fixed public-feed URL every other section of this file uses —
+  // see the other getWsUrl()/getPublicWsUrl() copies above.
+  function getPublicWsUrl() { return 'wss://api.derivws.com/trading/v1/options/ws/public'; }
+
+  // ── Dedicated public tick feed for the scanner, subscribed to every
+  // market at once so switching Trade Type or toggling Multi-Market Scan
+  // never needs a fresh subscription round-trip. ─────────────────────────
+  class BulkTickSocket {
+    constructor() {
+      this.socket = null;
+      this.connected = false;
+      this.reconnectTimer = null;
+      this.digits = new Map(); this.prices = new Map();
+      MARKETS.forEach((s) => { this.digits.set(s, []); this.prices.set(s, []); });
+      this.listeners = new Set();
+      this.connect();
+    }
+    connect() {
+      try { this.socket = new WebSocket(getPublicWsUrl()); }
+      catch (e) { this._scheduleReconnect(); return; }
+      this.socket.onopen = () => {
+        this.connected = true;
+        MARKETS.forEach((s) => { try { this.socket.send(JSON.stringify({ ticks: s, subscribe: 1 })); } catch (e) {} });
+      };
+      this.socket.onmessage = (msg) => {
+        try {
+          const d = JSON.parse(msg.data);
+          if (d.msg_type !== 'tick' || !d.tick) return;
+          const symbol = d.tick.symbol, quote = d.tick.quote;
+          if (!this.digits.has(symbol)) return;
+          const qs = quote.toFixed(2);
+          const digit = parseInt(qs[qs.length - 1], 10);
+          const da = this.digits.get(symbol); da.push(digit); if (da.length > 200) da.shift();
+          const pa = this.prices.get(symbol); pa.push(quote); if (pa.length > 200) pa.shift();
+          this.listeners.forEach((cb) => { try { cb(symbol); } catch (e) {} });
+        } catch (e) {}
+      };
+      this.socket.onclose = () => { this.connected = false; this._scheduleReconnect(); };
+      this.socket.onerror = () => { this.connected = false; };
+    }
+    _scheduleReconnect() {
+      if (this.reconnectTimer) return;
+      this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, 4000);
+    }
+    onTick(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
+    getDigits(symbol) { return this.digits.get(symbol) || []; }
+    getPrices(symbol) { return this.prices.get(symbol) || []; }
+  }
+
+  // ── Signal math ─────────────────────────────────────────────────────
+  // Plain proportion / z-score against the fair-generator baseline
+  // (10% per digit, 50/50 for parity and tick direction). This is a
+  // standard one-proportion z-test, not anything reverse-engineered from
+  // any other product — it's the same "how far from the expected
+  // baseline, in standard errors" idea Even Omega already applies via
+  // analyzeMultiTimeframe(), just written fresh here so this scanner
+  // isn't reaching into another mode's module-scoped helpers.
+  function pct(arr, pred) { if (!arr.length) return 0; let c = 0; for (let i = 0; i < arr.length; i++) if (pred(arr[i])) c++; return c / arr.length; }
+  function zScore(pHat, p0, n) { if (n < 5) return 0; const se = Math.sqrt(p0 * (1 - p0) / n); return se > 0 ? (pHat - p0) / se : 0; }
+  function confidenceFromZ(z) { const clamped = Math.max(0, Math.min(Math.abs(z), 3.2)); return Math.round(50 + clamped * 15.3); }
+
+  function evenOddSignal(digits) {
+    const short = digits.slice(-25), long = digits.slice(-50);
+    if (short.length < 15) return null;
+    const shortEven = pct(short, (d) => d % 2 === 0);
+    const longEven = long.length >= 15 ? pct(long, (d) => d % 2 === 0) : shortEven;
+    const contractType = shortEven >= 0.5 ? 'DIGITEVEN' : 'DIGITODD';
+    const pHat = contractType === 'DIGITEVEN' ? shortEven : 1 - shortEven;
+    const z = zScore(pHat, 0.5, short.length);
+    const longSide = longEven >= 0.5 ? 'DIGITEVEN' : 'DIGITODD';
+    return { contractType, barrier: null, pHat, z, confidence: confidenceFromZ(z), mtfAgree: longSide === contractType ? 100 : 45, label: contractType === 'DIGITEVEN' ? 'Even' : 'Odd', n: short.length };
+  }
+  function overUnderSignal(digits, barrier) {
+    const short = digits.slice(-25), long = digits.slice(-50);
+    if (short.length < 15) return null;
+    const b = Math.max(0, Math.min(9, parseInt(barrier, 10) || 0));
+    const shortOver = pct(short, (d) => d > b);
+    const longOver = long.length >= 15 ? pct(long, (d) => d > b) : shortOver;
+    const contractType = shortOver >= 0.5 ? 'DIGITOVER' : 'DIGITUNDER';
+    const pHat = contractType === 'DIGITOVER' ? shortOver : 1 - shortOver;
+    const p0 = Math.max(0.05, Math.min(0.95, contractType === 'DIGITOVER' ? (9 - b) / 10 : b / 10));
+    const z = zScore(pHat, p0, short.length);
+    const longSide = longOver >= 0.5 ? 'DIGITOVER' : 'DIGITUNDER';
+    return { contractType, barrier: b, pHat, z, confidence: confidenceFromZ(z), mtfAgree: longSide === contractType ? 100 : 45, label: `${contractType === 'DIGITOVER' ? 'Over' : 'Under'} ${b}`, n: short.length };
+  }
+  function differsSignal(digits) {
+    const recent = digits.slice(-40);
+    if (recent.length < 15) return null;
+    const counts = new Array(10).fill(0); recent.forEach((d) => counts[d]++);
+    let coldDigit = 0, coldCount = Infinity;
+    counts.forEach((c, d) => { if (c < coldCount) { coldCount = c; coldDigit = d; } });
+    const pHat = 1 - (coldCount / recent.length);
+    const z = zScore(pHat, 0.9, recent.length);
+    return { contractType: 'DIGITDIFF', barrier: coldDigit, pHat, z, confidence: confidenceFromZ(Math.max(0, z)), mtfAgree: 100, label: `Differs ≠${coldDigit}`, n: recent.length };
+  }
+  function riseFallSignal(prices) {
+    const short = prices.slice(-25), long = prices.slice(-50);
+    if (short.length < 15) return null;
+    let up = 0; for (let i = 1; i < short.length; i++) if (short[i] > short[i - 1]) up++;
+    const shortUp = up / (short.length - 1);
+    let upL = 0; for (let i = 1; i < long.length; i++) if (long[i] > long[i - 1]) upL++;
+    const longUp = long.length >= 15 ? upL / (long.length - 1) : shortUp;
+    const contractType = shortUp >= 0.5 ? 'CALL' : 'PUT';
+    const pHat = contractType === 'CALL' ? shortUp : 1 - shortUp;
+    const z = zScore(pHat, 0.5, short.length - 1);
+    const longSide = longUp >= 0.5 ? 'CALL' : 'PUT';
+    return { contractType, barrier: null, pHat, z, confidence: confidenceFromZ(z), mtfAgree: longSide === contractType ? 100 : 45, label: contractType === 'CALL' ? 'Rise' : 'Fall', n: short.length - 1 };
+  }
+  function computeSignal(tradeType, tick, symbol, barrier) {
+    if (tradeType === 'evenodd') return evenOddSignal(tick.getDigits(symbol));
+    if (tradeType === 'overunder') return overUnderSignal(tick.getDigits(symbol), barrier);
+    if (tradeType === 'differs') return differsSignal(tick.getDigits(symbol));
+    if (tradeType === 'risefall') return riseFallSignal(tick.getPrices(symbol));
+    return null;
+  }
+
+  const MIN_CONFIDENCE = 65; // qualifying bar — matches the "suitable market found" threshold
+  const CONFIG_KEY = 'bulktrade_config';
+
+  class BulkTradeEngine {
+    constructor() {
+      this.tick = new BulkTickSocket();
+      this.config = Object.assign({
+        tradeType: 'overunder', stake: 5, predictionBeforeLoss: 3, predictionAfterLoss: 4,
+        martingaleMultiplier: 2.2, multiMarketScan: true, scanAndRunBulk: false,
+        selectedMarket: '1HZ25V', bulkContracts: 15,
+      }, this._loadConfig());
+
+      // Runtime (not persisted) — this cluster's live escalation state.
+      this.currentStake = this.config.stake;
+      this.recoveryMode = false; // true = last cluster lost, next fires at the escalated stake/"after loss" barrier
+      this.clusterActive = false;
+      this._pendingBuyReqIds = new Set();
+      this.ownContractIds = new Set();
+      this._clusterPending = new Set();
+      this._clusterWon = 0; this._clusterLost = 0; this._clusterProfit = 0; this._clusterStakeUsed = 0;
+      this.stats = { stake: 0, payout: 0, runs: 0, lost: 0, won: 0, pnl: 0 };
+      this.bestSignal = null; // { symbol, ...signal }
+      this.scanning = false;
+      this.log = [];
+      this.cooldownUntil = 0;
+
+      this._onChange = null; // set by the UI
+      this._initTrading();
+      this.scanTimer = setInterval(() => this._scan(), 2000);
+    }
+    _loadConfig() {
+      try { const raw = localStorage.getItem(CONFIG_KEY); return raw ? JSON.parse(raw) : {}; } catch (e) { return {}; }
+    }
+    saveConfig() {
+      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(this.config)); } catch (e) {}
+    }
+    setConfig(patch) { this.config = { ...this.config, ...patch }; this.saveConfig(); this._emit(); }
+    _emit() { if (this._onChange) this._onChange(); }
+    addLog(kind, text) {
+      this.log.unshift({ t: Date.now(), kind, text });
+      if (this.log.length > 30) this.log.length = 30;
+      this._emit();
+    }
+
+    _candidateMarkets() { return this.config.multiMarketScan ? MARKETS : [this.config.selectedMarket]; }
+
+    _scan() {
+      const c = this.config;
+      const barrier = this.recoveryMode ? c.predictionAfterLoss : c.predictionBeforeLoss;
+      let best = null;
+      this._candidateMarkets().forEach((symbol) => {
+        const sig = computeSignal(c.tradeType, this.tick, symbol, barrier);
+        if (!sig) return;
+        const candidate = { symbol, ...sig };
+        if (!best || candidate.confidence > best.confidence) best = candidate;
+      });
+      this.bestSignal = best;
+      this.scanning = true;
+      // Auto-fire: only when armed, not already mid-cluster, past cooldown,
+      // and the best candidate actually clears the qualifying bar.
+      if (c.scanAndRunBulk && !this.clusterActive && Date.now() >= this.cooldownUntil &&
+          best && best.confidence >= MIN_CONFIDENCE) {
+        this.fireCluster(best);
+      }
+      this._emit();
+    }
+
+    // Manual button — fires immediately off the latest scan if it qualifies.
+    scanAndRunNow() {
+      if (this.clusterActive) { this.addLog('info', 'A cluster is already in flight — wait for it to finish settling.'); return; }
+      if (!this.bestSignal || this.bestSignal.confidence < MIN_CONFIDENCE) {
+        this.addLog('info', 'No suitable signal yet — keep scanning a little longer.');
+        return;
+      }
+      this.fireCluster(this.bestSignal);
+    }
+
+    fireCluster(signal) {
+      if (!this.socketT || this.socketT.readyState !== WebSocket.OPEN) {
+        this.addLog('loss', 'ERROR: Trading socket not connected. Sync your API token first.');
+        return;
+      }
+      const c = this.config;
+      const n = Math.max(1, parseInt(c.bulkContracts, 10) || 1);
+      this.clusterActive = true;
+      this._clusterPending = new Set();
+      this._clusterWon = 0; this._clusterLost = 0; this._clusterProfit = 0; this._clusterStakeUsed = 0;
+      this._clusterSignal = signal;
+      const duration = (signal.contractType === 'CALL' || signal.contractType === 'PUT') ? 5 : 1;
+      const durationUnit = 't';
+      this.addLog('info', `🚀 Firing ${n}× ${signal.label} on ${marketName(signal.symbol)} at $${this.currentStake.toFixed(2)} each (${Math.round(signal.confidence)}% confidence).`);
+      for (let i = 0; i < n; i++) {
+        const buyReqId = window.HubReqId.next();
+        this._pendingBuyReqIds.add(buyReqId);
+        if (this._pendingBuyReqIds.size > 400) this._pendingBuyReqIds.delete(this._pendingBuyReqIds.values().next().value);
+        const params = {
+          amount: this.currentStake, basis: 'stake', contract_type: signal.contractType,
+          underlying_symbol: signal.symbol, duration, duration_unit: durationUnit,
+          currency: (window.HubStore.getState().currency) || 'USD',
+        };
+        if (signal.barrier !== null && signal.barrier !== undefined) params.barrier = signal.barrier;
+        try {
+          this.socketT.send(JSON.stringify({ buy: '1', price: this.currentStake, req_id: buyReqId, parameters: params }));
+        } catch (e) {}
+      }
+      this._emit();
+    }
+
+    _finalizeCluster() {
+      const netWin = this._clusterProfit >= 0;
+      this.stats.stake += this._clusterStakeUsed;
+      this.stats.payout += this._clusterStakeUsed + this._clusterProfit;
+      this.stats.runs += this._clusterWon + this._clusterLost;
+      this.stats.won += this._clusterWon;
+      this.stats.lost += this._clusterLost;
+      this.stats.pnl += this._clusterProfit;
+      if (netWin) {
+        this.addLog('win', `🎯 Cluster WON — ${this._clusterWon}/${this._clusterWon + this._clusterLost} contracts, net ${this._clusterProfit >= 0 ? '+' : ''}${this._clusterProfit.toFixed(2)}. Back to normal stake ($${this.config.stake.toFixed(2)}).`);
+        this.currentStake = this.config.stake;
+        this.recoveryMode = false;
+      } else {
+        this.addLog('loss', `⛔ Cluster LOST — ${this._clusterWon}/${this._clusterWon + this._clusterLost} contracts, net ${this._clusterProfit.toFixed(2)}. Recovering: next cluster at $${(this.currentStake * this.config.martingaleMultiplier).toFixed(2)}, prediction switches to After-Loss.`);
+        this.currentStake = +(this.currentStake * this.config.martingaleMultiplier).toFixed(2);
+        this.recoveryMode = true;
+      }
+      this.clusterActive = false;
+      this.cooldownUntil = Date.now() + 5000; // brief pause before the next auto-fire can trigger
+      this._emit();
+    }
+
+    _initTrading() {
+      const token = window.HubStore.getState().apiToken;
+      const _self = this;
+      const ws = window.HubTradingSocket.connect(token);
+      _self.socketT = ws || window.HubTradingSocket.getSocket();
+      if (!_self._sharedTradingListener) {
+        _self._sharedTradingListener = (evtType, d) => {
+          _self.socketT = window.HubTradingSocket.getSocket() || _self.socketT;
+          if (evtType !== 'message') return;
+          _self._handleTradingMessage(d);
+        };
+      }
+      window.HubTradingSocket.addListener(_self._sharedTradingListener);
+      _self._handleTradingMessage = (d) => {
+        try {
+          if (d.msg_type === 'buy') {
+            const mine = d.req_id != null && _self._pendingBuyReqIds.has(d.req_id);
+            if (!mine) return;
+            _self._pendingBuyReqIds.delete(d.req_id);
+            if (d.error) { _self.addLog('loss', `Buy error: ${d.error.message || d.error.code}`); return; }
+            if (d.buy && d.buy.contract_id) {
+              _self.ownContractIds.add(d.buy.contract_id);
+              _self._clusterPending.add(d.buy.contract_id);
+              _self._clusterStakeUsed += parseFloat(d.buy.buy_price) || _self.currentStake;
+              window.HubContractRegistry && window.HubContractRegistry.claim(d.buy.contract_id, 'bulktrade');
+            }
+            return;
+          }
+          if (d.msg_type === 'proposal_open_contract') {
+            const c = d.proposal_open_contract;
+            if (!c || !c.is_sold || !c.contract_id || !_self.ownContractIds.has(c.contract_id)) return;
+            _self.ownContractIds.delete(c.contract_id);
+            const wasPending = _self._clusterPending.delete(c.contract_id);
+            const isWin = c.status === 'won';
+            const profit = parseFloat(c.profit) || 0;
+            if (wasPending) {
+              if (isWin) _self._clusterWon++; else _self._clusterLost++;
+              _self._clusterProfit += profit;
+              if (_self.clusterActive && _self._clusterPending.size === 0) _self._finalizeCluster();
+            }
+            _self._emit();
+          }
+        } catch (e) {}
+      };
+    }
+  }
+
+  // ── UI ────────────────────────────────────────────────────────────────
+  // Rebuilt on the same "shell built once, sub-panels patched in place"
+  // pattern every other bot tab (Hot Repeat, Differ, Nexus…) already uses:
+  // a persistent 3-column benz-grid desk (scan config / live signal /
+  // journal-style log) styled with the shared cp-card / titan-toggle /
+  // rf-ind-card system, instead of the old single full-innerHTML-rebuild
+  // stack. That also fixes inputs losing focus on every 1s refresh tick,
+  // since setHtmlIfChanged only touches a sub-panel's DOM when its
+  // rendered markup actually changed.
+  function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+  const TRADE_TYPES = [
+    { id: 'evenodd', label: 'Even / Odd', sub: 'Even vs odd digit pressure' },
+    { id: 'overunder', label: 'Over / Under', sub: 'Over vs under barrier pressure' },
+    { id: 'differs', label: 'Differs', sub: 'Cold-digit scan' },
+    { id: 'risefall', label: 'Rise / Fall', sub: 'Upward vs downward tick bias' },
+  ];
+
+  let engine = null;
+  let mounted = false;
+  let refreshTimer = null;
+  let shellBuilt = false;
+
+  function ensureEngine() { if (!engine) engine = new BulkTradeEngine(); return engine; }
+  function el(id, root) { return (root || document).querySelector('#' + id); }
+
+  const SELF_STYLE = (rootId) => `
+    <style>
+      @keyframes bt-in    { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes bt-glow  { 0%,100%{box-shadow:0 0 16px hsl(var(--primary)/0.12)} 50%{box-shadow:0 0 32px hsl(var(--primary)/0.28)} }
+      @keyframes bt-sheen { 0% { transform: translateX(-120%) skewX(-15deg); } 100% { transform: translateX(220%) skewX(-15deg); } }
+      @keyframes bt-pulse-ring { 0%,100%{box-shadow:0 0 0 0 hsl(var(--win)/0.35)} 50%{box-shadow:0 0 0 10px hsl(var(--win)/0)} }
+      @keyframes bt-spin  { to{transform:rotate(360deg)} }
+      @keyframes bt-dot-beacon { 0%,100%{box-shadow:0 0 0 0 hsl(var(--primary)/.7)} 50%{box-shadow:0 0 0 5px hsl(var(--primary)/0)} }
+      @keyframes bt-header-sweep { 0% { background-position: 0% 50% } 100% { background-position: 200% 50% } }
+      @keyframes bt-title-glow { 0%,100% { text-shadow: 0 0 10px hsl(var(--primary)/0.4) } 50% { text-shadow: 0 0 22px hsl(var(--primary)/0.75), 0 0 6px hsl(var(--secondary)/0.5) } }
+      @keyframes bt-entry-flash { 0% { background: hsl(var(--primary)/0.14); } 100% { background: transparent; } }
+      #${rootId} h1.font-display { animation: bt-title-glow 3.2s ease-in-out infinite; }
+      #${rootId} .rf-header-glow {
+        background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.5), hsl(var(--secondary)/0.4), transparent);
+        background-size: 200% 100%; animation: bt-header-sweep 5s linear infinite;
+        height: 2px; width: 100%; position:absolute; bottom:0; left:0;
+      }
+      #${rootId} .cp-card {
+        background: linear-gradient(150deg,hsl(var(--card)/0.92),hsl(var(--bg-soft)/0.7));
+        border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 14px; margin-bottom: 10px;
+        position: relative; overflow: hidden; backdrop-filter: blur(10px);
+        box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
+        transition: border-color .2s, box-shadow .2s;
+      }
+      #${rootId} .cp-card:hover { border-color: hsl(var(--border-bright)/0.6); }
+      #${rootId} .cp-card::before {
+        content:''; position:absolute; top:0; left:0; right:0; height:1px;
+        background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.35) 40%, hsl(var(--secondary)/0.25) 65%, transparent);
+      }
+      #${rootId} .cp-section-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8.5px; font-weight: 800;
+        letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--muted-foreground)/0.6);
+        margin-bottom: 10px; display: flex; align-items: center; gap: 7px;
+      }
+      #${rootId} .cp-section-label::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, hsl(var(--primary)/0.2), transparent); }
+      #${rootId} .cp-input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+      #${rootId} .cp-input-group { display: flex; flex-direction: column; gap: 4px; }
+      #${rootId} .cp-input-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8px; font-weight: 700;
+        letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--primary)/0.75);
+      }
+      #${rootId} .cp-input {
+        background: hsl(var(--bg)/0.75) !important; border: 1px solid hsl(var(--border)/0.5) !important;
+        border-radius: 10px !important; color: hsl(var(--foreground)) !important;
+        font-family: 'DM Mono', monospace !important; font-size: 12px !important; font-weight: 500 !important;
+        padding: 8px 10px !important; width:100%; outline: none !important; backdrop-filter: blur(6px) !important;
+      }
+      #${rootId} .cp-input:focus { border-color: hsl(var(--primary)/0.55) !important; }
+      @media (max-width: 820px) { #${rootId} .cp-input { font-size: 16px !important; } }
+      #${rootId} select.cp-input option { background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; }
+      #${rootId} .cp-toggle-row {
+        display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; margin-bottom: 8px;
+        background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px;
+        transition: background .16s, border-color .16s;
+      }
+      #${rootId} .cp-toggle-row:hover { background: hsl(var(--card)/0.5); border-color: hsl(var(--border)/0.5); }
+      #${rootId} .cp-engage-btn {
+        width: 100%; padding: 14px 18px; margin-top: 4px; font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 11px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+        border: 1px solid hsl(var(--primary)/0.3);
+        background: linear-gradient(135deg, hsl(var(--primary)/0.08), hsl(var(--primary-2, var(--primary))/0.04));
+        color: hsl(var(--primary)); border-radius: 14px; cursor: pointer;
+        box-shadow: 0 0 0 1px hsl(var(--primary)/0.08); transition: all .22s cubic-bezier(.34,1.56,.64,1);
+        position:relative; overflow:hidden;
+      }
+      #${rootId} .cp-engage-btn:hover:not(:disabled) { border-color: hsl(var(--primary)/0.55); transform: translateY(-2px); }
+      #${rootId} .cp-engage-btn.active {
+        background: linear-gradient(135deg, hsl(38 95% 55%/0.14), hsl(38 95% 55%/0.05));
+        border-color: hsl(38 95% 55%/0.4); color: hsl(38 95% 60%);
+        box-shadow: 0 4px 20px hsl(38 95% 55%/0.15); animation: bt-glow 3s ease-in-out infinite;
+      }
+      #${rootId} .cp-engage-btn:disabled { cursor: not-allowed; }
+      #${rootId} .cp-engage-btn::before {
+        content:''; position:absolute; top:0; bottom:0; width:35%; left:0;
+        background: linear-gradient(90deg, transparent, hsl(255 100% 100%/0.16), transparent);
+        animation: bt-sheen 2.8s ease-in-out infinite;
+      }
+      #${rootId} .cp-engage-btn:active:not(:disabled) { transform: scale(.97); }
+      #${rootId} .rf-ind-card {
+        background: hsl(var(--bg)/0.8); border: 1px solid hsl(var(--border)/0.3); border-radius: 10px;
+        padding: 8px; text-align: center; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+      }
+      #${rootId} .rf-ind-val { font-family:'Outfit',sans-serif; font-size:15px; font-weight:900; }
+      #${rootId} .rf-ind-label { font-size:7.5px; font-family:'DM Mono',monospace; letter-spacing:1px; color:hsl(var(--muted-foreground)); margin-top:2px; }
+      #${rootId} .rf-ind-card:hover { transform: translateY(-2px); border-color: hsl(var(--primary)/0.4); box-shadow: 0 4px 14px hsl(0 0% 0%/0.25); }
+      #${rootId} .hr-note { font-family:'DM Mono',monospace; font-size:9.5px; line-height:1.6; color:hsl(var(--muted-foreground)); padding:10px 12px; margin-top:10px; background:hsl(var(--bg)/0.4); border:1px solid hsl(var(--border)/0.3); border-radius:12px; }
+      #${rootId} .hr-note b { color: hsl(var(--primary)); }
+
+      /* Trade type tiles */
+      #${rootId} .bt-type-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+      #${rootId} .bt-type-tile {
+        padding:10px 11px; border-radius:12px; border:1px solid hsl(var(--border)/0.4);
+        background:hsl(var(--bg)/0.5); cursor:pointer; text-align:left; transition:all .18s ease;
+      }
+      #${rootId} .bt-type-tile:hover { border-color:hsl(var(--border-bright)); transform:translateY(-1px); }
+      #${rootId} .bt-type-tile.active { border-color:hsl(var(--primary)/0.65); background:hsl(var(--primary)/0.12); box-shadow:0 0 16px hsl(var(--primary)/0.15); }
+      #${rootId} .bt-type-tile b { display:block; font-size:11.5px; font-family:'Outfit',sans-serif; margin-bottom:2px; color:hsl(var(--foreground)); }
+      #${rootId} .bt-type-tile.active b { color:hsl(var(--primary)); }
+      #${rootId} .bt-type-tile span { font-size:9px; color:hsl(var(--muted-foreground)); }
+
+      /* Confidence radar gauge */
+      #${rootId} .bt-gauge { position:relative; width:126px; height:126px; margin:4px auto 12px; }
+      #${rootId} .bt-gauge-ring {
+        position:absolute; inset:0; border-radius:50%;
+        background: conic-gradient(hsl(var(--primary)) calc(var(--pct,0) * 3.6deg), hsl(var(--border)/0.22) 0deg);
+        transition: background .6s ease;
+      }
+      #${rootId} .bt-gauge.qualified .bt-gauge-ring {
+        background: conic-gradient(hsl(var(--win)) calc(var(--pct,0) * 3.6deg), hsl(var(--border)/0.22) 0deg);
+        animation: bt-pulse-ring 1.8s ease-in-out infinite;
+      }
+      #${rootId} .bt-gauge::after {
+        content:''; position:absolute; inset:-6px; border-radius:50%;
+        border:1px dashed hsl(var(--primary)/0.18);
+      }
+      #${rootId} .bt-gauge.scanning::after { animation: bt-spin 6s linear infinite; }
+      #${rootId} .bt-gauge-inner {
+        position:absolute; inset:9px; border-radius:50%; background:hsl(var(--card));
+        display:flex; flex-direction:column; align-items:center; justify-content:center;
+        border:1px solid hsl(var(--border)/0.3);
+      }
+      #${rootId} .bt-gauge-inner b { font-family:'Outfit',sans-serif; font-size:24px; font-weight:900; line-height:1; }
+      #${rootId} .bt-gauge.qualified .bt-gauge-inner b { color:hsl(var(--win)); }
+      #${rootId} .bt-gauge-inner span { font-size:7.5px; letter-spacing:2px; color:hsl(var(--muted-foreground)); margin-top:4px; }
+
+      /* Per-market scan grid */
+      #${rootId} .bt-scan-list { display:flex; flex-direction:column; gap:7px; }
+      #${rootId} .bt-scan-row { display:flex; align-items:center; gap:8px; animation:bt-in .3s ease both; }
+      #${rootId} .bt-scan-name { width:96px; flex-shrink:0; font-size:9.5px; font-family:'DM Mono',monospace; color:hsl(var(--muted-foreground)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #${rootId} .bt-scan-bar { flex:1; height:6px; border-radius:99px; background:hsl(var(--border)/0.25); overflow:hidden; position:relative; }
+      #${rootId} .bt-scan-fill { height:100%; border-radius:99px; background:hsl(var(--primary)/0.55); transition:width .6s cubic-bezier(.34,1.2,.64,1); }
+      #${rootId} .bt-scan-fill.qual { background:hsl(var(--win)); box-shadow:0 0 8px hsl(var(--win)/0.5); }
+      #${rootId} .bt-scan-pct { width:34px; flex-shrink:0; text-align:right; font-size:9.5px; font-family:'DM Mono',monospace; color:hsl(var(--muted-foreground)); }
+      #${rootId} .bt-scan-pct.qual { color:hsl(var(--win)); font-weight:700; }
+      #${rootId} .bt-scan-row.best .bt-scan-name { color:hsl(var(--primary)); font-weight:700; }
+
+      /* Header scan status pill */
+      #${rootId} .bt-scan-pill {
+        display:flex; align-items:center; gap:7px; padding:6px 12px; border-radius:999px;
+        background:hsl(var(--bg)/0.6); border:1px solid hsl(var(--border)/0.4);
+        font-family:'DM Mono',monospace; font-size:9.5px; letter-spacing:1.5px; color:hsl(var(--muted-foreground));
+      }
+      #${rootId} .bt-scan-dot { width:7px; height:7px; border-radius:50%; background:hsl(var(--primary)); animation: bt-dot-beacon 1.8s ease-in-out infinite; flex-shrink:0; }
+      #${rootId} .bt-scan-pill.fire .bt-scan-dot { background:hsl(38 95% 55%); }
+      #${rootId} .bt-scan-pill.signal .bt-scan-dot { background:hsl(var(--win)); }
+
+      /* Log rows */
+      #${rootId} .bt-log-row {
+        display:flex; gap:9px; padding:9px 10px; margin-bottom:7px; border-radius:10px;
+        background:hsl(var(--bg)/0.5); border:1px solid hsl(var(--border)/0.3);
+        transition: transform .16s ease, border-color .16s ease;
+      }
+      #${rootId} .bt-log-row:first-of-type { animation: bt-entry-flash 1.4s ease-out; }
+      #${rootId} .bt-log-row:hover { transform:translateX(3px); border-color:hsl(var(--border-bright)/0.6); }
+      #${rootId} .bt-log-bar { width:3px; border-radius:2px; flex-shrink:0; }
+      #${rootId} .bt-log-body { min-width:0; }
+      #${rootId} .bt-log-time { font-size:8.5px; font-family:'DM Mono',monospace; color:hsl(var(--muted-foreground)/0.6); margin-bottom:2px; }
+      #${rootId} .bt-log-text { font-size:10.5px; font-family:'DM Mono',monospace; line-height:1.5; color:hsl(var(--foreground)); word-break:break-word; }
+    </style>`;
+
+  function buildShell(root) {
+    if (shellBuilt) return;
+    root.innerHTML = `
+      ${SELF_STYLE('bulktrade-root')}
+      <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0;position:relative">
+        <div>
+          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700">BULK TRADE</h1>
+          <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">📡 AI MARKET SCANNER · CLUSTER EXECUTION · MULTI-STRATEGY</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="bt-scan-pill" id="bulktrade-scanpill"><span class="bt-scan-dot"></span><span id="bulktrade-scantext">SCANNING</span></div>
+        <div class="rf-header-glow"></div>
+      </header>
+      <div class="benz-grid">
+        <div class="benz-col"><div class="benz-scroll" id="bulktrade-left"></div></div>
+        <div class="benz-col"><div class="benz-scroll" id="bulktrade-center"></div></div>
+        <div class="benz-col">
+          <div style="display:flex;gap:4px;padding:8px;border-bottom:1px solid hsl(var(--border)/0.4)">
+            <div style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;text-align:center;border-radius:10px;border:1px solid hsl(var(--primary)/0.35);background:hsl(var(--primary)/0.1);color:hsl(var(--primary))">LOG</div>
+          </div>
+          <div class="benz-scroll" id="bulktrade-right"></div>
+        </div>
+      </div>`;
+    shellBuilt = true;
+  }
+
+  function renderLeft(c, eng) {
+    const barrierFields = c.tradeType === 'overunder' ? `
+      <div class="cp-input-row">
+        <div class="cp-input-group"><span class="cp-input-label">Pred. Before Loss</span><select class="cp-input" id="bt-predbefore">${[0,1,2,3,4,5,6,7,8,9].map((d) => `<option value="${d}" ${d === c.predictionBeforeLoss ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+        <div class="cp-input-group"><span class="cp-input-label">Pred. After Loss</span><select class="cp-input" id="bt-predafter">${[0,1,2,3,4,5,6,7,8,9].map((d) => `<option value="${d}" ${d === c.predictionAfterLoss ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+      </div>` : '';
+    return `
+      <div class="cp-card" style="animation:bt-in .35s ease both">
+        <div class="cp-section-label">TRADE TYPE</div>
+        <div class="bt-type-grid">
+          ${TRADE_TYPES.map((t) => `<button type="button" class="bt-type-tile ${c.tradeType === t.id ? 'active' : ''}" data-tt="${t.id}"><b>${t.label}</b><span>${t.sub}</span></button>`).join('')}
+        </div>
+      </div>
+      <div class="cp-card" style="animation:bt-in .35s ease both .05s">
+        <div class="cp-section-label">SCAN CONFIG</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Stake ($)</span><input class="cp-input" type="number" step="0.01" min="0.35" id="bt-stake" value="${c.stake}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Martingale ×</span><input class="cp-input" type="number" step="0.1" min="1" id="bt-mult" value="${c.martingaleMultiplier}"></div>
+        </div>
+        ${barrierFields}
+        <div class="cp-input-row" style="margin-bottom:0">
+          <div class="cp-input-group"><span class="cp-input-label">Bulk Contracts</span><select class="cp-input" id="bt-bulkn">${[5,10,15,20,25,30].map((n) => `<option value="${n}" ${n === c.bulkContracts ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          ${!c.multiMarketScan
+            ? `<div class="cp-input-group"><span class="cp-input-label">Market</span><select class="cp-input" id="bt-market">${MARKETS.map((m) => `<option value="${m}" ${m === c.selectedMarket ? 'selected' : ''}>${marketName(m)}</option>`).join('')}</select></div>`
+            : `<div class="cp-input-group"><span class="cp-input-label">Coverage</span><div class="cp-input" style="display:flex;align-items:center;color:hsl(var(--primary))">All 10 markets</div></div>`}
+        </div>
+      </div>
+      <div class="cp-card" style="animation:bt-in .35s ease both .1s">
+        <div class="cp-section-label">SCAN MODE</div>
+        <div class="cp-toggle-row">
+          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Multi-Market Scan</span>
+          <button class="titan-toggle ${c.multiMarketScan ? 'on' : ''}" id="bt-multiscan" onclick="event.stopPropagation()"></button>
+        </div>
+        <div class="cp-toggle-row" style="margin-bottom:0">
+          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Scan &amp; Run Bulk Trade</span>
+          <button class="titan-toggle ${c.scanAndRunBulk ? 'on' : ''}" id="bt-autorun" onclick="event.stopPropagation()"></button>
+        </div>
+      </div>
+      <button type="button" class="cp-engage-btn ${eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
+        ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : '⚡ SCAN & BULK TRADE'}
+      </button>
+      <div class="hr-note">
+        <b>How it works:</b> scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)} for the selected trade type, then fires a whole cluster of ${c.bulkContracts} contracts at once on a qualifying signal — the same batched-burst firing the Differ bot's Hot Repeat uses, generalized to Even/Odd, Over/Under and Rise/Fall too. A losing cluster escalates the next one via Martingale Multiplier (recovers as usual); a winning cluster drops straight back to normal.
+      </div>`;
+  }
+
+  // Recomputes a signal for every candidate market purely for the display
+  // grid — same computeSignal() the engine's own _scan() uses, just not
+  // written back into engine state (that stays owned by _scan()'s 2s tick).
+  function renderScanGrid(c, eng) {
+    const barrier = eng.recoveryMode ? c.predictionAfterLoss : c.predictionBeforeLoss;
+    const rows = MARKETS.map((sym) => {
+      const sig = computeSignal(c.tradeType, eng.tick, sym, barrier);
+      const conf = sig ? sig.confidence : 0;
+      const qual = !!sig && conf >= MIN_CONFIDENCE;
+      const isBest = !!(eng.bestSignal && eng.bestSignal.symbol === sym);
+      return `<div class="bt-scan-row ${isBest ? 'best' : ''}">
+        <span class="bt-scan-name">${marketName(sym)}</span>
+        <div class="bt-scan-bar"><div class="bt-scan-fill ${qual ? 'qual' : ''}" style="width:${conf}%"></div></div>
+        <span class="bt-scan-pct ${qual ? 'qual' : ''}">${sig ? conf + '%' : '—'}</span>
+      </div>`;
+    }).join('');
+    return `
+      <div class="cp-card" style="animation:bt-in .35s ease both .05s">
+        <div class="cp-section-label">MARKET SCAN</div>
+        <div class="bt-scan-list">${rows}</div>
+      </div>`;
+  }
+
+  function renderCenter(c, eng, s) {
+    const qualified = !!(s && s.confidence >= MIN_CONFIDENCE);
+    const pct = s ? s.confidence : 0;
+    return `
+      <div class="cp-card" style="animation:bt-in .35s ease both;text-align:center">
+        <div class="cp-section-label" style="justify-content:center">${qualified ? '✓ SUITABLE MARKET FOUND' : eng.scanning ? 'SCANNING…' : 'STARTING SCANNER…'}</div>
+        <div class="bt-gauge ${qualified ? 'qualified' : 'scanning'}" style="--pct:${pct}">
+          <div class="bt-gauge-ring"></div>
+          <div class="bt-gauge-inner"><b>${pct}%</b><span>CONFIDENCE</span></div>
+        </div>
+        ${s
+          ? `<div style="font-size:11px;color:hsl(var(--muted-foreground));margin-bottom:12px">${marketName(s.symbol)} — ${esc(s.label)}</div>`
+          : `<div style="font-size:11px;color:hsl(var(--muted-foreground));margin-bottom:12px">Not enough ticks yet on the candidate market(s) — give it a few seconds.</div>`}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="rf-ind-card"><div class="rf-ind-val">${s ? s.z.toFixed(2) : '—'}</div><div class="rf-ind-label">Z-SCORE</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val">${s ? s.mtfAgree + '%' : '—'}</div><div class="rf-ind-label">MTF AGREE</div></div>
+        </div>
+      </div>
+      ${c.multiMarketScan ? renderScanGrid(c, eng) : ''}
+      <div class="cp-card" style="animation:bt-in .35s ease both .1s">
+        <div class="cp-section-label">SESSION STATS</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+          <div class="rf-ind-card"><div class="rf-ind-val">$${eng.stats.stake.toFixed(2)}</div><div class="rf-ind-label">STAKE</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val">$${eng.stats.payout.toFixed(2)}</div><div class="rf-ind-label">PAYOUT</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val">${eng.stats.runs}</div><div class="rf-ind-label">RUNS</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--win))">${eng.stats.won}</div><div class="rf-ind-label">WON</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--loss))">${eng.stats.lost}</div><div class="rf-ind-label">LOST</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val" style="color:${eng.stats.pnl >= 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${eng.stats.pnl >= 0 ? '+' : ''}${eng.stats.pnl.toFixed(2)}</div><div class="rf-ind-label">P/L</div></div>
+        </div>
+        ${eng.recoveryMode ? `<div class="hr-note" style="color:hsl(var(--loss));border-color:hsl(var(--loss)/0.3)"><b style="color:hsl(var(--loss))">⚠ In recovery</b> — next cluster fires at $${eng.currentStake.toFixed(2)} (escalated).</div>` : ''}
+      </div>`;
+  }
+
+  function renderRight(eng) {
+    if (!eng.log.length) return `<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO ACTIVITY YET</div>`;
+    return eng.log.map((l) => {
+      const barColor = l.kind === 'win' ? 'hsl(var(--win))' : l.kind === 'loss' ? 'hsl(var(--loss))' : 'hsl(var(--primary))';
+      return `<div class="bt-log-row">
+        <div class="bt-log-bar" style="background:${barColor}"></div>
+        <div class="bt-log-body">
+          <div class="bt-log-time">${new Date(l.t).toLocaleTimeString()}</div>
+          <div class="bt-log-text">${esc(l.text)}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function render() {
+    const root = document.getElementById('bulktrade-root');
+    if (!root) return;
+    const eng = ensureEngine();
+    const c = eng.config;
+    const s = eng.bestSignal;
+    buildShell(root);
+    if (window.setHtmlIfChanged) {
+      window.setHtmlIfChanged(el('bulktrade-left', root), renderLeft(c, eng));
+      window.setHtmlIfChanged(el('bulktrade-center', root), renderCenter(c, eng, s));
+      window.setHtmlIfChanged(el('bulktrade-right', root), renderRight(eng));
+    } else {
+      el('bulktrade-left', root).innerHTML = renderLeft(c, eng);
+      el('bulktrade-center', root).innerHTML = renderCenter(c, eng, s);
+      el('bulktrade-right', root).innerHTML = renderRight(eng);
+    }
+    const pill = el('bulktrade-scanpill', root);
+    const pillText = el('bulktrade-scantext', root);
+    if (pill && pillText) {
+      pill.classList.remove('fire', 'signal');
+      if (eng.clusterActive) { pill.classList.add('fire'); pillText.textContent = 'FIRING'; }
+      else if (s && s.confidence >= MIN_CONFIDENCE) { pill.classList.add('signal'); pillText.textContent = 'SIGNAL'; }
+      else { pillText.textContent = 'SCANNING'; }
+    }
+    bindEvents(root);
+  }
+
+  function bindEvents(root) {
+    const eng = ensureEngine();
+    root.querySelectorAll('.bt-type-tile').forEach((btn) => {
+      if (btn._bound) return;
+      btn._bound = true;
+      btn.onclick = () => { eng.setConfig({ tradeType: btn.dataset.tt }); render(); };
+    });
+    const stakeEl = el('bt-stake', root);
+    if (stakeEl && !stakeEl._bound) { stakeEl._bound = true; stakeEl.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) { eng.setConfig({ stake: v }); if (!eng.recoveryMode) eng.currentStake = v; } }; }
+    const predBefore = el('bt-predbefore', root);
+    if (predBefore && !predBefore._bound) { predBefore._bound = true; predBefore.onchange = (e) => eng.setConfig({ predictionBeforeLoss: parseInt(e.target.value, 10) }); }
+    const predAfter = el('bt-predafter', root);
+    if (predAfter && !predAfter._bound) { predAfter._bound = true; predAfter.onchange = (e) => eng.setConfig({ predictionAfterLoss: parseInt(e.target.value, 10) }); }
+    const multEl = el('bt-mult', root);
+    if (multEl && !multEl._bound) { multEl._bound = true; multEl.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 1) eng.setConfig({ martingaleMultiplier: v }); }; }
+    const bulkNEl = el('bt-bulkn', root);
+    if (bulkNEl && !bulkNEl._bound) { bulkNEl._bound = true; bulkNEl.onchange = (e) => eng.setConfig({ bulkContracts: parseInt(e.target.value, 10) }); }
+    const marketEl = el('bt-market', root);
+    if (marketEl && !marketEl._bound) { marketEl._bound = true; marketEl.onchange = (e) => eng.setConfig({ selectedMarket: e.target.value }); }
+    const multiscanEl = el('bt-multiscan', root);
+    if (multiscanEl && !multiscanEl._bound) { multiscanEl._bound = true; multiscanEl.onclick = () => { eng.setConfig({ multiMarketScan: !eng.config.multiMarketScan }); render(); }; }
+    const autorunEl = el('bt-autorun', root);
+    if (autorunEl && !autorunEl._bound) { autorunEl._bound = true; autorunEl.onclick = () => eng.setConfig({ scanAndRunBulk: !eng.config.scanAndRunBulk }); }
+    const fireBtn = el('bt-fire', root);
+    if (fireBtn && !fireBtn._bound) { fireBtn._bound = true; fireBtn.onclick = () => eng.scanAndRunNow(); }
+  }
+
+  function activate() {
+    const eng = ensureEngine();
+    eng._onChange = () => { if (mounted) render(); };
+    mounted = true;
+    render();
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(render, 1000);
+  }
+  function deactivate() {
+    mounted = false;
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    // Engine itself (tick socket, trading listener, scan timer) keeps
+    // running in the background — same "stays mounted, keeps trading"
+    // convention every other bot tab on this hub already follows.
+  }
+
+  window.BulkTradePanel = { activate, deactivate };
 })();
 </script>
 </body>
