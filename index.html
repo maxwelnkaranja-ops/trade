@@ -20926,7 +20926,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function isBotActive(engine, botId) {
     if (!engine) return false;
     if (botId === 'differ' || botId === 'hotrepeat') return engine.state.isArmed || engine.state.isRunning;
-    if (botId === 'bulktrade') return !!(engine.clusterActive || (engine.config && (engine.config.scanAndRunBulk || engine.config.reversalTriggerEnabled || engine.config.parityStreakEnabled)));
+    if (botId === 'bulktrade') return !!(engine.clusterActive || engine.running);
     return engine.state.active || engine.state.isLocked;
   }
 
@@ -31814,23 +31814,45 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.tick = new BulkTickSocket();
       this.config = Object.assign({
         tradeType: 'overunder', stake: 5, predictionBeforeLoss: 3, predictionAfterLoss: 4,
-        martingaleMultiplier: 2.2, multiMarketScan: true, scanAndRunBulk: false,
+        martingaleMultiplier: 2.2, multiMarketScan: true,
         selectedMarket: '1HZ25V', bulkContracts: 15,
-        // Session cap — 0 means unlimited (old behaviour: keeps auto-firing
-        // cluster after cluster forever). Set > 0 to have Bulk Trade turn
-        // its own auto-fire toggles off once that many sessions
-        // (cluster-fires) have settled, instead of starting session after
-        // session indefinitely. See _finalizeCluster().
-        targetSessions: 0,
-        // Reversal Trigger Engine — Over/Under only. Off by default (opt-in).
-        reversalTriggerEnabled: false, reversalLookback: 25,
+        // Step-stop — the martingale ladder no longer escalates forever.
+        // After this many CONSECUTIVE losing clusters within a single run
+        // (see runsCompleted / martingaleStep below), the run gives up,
+        // resets to base stake, and counts as one finished run — instead
+        // of doubling/tripling the stake indefinitely until the balance
+        // is gone. Defaults to 3 steps.
+        maxMartingaleSteps: 3,
+        // Run cap — 0 means unlimited. A "run" is one full recovery cycle:
+        // it starts at base stake, and only ends (and counts as ONE run)
+        // once a cluster nets a win OR the step-stop above is hit — losing
+        // clusters that are still escalating do NOT count as separate runs.
+        // Once this many runs have completed, the bot stops itself. See
+        // start()/stop() and _finalizeCluster().
+        numberOfRuns: 10,
+        // Reversal Trigger Engine params — Over/Under only. This is the
+        // "wait for the trigger digit" entry path used whenever the bot is
+        // running and trade type is Over/Under (no separate enable toggle
+        // any more — starting the bot is what arms it).
+        reversalLookback: 25,
         reversalDominanceLookback: 50, reversalDominanceThreshold: 55,
-        // Parity Streak Break Engine — Even/Odd only. Off by default.
-        // Deliberately a different heuristic (streak-length based) from
-        // the Reversal Trigger Engine's per-digit flip-rate approach, per
-        // explicit request not to reuse that approach for Even/Odd.
-        parityStreakEnabled: false, parityStreakLookback: 150, parityStreakThreshold: 60,
+        // Parity Streak Break Engine params — Even/Odd only. Deliberately a
+        // different heuristic (streak-length based) from the Reversal
+        // Trigger Engine's per-digit flip-rate approach. Armed automatically
+        // whenever the bot is running and trade type is Even/Odd.
+        parityStreakLookback: 150, parityStreakThreshold: 60,
       }, this._loadConfig());
+      // Normalize config saved before the auto-fire toggles were replaced
+      // by a single Start/Stop control — old on/off flags are no longer
+      // read anywhere, so drop them if present rather than leaving dead
+      // keys sitting in localStorage.
+      delete this.config.scanAndRunBulk;
+      delete this.config.reversalTriggerEnabled;
+      delete this.config.parityStreakEnabled;
+      if (this.config.targetSessions != null && this.config.numberOfRuns == null) {
+        this.config.numberOfRuns = this.config.targetSessions;
+      }
+      delete this.config.targetSessions;
       // Normalize any config saved before Differs/Rise-Fall were removed
       // from this bot's trade-type list.
       if (this.config.tradeType !== 'evenodd' && this.config.tradeType !== 'overunder') {
@@ -31855,9 +31877,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // merged Trade Journal exactly like every other bot.
       this.journal = [];
       this._processedContracts = new Set();
-      // How many sessions (cluster-fires) have settled since the page
-      // loaded — see targetSessions in config and _finalizeCluster().
-      this.sessionsCompleted = 0;
+      // How many full RUNS have settled since the page loaded. A run only
+      // finishes (and increments this) on a net win or a step-stop — see
+      // numberOfRuns / maxMartingaleSteps in config and _finalizeCluster().
+      this.runsCompleted = 0;
+      // Consecutive losing clusters within the CURRENT run — reset to 0
+      // whenever a run finishes (win or step-stop). Compared against
+      // config.maxMartingaleSteps to decide when to give up escalating.
+      this.martingaleStep = 0;
+      // Whether the bot is currently armed to auto-fire on the next
+      // qualifying trigger. Deliberately NOT persisted to localStorage —
+      // reloading the page should never silently resume live trading.
+      this.running = false;
       // Live snapshots of the two advanced entry blocks, recomputed every
       // scan tick in _scan() below, purely for the UI + their own
       // (independent, opt-in) auto-fire path.
@@ -31912,7 +31943,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // from the normal "Scan & Run Bulk Trade" confidence gate.
       this.reversalTrigger = null;
       this.parityStreak = null;
-      if (best && c.tradeType === 'overunder' && c.reversalTriggerEnabled) {
+      if (best && c.tradeType === 'overunder') {
         const rt = computeReversalTrigger(
           this.tick.getDigits(best.symbol), best.contractType === 'DIGITOVER', barrier,
           Math.max(5, parseInt(c.reversalLookback, 10) || 25),
@@ -31920,34 +31951,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           Math.max(1, parseInt(c.reversalDominanceThreshold, 10) || 55)
         );
         this.reversalTrigger = rt ? { ...rt, symbol: best.symbol, side: best.contractType, barrier } : null;
-        if (rt && rt.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
-          this.addLog('info', `🔁 Reversal Trigger fired on digit ${rt.picked.digit} (${rt.picked.flipPct}% flip · ${rt.picked.samples} smpl) — dominance ${rt.dominancePct}%.`);
+        // This IS the wait-for-trigger-digit entry path: only fires once the
+        // bot has been started (this.running), it isn't already mid-cluster,
+        // and its cooldown from the last cluster has elapsed.
+        if (this.running && rt && rt.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
+          this.addLog('info', `🔁 Trigger digit ${rt.picked.digit} printed (${rt.picked.flipPct}% flip · ${rt.picked.samples} smpl) — dominance ${rt.dominancePct}%. Firing.`);
           this.fireCluster(best);
         }
       }
-      if (best && c.tradeType === 'evenodd' && c.parityStreakEnabled) {
+      if (best && c.tradeType === 'evenodd') {
         const ps = computeParityStreak(
           this.tick.getDigits(best.symbol),
           Math.max(20, parseInt(c.parityStreakLookback, 10) || 150),
           Math.max(1, parseInt(c.parityStreakThreshold, 10) || 60)
         );
         this.parityStreak = ps ? { ...ps, symbol: best.symbol } : null;
-        if (ps && ps.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
+        if (this.running && ps && ps.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
           const flipType = ps.currentParity === 'even' ? 'DIGITODD' : 'DIGITEVEN';
           const flipSignal = {
             symbol: best.symbol, contractType: flipType, barrier: null,
             confidence: ps.breakProb, label: flipType === 'DIGITEVEN' ? 'Even (streak break)' : 'Odd (streak break)',
           };
-          this.addLog('info', `🎯 Parity Streak Break fired — ${ps.currentLength}-tick ${ps.currentParity} streak, ${ps.breakProb}% historical break rate → betting ${flipSignal.label}.`);
+          this.addLog('info', `🎯 Streak break trigger fired — ${ps.currentLength}-tick ${ps.currentParity} streak, ${ps.breakProb}% historical break rate → betting ${flipSignal.label}.`);
           this.fireCluster(flipSignal);
         }
-      }
-
-      // Auto-fire: only when armed, not already mid-cluster, past cooldown,
-      // and the best candidate actually clears the qualifying bar.
-      if (c.scanAndRunBulk && !this.clusterActive && Date.now() >= this.cooldownUntil &&
-          best && best.confidence >= MIN_CONFIDENCE) {
-        this.fireCluster(best);
       }
       this._emit();
     }
@@ -31960,6 +31987,26 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         return;
       }
       this.fireCluster(this.bestSignal);
+    }
+
+    // Single Start/Stop control — replaces the old separate "Scan & Run
+    // Bulk Trade" / "Reversal Trigger Enabled" / "Parity Streak Enabled"
+    // toggles. Starting arms whichever wait-for-trigger path matches the
+    // selected Trade Type (handled inside _scan()); stopping disarms it.
+    // Neither call touches an in-flight cluster — it just settles normally.
+    start() {
+      if (this.running) return;
+      this.running = true;
+      const n = parseInt(this.config.numberOfRuns, 10) || 0;
+      const steps = Math.max(1, parseInt(this.config.maxMartingaleSteps, 10) || 3);
+      this.addLog('info', `▶ Bot started — ${n > 0 ? `target ${n} run${n === 1 ? '' : 's'}` : 'unlimited runs'}, step-stop after ${steps} martingale step${steps === 1 ? '' : 's'}. Scanning and waiting for a trigger…`);
+      this._emit();
+    }
+    stop() {
+      if (!this.running) return;
+      this.running = false;
+      this.addLog('info', '■ Bot stopped.');
+      this._emit();
     }
 
     fireCluster(signal) {
@@ -31997,37 +32044,57 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const netWin = this._clusterProfit >= 0;
       this.stats.stake += this._clusterStakeUsed;
       this.stats.payout += this._clusterStakeUsed + this._clusterProfit;
-      this.stats.runs += this._clusterWon + this._clusterLost;
+      this.stats.runs += this._clusterWon + this._clusterLost; // contract-level count, shown as "TRADES" in the UI
       this.stats.won += this._clusterWon;
       this.stats.lost += this._clusterLost;
       this.stats.pnl += this._clusterProfit;
+
+      // A RUN is the whole loss → martingale-escalation → recovery cycle,
+      // not each individual cluster fire. It only finishes — and only
+      // THEN counts toward Number Of Runs — once a cluster nets a win, or
+      // the step-stop below gives up on this cycle. A losing cluster that
+      // is still escalating does NOT end the run and does NOT increment
+      // runsCompleted; it's the same run continuing.
+      let runFinished = false;
+      const maxSteps = Math.max(1, parseInt(this.config.maxMartingaleSteps, 10) || 3);
       if (netWin) {
-        this.addLog('win', `🎯 Cluster WON — ${this._clusterWon}/${this._clusterWon + this._clusterLost} contracts, net ${this._clusterProfit >= 0 ? '+' : ''}${this._clusterProfit.toFixed(2)}. Back to normal stake ($${this.config.stake.toFixed(2)}).`);
+        this.addLog('win', `🎯 Cluster WON — ${this._clusterWon}/${this._clusterWon + this._clusterLost} contracts, net ${this._clusterProfit >= 0 ? '+' : ''}${this._clusterProfit.toFixed(2)}. Run complete — back to base stake ($${this.config.stake.toFixed(2)}).`);
         this.currentStake = this.config.stake;
         this.recoveryMode = false;
+        this.martingaleStep = 0;
+        runFinished = true;
       } else {
-        this.addLog('loss', `⛔ Cluster LOST — ${this._clusterWon}/${this._clusterWon + this._clusterLost} contracts, net ${this._clusterProfit.toFixed(2)}. Recovering: next cluster at $${(this.currentStake * this.config.martingaleMultiplier).toFixed(2)}, prediction switches to After-Loss.`);
-        this.currentStake = +(this.currentStake * this.config.martingaleMultiplier).toFixed(2);
-        this.recoveryMode = true;
+        this.martingaleStep += 1;
+        if (this.martingaleStep >= maxSteps) {
+          // Step-stop — give up escalating this run instead of martingaling
+          // forever. Resets to base stake; this run is now finished (as a
+          // loss), so it's the ONE run that counts, not each losing cluster.
+          this.addLog('loss', `🛑 Cluster LOST — step-stop hit (${this.martingaleStep}/${maxSteps} martingale steps). Run ends in loss, resetting to base stake ($${this.config.stake.toFixed(2)}).`);
+          this.currentStake = this.config.stake;
+          this.recoveryMode = false;
+          this.martingaleStep = 0;
+          runFinished = true;
+        } else {
+          this.addLog('loss', `⛔ Cluster LOST — ${this._clusterWon}/${this._clusterWon + this._clusterLost} contracts, net ${this._clusterProfit.toFixed(2)}. Step ${this.martingaleStep}/${maxSteps} — next cluster at $${(this.currentStake * this.config.martingaleMultiplier).toFixed(2)}, prediction switches to After-Loss.`);
+          this.currentStake = +(this.currentStake * this.config.martingaleMultiplier).toFixed(2);
+          this.recoveryMode = true;
+          runFinished = false;
+        }
       }
       this.clusterActive = false;
       this.cooldownUntil = Date.now() + 5000; // brief pause before the next auto-fire can trigger
-      // Session cap — unlike before, a set Target Sessions no longer lets
-      // Bulk Trade keep starting cluster after cluster forever. Once this
-      // many sessions (cluster-fires) have settled, every auto-fire path
-      // (Scan & Run, Reversal Trigger, Parity Streak Break) switches
-      // itself off. The scanner keeps reading the market either way — it
-      // just stops placing new trades until re-armed.
-      this.sessionsCompleted += 1;
-      const target = parseInt(this.config.targetSessions, 10) || 0;
-      if (target > 0 && this.sessionsCompleted >= target) {
-        this.addLog('info', `🛑 Target of ${target} session${target === 1 ? '' : 's'} reached — auto-fire stopped. Reset Sessions to keep going.`);
-        this.config = { ...this.config, scanAndRunBulk: false, reversalTriggerEnabled: false, parityStreakEnabled: false };
-        this.saveConfig();
+
+      if (runFinished) {
+        this.runsCompleted += 1;
+        const target = parseInt(this.config.numberOfRuns, 10) || 0;
+        if (target > 0 && this.runsCompleted >= target) {
+          this.addLog('info', `🏁 Target of ${target} run${target === 1 ? '' : 's'} reached — bot stopped. Reset Runs to start a fresh session.`);
+          this.running = false;
+        }
       }
       this._emit();
     }
-    resetSessions() { this.sessionsCompleted = 0; this._emit(); }
+    resetRuns() { this.runsCompleted = 0; this.martingaleStep = 0; this._emit(); }
     // Wired into the Dashboard's "Clear All Stats" button (see
     // clearAllBtn above) — same `eng.clearStats && eng.clearStats()`
     // convention every Titan-class bot already exposes.
@@ -32035,7 +32102,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.stats = { stake: 0, payout: 0, runs: 0, lost: 0, won: 0, pnl: 0 };
       this.journal = [];
       this._processedContracts = new Set();
-      this.sessionsCompleted = 0;
+      this.runsCompleted = 0;
+      this.martingaleStep = 0;
       this._emit();
     }
 
@@ -32400,37 +32468,39 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>
       <div class="cp-card" style="animation:bt-in .35s ease both .1s">
         <div class="cp-section-label">SCAN MODE</div>
-        <div class="cp-toggle-row">
+        <div class="cp-toggle-row" style="margin-bottom:0">
           <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Multi-Market Scan</span>
           <button class="titan-toggle ${c.multiMarketScan ? 'on' : ''}" id="bt-multiscan" onclick="event.stopPropagation()"></button>
         </div>
-        <div class="cp-toggle-row" style="margin-bottom:0">
-          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Scan &amp; Run Bulk Trade</span>
-          <button class="titan-toggle ${c.scanAndRunBulk ? 'on' : ''}" id="bt-autorun" onclick="event.stopPropagation()"></button>
-        </div>
       </div>
       <div class="cp-card" style="animation:bt-in .35s ease both .12s">
-        <div class="cp-section-label">SESSION LIMIT</div>
+        <div class="cp-section-label">RUN CONTROL</div>
         <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:8px">
-          A session = one cluster fire settling. Leave at 0 for unlimited (old behaviour). Set a number and every auto-fire toggle above/below switches itself off once that many sessions have settled — no more starting a fresh session after the count ends.
+          Set these, then press Start below. A RUN is one full cycle: base stake → (if it loses) martingale escalation → ends on either a win or the step-stop, and only THEN counts as one run. Leave Number Of Runs at 0 for unlimited.
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Number Of Runs (0=∞)</span><input class="cp-input" type="number" min="0" step="1" id="bt-numruns" value="${c.numberOfRuns || 0}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Max Martingale Steps</span><input class="cp-input" type="number" min="1" step="1" id="bt-maxsteps" value="${c.maxMartingaleSteps || 3}"></div>
         </div>
         <div class="cp-input-row" style="margin-bottom:0">
-          <div class="cp-input-group"><span class="cp-input-label">Target Sessions (0=∞)</span><input class="cp-input" type="number" min="0" step="1" id="bt-targetsessions" value="${c.targetSessions || 0}"></div>
           <div class="cp-input-group">
-            <span class="cp-input-label">Completed</span>
+            <span class="cp-input-label">Runs Completed</span>
             <div class="cp-input" style="display:flex;align-items:center;justify-content:space-between">
-              <span>${eng.sessionsCompleted || 0}${c.targetSessions > 0 ? ' / ' + c.targetSessions : ''}</span>
-              <button type="button" id="bt-resetsessions" title="Reset session counter" style="background:none;border:none;color:hsl(var(--primary));cursor:pointer;font-size:12px;padding:0">↺</button>
+              <span>${eng.runsCompleted || 0}${c.numberOfRuns > 0 ? ' / ' + c.numberOfRuns : ''}</span>
+              <button type="button" id="bt-resetruns" title="Reset run counter" style="background:none;border:none;color:hsl(var(--primary));cursor:pointer;font-size:12px;padding:0">↺</button>
             </div>
+          </div>
+          <div class="cp-input-group">
+            <span class="cp-input-label">Martingale Step</span>
+            <div class="cp-input" style="display:flex;align-items:center;color:${eng.martingaleStep > 0 ? 'hsl(var(--loss))' : 'hsl(var(--foreground))'}">${eng.martingaleStep || 0} / ${c.maxMartingaleSteps || 3}</div>
           </div>
         </div>
       </div>
       ${c.tradeType === 'overunder' ? `
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .14s">
         <div class="cp-section-label">REVERSAL TRIGGER ENGINE</div>
-        <div class="cp-toggle-row" style="margin-bottom:8px">
-          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Enable</span>
-          <button class="titan-toggle ${c.reversalTriggerEnabled ? 'on' : ''}" id="bt-revtoggle" onclick="event.stopPropagation()"></button>
+        <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:8px">
+          This is the trigger the bot waits for on Over/Under. Confirms the scanner's pick is dominant, then fires the moment the digit that historically flips the outcome most actually prints.
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Reversal Lookback</span><input class="cp-input" type="number" min="5" step="1" id="bt-revlookback" value="${c.reversalLookback}"></div>
@@ -32443,20 +32513,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       ${c.tradeType === 'evenodd' ? `
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .14s">
         <div class="cp-section-label">PARITY STREAK BREAK ENGINE</div>
-        <div class="cp-toggle-row" style="margin-bottom:8px">
-          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Enable</span>
-          <button class="titan-toggle ${c.parityStreakEnabled ? 'on' : ''}" id="bt-psbtoggle" onclick="event.stopPropagation()"></button>
+        <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:8px">
+          This is the trigger the bot waits for on Even/Odd. Tracks how long same-parity streaks usually run, then fires the flip once the live streak reaches a length that has historically broken most often.
         </div>
         <div class="cp-input-row" style="margin-bottom:0">
           <div class="cp-input-group"><span class="cp-input-label">Streak Lookback (ticks)</span><input class="cp-input" type="number" min="20" step="5" id="bt-pslookback" value="${c.parityStreakLookback}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Break Threshold %</span><input class="cp-input" type="number" min="1" max="99" step="1" id="bt-psthreshold" value="${c.parityStreakThreshold}"></div>
         </div>
       </div>` : ''}
-      <button type="button" class="cp-engage-btn ${eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
-        ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : '⚡ SCAN & BULK TRADE'}
+      <button type="button" class="cp-engage-btn ${eng.running || eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
+        ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : eng.running ? '■ STOP BOT' : '▶ START BOT'}
       </button>
       <div class="hr-note">
-        <b>How it works:</b> scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)} for the selected trade type, then fires a whole cluster of ${c.bulkContracts} contracts at once on a qualifying signal — the same batched-burst firing the Differ bot's Hot Repeat uses, generalized to Even/Odd and Over/Under. A losing cluster escalates the next one via Martingale Multiplier (recovers as usual); a winning cluster drops straight back to normal. The Reversal Trigger / Parity Streak Break engines above are independent, opt-in entry paths that fire on their own signal regardless of the main confidence gate.
+        <b>How it works:</b> set Stake, Martingale ×, Max Martingale Steps and Number Of Runs above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the trigger digit for whichever trade type is selected, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. It then scans again, waits for the next trigger, and fires the next run. Once Number Of Runs is reached, the bot stops itself automatically.
       </div>`;
   }
 
@@ -32488,13 +32557,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // engine's own computeReversalTrigger() output 1:1, nothing invented
   // here — every number on screen is read straight off eng.reversalTrigger.
   function renderReversalBlock(c, eng) {
-    if (c.tradeType !== 'overunder' || !c.reversalTriggerEnabled) return '';
+    if (c.tradeType !== 'overunder') return '';
     const rt = eng.reversalTrigger;
     return `
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .08s">
         <div class="cp-section-label" style="justify-content:space-between">
           <span>REVERSAL TRIGGER ENGINE</span>
-          <span class="bt-adv-status"><span class="bt-adv-dot ${c.reversalTriggerEnabled ? 'on' : 'off'}"></span>${c.reversalTriggerEnabled ? 'ACTIVE' : 'OFF'}</span>
+          <span class="bt-adv-status"><span class="bt-adv-dot ${eng.running ? 'on' : 'off'}"></span>${eng.running ? 'WAITING FOR TRIGGER' : 'BOT STOPPED'}</span>
         </div>
         <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
           Separate from the normal trigger. Reads recent history: confirms the scanner's market pick is actually dominant, then ends the entry streak on whichever digit has historically flipped the outcome most — instead of a fixed end-digit.
@@ -32535,13 +32604,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // math from the Reversal Trigger Engine above (streak-length break
   // probability rather than per-digit flip rate against a barrier).
   function renderParityStreakBlock(c, eng) {
-    if (c.tradeType !== 'evenodd' || !c.parityStreakEnabled) return '';
+    if (c.tradeType !== 'evenodd') return '';
     const ps = eng.parityStreak;
     return `
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .08s">
         <div class="cp-section-label" style="justify-content:space-between">
           <span>PARITY STREAK BREAK ENGINE</span>
-          <span class="bt-adv-status"><span class="bt-adv-dot ${c.parityStreakEnabled ? 'on' : 'off'}"></span>${c.parityStreakEnabled ? 'ACTIVE' : 'OFF'}</span>
+          <span class="bt-adv-status"><span class="bt-adv-dot ${eng.running ? 'on' : 'off'}"></span>${eng.running ? 'WAITING FOR TRIGGER' : 'BOT STOPPED'}</span>
         </div>
         <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
           A different strategy from the Reversal Trigger Engine — tracks how long runs of consecutive same-parity digits usually last, then bets on the flip once the live streak reaches a length that has historically broken most often.
@@ -32602,12 +32671,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
           <div class="rf-ind-card"><div class="rf-ind-val">$${eng.stats.stake.toFixed(2)}</div><div class="rf-ind-label">STAKE</div></div>
           <div class="rf-ind-card"><div class="rf-ind-val">$${eng.stats.payout.toFixed(2)}</div><div class="rf-ind-label">PAYOUT</div></div>
-          <div class="rf-ind-card"><div class="rf-ind-val">${eng.stats.runs}</div><div class="rf-ind-label">RUNS</div></div>
+          <div class="rf-ind-card"><div class="rf-ind-val">${eng.stats.runs}</div><div class="rf-ind-label">TRADES</div></div>
           <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--win))">${eng.stats.won}</div><div class="rf-ind-label">WON</div></div>
           <div class="rf-ind-card"><div class="rf-ind-val" style="color:hsl(var(--loss))">${eng.stats.lost}</div><div class="rf-ind-label">LOST</div></div>
           <div class="rf-ind-card"><div class="rf-ind-val" style="color:${eng.stats.pnl >= 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${eng.stats.pnl >= 0 ? '+' : ''}${eng.stats.pnl.toFixed(2)}</div><div class="rf-ind-label">P/L</div></div>
         </div>
-        ${eng.recoveryMode ? `<div class="hr-note" style="color:hsl(var(--loss));border-color:hsl(var(--loss)/0.3)"><b style="color:hsl(var(--loss))">⚠ In recovery</b> — next cluster fires at $${eng.currentStake.toFixed(2)} (escalated).</div>` : ''}
+        ${eng.recoveryMode ? `<div class="hr-note" style="color:hsl(var(--loss));border-color:hsl(var(--loss)/0.3)"><b style="color:hsl(var(--loss))">⚠ In recovery</b> — martingale step ${eng.martingaleStep}/${eng.config.maxMartingaleSteps || 3}, next cluster fires at $${eng.currentStake.toFixed(2)} (escalated). Step-stop resets to base stake if this run keeps losing.</div>` : ''}
       </div>`;
   }
 
@@ -32721,23 +32790,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (marketEl && !marketEl._bound) { marketEl._bound = true; marketEl.onchange = (e) => eng.setConfig({ selectedMarket: e.target.value }); }
     const multiscanEl = el('bt-multiscan', root);
     if (multiscanEl && !multiscanEl._bound) { multiscanEl._bound = true; multiscanEl.onclick = () => { eng.setConfig({ multiMarketScan: !eng.config.multiMarketScan }); render(); }; }
-    const autorunEl = el('bt-autorun', root);
-    if (autorunEl && !autorunEl._bound) { autorunEl._bound = true; autorunEl.onclick = () => eng.setConfig({ scanAndRunBulk: !eng.config.scanAndRunBulk }); }
     const fireBtn = el('bt-fire', root);
-    if (fireBtn && !fireBtn._bound) { fireBtn._bound = true; fireBtn.onclick = () => eng.scanAndRunNow(); }
+    if (fireBtn && !fireBtn._bound) { fireBtn._bound = true; fireBtn.onclick = () => { if (eng.running) eng.stop(); else eng.start(); render(); }; }
 
-    // ── Session Limit ──────────────────────────────────────────────
-    const targetSessionsEl = el('bt-targetsessions', root);
-    if (targetSessionsEl && !targetSessionsEl._bound) {
-      targetSessionsEl._bound = true;
-      targetSessionsEl.onchange = (e) => { const v = parseInt(e.target.value, 10); eng.setConfig({ targetSessions: isNaN(v) || v < 0 ? 0 : v }); };
+    // ── Run Control ──────────────────────────────────────────────
+    const numRunsEl = el('bt-numruns', root);
+    if (numRunsEl && !numRunsEl._bound) {
+      numRunsEl._bound = true;
+      numRunsEl.onchange = (e) => { const v = parseInt(e.target.value, 10); eng.setConfig({ numberOfRuns: isNaN(v) || v < 0 ? 0 : v }); };
     }
-    const resetSessionsEl = el('bt-resetsessions', root);
-    if (resetSessionsEl && !resetSessionsEl._bound) { resetSessionsEl._bound = true; resetSessionsEl.onclick = () => { eng.resetSessions(); render(); }; }
+    const maxStepsEl = el('bt-maxsteps', root);
+    if (maxStepsEl && !maxStepsEl._bound) {
+      maxStepsEl._bound = true;
+      maxStepsEl.onchange = (e) => { const v = parseInt(e.target.value, 10); eng.setConfig({ maxMartingaleSteps: isNaN(v) || v < 1 ? 3 : v }); };
+    }
+    const resetRunsEl = el('bt-resetruns', root);
+    if (resetRunsEl && !resetRunsEl._bound) { resetRunsEl._bound = true; resetRunsEl.onclick = () => { eng.resetRuns(); render(); }; }
 
     // ── Reversal Trigger Engine (Over/Under) ────────────────────────
-    const revToggleEl = el('bt-revtoggle', root);
-    if (revToggleEl && !revToggleEl._bound) { revToggleEl._bound = true; revToggleEl.onclick = () => eng.setConfig({ reversalTriggerEnabled: !eng.config.reversalTriggerEnabled }); }
     const revLookbackEl = el('bt-revlookback', root);
     if (revLookbackEl && !revLookbackEl._bound) { revLookbackEl._bound = true; revLookbackEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 5) eng.setConfig({ reversalLookback: v }); }; }
     const domLookbackEl = el('bt-domlookback', root);
@@ -32746,8 +32816,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (domThresholdEl && !domThresholdEl._bound) { domThresholdEl._bound = true; domThresholdEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 1 && v <= 99) eng.setConfig({ reversalDominanceThreshold: v }); }; }
 
     // ── Parity Streak Break Engine (Even/Odd) ───────────────────────
-    const psbToggleEl = el('bt-psbtoggle', root);
-    if (psbToggleEl && !psbToggleEl._bound) { psbToggleEl._bound = true; psbToggleEl.onclick = () => eng.setConfig({ parityStreakEnabled: !eng.config.parityStreakEnabled }); }
     const psLookbackEl = el('bt-pslookback', root);
     if (psLookbackEl && !psLookbackEl._bound) { psLookbackEl._bound = true; psLookbackEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 20) eng.setConfig({ parityStreakLookback: v }); }; }
     const psThresholdEl = el('bt-psthreshold', root);
