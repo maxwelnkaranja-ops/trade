@@ -17002,6 +17002,15 @@ window.NexusStrategies=exports;
       const stats = { ...this.state.stats, profit: this.state.stats.profit + profit, win: this.state.stats.win + (win ? 1 : 0), loss: this.state.stats.loss + (win ? 0 : 1) };
       let ns = { ...this.state, stats };
       if (win) {
+        // Remember whether THIS win came out of an active recovery chain
+        // (i.e. this run had already lost at least once and martingaled up
+        // before winning) — before it's reset below. _chainAfterResult uses
+        // this to stop the run sequence early instead of continuing on to
+        // the next run (see the RECOVERY-STOP branch there): a recovery is
+        // treated as a signal of a bad trade/market, so the bot cools down
+        // and re-scouts a fresh market/signal rather than pushing on toward
+        // Target Runs on the same read.
+        ns.recoveredThisRun = !!this.state.inRecovery;
         ns.currentRuns = this.state.currentRuns + 1; ns.martingaleStep = 0; ns.inRecovery = false; ns.currentStake = this.getEffectiveStake();
       } else {
         const nextStep = this.state.martingaleStep + 1;
@@ -17122,6 +17131,15 @@ window.NexusStrategies=exports;
           this.addLog('engine', 'RECOVERY', `🔄 Step ${st.martingaleStep} | $${st.currentStake.toFixed(2)} | Mode: ${recMode}`);
           this.executionGuard = false;
           this.executeBoltPurchase();
+        } else if (st.recoveredThisRun) {
+          // This run only completed because a martingale recovery kicked
+          // in and won — not a clean win. That's treated as a sign of a
+          // bad trade/market read, so per explicit instruction the bot
+          // does NOT push on toward Target Runs on the back of it. Stop
+          // the sequence here, cool down, and let the engine re-scout
+          // (market recycle) from scratch instead.
+          this.addLog('win', 'RECOVERY-STOP', `Recovered from a loss before the stop limit — stopping this run early instead of continuing to ${cfg.targetRuns} runs. Cooling down and recycling the market.`);
+          this.completeSession(true);
         } else if (st.currentRuns > 0) {
           this.executionGuard = false;
           this.executeBoltPurchase();
@@ -20898,7 +20916,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     even_intel: { label: 'Even Bot (Intel)', dot: 'hsl(var(--win))' },
     odd_intel: { label: 'Odd Bot (Intel)', dot: 'hsl(var(--primary-2))' },
     matches_intel: { label: 'Matches Bot (Intel)', dot: 'hsl(var(--accent))' },
-    bulktrade: { label: 'Bulk Trade Bot', dot: 'hsl(var(--secondary))' },
+    // Bulk Trade is now two fully independent engines/tabs (Even/Odd and
+    // Over/Under), each with its own config, journal and stats — see the
+    // Bulk Trade module. Both get their own id here so their trades show
+    // up separately (and correctly) in the Dashboard's merged totals.
+    bulktrade_evenodd: { label: 'Bulk Trade Bot (Even/Odd)', dot: 'hsl(var(--secondary))' },
+    bulktrade_overunder: { label: 'Bulk Trade Bot (Over/Under)', dot: 'hsl(var(--secondary))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -20914,8 +20937,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       return { trades: s.totalWins + s.totalLoss, win: s.totalWins, loss: s.totalLoss, profit: s.totalProfit };
     }
     // Bulk Trade is a standalone module, not a TitanEngine — its stats
-    // live directly on `.stats`, not `.state.stats`.
-    if (botId === 'bulktrade') {
+    // live directly on `.stats`, not `.state.stats`. Its Even/Odd and
+    // Over/Under tabs are two separate engine instances (bulktrade_evenodd
+    // / bulktrade_overunder), each with its own `.stats`/`.journal`.
+    if (botId === 'bulktrade_evenodd' || botId === 'bulktrade_overunder') {
       const st = engine.stats || { won: 0, lost: 0, pnl: 0 };
       return { trades: st.won + st.lost, win: st.won, loss: st.lost, profit: st.pnl };
     }
@@ -20926,7 +20951,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function isBotActive(engine, botId) {
     if (!engine) return false;
     if (botId === 'differ' || botId === 'hotrepeat') return engine.state.isArmed || engine.state.isRunning;
-    if (botId === 'bulktrade') return !!(engine.clusterActive || engine.running);
+    if (botId === 'bulktrade_evenodd' || botId === 'bulktrade_overunder') return !!(engine.clusterActive || engine.running);
     return engine.state.active || engine.state.isLocked;
   }
 
@@ -20935,7 +20960,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function getBotFlowStage(engine, botId) {
     const stage = { engaged: false, analysis: false, trading: false, result: null };
     if (!engine) return stage;
-    if (botId === 'bulktrade') {
+    if (botId === 'bulktrade_evenodd' || botId === 'bulktrade_overunder') {
       stage.engaged = isBotActive(engine, botId);
       stage.trading = !!engine.clusterActive;
       stage.analysis = stage.engaged && !stage.trading;
@@ -21905,7 +21930,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // gate (a separate BOT_IDS list below) already counted its P&L toward
     // the take-profit/stop-loss total. Added here so the visible dashboard
     // totals/journal finally match what the gate was already enforcing.
-    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade'];
+    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd', 'bulktrade_overunder'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -27445,7 +27470,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // special-case), and refreshTabDots()/the stake widget both already
     // no-op safely for ids with no matching tab element, so adding them
     // here is safe everywhere else BOT_IDS is used.
-    'even_intel', 'matches_intel'];
+    'even_intel', 'matches_intel',
+    // Bulk Trade's Even/Odd and Over/Under tabs are now two fully
+    // independent BulkTradeEngine instances (see the Bulk Trade module),
+    // each with its own config, journal, stats and run/martingale state.
+    // Both need their own id here so ENGAGE ALL / TERMINATE ALL, the tab
+    // dot, and the Trade Journal totals actually reach them — previously
+    // there was no 'bulktrade' entry here at all, so pressing ENGAGE ALL
+    // never started or stopped Bulk Trade.
+    'bulktrade_evenodd', 'bulktrade_overunder'];
 
   // Differ's default cold-pick method (Echo) fires the instant it's armed
   // — that's the strategy, not a bug — but bundling it into a bulk
@@ -27476,7 +27509,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade: null };
+  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null, bulktrade_overunder: null };
+  // Shared "is this bot currently engaged?" check for Master Control
+  // (ENGAGE ALL / TERMINATE ALL) — each bot family speaks a different
+  // dialect of "on": Hot Repeat has isArmed/isRunning, the two Bulk Trade
+  // engines have running/clusterActive (they're not TitanEngine instances,
+  // so they have no .state at all), everything else is .state.active /
+  // .state.isLocked.
+  function isMasterEngaged(eng, id) {
+    if (id === 'hotrepeat') return eng.state.isArmed || eng.state.isRunning;
+    if (id === 'bulktrade_evenodd' || id === 'bulktrade_overunder') return !!(eng.running || eng.clusterActive);
+    return eng.state.active || eng.state.isLocked;
+  }
   // Exposed so the Dashboard's Master Control "Stake" popup (defined in
   // buildShell, a separate function/closure) can read/write every bot's
   // stake without needing to be threaded through as a parameter.
@@ -28138,6 +28182,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const s = eng.state;
       if (id === 'differ' || id === 'hotrepeat') {
         total += (s.totalProfit || 0);
+      } else if (id === 'bulktrade_evenodd' || id === 'bulktrade_overunder') {
+        total += (eng.stats && typeof eng.stats.pnl === 'number' ? eng.stats.pnl : 0);
       } else {
         total += (s.stats && typeof s.stats.profit === 'number' ? s.stats.profit : 0);
       }
@@ -28332,7 +28378,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const engagedCount = ENGAGE_BOT_IDS.filter((id) => {
         const eng = engines[id];
         if (!eng) return false;
-        return (id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+        return isMasterEngaged(eng, id);
       }).length;
       const masterBtn = document.getElementById('dash-master-toggle');
       if (engagedCount < ENGAGE_BOT_IDS.length && masterBtn) masterBtn.click();
@@ -28386,7 +28432,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const engagedCount = ENGAGE_BOT_IDS.filter((id) => {
       const eng = engines[id];
       if (!eng) return false;
-      return (id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+      return isMasterEngaged(eng, id);
     }).length;
     const masterBtn = document.getElementById('dash-master-toggle');
     if (engagedCount < ENGAGE_BOT_IDS.length && masterBtn) masterBtn.click();
@@ -28442,7 +28488,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const engagedCount = ENGAGE_BOT_IDS.filter((id) => {
         const eng = engines[id];
         if (!eng) return false;
-        return (id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+        return isMasterEngaged(eng, id);
       }).length;
       const turnOn = engagedCount < ENGAGE_BOT_IDS.length;
       if (turnOn) { applyMasterTpSlToAllEngines(); resetPnlGateLatch(); }
@@ -28496,6 +28542,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
           }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
+        } else if (id === 'bulktrade_evenodd' || id === 'bulktrade_overunder') {
+          // Bulk Trade's two sub-engines aren't TitanEngine instances (no
+          // .state, no toggleEngine) — they expose a plain running flag
+          // and start()/stop(), so ENGAGE ALL / TERMINATE ALL just calls
+          // those directly instead of the TitanEngine-shaped branch below.
+          if (turnOn && !eng.running) eng.start();
+          if (!turnOn && eng.running) eng.stop();
         } else {
           // Consider an engine "on" for the ENGAGE decision only if actively
           // running or locked — cooldown is treated as stopped there so
@@ -28566,7 +28619,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           const nowEngaged = ENGAGE_BOT_IDS.filter((id) => {
             const eng = engines[id];
             if (!eng) return false;
-            return (id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked);
+            return isMasterEngaged(eng, id);
           }).length;
           if (nowEngaged > 0) {
             masterBtn.textContent = '⛔ TERMINATE ALL';
@@ -28658,6 +28711,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function ensureTitanOrDifferForControl(id) {
     if (id === 'differ') return ensureDifferEngine();
     if (id === 'hotrepeat') return ensureHotRepeatEngine();
+    if (id === 'bulktrade_evenodd') return window.ensureBulkTradeEngine ? window.ensureBulkTradeEngine('evenodd') : null;
+    if (id === 'bulktrade_overunder') return window.ensureBulkTradeEngine ? window.ensureBulkTradeEngine('overunder') : null;
     return ensureTitanEngine(id);
   }
 
@@ -28708,7 +28763,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const dot = document.querySelector(`.hub-tab[data-app="${id}"] .dot`);
       if (!dot) return;
       const eng = engines[id];
-      const active = eng && ((id === 'differ' || id === 'hotrepeat') ? (eng.state.isArmed || eng.state.isRunning) : (eng.state.active || eng.state.isLocked));
+      const active = eng && isMasterEngaged(eng, id);
       dot.classList.toggle('live', !!active);
     });
     refreshDifferToggleLabel();
@@ -31807,13 +31862,28 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   const MIN_CONFIDENCE = 65; // qualifying bar — matches the "suitable market found" threshold
-  const CONFIG_KEY = 'bulktrade_config';
+  // Bulk Trade's Even/Odd and Over/Under tabs are two fully independent
+  // engine instances now (see the UI module below) — each gets its own
+  // localStorage config key so their settings, stake, martingale ladder
+  // etc. never bleed into each other. CONFIG_KEY_LEGACY is the single key
+  // this used to be saved under before the split; a fresh per-type engine
+  // seeds itself from it once (best-effort) so an existing user's tuned
+  // settings aren't silently reset to defaults on first load after this
+  // update — see _loadConfig().
+  const CONFIG_KEY_LEGACY = 'bulktrade_config';
+  const configKeyFor = (tradeType) => 'bulktrade_config_' + tradeType;
 
   class BulkTradeEngine {
-    constructor() {
+    constructor(fixedTradeType) {
+      // Each instance is now permanently locked to one trade type — no
+      // more switching evenodd/overunder in place on a shared engine.
+      // Falls back to 'overunder' (the original default) if constructed
+      // without one, so nothing breaks if this is ever called bare.
+      this.tradeType = (fixedTradeType === 'evenodd') ? 'evenodd' : 'overunder';
+      this._configKey = configKeyFor(this.tradeType);
       this.tick = new BulkTickSocket();
       this.config = Object.assign({
-        tradeType: 'overunder', stake: 5, predictionBeforeLoss: 3, predictionAfterLoss: 4,
+        tradeType: this.tradeType, stake: 5, predictionBeforeLoss: 3, predictionAfterLoss: 4,
         martingaleMultiplier: 2.2, multiMarketScan: true,
         selectedMarket: '1HZ25V', bulkContracts: 15,
         // Step-stop — the martingale ladder no longer escalates forever.
@@ -31841,7 +31911,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // Trigger Engine's per-digit flip-rate approach. Armed automatically
         // whenever the bot is running and trade type is Even/Odd.
         parityStreakLookback: 150, parityStreakThreshold: 60,
+        // First-Tick Handling — same 'normal' / 'sacrifice' (Test Stake) /
+        // 'skip' (Skip Tick) modes every other bot family uses. 'sacrifice'
+        // fires one small probe contract at firstTickStake on the entry
+        // trigger instead of a full cluster: WIN fires the real cluster at
+        // Stake $ immediately, LOSS rejects the signal and returns to
+        // scanning with nothing else fired. 'skip' lets the entry trigger
+        // pass once with no trade, then force-fires the cluster on the
+        // very next scan cycle regardless of whether the trigger is still
+        // armed (Bulk Trade scans on a 2s poll rather than raw ticks, so
+        // that poll cycle is this engine's "tick" for this purpose).
+        firstTickMode: 'normal', firstTickStake: 0.35,
       }, this._loadConfig());
+      // Trade type can never be overridden by saved/legacy config — this
+      // instance's slot decides it, permanently.
+      this.config.tradeType = this.tradeType;
       // Normalize config saved before the auto-fire toggles were replaced
       // by a single Start/Stop control — old on/off flags are no longer
       // read anywhere, so drop them if present rather than leaving dead
@@ -31855,9 +31939,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       delete this.config.targetSessions;
       // Normalize any config saved before Differs/Rise-Fall were removed
       // from this bot's trade-type list.
-      if (this.config.tradeType !== 'evenodd' && this.config.tradeType !== 'overunder') {
-        this.config.tradeType = 'overunder';
-      }
+      // Trade type is locked per-instance now (see this.tradeType above) —
+      // this just guards against a corrupt/ancient saved value.
+      this.config.tradeType = this.tradeType;
 
       // Runtime (not persisted) — this cluster's live escalation state.
       this.currentStake = this.config.stake;
@@ -31895,16 +31979,40 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.reversalTrigger = null;
       this.parityStreak = null;
       this.cooldownUntil = 0;
+      // First-Tick Handling runtime trackers — see fireCluster's callers
+      // (_enterEntry) and _initTrading's buy/settlement routing below.
+      this._skipArmed = false;      // 'skip' mode: entry met once already, waiting for the next scan cycle to force-fire
+      this._skipSignal = null;      // the signal to fire once the skip window passes
+      this._testInFlight = false;   // 'sacrifice' mode: a probe trade is out and hasn't settled yet
+      this._testSignal = null;      // the signal the probe is gating — fired for real on a probe WIN
+      this._testPendingReqIds = new Set();
+      this._testContractIds = new Set();
 
       this._onChange = null; // set by the UI
       this._initTrading();
       this.scanTimer = setInterval(() => this._scan(), 2000);
     }
     _loadConfig() {
-      try { const raw = localStorage.getItem(CONFIG_KEY); return raw ? JSON.parse(raw) : {}; } catch (e) { return {}; }
+      try {
+        const raw = localStorage.getItem(this._configKey);
+        if (raw) return JSON.parse(raw);
+        // Nothing saved yet under this trade type's own key — best-effort
+        // migration from the single pre-split config, but only into
+        // whichever type it was actually last used for (defaulting to
+        // 'overunder', the original hardcoded default) so Over/Under
+        // doesn't silently inherit settings that were really Even/Odd's,
+        // or vice versa.
+        const legacyRaw = localStorage.getItem(CONFIG_KEY_LEGACY);
+        if (legacyRaw) {
+          const legacy = JSON.parse(legacyRaw);
+          const legacyType = (legacy && legacy.tradeType === 'evenodd') ? 'evenodd' : 'overunder';
+          if (legacyType === this.tradeType) return legacy;
+        }
+        return {};
+      } catch (e) { return {}; }
     }
     saveConfig() {
-      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(this.config)); } catch (e) {}
+      try { localStorage.setItem(this._configKey, JSON.stringify(this.config)); } catch (e) {}
     }
     setConfig(patch) { this.config = { ...this.config, ...patch }; this.saveConfig(); this._emit(); }
     _emit() {
@@ -31913,7 +32021,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // Dashboard reads via getBotStats/getBotJournal/isBotActive) and
       // nudge the Dashboard to re-render if it's the active tab — exactly
       // how every Titan-class bot's own onUpdate hook already behaves.
-      if (window.__BotEngines) window.__BotEngines.bulktrade = this;
+      // Even/Odd and Over/Under are separate ids now (bulktrade_evenodd /
+      // bulktrade_overunder) since they're separate engines with their
+      // own journal/stats — see BOT_META/BOT_IDS in the Dashboard module.
+      if (window.__BotEngines) window.__BotEngines['bulktrade_' + this.tradeType] = this;
       if (window.__queueDashboardRender) window.__queueDashboardRender();
     }
     addLog(kind, text) {
@@ -31925,6 +32036,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     _candidateMarkets() { return this.config.multiMarketScan ? MARKETS : [this.config.selectedMarket]; }
 
     _scan() {
+      // ── FIRST-TICK HANDLING: 'skip' mode force-fire ───────────────────
+      // The entry trigger already passed once with no trade placed (see
+      // _enterEntry below); this scan cycle is the "next tick" it was
+      // waiting for, so fire unconditionally on the signal snapshot taken
+      // at arm time rather than re-checking whether the trigger is still
+      // armed right now.
+      if (this._skipArmed && this._skipSignal && !this.clusterActive && this.running) {
+        const sig = this._skipSignal;
+        this._skipArmed = false;
+        this._skipSignal = null;
+        this.addLog('engine', `▶ Skip-tick window passed — firing now (First-Tick Handling).`);
+        this.fireCluster(sig);
+        this._emit();
+        return;
+      }
       const c = this.config;
       const barrier = this.recoveryMode ? c.predictionAfterLoss : c.predictionBeforeLoss;
       let best = null;
@@ -31956,7 +32082,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // and its cooldown from the last cluster has elapsed.
         if (this.running && rt && rt.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
           this.addLog('info', `🔁 Trigger digit ${rt.picked.digit} printed (${rt.picked.flipPct}% flip · ${rt.picked.samples} smpl) — dominance ${rt.dominancePct}%. Firing.`);
-          this.fireCluster(best);
+          this._enterEntry(best);
         }
       }
       if (best && c.tradeType === 'evenodd') {
@@ -31973,20 +32099,73 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             confidence: ps.breakProb, label: flipType === 'DIGITEVEN' ? 'Even (streak break)' : 'Odd (streak break)',
           };
           this.addLog('info', `🎯 Streak break trigger fired — ${ps.currentLength}-tick ${ps.currentParity} streak, ${ps.breakProb}% historical break rate → betting ${flipSignal.label}.`);
-          this.fireCluster(flipSignal);
+          this._enterEntry(flipSignal);
         }
       }
       this._emit();
     }
 
+    // ── FIRST-TICK HANDLING dispatcher ──────────────────────────────────
+    // Every auto-fire entry point (both trigger engines above, plus the
+    // manual "Scan & Run" button below) routes through here instead of
+    // calling fireCluster() directly, so Normal / Test Stake / Skip Tick
+    // apply uniformly everywhere a cluster could fire.
+    _enterEntry(signal) {
+      const mode = this.config.firstTickMode || 'normal';
+      if (mode === 'skip') {
+        if (this._skipArmed) return; // already waiting for the force-fire tick — ignore re-arms in the meantime
+        this._skipArmed = true;
+        this._skipSignal = signal;
+        this.addLog('engine', '⏭ Entry met — skipping this tick per First-Tick Handling. Firing on the very next scan.');
+        this._emit();
+        return;
+      }
+      if (mode === 'sacrifice') {
+        if (this._testInFlight) return; // a probe is already out — let it settle first
+        this._fireTestTrade(signal);
+        return;
+      }
+      this.fireCluster(signal);
+    }
+
+    // ── FIRST-TICK HANDLING: 'sacrifice' (Test Stake) probe ─────────────
+    // Fires ONE small contract at firstTickStake instead of the full
+    // cluster. Its result is excluded from Runs/stats entirely — a WIN
+    // fires the real cluster at Stake $ immediately after, a LOSS rejects
+    // the signal outright and the engine goes back to scanning with no
+    // cluster fired and no run/martingale step counted.
+    _fireTestTrade(signal) {
+      if (!this.socketT || this.socketT.readyState !== WebSocket.OPEN) {
+        this.addLog('loss', 'ERROR: Trading socket not connected. Sync your API token first.');
+        return;
+      }
+      const stake = parseFloat(this.config.firstTickStake) || this.config.stake;
+      const duration = 1, durationUnit = 't';
+      this._testInFlight = true;
+      this._testSignal = signal;
+      const buyReqId = window.HubReqId.next();
+      this._testPendingReqIds.add(buyReqId);
+      const params = {
+        amount: stake, basis: 'stake', contract_type: signal.contractType,
+        underlying_symbol: signal.symbol, duration, duration_unit: durationUnit,
+        currency: (window.HubStore.getState().currency) || 'USD',
+      };
+      if (signal.barrier !== null && signal.barrier !== undefined) params.barrier = signal.barrier;
+      this.addLog('info', `🧪 Test stake $${stake.toFixed(2)} firing on the entry tick (${signal.label} on ${marketName(signal.symbol)}) — not counted toward Runs/stats. Real cluster fires only on a win.`);
+      try {
+        this.socketT.send(JSON.stringify({ buy: '1', price: stake, req_id: buyReqId, parameters: params }));
+      } catch (e) {}
+      this._emit();
+    }
+
     // Manual button — fires immediately off the latest scan if it qualifies.
     scanAndRunNow() {
-      if (this.clusterActive) { this.addLog('info', 'A cluster is already in flight — wait for it to finish settling.'); return; }
+      if (this.clusterActive || this._testInFlight || this._skipArmed) { this.addLog('info', 'A cluster is already in flight — wait for it to finish settling.'); return; }
       if (!this.bestSignal || this.bestSignal.confidence < MIN_CONFIDENCE) {
         this.addLog('info', 'No suitable signal yet — keep scanning a little longer.');
         return;
       }
-      this.fireCluster(this.bestSignal);
+      this._enterEntry(this.bestSignal);
     }
 
     // Single Start/Stop control — replaces the old separate "Scan & Run
@@ -32123,6 +32302,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       _self._handleTradingMessage = (d) => {
         try {
           if (d.msg_type === 'buy') {
+            // ── FIRST-TICK HANDLING: 'sacrifice' probe's buy confirmation ──
+            // Routed to its own tracker, never into ownContractIds/
+            // _clusterPending, so it can never be mistaken for (or counted
+            // toward) a real cluster contract.
+            const isTestBuy = d.req_id != null && _self._testPendingReqIds.has(d.req_id);
+            if (isTestBuy) {
+              _self._testPendingReqIds.delete(d.req_id);
+              if (d.error) {
+                _self.addLog('loss', `Test stake buy error: ${d.error.message || d.error.code}`);
+                _self._testInFlight = false; _self._testSignal = null;
+                _self._emit();
+                return;
+              }
+              if (d.buy && d.buy.contract_id) {
+                _self._testContractIds.add(d.buy.contract_id);
+                window.HubContractRegistry && window.HubContractRegistry.claim(d.buy.contract_id, 'bulktrade');
+              }
+              return;
+            }
             const mine = d.req_id != null && _self._pendingBuyReqIds.has(d.req_id);
             if (!mine) return;
             _self._pendingBuyReqIds.delete(d.req_id);
@@ -32137,7 +32335,28 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           }
           if (d.msg_type === 'proposal_open_contract') {
             const c = d.proposal_open_contract;
-            if (!c || !c.is_sold || !c.contract_id || !_self.ownContractIds.has(c.contract_id)) return;
+            if (!c || !c.is_sold || !c.contract_id) return;
+            // ── FIRST-TICK HANDLING: 'sacrifice' probe settling ─────────
+            // Never touches Runs/stats/journal — a WIN fires the real
+            // cluster at Stake $ immediately; a LOSS rejects the signal
+            // and the engine just goes back to scanning.
+            if (_self._testContractIds.has(c.contract_id)) {
+              _self._testContractIds.delete(c.contract_id);
+              _self._testInFlight = false;
+              const isWin = c.status === 'won';
+              const sig = _self._testSignal;
+              _self._testSignal = null;
+              if (isWin) {
+                _self.addLog('win', `✅ Test stake WON (not counted) — firing real cluster now at $${_self.currentStake.toFixed(2)}.`);
+                if (sig) _self.fireCluster(sig);
+              } else {
+                _self.addLog('loss', `❌ Test stake LOST (not counted) — signal rejected, this run is skipped. Back to scanning.`);
+                _self.cooldownUntil = Date.now() + 5000;
+              }
+              _self._emit();
+              return;
+            }
+            if (!_self.ownContractIds.has(c.contract_id)) return;
             _self.ownContractIds.delete(c.contract_id);
             const wasPending = _self._clusterPending.delete(c.contract_id);
             const isWin = c.status === 'won';
@@ -32160,7 +32379,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                 const sig = _self._clusterSignal || {};
                 _self.journal.unshift({
                   id: (contractKey || Date.now().toString()) + Math.random().toString(36).slice(2, 5),
-                  contractId: contractKey, botId: 'bulktrade',
+                  contractId: contractKey, botId: 'bulktrade_' + _self.tradeType,
                   time: new Date().toLocaleTimeString(), ts: Date.now(),
                   type: isWin ? 'win' : 'loss',
                   market: c.underlying || sig.symbol || null,
@@ -32194,26 +32413,50 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // rendered markup actually changed.
   function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
-  // Differs and Rise/Fall were removed from Bulk Trade per explicit
-  // request — this scanner now only ever trades Even/Odd and Over/Under,
-  // which are also the only two families that get a dedicated advanced
-  // entry block below (Reversal Trigger Engine / Parity Streak Break
-  // Engine). Any config saved from before this change with tradeType
-  // 'differs' or 'risefall' is normalized back to 'overunder' in the
-  // engine constructor so old localStorage state can't get stuck on a
-  // trade type that no longer has a tile.
+  // Even/Odd and Over/Under are two fully independent engines/tabs now
+  // (see BulkTradeEngine's fixedTradeType) — this tile grid is no longer
+  // a config toggle on a shared engine, it's the tab switcher between
+  // them. Differs and Rise/Fall were removed from Bulk Trade entirely per
+  // earlier explicit request, so there are still only these two tiles.
   const TRADE_TYPES = [
     { id: 'evenodd', label: 'Even / Odd', sub: 'Even vs odd digit pressure' },
     { id: 'overunder', label: 'Over / Under', sub: 'Over vs under barrier pressure' },
   ];
 
-  let engine = null;
+  // Even/Odd and Over/Under are two fully independent BulkTradeEngine
+  // instances now (own config, journal, stats, martingale/run state) —
+  // see the class above. `activeSubTab` just decides which one the panel
+  // is currently *displaying*; both keep scanning/trading in the
+  // background regardless of which is on screen, exactly like every
+  // other bot in this hub.
+  const engines = { evenodd: null, overunder: null };
+  let activeSubTab = 'overunder';
+  try {
+    const saved = localStorage.getItem('bulktrade_active_subtab');
+    if (saved === 'evenodd' || saved === 'overunder') activeSubTab = saved;
+  } catch (e) {}
   let mounted = false;
   let refreshTimer = null;
   let shellBuilt = false;
   let rightTab = 'journal'; // 'journal' | 'log' — which tab the right column shows
 
-  function ensureEngine() { if (!engine) engine = new BulkTradeEngine(); return engine; }
+  function ensureEngine(type) {
+    const t = (type === 'evenodd' || type === 'overunder') ? type : activeSubTab;
+    if (!engines[t]) {
+      engines[t] = new BulkTradeEngine(t);
+      // Register immediately (not just on the instance's first _emit(),
+      // which only happens after its first 2s scan tick) so ENGAGE ALL /
+      // the Dashboard's Trade Journal can find a freshly-created engine
+      // right away even if this tab has never been opened before.
+      if (window.__BotEngines) window.__BotEngines['bulktrade_' + t] = engines[t];
+    }
+    return engines[t];
+  }
+  // Exposed so the Dashboard's Master Control (ENGAGE ALL / TERMINATE ALL)
+  // can create/fetch either sub-engine on demand without having to know
+  // anything about this module's internals — mirrors ensureBotEngine for
+  // the TitanEngine-class bots.
+  window.ensureBulkTradeEngine = ensureEngine;
   function el(id, root) { return (root || document).querySelector('#' + id); }
 
   const SELF_STYLE = (rootId) => `
@@ -32304,17 +32547,42 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #${rootId} .hr-note { font-family:'DM Mono',monospace; font-size:9.5px; line-height:1.6; color:hsl(var(--muted-foreground)); padding:10px 12px; margin-top:10px; background:hsl(var(--bg)/0.4); border:1px solid hsl(var(--border)/0.3); border-radius:12px; }
       #${rootId} .hr-note b { color: hsl(var(--primary)); }
 
-      /* Trade type tiles */
-      #${rootId} .bt-type-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-      #${rootId} .bt-type-tile {
-        padding:10px 11px; border-radius:12px; border:1px solid hsl(var(--border)/0.4);
-        background:hsl(var(--bg)/0.5); cursor:pointer; text-align:left; transition:all .18s ease;
+      /* Side panel — dedicated tab switcher between Even/Odd and Over/Under */
+      #${rootId} .bt-sidepanel {
+        width:168px; flex-shrink:0; display:flex; flex-direction:column; gap:8px;
+        padding:12px 8px; border-right:1px solid hsl(var(--border)/0.4);
+        overflow-y:auto; background:hsl(var(--bg)/0.25);
       }
-      #${rootId} .bt-type-tile:hover { border-color:hsl(var(--border-bright)); transform:translateY(-1px); }
-      #${rootId} .bt-type-tile.active { border-color:hsl(var(--primary)/0.65); background:hsl(var(--primary)/0.12); box-shadow:0 0 16px hsl(var(--primary)/0.15); }
-      #${rootId} .bt-type-tile b { display:block; font-size:11.5px; font-family:'Outfit',sans-serif; margin-bottom:2px; color:hsl(var(--foreground)); }
-      #${rootId} .bt-type-tile.active b { color:hsl(var(--primary)); }
-      #${rootId} .bt-type-tile span { font-size:9px; color:hsl(var(--muted-foreground)); }
+      #${rootId} .bt-side-tab {
+        display:flex; align-items:center; gap:8px; text-align:left; width:100%;
+        padding:10px; border-radius:12px; border:1px solid hsl(var(--border)/0.35);
+        background:hsl(var(--bg)/0.5); cursor:pointer; transition:all .18s ease;
+      }
+      #${rootId} .bt-side-tab:hover { border-color:hsl(var(--border-bright)); transform:translateX(2px); }
+      #${rootId} .bt-side-tab.active {
+        border-color:hsl(var(--primary)/0.6); background:hsl(var(--primary)/0.12);
+        box-shadow:0 0 16px hsl(var(--primary)/0.15);
+      }
+      #${rootId} .bt-side-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+      #${rootId} .bt-side-dot.on { background:hsl(var(--win)); animation: bt-dot-beacon 1.8s ease-in-out infinite; }
+      #${rootId} .bt-side-dot.off { background:hsl(var(--muted-foreground)/0.35); }
+      #${rootId} .bt-side-label { display:flex; flex-direction:column; min-width:0; flex:1; }
+      #${rootId} .bt-side-label b {
+        font-size:11px; font-family:'Outfit',sans-serif; font-weight:800; color:hsl(var(--foreground));
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      }
+      #${rootId} .bt-side-tab.active .bt-side-label b { color:hsl(var(--primary)); }
+      #${rootId} .bt-side-sub { font-size:8px; color:hsl(var(--muted-foreground)/0.7); margin-top:1px; }
+      #${rootId} .bt-side-stats { display:flex; flex-direction:column; align-items:flex-end; gap:2px; flex-shrink:0; }
+      #${rootId} .bt-side-pnl { font-family:'DM Mono',monospace; font-size:10px; font-weight:800; }
+      #${rootId} .bt-side-runs { font-size:7.5px; font-family:'DM Mono',monospace; color:hsl(var(--muted-foreground)/0.6); }
+      @media (max-width: 820px) {
+        #${rootId} .bt-sidepanel { width:56px; padding:10px 6px; }
+        #${rootId} .bt-side-tab { flex-direction:column; gap:4px; padding:8px 4px; }
+        #${rootId} .bt-side-sub, #${rootId} .bt-side-stats { display:none; }
+        #${rootId} .bt-side-label { align-items:center; }
+        #${rootId} .bt-side-label b { white-space:normal; text-align:center; font-size:8.5px; letter-spacing:0; }
+      }
 
       /* Confidence radar gauge */
       #${rootId} .bt-gauge { position:relative; width:126px; height:126px; margin:4px auto 12px; }
@@ -32425,18 +32693,51 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div class="bt-scan-pill" id="bulktrade-scanpill"><span class="bt-scan-dot"></span><span id="bulktrade-scantext">SCANNING</span></div>
         <div class="rf-header-glow"></div>
       </header>
-      <div class="benz-grid">
-        <div class="benz-col"><div class="benz-scroll" id="bulktrade-left"></div></div>
-        <div class="benz-col"><div class="benz-scroll" id="bulktrade-center"></div></div>
-        <div class="benz-col">
-          <div style="display:flex;gap:4px;padding:8px;border-bottom:1px solid hsl(var(--border)/0.4)">
-            <button type="button" class="bt-right-tab" data-righttab="journal" style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;text-align:center;border-radius:10px;cursor:pointer">JOURNAL</button>
-            <button type="button" class="bt-right-tab" data-righttab="log" style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;text-align:center;border-radius:10px;cursor:pointer">LOG</button>
+      <div class="bt-shell-row" style="display:flex;flex:1;min-height:0;overflow:hidden;">
+        <div class="bt-sidepanel" id="bulktrade-sidepanel"></div>
+        <div class="benz-grid" style="flex:1;min-width:0;">
+          <div class="benz-col"><div class="benz-scroll" id="bulktrade-left"></div></div>
+          <div class="benz-col"><div class="benz-scroll" id="bulktrade-center"></div></div>
+          <div class="benz-col">
+            <div style="display:flex;gap:4px;padding:8px;border-bottom:1px solid hsl(var(--border)/0.4)">
+              <button type="button" class="bt-right-tab" data-righttab="journal" style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;text-align:center;border-radius:10px;cursor:pointer">JOURNAL</button>
+              <button type="button" class="bt-right-tab" data-righttab="log" style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;text-align:center;border-radius:10px;cursor:pointer">LOG</button>
+            </div>
+            <div class="benz-scroll" id="bulktrade-right"></div>
           </div>
-          <div class="benz-scroll" id="bulktrade-right"></div>
         </div>
       </div>`;
     shellBuilt = true;
+  }
+
+  // Side panel — the dedicated tab switcher between the two fully
+  // independent trade-type engines. Lives outside the scrolling config
+  // column (previously the only way to switch was a tile buried inside
+  // Left's config stack) so it's always visible regardless of scroll
+  // position, and shows each engine's live running/P&L/runs state even
+  // for the tab you're NOT currently looking at, since both keep
+  // scanning/trading in the background at all times.
+  function renderSidePanel() {
+    return TRADE_TYPES.map((t) => {
+      const eng = ensureEngine(t.id);
+      const active = activeSubTab === t.id;
+      const isRunning = eng.running || eng.clusterActive;
+      const pnl = (eng.stats && eng.stats.pnl) || 0;
+      const pnlColor = pnl > 0 ? 'hsl(var(--win))' : pnl < 0 ? 'hsl(var(--loss))' : 'hsl(var(--muted-foreground))';
+      const runsLabel = `${eng.runsCompleted || 0}${eng.config.numberOfRuns > 0 ? '/' + eng.config.numberOfRuns : ''}`;
+      return `
+        <button type="button" class="bt-side-tab ${active ? 'active' : ''}" data-tt="${t.id}" title="${t.label}">
+          <span class="bt-side-dot ${isRunning ? 'on' : 'off'}"></span>
+          <span class="bt-side-label">
+            <b>${t.label}</b>
+            <span class="bt-side-sub">${t.sub}</span>
+          </span>
+          <span class="bt-side-stats">
+            <span class="bt-side-pnl" style="color:${pnlColor}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</span>
+            <span class="bt-side-runs">${runsLabel} runs</span>
+          </span>
+        </button>`;
+    }).join('');
   }
 
   function renderLeft(c, eng) {
@@ -32446,12 +32747,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div class="cp-input-group"><span class="cp-input-label">Pred. After Loss</span><select class="cp-input" id="bt-predafter">${[0,1,2,3,4,5,6,7,8,9].map((d) => `<option value="${d}" ${d === c.predictionAfterLoss ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
       </div>` : '';
     return `
-      <div class="cp-card" style="animation:bt-in .35s ease both">
-        <div class="cp-section-label">TRADE TYPE</div>
-        <div class="bt-type-grid">
-          ${TRADE_TYPES.map((t) => `<button type="button" class="bt-type-tile ${c.tradeType === t.id ? 'active' : ''}" data-tt="${t.id}"><b>${t.label}</b><span>${t.sub}</span></button>`).join('')}
-        </div>
-      </div>
       <div class="cp-card" style="animation:bt-in .35s ease both .05s">
         <div class="cp-section-label">SCAN CONFIG</div>
         <div class="cp-input-row">
@@ -32494,6 +32789,30 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             <span class="cp-input-label">Martingale Step</span>
             <div class="cp-input" style="display:flex;align-items:center;color:${eng.martingaleStep > 0 ? 'hsl(var(--loss))' : 'hsl(var(--foreground))'}">${eng.martingaleStep || 0} / ${c.maxMartingaleSteps || 3}</div>
           </div>
+        </div>
+      </div>
+      <div class="cp-card" style="animation:bt-in .35s ease both .13s">
+        <div class="cp-section-label">FIRST-TICK HANDLING</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group" style="flex:1.4">
+            <span class="cp-input-label">Mode</span>
+            <select class="cp-input" id="bt-firsttick-mode" style="font-size:11px">
+              <option value="normal" ${(c.firstTickMode||'normal')==='normal'?'selected':''}>Normal — no special handling</option>
+              <option value="sacrifice" ${c.firstTickMode==='sacrifice'?'selected':''}>Test Stake — probe trade gates the real run</option>
+              <option value="skip" ${c.firstTickMode==='skip'?'selected':''}>Skip Tick — wait 1 tick, then trade</option>
+            </select>
+          </div>
+          <div class="cp-input-group">
+            <span class="cp-input-label">Test Stake $</span>
+            <input class="cp-input" type="number" step="0.01" min="0.01" id="bt-firsttick-stake" value="${c.firstTickStake}" ${c.firstTickMode!=='sacrifice'?'disabled style="opacity:.45"':''}>
+          </div>
+        </div>
+        <div style="margin-top:4px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px">
+          ${c.firstTickMode==='sacrifice'
+            ? 'Fires a small test trade on the entry tick (not counted toward Runs/stats). WIN → real cluster at Stake $ fires immediately. LOSS → signal rejected, the cluster is skipped and the engine goes back to scouting.'
+            : c.firstTickMode==='skip'
+            ? 'Entry tick is skipped (no cluster fired); the real cluster at Stake $ fires unconditionally on the very next scan cycle.'
+            : 'Every run fires the cluster normally from the entry tick — no probe or skip.'}
         </div>
       </div>
       ${c.tradeType === 'overunder' ? `
@@ -32742,10 +33061,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const s = eng.bestSignal;
     buildShell(root);
     if (window.setHtmlIfChanged) {
+      window.setHtmlIfChanged(el('bulktrade-sidepanel', root), renderSidePanel());
       window.setHtmlIfChanged(el('bulktrade-left', root), renderLeft(c, eng));
       window.setHtmlIfChanged(el('bulktrade-center', root), renderCenter(c, eng, s));
       window.setHtmlIfChanged(el('bulktrade-right', root), rightTab === 'journal' ? renderJournalTab(eng) : renderLog(eng));
     } else {
+      el('bulktrade-sidepanel', root).innerHTML = renderSidePanel();
       el('bulktrade-left', root).innerHTML = renderLeft(c, eng);
       el('bulktrade-center', root).innerHTML = renderCenter(c, eng, s);
       el('bulktrade-right', root).innerHTML = rightTab === 'journal' ? renderJournalTab(eng) : renderLog(eng);
@@ -32766,10 +33087,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
   function bindEvents(root) {
     const eng = ensureEngine();
-    root.querySelectorAll('.bt-type-tile').forEach((btn) => {
+    root.querySelectorAll('.bt-side-tab').forEach((btn) => {
       if (btn._bound) return;
       btn._bound = true;
-      btn.onclick = () => { eng.setConfig({ tradeType: btn.dataset.tt }); render(); };
+      btn.onclick = () => {
+        activeSubTab = btn.dataset.tt;
+        try { localStorage.setItem('bulktrade_active_subtab', activeSubTab); } catch (e) {}
+        render();
+      };
     });
     root.querySelectorAll('.bt-right-tab').forEach((btn) => {
       if (btn._bound) return;
@@ -32807,6 +33132,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const resetRunsEl = el('bt-resetruns', root);
     if (resetRunsEl && !resetRunsEl._bound) { resetRunsEl._bound = true; resetRunsEl.onclick = () => { eng.resetRuns(); render(); }; }
 
+    // ── First-Tick Handling ──────────────────────────────────────────
+    const ftModeEl = el('bt-firsttick-mode', root);
+    if (ftModeEl && !ftModeEl._bound) {
+      ftModeEl._bound = true;
+      ftModeEl.onchange = (e) => { eng.setConfig({ firstTickMode: e.target.value }); render(); };
+    }
+    const ftStakeEl = el('bt-firsttick-stake', root);
+    if (ftStakeEl && !ftStakeEl._bound) {
+      ftStakeEl._bound = true;
+      // Saves instantly, same as every other Bulk Trade field — setConfig()
+      // always writes straight to localStorage here, there's no separate
+      // "commit on Save Settings" step like the TitanEngine-class bots have.
+      ftStakeEl.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) eng.setConfig({ firstTickStake: Math.max(0.01, v) }); };
+    }
+
     // ── Reversal Trigger Engine (Over/Under) ────────────────────────
     const revLookbackEl = el('bt-revlookback', root);
     if (revLookbackEl && !revLookbackEl._bound) { revLookbackEl._bound = true; revLookbackEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 5) eng.setConfig({ reversalLookback: v }); }; }
@@ -32823,8 +33163,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   function activate() {
-    const eng = ensureEngine();
-    eng._onChange = () => { if (mounted) render(); };
+    // Instantiate BOTH sub-engines up front (not just whichever tab is
+    // currently showing) so the one you're not looking at still starts
+    // scanning/trading in the background the moment Bulk Trade is opened
+    // — same "independent, always-on" convention every other bot in this
+    // hub already follows.
+    ['evenodd', 'overunder'].forEach((t) => {
+      const e = ensureEngine(t);
+      e._onChange = () => { if (mounted) render(); };
+    });
     mounted = true;
     render();
     if (refreshTimer) clearInterval(refreshTimer);
