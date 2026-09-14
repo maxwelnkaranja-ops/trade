@@ -708,7 +708,7 @@
           <span class="hub-tab-label">Flip Intell</span>
           <span class="dot live" id="flipintell-tab-dot" style="display:none"></span>
         </button>
-        <button type="button" class="hub-tab" data-app="bulktrade" data-label="Bulk Trade" title="Bulk Trade — AI Market Scanner that scans Even/Odd, Over/Under, Differs and Rise/Fall across every market, then fires a whole cluster of contracts at once on a qualifying signal">
+        <button type="button" class="hub-tab" data-app="bulktrade" data-label="Bulk Trade" title="Bulk Trade — AI Market Scanner that scans Even/Odd, Differs and Rise/Fall across every market, then fires a whole cluster of contracts at once on a qualifying signal">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
           <span class="hub-tab-label">Bulk Trade</span>
           <span class="dot live" id="bulktrade-tab-dot" style="display:none"></span>
@@ -20916,12 +20916,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     even_intel: { label: 'Even Bot (Intel)', dot: 'hsl(var(--win))' },
     odd_intel: { label: 'Odd Bot (Intel)', dot: 'hsl(var(--primary-2))' },
     matches_intel: { label: 'Matches Bot (Intel)', dot: 'hsl(var(--accent))' },
-    // Bulk Trade is now two fully independent engines/tabs (Even/Odd and
-    // Over/Under), each with its own config, journal and stats — see the
-    // Bulk Trade module. Both get their own id here so their trades show
-    // up separately (and correctly) in the Dashboard's merged totals.
+    // Bulk Trade is a single Even/Odd engine/tab — see the Bulk Trade
+    // module. It gets its own id here so its trades show up correctly in
+    // the Dashboard's merged totals (and count toward Take Profit / Take
+    // Profit Reload via the master P&L gate, same as every other bot).
     bulktrade_evenodd: { label: 'Bulk Trade Bot (Even/Odd)', dot: 'hsl(var(--secondary))' },
-    bulktrade_overunder: { label: 'Bulk Trade Bot (Over/Under)', dot: 'hsl(var(--secondary))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -20937,10 +20936,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       return { trades: s.totalWins + s.totalLoss, win: s.totalWins, loss: s.totalLoss, profit: s.totalProfit };
     }
     // Bulk Trade is a standalone module, not a TitanEngine — its stats
-    // live directly on `.stats`, not `.state.stats`. Its Even/Odd and
-    // Over/Under tabs are two separate engine instances (bulktrade_evenodd
-    // / bulktrade_overunder), each with its own `.stats`/`.journal`.
-    if (botId === 'bulktrade_evenodd' || botId === 'bulktrade_overunder') {
+    // live directly on `.stats`, not `.state.stats`.
+    if (botId === 'bulktrade_evenodd') {
       const st = engine.stats || { won: 0, lost: 0, pnl: 0 };
       return { trades: st.won + st.lost, win: st.won, loss: st.lost, profit: st.pnl };
     }
@@ -20951,7 +20948,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function isBotActive(engine, botId) {
     if (!engine) return false;
     if (botId === 'differ' || botId === 'hotrepeat') return engine.state.isArmed || engine.state.isRunning;
-    if (botId === 'bulktrade_evenodd' || botId === 'bulktrade_overunder') return !!(engine.clusterActive || engine.running);
+    if (botId === 'bulktrade_evenodd') return !!(engine.clusterActive || engine.running);
     return engine.state.active || engine.state.isLocked;
   }
 
@@ -20960,7 +20957,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function getBotFlowStage(engine, botId) {
     const stage = { engaged: false, analysis: false, trading: false, result: null };
     if (!engine) return stage;
-    if (botId === 'bulktrade_evenodd' || botId === 'bulktrade_overunder') {
+    if (botId === 'bulktrade_evenodd') {
       stage.engaged = isBotActive(engine, botId);
       stage.trading = !!engine.clusterActive;
       stage.analysis = stage.engaged && !stage.trading;
@@ -21930,7 +21927,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // gate (a separate BOT_IDS list below) already counted its P&L toward
     // the take-profit/stop-loss total. Added here so the visible dashboard
     // totals/journal finally match what the gate was already enforcing.
-    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd', 'bulktrade_overunder'];
+    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -27471,14 +27468,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // no-op safely for ids with no matching tab element, so adding them
     // here is safe everywhere else BOT_IDS is used.
     'even_intel', 'matches_intel',
-    // Bulk Trade's Even/Odd and Over/Under tabs are now two fully
-    // independent BulkTradeEngine instances (see the Bulk Trade module),
-    // each with its own config, journal, stats and run/martingale state.
-    // Both need their own id here so ENGAGE ALL / TERMINATE ALL, the tab
-    // dot, and the Trade Journal totals actually reach them — previously
-    // there was no 'bulktrade' entry here at all, so pressing ENGAGE ALL
-    // never started or stopped Bulk Trade.
-    'bulktrade_evenodd', 'bulktrade_overunder'];
+    // Bulk Trade's Even/Odd tab is its own BulkTradeEngine instance (see
+    // the Bulk Trade module), with its own config, journal, stats and
+    // run/martingale state. It needs its own id here so ENGAGE ALL /
+    // TERMINATE ALL, the tab dot, and the Trade Journal totals actually
+    // reach it — previously there was no 'bulktrade' entry here at all,
+    // so pressing ENGAGE ALL never started or stopped Bulk Trade.
+    'bulktrade_evenodd'];
 
   // Differ's default cold-pick method (Echo) fires the instant it's armed
   // — that's the strategy, not a bug — but bundling it into a bulk
@@ -27509,16 +27505,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null, bulktrade_overunder: null };
+  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null };
   // Shared "is this bot currently engaged?" check for Master Control
   // (ENGAGE ALL / TERMINATE ALL) — each bot family speaks a different
-  // dialect of "on": Hot Repeat has isArmed/isRunning, the two Bulk Trade
-  // engines have running/clusterActive (they're not TitanEngine instances,
-  // so they have no .state at all), everything else is .state.active /
+  // dialect of "on": Hot Repeat has isArmed/isRunning, the Bulk Trade
+  // engine has running/clusterActive (it's not a TitanEngine instance,
+  // so it has no .state at all), everything else is .state.active /
   // .state.isLocked.
   function isMasterEngaged(eng, id) {
     if (id === 'hotrepeat') return eng.state.isArmed || eng.state.isRunning;
-    if (id === 'bulktrade_evenodd' || id === 'bulktrade_overunder') return !!(eng.running || eng.clusterActive);
+    if (id === 'bulktrade_evenodd') return !!(eng.running || eng.clusterActive);
     return eng.state.active || eng.state.isLocked;
   }
   // Exposed so the Dashboard's Master Control "Stake" popup (defined in
@@ -28182,7 +28178,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const s = eng.state;
       if (id === 'differ' || id === 'hotrepeat') {
         total += (s.totalProfit || 0);
-      } else if (id === 'bulktrade_evenodd' || id === 'bulktrade_overunder') {
+      } else if (id === 'bulktrade_evenodd') {
         total += (eng.stats && typeof eng.stats.pnl === 'number' ? eng.stats.pnl : 0);
       } else {
         total += (s.stats && typeof s.stats.profit === 'number' ? s.stats.profit : 0);
@@ -28225,6 +28221,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           eng.addLog && eng.addLog('engine', 'TERMINATE', 'Force terminated by master control');
           eng.emit && eng.emit();
         } catch(_) {}
+      } else if (id === 'bulktrade_evenodd') {
+        // Bulk Trade isn't a TitanEngine instance (no .state) — forceStopTitan
+        // would silently no-op on it. Stop it directly instead so the master
+        // TP/SL gate can actually halt it, same as every other bot.
+        try { if (eng.running) eng.stop(); eng.addLog && eng.addLog('info', 'Force terminated by master control'); } catch(_) {}
       } else {
         forceStopTitan(eng);
       }
@@ -28322,6 +28323,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         if (id === 'differ' || id === 'hotrepeat') {
           eng.dispatch && eng.dispatch({ type: 'RESET_PNL_ONLY' });
           if (id === 'hotrepeat') eng.state.consecutiveLosses = 0;
+        } else if (id === 'bulktrade_evenodd') {
+          // Bulk Trade isn't a TitanEngine instance — it has no .state, so
+          // the generic branch below would just create a dead `.state`
+          // object nothing ever reads, leaving its real stats/stake/
+          // martingale progression untouched. Reset its actual fields
+          // directly instead so Take Profit Reload really restarts it
+          // from base stake with a clean P&L, same as every other bot.
+          eng.stats = { stake: 0, payout: 0, runs: 0, lost: 0, won: 0, pnl: 0 };
+          eng.currentStake = eng.config.stake;
+          eng.martingaleStep = 0;
+          eng.recoveryMode = false;
+          eng.clusterActive = false;
+          eng._emit && eng._emit();
         } else {
           if (eng.cooldownTimer) { clearInterval(eng.cooldownTimer); eng.cooldownTimer = null; }
           eng.executionGuard = false;
@@ -28542,10 +28556,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
           }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
-        } else if (id === 'bulktrade_evenodd' || id === 'bulktrade_overunder') {
-          // Bulk Trade's two sub-engines aren't TitanEngine instances (no
-          // .state, no toggleEngine) — they expose a plain running flag
-          // and start()/stop(), so ENGAGE ALL / TERMINATE ALL just calls
+        } else if (id === 'bulktrade_evenodd') {
+          // Bulk Trade's engine isn't a TitanEngine instance (no .state,
+          // no toggleEngine) — it exposes a plain running flag and
+          // start()/stop(), so ENGAGE ALL / TERMINATE ALL just calls
           // those directly instead of the TitanEngine-shaped branch below.
           if (turnOn && !eng.running) eng.start();
           if (!turnOn && eng.running) eng.stop();
@@ -28712,7 +28726,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (id === 'differ') return ensureDifferEngine();
     if (id === 'hotrepeat') return ensureHotRepeatEngine();
     if (id === 'bulktrade_evenodd') return window.ensureBulkTradeEngine ? window.ensureBulkTradeEngine('evenodd') : null;
-    if (id === 'bulktrade_overunder') return window.ensureBulkTradeEngine ? window.ensureBulkTradeEngine('overunder') : null;
     return ensureTitanEngine(id);
   }
 
@@ -31617,27 +31630,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 //      subscribed to all 10 standard synthetic-index markets at once, so
 //      it can score every market continuously without needing any other
 //      bot's tab to be open.
-//   2. For whichever TRADE TYPE is selected (Even/Odd, Over/Under,
-//      Differs, Rise/Fall — same four families every other bot on this
-//      hub already trades), computes a signal per market: which side is
-//      currently favoured, a confidence %, a z-score (how many standard
-//      errors the observed digit/tick distribution sits from the 10%-per-
-//      digit / 50-50 baseline you'd expect from a fair generator), and a
-//      short-vs-long-window agreement % (MTF Agree) — conceptually the
-//      same short/long-window agreement idea used by Even Omega's own
-//      analyzeMultiTimeframe(), just generalized across all four trade
-//      families here instead of just Even/Odd.
+//   2. For Even/Odd — the only TRADE TYPE this bot runs — computes a
+//      signal per market: which side is currently favoured, a confidence
+//      %, a z-score (how many standard errors the observed digit
+//      distribution sits from the 50/50 baseline you'd expect from a
+//      fair generator), and a short-vs-long-window agreement % (MTF
+//      Agree) — conceptually the same short/long-window agreement idea
+//      used by Even Omega's own analyzeMultiTimeframe(), just written
+//      fresh here so this scanner isn't reaching into another mode's
+//      module-scoped helpers.
 //   3. Once a market clears the confidence bar, "Scan & Run Bulk Trade"
 //      (or the manual button) fires a whole CLUSTER of contracts at once
 //      — the same batched-burst mechanism the Differ bot's "Hot Repeat"-
 //      style executeBurst() already uses (see BenzEngine.executeBurst
-//      above), generalized to whichever contract_type/barrier the scan
-//      picked instead of always DIGITDIFF.
+//      above), generalized to whichever contract_type the scan picked
+//      instead of always DIGITDIFF.
 //   4. A cluster that nets a loss escalates the next cluster's stake by
-//      Martingale Multiplier (and, for Over/Under, swaps to Prediction
-//      After Loss) — recovers as usual, exactly like every other bot's
-//      martingale — then a net-win cluster drops straight back to the
-//      base Stake $ / Prediction Before Loss.
+//      Martingale Multiplier — recovers as usual, exactly like every
+//      other bot's martingale — then a net-win cluster drops straight
+//      back to the base Stake $.
 //
 // Trades over the SAME shared, already-authenticated window.HubTradingSocket
 // every other bot uses (see its big comment block above) — no separate
@@ -31726,19 +31737,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const longSide = longEven >= 0.5 ? 'DIGITEVEN' : 'DIGITODD';
     return { contractType, barrier: null, pHat, z, confidence: confidenceFromZ(z), mtfAgree: longSide === contractType ? 100 : 45, label: contractType === 'DIGITEVEN' ? 'Even' : 'Odd', n: short.length };
   }
-  function overUnderSignal(digits, barrier) {
-    const short = digits.slice(-25), long = digits.slice(-50);
-    if (short.length < 15) return null;
-    const b = Math.max(0, Math.min(9, parseInt(barrier, 10) || 0));
-    const shortOver = pct(short, (d) => d > b);
-    const longOver = long.length >= 15 ? pct(long, (d) => d > b) : shortOver;
-    const contractType = shortOver >= 0.5 ? 'DIGITOVER' : 'DIGITUNDER';
-    const pHat = contractType === 'DIGITOVER' ? shortOver : 1 - shortOver;
-    const p0 = Math.max(0.05, Math.min(0.95, contractType === 'DIGITOVER' ? (9 - b) / 10 : b / 10));
-    const z = zScore(pHat, p0, short.length);
-    const longSide = longOver >= 0.5 ? 'DIGITOVER' : 'DIGITUNDER';
-    return { contractType, barrier: b, pHat, z, confidence: confidenceFromZ(z), mtfAgree: longSide === contractType ? 100 : 45, label: `${contractType === 'DIGITOVER' ? 'Over' : 'Under'} ${b}`, n: short.length };
-  }
   function differsSignal(digits) {
     const recent = digits.slice(-40);
     if (recent.length < 15) return null;
@@ -31762,61 +31760,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const longSide = longUp >= 0.5 ? 'CALL' : 'PUT';
     return { contractType, barrier: null, pHat, z, confidence: confidenceFromZ(z), mtfAgree: longSide === contractType ? 100 : 45, label: contractType === 'CALL' ? 'Rise' : 'Fall', n: short.length - 1 };
   }
-  // ── Reversal Trigger Engine (Over/Under only) ──────────────────────
-  // Separate from the normal "confidence >= MIN_CONFIDENCE" auto-fire
-  // trigger. Two stages:
-  //   1. DOMINANCE — over the last `domLookback` ticks, what % actually
-  //      landed on the scanner's picked side (over/under of `barrier`)?
-  //      If that's >= `domThreshold`, the scanner's pick is "market
-  //      confirmed" rather than a fluke from a short window.
-  //   2. TRIGGER DIGIT — over the shorter `lookback` window, for every
-  //      digit close to the barrier (the "zone" — barrier ±2, since
-  //      those are the digits that most affect whether the dominant side
-  //      holds), look at every time that digit appeared and check
-  //      whether the very next tick landed on the OPPOSITE side of the
-  //      dominant pick (a "flip"). The digit with the highest flip rate
-  //      (min 1 sample) becomes the trigger: instead of firing the
-  //      instant confidence clears a fixed bar, this waits for that
-  //      specific digit to print, then fires — a data-driven "end of
-  //      streak" digit instead of a fixed one.
-  // This is plain frequency counting over real tick history, same
-  // epistemic status as the z-score scanner above — a heuristic, not a
-  // guarantee.
-  function computeReversalTrigger(digits, sideIsOver, barrier, lookback, domLookback, domThreshold) {
-    const domWindow = digits.slice(-domLookback);
-    if (domWindow.length < 10) return null;
-    const domHits = domWindow.filter((d) => (sideIsOver ? d > barrier : d <= barrier)).length;
-    const dominancePct = Math.round((domHits / domWindow.length) * 100);
-    const marketConfirmed = dominancePct >= domThreshold;
-
-    const revWindow = digits.slice(-(lookback + 1));
-    const zoneSet = new Set();
-    for (let off = -2; off <= 2; off++) { const z = barrier + off; if (z >= 0 && z <= 9) zoneSet.add(z); }
-    const zoneStats = Array.from(zoneSet).map((zd) => {
-      let samples = 0, flips = 0;
-      for (let i = 0; i < revWindow.length - 1; i++) {
-        if (revWindow[i] !== zd) continue;
-        samples++;
-        const nextIsOver = revWindow[i + 1] > barrier;
-        const flipped = sideIsOver ? !nextIsOver : nextIsOver;
-        if (flipped) flips++;
-      }
-      return { digit: zd, samples, flipPct: samples > 0 ? Math.round((flips / samples) * 100) : 0 };
-    }).sort((a, b) => (b.flipPct - a.flipPct) || (b.samples - a.samples) || (a.digit - b.digit));
-
-    const withSamples = zoneStats.filter((z) => z.samples > 0);
-    const picked = withSamples[0] || null;
-    const runnerUp = withSamples[1] || null;
-    const lastDigit = digits[digits.length - 1];
-    const armedThisTick = !!(picked && marketConfirmed && lastDigit === picked.digit);
-
-    return { dominancePct, marketConfirmed, domLookback, lookback, zoneStats, picked, runnerUp, armedThisTick };
-  }
-
   // ── Parity Streak Break Engine (Even/Odd only) ─────────────────────
-  // A deliberately different strategy from the Reversal Trigger Engine
-  // above — instead of per-digit flip rates against a barrier, this
-  // tracks how long runs of consecutive same-parity digits (all-even or
+  // Tracks how long runs of consecutive same-parity digits (all-even or
   // all-odd in a row) tend to last, then enters BETTING ON THE FLIP once
   // the live streak reaches a length that has historically broken most
   // often. E.g. if streaks of length 4 broke 70% of the time historically
@@ -31855,31 +31800,26 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
   function computeSignal(tradeType, tick, symbol, barrier) {
     if (tradeType === 'evenodd') return evenOddSignal(tick.getDigits(symbol));
-    if (tradeType === 'overunder') return overUnderSignal(tick.getDigits(symbol), barrier);
     if (tradeType === 'differs') return differsSignal(tick.getDigits(symbol));
     if (tradeType === 'risefall') return riseFallSignal(tick.getPrices(symbol));
     return null;
   }
 
   const MIN_CONFIDENCE = 65; // qualifying bar — matches the "suitable market found" threshold
-  // Bulk Trade's Even/Odd and Over/Under tabs are two fully independent
-  // engine instances now (see the UI module below) — each gets its own
-  // localStorage config key so their settings, stake, martingale ladder
-  // etc. never bleed into each other. CONFIG_KEY_LEGACY is the single key
-  // this used to be saved under before the split; a fresh per-type engine
-  // seeds itself from it once (best-effort) so an existing user's tuned
-  // settings aren't silently reset to defaults on first load after this
-  // update — see _loadConfig().
+  // Bulk Trade is a single Even/Odd engine instance now (Over/Under was
+  // removed) — kept keyed by trade type so an existing user's saved
+  // Even/Odd settings under the old per-type key still load unchanged.
+  // CONFIG_KEY_LEGACY is the single key this used to be saved under
+  // before the Even/Odd vs Over/Under split; a fresh engine seeds itself
+  // from it once (best-effort) so tuned settings aren't silently reset to
+  // defaults on first load after that update — see _loadConfig().
   const CONFIG_KEY_LEGACY = 'bulktrade_config';
   const configKeyFor = (tradeType) => 'bulktrade_config_' + tradeType;
 
   class BulkTradeEngine {
     constructor(fixedTradeType) {
-      // Each instance is now permanently locked to one trade type — no
-      // more switching evenodd/overunder in place on a shared engine.
-      // Falls back to 'overunder' (the original default) if constructed
-      // without one, so nothing breaks if this is ever called bare.
-      this.tradeType = (fixedTradeType === 'evenodd') ? 'evenodd' : 'overunder';
+      // Locked to Even/Odd — Over/Under has been removed from Bulk Trade.
+      this.tradeType = 'evenodd';
       this._configKey = configKeyFor(this.tradeType);
       this.tick = new BulkTickSocket();
       this.config = Object.assign({
@@ -31900,16 +31840,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // Once this many runs have completed, the bot stops itself. See
         // start()/stop() and _finalizeCluster().
         numberOfRuns: 10,
-        // Reversal Trigger Engine params — Over/Under only. This is the
-        // "wait for the trigger digit" entry path used whenever the bot is
-        // running and trade type is Over/Under (no separate enable toggle
-        // any more — starting the bot is what arms it).
-        reversalLookback: 25,
-        reversalDominanceLookback: 50, reversalDominanceThreshold: 55,
-        // Parity Streak Break Engine params — Even/Odd only. Deliberately a
-        // different heuristic (streak-length based) from the Reversal
-        // Trigger Engine's per-digit flip-rate approach. Armed automatically
-        // whenever the bot is running and trade type is Even/Odd.
+        // Parity Streak Break Engine params. A streak-length based
+        // heuristic: armed automatically whenever the bot is running.
         parityStreakLookback: 150, parityStreakThreshold: 60,
         // First-Tick Handling — same 'normal' / 'sacrifice' (Test Stake) /
         // 'skip' (Skip Tick) modes every other bot family uses. 'sacrifice'
@@ -31997,16 +31929,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const raw = localStorage.getItem(this._configKey);
         if (raw) return JSON.parse(raw);
         // Nothing saved yet under this trade type's own key — best-effort
-        // migration from the single pre-split config, but only into
-        // whichever type it was actually last used for (defaulting to
-        // 'overunder', the original hardcoded default) so Over/Under
-        // doesn't silently inherit settings that were really Even/Odd's,
-        // or vice versa.
+        // migration from the single pre-split config, but only if that
+        // legacy config was actually last used for Even/Odd, so this
+        // doesn't silently inherit settings that were really Over/Under's.
         const legacyRaw = localStorage.getItem(CONFIG_KEY_LEGACY);
         if (legacyRaw) {
           const legacy = JSON.parse(legacyRaw);
-          const legacyType = (legacy && legacy.tradeType === 'evenodd') ? 'evenodd' : 'overunder';
-          if (legacyType === this.tradeType) return legacy;
+          if (legacy && legacy.tradeType === 'evenodd') return legacy;
         }
         return {};
       } catch (e) { return {}; }
@@ -32021,9 +31950,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // Dashboard reads via getBotStats/getBotJournal/isBotActive) and
       // nudge the Dashboard to re-render if it's the active tab — exactly
       // how every Titan-class bot's own onUpdate hook already behaves.
-      // Even/Odd and Over/Under are separate ids now (bulktrade_evenodd /
-      // bulktrade_overunder) since they're separate engines with their
-      // own journal/stats — see BOT_META/BOT_IDS in the Dashboard module.
+      // Registered as 'bulktrade_evenodd' — see BOT_META/BOT_IDS in the
+      // Dashboard module, which is what makes its P&L count toward the
+      // master Take Profit / Take Profit Reload gate.
       if (window.__BotEngines) window.__BotEngines['bulktrade_' + this.tradeType] = this;
       if (window.__queueDashboardRender) window.__queueDashboardRender();
     }
@@ -32069,22 +31998,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // from the normal "Scan & Run Bulk Trade" confidence gate.
       this.reversalTrigger = null;
       this.parityStreak = null;
-      if (best && c.tradeType === 'overunder') {
-        const rt = computeReversalTrigger(
-          this.tick.getDigits(best.symbol), best.contractType === 'DIGITOVER', barrier,
-          Math.max(5, parseInt(c.reversalLookback, 10) || 25),
-          Math.max(10, parseInt(c.reversalDominanceLookback, 10) || 50),
-          Math.max(1, parseInt(c.reversalDominanceThreshold, 10) || 55)
-        );
-        this.reversalTrigger = rt ? { ...rt, symbol: best.symbol, side: best.contractType, barrier } : null;
-        // This IS the wait-for-trigger-digit entry path: only fires once the
-        // bot has been started (this.running), it isn't already mid-cluster,
-        // and its cooldown from the last cluster has elapsed.
-        if (this.running && rt && rt.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
-          this.addLog('info', `🔁 Trigger digit ${rt.picked.digit} printed (${rt.picked.flipPct}% flip · ${rt.picked.samples} smpl) — dominance ${rt.dominancePct}%. Firing.`);
-          this._enterEntry(best);
-        }
-      }
       if (best && c.tradeType === 'evenodd') {
         const ps = computeParityStreak(
           this.tick.getDigits(best.symbol),
@@ -32413,27 +32326,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // rendered markup actually changed.
   function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
-  // Even/Odd and Over/Under are two fully independent engines/tabs now
-  // (see BulkTradeEngine's fixedTradeType) — this tile grid is no longer
-  // a config toggle on a shared engine, it's the tab switcher between
-  // them. Differs and Rise/Fall were removed from Bulk Trade entirely per
-  // earlier explicit request, so there are still only these two tiles.
+  // Bulk Trade runs a single Even/Odd engine (Over/Under was removed).
   const TRADE_TYPES = [
     { id: 'evenodd', label: 'Even / Odd', sub: 'Even vs odd digit pressure' },
-    { id: 'overunder', label: 'Over / Under', sub: 'Over vs under barrier pressure' },
   ];
 
-  // Even/Odd and Over/Under are two fully independent BulkTradeEngine
-  // instances now (own config, journal, stats, martingale/run state) —
-  // see the class above. `activeSubTab` just decides which one the panel
-  // is currently *displaying*; both keep scanning/trading in the
-  // background regardless of which is on screen, exactly like every
-  // other bot in this hub.
-  const engines = { evenodd: null, overunder: null };
-  let activeSubTab = 'overunder';
+  // Bulk Trade's Even/Odd engine (own config, journal, stats,
+  // martingale/run state) — see the class above.
+  const engines = { evenodd: null };
+  let activeSubTab = 'evenodd';
   try {
     const saved = localStorage.getItem('bulktrade_active_subtab');
-    if (saved === 'evenodd' || saved === 'overunder') activeSubTab = saved;
+    if (saved === 'evenodd') activeSubTab = saved;
   } catch (e) {}
   let mounted = false;
   let refreshTimer = null;
@@ -32441,7 +32345,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   let rightTab = 'journal'; // 'journal' | 'log' — which tab the right column shows
 
   function ensureEngine(type) {
-    const t = (type === 'evenodd' || type === 'overunder') ? type : activeSubTab;
+    const t = (type === 'evenodd') ? type : activeSubTab;
     if (!engines[t]) {
       engines[t] = new BulkTradeEngine(t);
       // Register immediately (not just on the instance's first _emit(),
@@ -32547,7 +32451,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #${rootId} .hr-note { font-family:'DM Mono',monospace; font-size:9.5px; line-height:1.6; color:hsl(var(--muted-foreground)); padding:10px 12px; margin-top:10px; background:hsl(var(--bg)/0.4); border:1px solid hsl(var(--border)/0.3); border-radius:12px; }
       #${rootId} .hr-note b { color: hsl(var(--primary)); }
 
-      /* Side panel — dedicated tab switcher between Even/Odd and Over/Under */
+      /* Side panel — Even/Odd engine status tile */
       #${rootId} .bt-sidepanel {
         width:168px; flex-shrink:0; display:flex; flex-direction:column; gap:8px;
         padding:12px 8px; border-right:1px solid hsl(var(--border)/0.4);
@@ -32640,7 +32544,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       }
       #${rootId} .bt-right-tab:hover:not(.active) { border-color:hsl(var(--border-bright)); }
 
-      /* Advanced entry blocks (Reversal Trigger / Parity Streak Break) */
+      /* Advanced entry block (Parity Streak Break) */
       #${rootId} .bt-adv-card {
         border:1px solid hsl(var(--accent)/0.3); background:linear-gradient(150deg,hsl(var(--accent)/0.08),hsl(var(--bg)/0.6));
       }
@@ -32741,11 +32645,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   function renderLeft(c, eng) {
-    const barrierFields = c.tradeType === 'overunder' ? `
-      <div class="cp-input-row">
-        <div class="cp-input-group"><span class="cp-input-label">Pred. Before Loss</span><select class="cp-input" id="bt-predbefore">${[0,1,2,3,4,5,6,7,8,9].map((d) => `<option value="${d}" ${d === c.predictionBeforeLoss ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
-        <div class="cp-input-group"><span class="cp-input-label">Pred. After Loss</span><select class="cp-input" id="bt-predafter">${[0,1,2,3,4,5,6,7,8,9].map((d) => `<option value="${d}" ${d === c.predictionAfterLoss ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
-      </div>` : '';
     return `
       <div class="cp-card" style="animation:bt-in .35s ease both .05s">
         <div class="cp-section-label">SCAN CONFIG</div>
@@ -32753,7 +32652,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="cp-input-group"><span class="cp-input-label">Stake ($)</span><input class="cp-input" type="number" step="0.01" min="0.35" id="bt-stake" value="${c.stake}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Martingale ×</span><input class="cp-input" type="number" step="0.1" min="1" id="bt-mult" value="${c.martingaleMultiplier}"></div>
         </div>
-        ${barrierFields}
         <div class="cp-input-row" style="margin-bottom:0">
           <div class="cp-input-group"><span class="cp-input-label">Bulk Contracts</span><select class="cp-input" id="bt-bulkn">${[5,10,15,20,25,30].map((n) => `<option value="${n}" ${n === c.bulkContracts ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
           ${!c.multiMarketScan
@@ -32815,36 +32713,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             : 'Every run fires the cluster normally from the entry tick — no probe or skip.'}
         </div>
       </div>
-      ${c.tradeType === 'overunder' ? `
-      <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .14s">
-        <div class="cp-section-label">REVERSAL TRIGGER ENGINE</div>
-        <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:8px">
-          This is the trigger the bot waits for on Over/Under. Confirms the scanner's pick is dominant, then fires the moment the digit that historically flips the outcome most actually prints.
-        </div>
-        <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Reversal Lookback</span><input class="cp-input" type="number" min="5" step="1" id="bt-revlookback" value="${c.reversalLookback}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Dominance Lookback</span><input class="cp-input" type="number" min="10" step="1" id="bt-domlookback" value="${c.reversalDominanceLookback}"></div>
-        </div>
-        <div class="cp-input-row" style="margin-bottom:0">
-          <div class="cp-input-group"><span class="cp-input-label">Dominance Threshold %</span><input class="cp-input" type="number" min="1" max="99" step="1" id="bt-domthreshold" value="${c.reversalDominanceThreshold}"></div>
-        </div>
-      </div>` : ''}
-      ${c.tradeType === 'evenodd' ? `
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .14s">
         <div class="cp-section-label">PARITY STREAK BREAK ENGINE</div>
         <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:8px">
-          This is the trigger the bot waits for on Even/Odd. Tracks how long same-parity streaks usually run, then fires the flip once the live streak reaches a length that has historically broken most often.
+          This is the trigger the bot waits for. Tracks how long same-parity streaks usually run, then fires the flip once the live streak reaches a length that has historically broken most often.
         </div>
         <div class="cp-input-row" style="margin-bottom:0">
           <div class="cp-input-group"><span class="cp-input-label">Streak Lookback (ticks)</span><input class="cp-input" type="number" min="20" step="5" id="bt-pslookback" value="${c.parityStreakLookback}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Break Threshold %</span><input class="cp-input" type="number" min="1" max="99" step="1" id="bt-psthreshold" value="${c.parityStreakThreshold}"></div>
         </div>
-      </div>` : ''}
+      </div>
       <button type="button" class="cp-engage-btn ${eng.running || eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
         ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : eng.running ? '■ STOP BOT' : '▶ START BOT'}
       </button>
       <div class="hr-note">
-        <b>How it works:</b> set Stake, Martingale ×, Max Martingale Steps and Number Of Runs above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the trigger digit for whichever trade type is selected, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. It then scans again, waits for the next trigger, and fires the next run. Once Number Of Runs is reached, the bot stops itself automatically.
+        <b>How it works:</b> set Stake, Martingale ×, Max Martingale Steps and Number Of Runs above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the parity streak trigger, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. It then scans again, waits for the next trigger, and fires the next run. Once Number Of Runs is reached, the bot stops itself automatically.
       </div>`;
   }
 
@@ -32852,9 +32735,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // grid — same computeSignal() the engine's own _scan() uses, just not
   // written back into engine state (that stays owned by _scan()'s 2s tick).
   function renderScanGrid(c, eng) {
-    const barrier = eng.recoveryMode ? c.predictionAfterLoss : c.predictionBeforeLoss;
     const rows = MARKETS.map((sym) => {
-      const sig = computeSignal(c.tradeType, eng.tick, sym, barrier);
+      const sig = computeSignal(c.tradeType, eng.tick, sym, null);
       const conf = sig ? sig.confidence : 0;
       const qual = !!sig && conf >= MIN_CONFIDENCE;
       const isBest = !!(eng.bestSignal && eng.bestSignal.symbol === sym);
@@ -32871,59 +32753,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>`;
   }
 
-  // ── Reversal Trigger Engine block — shown after the market scan when
-  // the trade type is Over/Under and the engine is enabled. Mirrors the
-  // engine's own computeReversalTrigger() output 1:1, nothing invented
-  // here — every number on screen is read straight off eng.reversalTrigger.
-  function renderReversalBlock(c, eng) {
-    if (c.tradeType !== 'overunder') return '';
-    const rt = eng.reversalTrigger;
-    return `
-      <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .08s">
-        <div class="cp-section-label" style="justify-content:space-between">
-          <span>REVERSAL TRIGGER ENGINE</span>
-          <span class="bt-adv-status"><span class="bt-adv-dot ${eng.running ? 'on' : 'off'}"></span>${eng.running ? 'WAITING FOR TRIGGER' : 'BOT STOPPED'}</span>
-        </div>
-        <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
-          Separate from the normal trigger. Reads recent history: confirms the scanner's market pick is actually dominant, then ends the entry streak on whichever digit has historically flipped the outcome most — instead of a fixed end-digit.
-        </div>
-        ${!rt ? `<div style="text-align:center;padding:14px;opacity:0.5;font-size:10.5px">Not enough ticks yet — give it a few seconds.</div>` : `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-          <div class="rf-ind-card" style="text-align:left;padding:8px 10px">
-            <div class="rf-ind-label" style="margin:0 0 3px">DOMINANCE · ${rt.domLookback}T</div>
-            <div class="rf-ind-val" style="font-size:17px">${rt.dominancePct}%</div>
-            <div style="font-size:8px;margin-top:2px;color:${rt.marketConfirmed ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${rt.marketConfirmed ? '✓ market confirmed' : '✗ not confirmed'}</div>
-          </div>
-          <div class="rf-ind-card" style="text-align:left;padding:8px 10px">
-            <div class="rf-ind-label" style="margin:0 0 3px">TRIGGER DIGIT · ${rt.lookback}T</div>
-            <div class="rf-ind-val" style="font-size:17px">${rt.picked ? rt.picked.digit : '—'}</div>
-            <div style="font-size:8px;margin-top:2px;color:hsl(var(--muted-foreground))">${rt.picked ? `${rt.picked.flipPct}% flip · ${rt.picked.samples} smpl` : 'no samples yet'}</div>
-            ${rt.runnerUp ? `<div style="font-size:7.5px;margin-top:1px;color:hsl(var(--muted-foreground)/0.7)">Alt: digit ${rt.runnerUp.digit} → ${rt.runnerUp.flipPct}%/${rt.runnerUp.samples} smpl</div>` : ''}
-          </div>
-        </div>
-        <div class="cp-section-label" style="font-size:7.5px">ZONE DIGITS RANKED BY FLIP RATE</div>
-        <div>
-          ${rt.zoneStats.map((z) => {
-            const isPicked = rt.picked && z.digit === rt.picked.digit;
-            const isWarn = z.samples > 0 && z.samples < 2;
-            return `<div class="bt-zone-row ${isPicked ? 'picked' : ''} ${isWarn ? 'warn' : ''}">
-              <div class="bt-zone-digit">${z.digit}</div>
-              <div class="bt-zone-bar"><div class="bt-zone-fill" style="width:${z.flipPct}%"></div></div>
-              <div class="bt-zone-pct">${z.samples > 0 ? z.flipPct + '%' : '—'}</div>
-              <div class="bt-zone-samples">${z.samples} smpl${isWarn ? ' ⚠' : ''}</div>
-              ${isPicked ? `<span style="font-size:8px;color:hsl(var(--win));font-weight:800;flex-shrink:0">◀ PICKED</span>` : ''}
-            </div>`;
-          }).join('')}
-        </div>`}
-      </div>`;
-  }
-
-  // ── Parity Streak Break Engine block — shown after the market scan
-  // when the trade type is Even/Odd and the engine is enabled. Distinct
-  // math from the Reversal Trigger Engine above (streak-length break
-  // probability rather than per-digit flip rate against a barrier).
+  // ── Parity Streak Break Engine block — shown after the market scan.
   function renderParityStreakBlock(c, eng) {
-    if (c.tradeType !== 'evenodd') return '';
     const ps = eng.parityStreak;
     return `
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .08s">
@@ -32932,7 +32763,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <span class="bt-adv-status"><span class="bt-adv-dot ${eng.running ? 'on' : 'off'}"></span>${eng.running ? 'WAITING FOR TRIGGER' : 'BOT STOPPED'}</span>
         </div>
         <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
-          A different strategy from the Reversal Trigger Engine — tracks how long runs of consecutive same-parity digits usually last, then bets on the flip once the live streak reaches a length that has historically broken most often.
+          Tracks how long runs of consecutive same-parity digits usually last, then bets on the flip once the live streak reaches a length that has historically broken most often.
         </div>
         ${!ps ? `<div style="text-align:center;padding:14px;opacity:0.5;font-size:10.5px">Not enough ticks yet — give it a few seconds.</div>` : `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
@@ -32983,7 +32814,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
       ${c.multiMarketScan ? renderScanGrid(c, eng) : ''}
-      ${renderReversalBlock(c, eng)}
       ${renderParityStreakBlock(c, eng)}
       <div class="cp-card" style="animation:bt-in .35s ease both .1s">
         <div class="cp-section-label">SESSION STATS</div>
@@ -33103,10 +32933,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     });
     const stakeEl = el('bt-stake', root);
     if (stakeEl && !stakeEl._bound) { stakeEl._bound = true; stakeEl.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) { eng.setConfig({ stake: v }); if (!eng.recoveryMode) eng.currentStake = v; } }; }
-    const predBefore = el('bt-predbefore', root);
-    if (predBefore && !predBefore._bound) { predBefore._bound = true; predBefore.onchange = (e) => eng.setConfig({ predictionBeforeLoss: parseInt(e.target.value, 10) }); }
-    const predAfter = el('bt-predafter', root);
-    if (predAfter && !predAfter._bound) { predAfter._bound = true; predAfter.onchange = (e) => eng.setConfig({ predictionAfterLoss: parseInt(e.target.value, 10) }); }
     const multEl = el('bt-mult', root);
     if (multEl && !multEl._bound) { multEl._bound = true; multEl.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 1) eng.setConfig({ martingaleMultiplier: v }); }; }
     const bulkNEl = el('bt-bulkn', root);
@@ -33147,14 +32973,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       ftStakeEl.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) eng.setConfig({ firstTickStake: Math.max(0.01, v) }); };
     }
 
-    // ── Reversal Trigger Engine (Over/Under) ────────────────────────
-    const revLookbackEl = el('bt-revlookback', root);
-    if (revLookbackEl && !revLookbackEl._bound) { revLookbackEl._bound = true; revLookbackEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 5) eng.setConfig({ reversalLookback: v }); }; }
-    const domLookbackEl = el('bt-domlookback', root);
-    if (domLookbackEl && !domLookbackEl._bound) { domLookbackEl._bound = true; domLookbackEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 10) eng.setConfig({ reversalDominanceLookback: v }); }; }
-    const domThresholdEl = el('bt-domthreshold', root);
-    if (domThresholdEl && !domThresholdEl._bound) { domThresholdEl._bound = true; domThresholdEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 1 && v <= 99) eng.setConfig({ reversalDominanceThreshold: v }); }; }
-
     // ── Parity Streak Break Engine (Even/Odd) ───────────────────────
     const psLookbackEl = el('bt-pslookback', root);
     if (psLookbackEl && !psLookbackEl._bound) { psLookbackEl._bound = true; psLookbackEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 20) eng.setConfig({ parityStreakLookback: v }); }; }
@@ -33163,12 +32981,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   function activate() {
-    // Instantiate BOTH sub-engines up front (not just whichever tab is
-    // currently showing) so the one you're not looking at still starts
-    // scanning/trading in the background the moment Bulk Trade is opened
-    // — same "independent, always-on" convention every other bot in this
-    // hub already follows.
-    ['evenodd', 'overunder'].forEach((t) => {
+    // Instantiate the engine up front so it starts scanning/trading in
+    // the background the moment Bulk Trade is opened — same
+    // "independent, always-on" convention every other bot in this hub
+    // already follows.
+    ['evenodd'].forEach((t) => {
       const e = ensureEngine(t);
       e._onChange = () => { if (mounted) render(); };
     });
