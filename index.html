@@ -31798,7 +31798,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     return { lookback, currentParity, currentLength: liveLen, breakProb, distribution, pickedRow: row, armedThisTick };
   }
 
-  function computeSignal(tradeType, tick, symbol, barrier) {
+  function computeSignal(tradeType, tick, symbol) {
     if (tradeType === 'evenodd') return evenOddSignal(tick.getDigits(symbol));
     if (tradeType === 'differs') return differsSignal(tick.getDigits(symbol));
     if (tradeType === 'risefall') return riseFallSignal(tick.getPrices(symbol));
@@ -31823,7 +31823,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this._configKey = configKeyFor(this.tradeType);
       this.tick = new BulkTickSocket();
       this.config = Object.assign({
-        tradeType: this.tradeType, stake: 5, predictionBeforeLoss: 3, predictionAfterLoss: 4,
+        tradeType: this.tradeType, stake: 5,
         martingaleMultiplier: 2.2, multiMarketScan: true,
         selectedMarket: '1HZ25V', bulkContracts: 15,
         // Step-stop — the martingale ladder no longer escalates forever.
@@ -31877,7 +31877,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
       // Runtime (not persisted) — this cluster's live escalation state.
       this.currentStake = this.config.stake;
-      this.recoveryMode = false; // true = last cluster lost, next fires at the escalated stake/"after loss" barrier
+      this.recoveryMode = false; // true = last cluster lost, next fires at the escalated stake
       this.clusterActive = false;
       this._pendingBuyReqIds = new Set();
       this.ownContractIds = new Set();
@@ -31981,10 +31981,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         return;
       }
       const c = this.config;
-      const barrier = this.recoveryMode ? c.predictionAfterLoss : c.predictionBeforeLoss;
       let best = null;
       this._candidateMarkets().forEach((symbol) => {
-        const sig = computeSignal(c.tradeType, this.tick, symbol, barrier);
+        const sig = computeSignal(c.tradeType, this.tick, symbol);
         if (!sig) return;
         const candidate = { symbol, ...sig };
         if (!best || candidate.confidence > best.confidence) best = candidate;
