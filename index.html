@@ -31767,7 +31767,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // often. E.g. if streaks of length 4 broke 70% of the time historically
   // whenever they got that long, and the market is currently 4 ticks into
   // an even streak, this fires an ODD entry anticipating the break.
-  function computeParityStreak(digits, lookback, thresholdPct) {
+  function computeParityStreak(digits, lookback, thresholdPct, minSamples) {
     const win = digits.slice(-lookback);
     if (win.length < 20) return null;
     const lengths = [];
@@ -31793,9 +31793,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const currentParity = digits[digits.length - 1] % 2 === 0 ? 'even' : 'odd';
     const row = distribution.find((d) => d.length === Math.min(liveLen, MAX_TRACK)) || distribution[distribution.length - 1];
     const breakProb = row ? row.breakPct : 0;
-    const armedThisTick = !!(row && row.reached >= 3 && breakProb >= thresholdPct);
+    // minSamples (how many times this streak length has actually been
+    // observed in the lookback window) defaults to 3 for back-compat, but
+    // that's a thin bar — a streak length seen only 3 times can show a
+    // breakPct of 100% or 0% purely from noise. Callers can pass a higher
+    // floor (see BulkTradeEngine's parityStreakMinSamples) to only arm on
+    // streak lengths with sturdier statistical support.
+    const effMinSamples = Math.max(1, parseInt(minSamples, 10) || 3);
+    const armedThisTick = !!(row && row.reached >= effMinSamples && breakProb >= thresholdPct);
 
-    return { lookback, currentParity, currentLength: liveLen, breakProb, distribution, pickedRow: row, armedThisTick };
+    return { lookback, currentParity, currentLength: liveLen, breakProb, distribution, pickedRow: row, armedThisTick, samples: row ? row.reached : 0 };
   }
 
   function computeSignal(tradeType, tick, symbol) {
@@ -31843,6 +31850,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // Parity Streak Break Engine params. A streak-length based
         // heuristic: armed automatically whenever the bot is running.
         parityStreakLookback: 150, parityStreakThreshold: 60,
+        // Minimum number of times this exact streak length must have been
+        // observed within the lookback window before its breakPct is
+        // trusted enough to arm the trigger. The old hardcoded floor of 3
+        // let a streak length seen only 3 times (e.g. 3-for-3 breaks) arm
+        // the bot off what's really just noise; 5 asks for a bit more
+        // evidence before betting real money on the read.
+        parityStreakMinSamples: 5,
         // First-Tick Handling — same 'normal' / 'sacrifice' (Test Stake) /
         // 'skip' (Skip Tick) modes every other bot family uses. 'sacrifice'
         // fires one small probe contract at firstTickStake on the entry
@@ -31929,13 +31943,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const raw = localStorage.getItem(this._configKey);
         if (raw) return JSON.parse(raw);
         // Nothing saved yet under this trade type's own key — best-effort
-        // migration from the single pre-split config, but only if that
-        // legacy config was actually last used for Even/Odd, so this
-        // doesn't silently inherit settings that were really Over/Under's.
+        // migration from the single pre-split config. Migrate unconditionally:
+        // stake, martingaleMultiplier, maxMartingaleSteps, numberOfRuns,
+        // parityStreakLookback/Threshold, and firstTickMode/Stake are all
+        // shared tuning knobs that applied no matter which tradeType the
+        // legacy config last happened to be saved under — gating this on
+        // tradeType === 'evenodd' meant anyone who last saved on Over/Under
+        // silently lost all their tuned settings back to hardcoded defaults.
+        // The (harmless, now-unused) Over/Under-only fields like
+        // predictionBeforeLoss/AfterLoss just come along for the ride.
         const legacyRaw = localStorage.getItem(CONFIG_KEY_LEGACY);
         if (legacyRaw) {
           const legacy = JSON.parse(legacyRaw);
-          if (legacy && legacy.tradeType === 'evenodd') return legacy;
+          if (legacy) return legacy;
         }
         return {};
       } catch (e) { return {}; }
@@ -31997,20 +32017,43 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // from the normal "Scan & Run Bulk Trade" confidence gate.
       this.reversalTrigger = null;
       this.parityStreak = null;
-      if (best && c.tradeType === 'evenodd') {
-        const ps = computeParityStreak(
-          this.tick.getDigits(best.symbol),
-          Math.max(20, parseInt(c.parityStreakLookback, 10) || 150),
-          Math.max(1, parseInt(c.parityStreakThreshold, 10) || 60)
-        );
-        this.parityStreak = ps ? { ...ps, symbol: best.symbol } : null;
-        if (this.running && ps && ps.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
-          const flipType = ps.currentParity === 'even' ? 'DIGITODD' : 'DIGITEVEN';
+      if (c.tradeType === 'evenodd') {
+        // Scan every candidate market for its OWN streak-break setup rather
+        // than only ever checking the one market that happened to win the
+        // unrelated short/long-window dominance race above (evenOddSignal's
+        // "best" is a trend-following pick — a totally different heuristic
+        // from this mean-reversion one, so the two can legitimately point
+        // at different markets, or even opposite directions, on any given
+        // scan). Picking the strongest armed streak anywhere on the board
+        // means this trigger actually fires on the best mean-reversion
+        // setup available instead of being hostage to trend-scoring.
+        const lookback = Math.max(20, parseInt(c.parityStreakLookback, 10) || 150);
+        const thresholdPct = Math.max(1, parseInt(c.parityStreakThreshold, 10) || 60);
+        const minSamples = Math.max(1, parseInt(c.parityStreakMinSamples, 10) || 3);
+        let bestPs = null;
+        this._candidateMarkets().forEach((symbol) => {
+          const ps = computeParityStreak(this.tick.getDigits(symbol), lookback, thresholdPct, minSamples);
+          if (!ps) return;
+          const candidate = { ...ps, symbol };
+          // Rank candidates for display/firing: armed beats unarmed; among
+          // armed (or among all, if none are armed yet) prefer the higher
+          // breakProb, then more samples backing that read.
+          if (!bestPs
+            || (candidate.armedThisTick && !bestPs.armedThisTick)
+            || (candidate.armedThisTick === bestPs.armedThisTick
+                && (candidate.breakProb > bestPs.breakProb
+                    || (candidate.breakProb === bestPs.breakProb && candidate.samples > bestPs.samples)))) {
+            bestPs = candidate;
+          }
+        });
+        this.parityStreak = bestPs;
+        if (this.running && bestPs && bestPs.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
+          const flipType = bestPs.currentParity === 'even' ? 'DIGITODD' : 'DIGITEVEN';
           const flipSignal = {
-            symbol: best.symbol, contractType: flipType, barrier: null,
-            confidence: ps.breakProb, label: flipType === 'DIGITEVEN' ? 'Even (streak break)' : 'Odd (streak break)',
+            symbol: bestPs.symbol, contractType: flipType, barrier: null,
+            confidence: bestPs.breakProb, label: flipType === 'DIGITEVEN' ? 'Even (streak break)' : 'Odd (streak break)',
           };
-          this.addLog('info', `🎯 Streak break trigger fired — ${ps.currentLength}-tick ${ps.currentParity} streak, ${ps.breakProb}% historical break rate → betting ${flipSignal.label}.`);
+          this.addLog('info', `🎯 Streak break trigger fired on ${marketName(bestPs.symbol)} — ${bestPs.currentLength}-tick ${bestPs.currentParity} streak, ${bestPs.breakProb}% historical break rate (${bestPs.samples} samples) → betting ${flipSignal.label}.`);
           this._enterEntry(flipSignal);
         }
       }
@@ -32715,11 +32758,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .14s">
         <div class="cp-section-label">PARITY STREAK BREAK ENGINE</div>
         <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:8px">
-          This is the trigger the bot waits for. Tracks how long same-parity streaks usually run, then fires the flip once the live streak reaches a length that has historically broken most often.
+          This is the trigger the bot waits for. Tracks how long same-parity streaks usually run, then fires the flip once the live streak reaches a length that has historically broken most often — scanning every market on the board for whichever one has the strongest streak-break setup right now, then firing on that one. Min Samples filters out streak lengths that haven't happened often enough in the lookback window to trust yet.
         </div>
         <div class="cp-input-row" style="margin-bottom:0">
           <div class="cp-input-group"><span class="cp-input-label">Streak Lookback (ticks)</span><input class="cp-input" type="number" min="20" step="5" id="bt-pslookback" value="${c.parityStreakLookback}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Break Threshold %</span><input class="cp-input" type="number" min="1" max="99" step="1" id="bt-psthreshold" value="${c.parityStreakThreshold}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Min Samples</span><input class="cp-input" type="number" min="1" max="50" step="1" id="bt-psminsamples" value="${c.parityStreakMinSamples ?? 5}"></div>
         </div>
       </div>
       <button type="button" class="cp-engage-btn ${eng.running || eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
@@ -32977,6 +33021,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (psLookbackEl && !psLookbackEl._bound) { psLookbackEl._bound = true; psLookbackEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 20) eng.setConfig({ parityStreakLookback: v }); }; }
     const psThresholdEl = el('bt-psthreshold', root);
     if (psThresholdEl && !psThresholdEl._bound) { psThresholdEl._bound = true; psThresholdEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 1 && v <= 99) eng.setConfig({ parityStreakThreshold: v }); }; }
+    const psMinSamplesEl = el('bt-psminsamples', root);
+    if (psMinSamplesEl && !psMinSamplesEl._bound) { psMinSamplesEl._bound = true; psMinSamplesEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 1 && v <= 50) eng.setConfig({ parityStreakMinSamples: v }); }; }
   }
 
   function activate() {
