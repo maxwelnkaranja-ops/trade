@@ -31847,6 +31847,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // Once this many runs have completed, the bot stops itself. See
         // start()/stop() and _finalizeCluster().
         numberOfRuns: 10,
+        // Rest Cooldown — how long (seconds) the bot sits out after either
+        // (a) a run gives up via step-stop (max martingale steps hit), or
+        // (b) a full session's worth of runs (numberOfRuns) completes.
+        // A run that finishes on a WIN does not trigger this — it just
+        // keeps going straight into the next run (only the brief 5s
+        // anti-spam gap in cooldownUntil applies there). Defaults to 60s.
+        restCooldownSeconds: 60,
+        // Session count — 0 means unlimited sessions (keeps auto-restarting
+        // forever). A SESSION is one full pass through numberOfRuns runs.
+        // Once a session's run target is hit, the bot rests for
+        // restCooldownSeconds, then — if more sessions remain — resets
+        // runsCompleted to 0 and starts the next session automatically.
+        // Once sessionCount sessions have completed, the bot stops itself
+        // for good (same as hitting numberOfRuns used to do on its own).
+        sessionCount: 2,
         // Parity Streak Break Engine params. A streak-length based
         // heuristic: armed automatically whenever the bot is running.
         parityStreakLookback: 150, parityStreakThreshold: 60,
@@ -31915,6 +31930,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // whenever a run finishes (win or step-stop). Compared against
       // config.maxMartingaleSteps to decide when to give up escalating.
       this.martingaleStep = 0;
+      // How many full SESSIONS have completed since the page loaded (or
+      // since the last Reset Runs). A session finishes when runsCompleted
+      // hits config.numberOfRuns. Compared against config.sessionCount to
+      // decide whether to auto-start another session after the rest
+      // cooldown, or stop the automation for good. See _finalizeCluster()
+      // and _beginRestCooldown().
+      this.sessionsCompleted = 0;
+      // Rest Cooldown runtime state — separate from the brief 5s
+      // anti-spam `cooldownUntil` gate above. isCooldown blocks new
+      // entries the same way, but is long-lived, user-visible (countdown
+      // + reason in the UI) and only entered on step-stop or session
+      // completion — see _beginRestCooldown()/_finalizeCluster().
+      this.isCooldown = false;
+      this.cooldownRemaining = 0;
+      this.cooldownReason = '';
+      this._restCooldownTimer = null;
       // Whether the bot is currently armed to auto-fire on the next
       // qualifying trigger. Deliberately NOT persisted to localStorage —
       // reloading the page should never silently resume live trading.
@@ -32047,7 +32078,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           }
         });
         this.parityStreak = bestPs;
-        if (this.running && bestPs && bestPs.armedThisTick && !this.clusterActive && Date.now() >= this.cooldownUntil) {
+        if (this.running && bestPs && bestPs.armedThisTick && !this.clusterActive && !this.isCooldown && Date.now() >= this.cooldownUntil) {
           const flipType = bestPs.currentParity === 'even' ? 'DIGITODD' : 'DIGITEVEN';
           const flipSignal = {
             symbol: bestPs.symbol, contractType: flipType, barrier: null,
@@ -32133,13 +32164,59 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.running = true;
       const n = parseInt(this.config.numberOfRuns, 10) || 0;
       const steps = Math.max(1, parseInt(this.config.maxMartingaleSteps, 10) || 3);
-      this.addLog('info', `▶ Bot started — ${n > 0 ? `target ${n} run${n === 1 ? '' : 's'}` : 'unlimited runs'}, step-stop after ${steps} martingale step${steps === 1 ? '' : 's'}. Scanning and waiting for a trigger…`);
+      const sessions = Math.max(0, parseInt(this.config.sessionCount, 10) || 0);
+      const cd = Math.max(1, parseInt(this.config.restCooldownSeconds, 10) || 60);
+      this.addLog('info', `▶ Bot started — ${n > 0 ? `target ${n} run${n === 1 ? '' : 's'}` : 'unlimited runs'} per session, step-stop after ${steps} martingale step${steps === 1 ? '' : 's'}, ${sessions > 0 ? `${sessions} session${sessions === 1 ? '' : 's'}` : 'unlimited sessions'} with a ${cd}s rest cooldown between them. Scanning and waiting for a trigger…`);
       this._emit();
     }
     stop() {
-      if (!this.running) return;
+      // Hard stop — also cancels any rest cooldown in progress instead of
+      // letting it silently re-arm the bot once the countdown finishes.
+      if (this._restCooldownTimer) { clearInterval(this._restCooldownTimer); this._restCooldownTimer = null; }
+      this.isCooldown = false;
+      this.cooldownRemaining = 0;
+      this.cooldownReason = '';
+      if (!this.running) { this._emit(); return; }
       this.running = false;
       this.addLog('info', '■ Bot stopped.');
+      this._emit();
+    }
+
+    // ── Rest Cooldown ────────────────────────────────────────────────────
+    // A longer, user-visible rest period — distinct from the brief 5s
+    // anti-spam `cooldownUntil` gate that already applies after every
+    // cluster. Only entered on the two events the person asked for: a run
+    // giving up via step-stop, or a full session's worth of runs
+    // completing. `opts.newSession` decides what happens when the
+    // countdown reaches 0: start a fresh session (reset run/step counters)
+    // or just resume scanning for the next run in the same session.
+    _beginRestCooldown(reason, opts = {}) {
+      const secs = Math.max(1, parseInt(this.config.restCooldownSeconds, 10) || 60);
+      this.isCooldown = true;
+      this.cooldownRemaining = secs;
+      this.cooldownReason = reason;
+      this.addLog('info', `😴 Resting for ${secs}s — ${reason}.`);
+      if (this._restCooldownTimer) clearInterval(this._restCooldownTimer);
+      this._restCooldownTimer = setInterval(() => {
+        this.cooldownRemaining -= 1;
+        if (this.cooldownRemaining <= 0) {
+          clearInterval(this._restCooldownTimer);
+          this._restCooldownTimer = null;
+          this.isCooldown = false;
+          this.cooldownReason = '';
+          if (opts.newSession && this.running) {
+            this.runsCompleted = 0;
+            this.martingaleStep = 0;
+            this.currentStake = this.config.stake;
+            this.recoveryMode = false;
+            const sessions = Math.max(0, parseInt(this.config.sessionCount, 10) || 0);
+            this.addLog('info', `▶ Cooldown ended — starting session ${this.sessionsCompleted + 1}${sessions > 0 ? '/' + sessions : ''}. Scanning and waiting for a trigger…`);
+          } else if (this.running) {
+            this.addLog('info', '▶ Cooldown ended — resuming scan for the next run.');
+          }
+        }
+        this._emit();
+      }, 1000);
       this._emit();
     }
 
@@ -32190,6 +32267,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // is still escalating does NOT end the run and does NOT increment
       // runsCompleted; it's the same run continuing.
       let runFinished = false;
+      let runFinishedViaStepStop = false;
       const maxSteps = Math.max(1, parseInt(this.config.maxMartingaleSteps, 10) || 3);
       if (netWin) {
         this.addLog('win', `🎯 Cluster WON — ${this._clusterWon}/${this._clusterWon + this._clusterLost} contracts, net ${this._clusterProfit >= 0 ? '+' : ''}${this._clusterProfit.toFixed(2)}. Run complete — back to base stake ($${this.config.stake.toFixed(2)}).`);
@@ -32208,6 +32286,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           this.recoveryMode = false;
           this.martingaleStep = 0;
           runFinished = true;
+          runFinishedViaStepStop = true;
         } else {
           this.addLog('loss', `⛔ Cluster LOST — ${this._clusterWon}/${this._clusterWon + this._clusterLost} contracts, net ${this._clusterProfit.toFixed(2)}. Step ${this.martingaleStep}/${maxSteps} — next cluster at $${(this.currentStake * this.config.martingaleMultiplier).toFixed(2)}, prediction switches to After-Loss.`);
           this.currentStake = +(this.currentStake * this.config.martingaleMultiplier).toFixed(2);
@@ -32221,14 +32300,40 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (runFinished) {
         this.runsCompleted += 1;
         const target = parseInt(this.config.numberOfRuns, 10) || 0;
-        if (target > 0 && this.runsCompleted >= target) {
-          this.addLog('info', `🏁 Target of ${target} run${target === 1 ? '' : 's'} reached — bot stopped. Reset Runs to start a fresh session.`);
-          this.running = false;
+        const sessionTarget = Math.max(0, parseInt(this.config.sessionCount, 10) || 0);
+        const targetReached = target > 0 && this.runsCompleted >= target;
+
+        if (targetReached) {
+          // A full session's worth of runs is done — rest, then either
+          // roll into the next session automatically or stop for good.
+          this.sessionsCompleted += 1;
+          const moreSessions = sessionTarget === 0 || this.sessionsCompleted < sessionTarget;
+          if (moreSessions) {
+            this.addLog('info', `🏁 Session ${this.sessionsCompleted}${sessionTarget > 0 ? '/' + sessionTarget : ''} complete (${target} run${target === 1 ? '' : 's'}).`);
+            this._beginRestCooldown(`session ${this.sessionsCompleted}${sessionTarget > 0 ? '/' + sessionTarget : ''} complete`, { newSession: true });
+          } else {
+            this.addLog('info', `🏁🏁 All ${sessionTarget} session${sessionTarget === 1 ? '' : 's'} complete — automation finished, bot stopped. Reset Runs to start over.`);
+            this.running = false;
+          }
+        } else if (runFinishedViaStepStop) {
+          // Not at the session's run target yet, but this individual run
+          // gave up via step-stop — rest before trying the next run in the
+          // SAME session (no session increment, no counter reset).
+          this._beginRestCooldown(`step-stop hit (${maxSteps}/${maxSteps} martingale steps)`, { newSession: false });
         }
       }
       this._emit();
     }
-    resetRuns() { this.runsCompleted = 0; this.martingaleStep = 0; this._emit(); }
+    resetRuns() {
+      this.runsCompleted = 0;
+      this.martingaleStep = 0;
+      this.sessionsCompleted = 0;
+      if (this._restCooldownTimer) { clearInterval(this._restCooldownTimer); this._restCooldownTimer = null; }
+      this.isCooldown = false;
+      this.cooldownRemaining = 0;
+      this.cooldownReason = '';
+      this._emit();
+    }
     // Wired into the Dashboard's "Clear All Stats" button (see
     // clearAllBtn above) — same `eng.clearStats && eng.clearStats()`
     // convention every Titan-class bot already exposes.
@@ -32238,6 +32343,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this._processedContracts = new Set();
       this.runsCompleted = 0;
       this.martingaleStep = 0;
+      this.sessionsCompleted = 0;
+      if (this._restCooldownTimer) { clearInterval(this._restCooldownTimer); this._restCooldownTimer = null; }
+      this.isCooldown = false;
+      this.cooldownRemaining = 0;
+      this.cooldownReason = '';
       this._emit();
     }
 
@@ -32424,7 +32534,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       }
       #${rootId} .cp-card {
         background: linear-gradient(150deg,hsl(var(--card)/0.92),hsl(var(--bg-soft)/0.7));
-        border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 14px; margin-bottom: 10px;
+        border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 16px; margin-bottom: 14px;
         position: relative; overflow: hidden; backdrop-filter: blur(10px);
         box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
         transition: border-color .2s, box-shadow .2s;
@@ -32435,32 +32545,71 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.35) 40%, hsl(var(--secondary)/0.25) 65%, transparent);
       }
       #${rootId} .cp-section-label {
-        font-family: 'Space Grotesk', sans-serif !important; font-size: 8.5px; font-weight: 800;
-        letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--muted-foreground)/0.6);
-        margin-bottom: 10px; display: flex; align-items: center; gap: 7px;
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 9px; font-weight: 800;
+        letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--muted-foreground)/0.7);
+        margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
       }
       #${rootId} .cp-section-label::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, hsl(var(--primary)/0.2), transparent); }
-      #${rootId} .cp-input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-      #${rootId} .cp-input-group { display: flex; flex-direction: column; gap: 4px; }
+      #${rootId} .cp-section-hint {
+        font-size: 9.5px; color: hsl(var(--muted-foreground)); line-height: 1.65;
+        margin-bottom: 12px; padding-right: 2px;
+      }
+      #${rootId} .cp-input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+      #${rootId} .cp-input-row:last-child { margin-bottom: 0; }
+      #${rootId} .cp-input-group { display: flex; flex-direction: column; gap: 6px; }
       #${rootId} .cp-input-label {
         font-family: 'Space Grotesk', sans-serif !important; font-size: 8px; font-weight: 700;
         letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--primary)/0.75);
       }
       #${rootId} .cp-input {
         background: hsl(var(--bg)/0.75) !important; border: 1px solid hsl(var(--border)/0.5) !important;
-        border-radius: 10px !important; color: hsl(var(--foreground)) !important;
+        border-radius: 11px !important; color: hsl(var(--foreground)) !important;
         font-family: 'DM Mono', monospace !important; font-size: 12px !important; font-weight: 500 !important;
-        padding: 8px 10px !important; width:100%; outline: none !important; backdrop-filter: blur(6px) !important;
+        padding: 10px 12px !important; width:100%; outline: none !important; backdrop-filter: blur(6px) !important;
+        box-sizing: border-box !important;
       }
       #${rootId} .cp-input:focus { border-color: hsl(var(--primary)/0.55) !important; }
       @media (max-width: 820px) { #${rootId} .cp-input { font-size: 16px !important; } }
       #${rootId} select.cp-input option { background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; }
       #${rootId} .cp-toggle-row {
-        display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; margin-bottom: 8px;
+        display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; margin-bottom: 8px;
         background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px;
         transition: background .16s, border-color .16s;
       }
       #${rootId} .cp-toggle-row:hover { background: hsl(var(--card)/0.5); border-color: hsl(var(--border)/0.5); }
+      /* Runs/Sessions progress — used in RUN CONTROL and REST COOLDOWN & SESSIONS cards */
+      #${rootId} .cp-progress-group {
+        background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px;
+        padding: 12px 14px;
+      }
+      #${rootId} .cp-progress-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px; }
+      #${rootId} .cp-progress-label {
+        font-family: 'Space Grotesk', sans-serif !important; font-size: 8px; font-weight: 700;
+        letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--muted-foreground)/0.85);
+      }
+      #${rootId} .cp-reset-btn {
+        background: hsl(var(--primary)/0.1); border: 1px solid hsl(var(--primary)/0.3); color: hsl(var(--primary));
+        cursor: pointer; font-family:'DM Mono',monospace; font-size: 9.5px; font-weight: 600;
+        padding: 4px 9px; border-radius: 999px; letter-spacing: 0.5px; transition: background .15s, border-color .15s;
+      }
+      #${rootId} .cp-reset-btn:hover { background: hsl(var(--primary)/0.18); border-color: hsl(var(--primary)/0.5); }
+      #${rootId} .cp-progress-bar { height: 7px; border-radius: 999px; background: hsl(var(--border)/0.25); overflow: hidden; margin-bottom: 8px; }
+      #${rootId} .cp-progress-fill { height: 100%; border-radius: 999px; background: hsl(var(--primary)/0.7); transition: width .5s cubic-bezier(.34,1.2,.64,1); }
+      #${rootId} .cp-progress-fill.session { background: hsl(var(--secondary, var(--primary))/0.75); }
+      #${rootId} .cp-progress-foot {
+        display:flex; align-items:center; justify-content:space-between; gap:8px;
+        font-family:'DM Mono',monospace; font-size: 11px; font-weight: 600; color: hsl(var(--foreground));
+      }
+      #${rootId} .cp-status-pill {
+        display:inline-flex; align-items:center; gap:5px; padding: 3px 10px; border-radius: 999px;
+        font-family:'DM Mono',monospace; font-size: 9.5px; font-weight: 600; letter-spacing: 0.5px;
+        background: hsl(var(--win)/0.12); border: 1px solid hsl(var(--win)/0.35); color: hsl(var(--win));
+        white-space: nowrap;
+      }
+      #${rootId} .cp-status-pill.resting {
+        background: hsl(var(--accent)/0.14); border-color: hsl(var(--accent)/0.4); color: hsl(var(--accent));
+        animation: bt-dot-beacon 1.8s ease-in-out infinite;
+      }
       #${rootId} .cp-engage-btn {
         width: 100%; padding: 14px 18px; margin-top: 4px; font-family: 'Space Grotesk', sans-serif !important;
         font-size: 11px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
@@ -32671,16 +32820,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const pnl = (eng.stats && eng.stats.pnl) || 0;
       const pnlColor = pnl > 0 ? 'hsl(var(--win))' : pnl < 0 ? 'hsl(var(--loss))' : 'hsl(var(--muted-foreground))';
       const runsLabel = `${eng.runsCompleted || 0}${eng.config.numberOfRuns > 0 ? '/' + eng.config.numberOfRuns : ''}`;
+      const sessionsLabel = eng.config.sessionCount > 0 ? ` · S${(eng.sessionsCompleted || 0) + 1}/${eng.config.sessionCount}` : '';
       return `
         <button type="button" class="bt-side-tab ${active ? 'active' : ''}" data-tt="${t.id}" title="${t.label}">
-          <span class="bt-side-dot ${isRunning ? 'on' : 'off'}"></span>
+          <span class="bt-side-dot ${eng.isCooldown ? 'off' : isRunning ? 'on' : 'off'}" style="${eng.isCooldown ? 'background:hsl(var(--accent))' : ''}"></span>
           <span class="bt-side-label">
             <b>${t.label}</b>
-            <span class="bt-side-sub">${t.sub}</span>
+            <span class="bt-side-sub">${eng.isCooldown ? `😴 resting ${eng.cooldownRemaining}s` : t.sub}</span>
           </span>
           <span class="bt-side-stats">
             <span class="bt-side-pnl" style="color:${pnlColor}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</span>
-            <span class="bt-side-runs">${runsLabel} runs</span>
+            <span class="bt-side-runs">${runsLabel} runs${sessionsLabel}</span>
           </span>
         </button>`;
     }).join('');
@@ -32689,12 +32839,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function renderLeft(c, eng) {
     return `
       <div class="cp-card" style="animation:bt-in .35s ease both .05s">
-        <div class="cp-section-label">SCAN CONFIG</div>
+        <div class="cp-section-label">⚙️ SCAN CONFIG</div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Stake ($)</span><input class="cp-input" type="number" step="0.01" min="0.35" id="bt-stake" value="${c.stake}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Martingale ×</span><input class="cp-input" type="number" step="0.1" min="1" id="bt-mult" value="${c.martingaleMultiplier}"></div>
         </div>
-        <div class="cp-input-row" style="margin-bottom:0">
+        <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Bulk Contracts</span><select class="cp-input" id="bt-bulkn">${[5,10,15,20,25,30].map((n) => `<option value="${n}" ${n === c.bulkContracts ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
           ${!c.multiMarketScan
             ? `<div class="cp-input-group"><span class="cp-input-label">Market</span><select class="cp-input" id="bt-market">${MARKETS.map((m) => `<option value="${m}" ${m === c.selectedMarket ? 'selected' : ''}>${marketName(m)}</option>`).join('')}</select></div>`
@@ -32702,37 +32852,55 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
       <div class="cp-card" style="animation:bt-in .35s ease both .1s">
-        <div class="cp-section-label">SCAN MODE</div>
+        <div class="cp-section-label">📡 SCAN MODE</div>
         <div class="cp-toggle-row" style="margin-bottom:0">
           <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Multi-Market Scan</span>
           <button class="titan-toggle ${c.multiMarketScan ? 'on' : ''}" id="bt-multiscan" onclick="event.stopPropagation()"></button>
         </div>
       </div>
       <div class="cp-card" style="animation:bt-in .35s ease both .12s">
-        <div class="cp-section-label">RUN CONTROL</div>
-        <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:8px">
-          Set these, then press Start below. A RUN is one full cycle: base stake → (if it loses) martingale escalation → ends on either a win or the step-stop, and only THEN counts as one run. Leave Number Of Runs at 0 for unlimited.
+        <div class="cp-section-label">🎯 RUN CONTROL</div>
+        <div class="cp-section-hint">
+          A RUN is one full cycle: base stake → (on a loss) martingale escalation → ends on either a win or the step-stop, and only THEN counts as one run. Set your targets, then press Start below. Leave Runs Per Session at 0 for unlimited.
         </div>
         <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Number Of Runs (0=∞)</span><input class="cp-input" type="number" min="0" step="1" id="bt-numruns" value="${c.numberOfRuns || 0}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Runs Per Session (0 = ∞)</span><input class="cp-input" type="number" min="0" step="1" id="bt-numruns" value="${c.numberOfRuns || 0}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Max Martingale Steps</span><input class="cp-input" type="number" min="1" step="1" id="bt-maxsteps" value="${c.maxMartingaleSteps || 3}"></div>
         </div>
-        <div class="cp-input-row" style="margin-bottom:0">
-          <div class="cp-input-group">
-            <span class="cp-input-label">Runs Completed</span>
-            <div class="cp-input" style="display:flex;align-items:center;justify-content:space-between">
-              <span>${eng.runsCompleted || 0}${c.numberOfRuns > 0 ? ' / ' + c.numberOfRuns : ''}</span>
-              <button type="button" id="bt-resetruns" title="Reset run counter" style="background:none;border:none;color:hsl(var(--primary));cursor:pointer;font-size:12px;padding:0">↺</button>
-            </div>
+        <div class="cp-progress-group">
+          <div class="cp-progress-head">
+            <span class="cp-progress-label">Runs Completed This Session</span>
+            <button type="button" id="bt-resetruns" class="cp-reset-btn" title="Reset run/session counters">↺ Reset</button>
           </div>
-          <div class="cp-input-group">
-            <span class="cp-input-label">Martingale Step</span>
-            <div class="cp-input" style="display:flex;align-items:center;color:${eng.martingaleStep > 0 ? 'hsl(var(--loss))' : 'hsl(var(--foreground))'}">${eng.martingaleStep || 0} / ${c.maxMartingaleSteps || 3}</div>
+          <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${c.numberOfRuns > 0 ? Math.min(100, Math.round((eng.runsCompleted || 0) / c.numberOfRuns * 100)) : 0}%"></div></div>
+          <div class="cp-progress-foot">
+            <span>${eng.runsCompleted || 0}${c.numberOfRuns > 0 ? ' / ' + c.numberOfRuns + ' runs' : ' runs (unlimited)'}</span>
+            <span style="color:${eng.martingaleStep > 0 ? 'hsl(var(--loss))' : 'hsl(var(--muted-foreground))'}">Step ${eng.martingaleStep || 0}/${c.maxMartingaleSteps || 3}</span>
+          </div>
+        </div>
+      </div>
+      <div class="cp-card" style="animation:bt-in .35s ease both .125s">
+        <div class="cp-section-label">😴 REST COOLDOWN &amp; SESSIONS</div>
+        <div class="cp-section-hint">
+          The bot rests for Rest Cooldown whenever a run step-stops (hits Max Martingale Steps) or a full session's Runs Per Session target is reached. After a session-completion rest it auto-starts the next session — fresh stake and step counters — until Session Count is reached, then it stops itself for good. Leave Session Count at 0 to keep auto-starting sessions forever.
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Rest Cooldown (seconds)</span><input class="cp-input" type="number" min="1" step="1" id="bt-restcooldown" value="${c.restCooldownSeconds || 60}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Session Count (0 = ∞)</span><input class="cp-input" type="number" min="0" step="1" id="bt-sessioncount" value="${c.sessionCount ?? 2}"></div>
+        </div>
+        <div class="cp-progress-group">
+          <div class="cp-progress-head">
+            <span class="cp-progress-label">Sessions Completed</span>
+            <span class="cp-status-pill ${eng.isCooldown ? 'resting' : ''}">${eng.isCooldown ? `😴 Resting · ${eng.cooldownRemaining}s` : '● Active'}</span>
+          </div>
+          <div class="cp-progress-bar"><div class="cp-progress-fill session" style="width:${c.sessionCount > 0 ? Math.min(100, Math.round((eng.sessionsCompleted || 0) / c.sessionCount * 100)) : 0}%"></div></div>
+          <div class="cp-progress-foot">
+            <span>${eng.sessionsCompleted || 0}${c.sessionCount > 0 ? ' / ' + c.sessionCount + ' sessions' : ' sessions (unlimited)'}</span>
           </div>
         </div>
       </div>
       <div class="cp-card" style="animation:bt-in .35s ease both .13s">
-        <div class="cp-section-label">FIRST-TICK HANDLING</div>
+        <div class="cp-section-label">🎬 FIRST-TICK HANDLING</div>
         <div class="cp-input-row">
           <div class="cp-input-group" style="flex:1.4">
             <span class="cp-input-label">Mode</span>
@@ -32747,7 +32915,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             <input class="cp-input" type="number" step="0.01" min="0.01" id="bt-firsttick-stake" value="${c.firstTickStake}" ${c.firstTickMode!=='sacrifice'?'disabled style="opacity:.45"':''}>
           </div>
         </div>
-        <div style="margin-top:4px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.6);letter-spacing:0.5px">
+        <div style="margin-top:10px;font-size:8.5px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.65);letter-spacing:0.5px;line-height:1.6">
           ${c.firstTickMode==='sacrifice'
             ? 'Fires a small test trade on the entry tick (not counted toward Runs/stats). WIN → real cluster at Stake $ fires immediately. LOSS → signal rejected, the cluster is skipped and the engine goes back to scouting.'
             : c.firstTickMode==='skip'
@@ -32756,21 +32924,21 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .14s">
-        <div class="cp-section-label">PARITY STREAK BREAK ENGINE</div>
-        <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:8px">
+        <div class="cp-section-label">🔀 PARITY STREAK BREAK ENGINE</div>
+        <div class="cp-section-hint">
           This is the trigger the bot waits for. Tracks how long same-parity streaks usually run, then fires the flip once the live streak reaches a length that has historically broken most often — scanning every market on the board for whichever one has the strongest streak-break setup right now, then firing on that one. Min Samples filters out streak lengths that haven't happened often enough in the lookback window to trust yet.
         </div>
-        <div class="cp-input-row" style="margin-bottom:0">
+        <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Streak Lookback (ticks)</span><input class="cp-input" type="number" min="20" step="5" id="bt-pslookback" value="${c.parityStreakLookback}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Break Threshold %</span><input class="cp-input" type="number" min="1" max="99" step="1" id="bt-psthreshold" value="${c.parityStreakThreshold}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Min Samples</span><input class="cp-input" type="number" min="1" max="50" step="1" id="bt-psminsamples" value="${c.parityStreakMinSamples ?? 5}"></div>
         </div>
       </div>
       <button type="button" class="cp-engage-btn ${eng.running || eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
-        ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : eng.running ? '■ STOP BOT' : '▶ START BOT'}
+        ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : eng.isCooldown ? `😴 RESTING (${eng.cooldownRemaining}s) — CLICK TO STOP` : eng.running ? '■ STOP BOT' : '▶ START BOT'}
       </button>
       <div class="hr-note">
-        <b>How it works:</b> set Stake, Martingale ×, Max Martingale Steps and Number Of Runs above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the parity streak trigger, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. It then scans again, waits for the next trigger, and fires the next run. Once Number Of Runs is reached, the bot stops itself automatically.
+        <b>How it works:</b> set Stake, Martingale ×, Max Martingale Steps and Runs Per Session above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the parity streak trigger, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. A step-stop loss also triggers a Rest Cooldown before the next run. Once Runs Per Session is reached, the bot rests again and then auto-starts the next session, up to Session Count — after which it stops itself automatically.
       </div>`;
   }
 
@@ -32869,6 +33037,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <div class="rf-ind-card"><div class="rf-ind-val" style="color:${eng.stats.pnl >= 0 ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${eng.stats.pnl >= 0 ? '+' : ''}${eng.stats.pnl.toFixed(2)}</div><div class="rf-ind-label">P/L</div></div>
         </div>
         ${eng.recoveryMode ? `<div class="hr-note" style="color:hsl(var(--loss));border-color:hsl(var(--loss)/0.3)"><b style="color:hsl(var(--loss))">⚠ In recovery</b> — martingale step ${eng.martingaleStep}/${eng.config.maxMartingaleSteps || 3}, next cluster fires at $${eng.currentStake.toFixed(2)} (escalated). Step-stop resets to base stake if this run keeps losing.</div>` : ''}
+        ${eng.isCooldown ? `<div class="hr-note" style="color:hsl(var(--accent));border-color:hsl(var(--accent)/0.3)"><b style="color:hsl(var(--accent))">😴 Resting — ${eng.cooldownRemaining}s left</b> — ${esc(eng.cooldownReason || '')}. No new entries will fire until the cooldown ends.</div>` : ''}
       </div>`;
   }
 
@@ -33000,6 +33169,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
     const resetRunsEl = el('bt-resetruns', root);
     if (resetRunsEl && !resetRunsEl._bound) { resetRunsEl._bound = true; resetRunsEl.onclick = () => { eng.resetRuns(); render(); }; }
+
+    // ── Rest Cooldown & Sessions ─────────────────────────────────────
+    const restCooldownEl = el('bt-restcooldown', root);
+    if (restCooldownEl && !restCooldownEl._bound) {
+      restCooldownEl._bound = true;
+      restCooldownEl.onchange = (e) => { const v = parseInt(e.target.value, 10); eng.setConfig({ restCooldownSeconds: isNaN(v) || v < 1 ? 60 : v }); };
+    }
+    const sessionCountEl = el('bt-sessioncount', root);
+    if (sessionCountEl && !sessionCountEl._bound) {
+      sessionCountEl._bound = true;
+      sessionCountEl.onchange = (e) => { const v = parseInt(e.target.value, 10); eng.setConfig({ sessionCount: isNaN(v) || v < 0 ? 2 : v }); };
+    }
 
     // ── First-Tick Handling ──────────────────────────────────────────
     const ftModeEl = el('bt-firsttick-mode', root);
