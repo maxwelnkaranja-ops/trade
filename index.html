@@ -10241,7 +10241,7 @@ window.PatternIntelEngine = (function () {
   // consistent with every other Even/Odd-only change in this engine
   // (Test Trade, Martingale, 1-minute cooldown) that explicitly excludes
   // Matches.
-  const MIN_WIN_RATE_PARITY_DEFAULT = 0.75; // Even — nudged back down a bit per explicit request (was 0.80, before that 0.65, before that 0.72) so Intel fires a little more often; still adjustable live via the Market Intel tab's Confidence Threshold slider
+  const MIN_WIN_RATE_PARITY_DEFAULT = 0.65; // Even/Odd — lowered again per explicit request: 0.75 was firing rarely/very slowly. Still adjustable live via the Market Intel tab's Confidence Threshold slider
   const MIN_WIN_RATE_DIGIT_DEFAULT = 0.90;  // Matches — nudged back down a bit per explicit request (was 1.0/max, before that 0.92, 0.82, 0.72) because 100% was too restrictive; scope confirmed as confidence-threshold only: still flat-stake, no Test Trade, no Martingale, no 1-min cooldown for Matches
   const MIN_WIN_RATE_PARITY_KEY = 'pattern_intel_min_win_rate_parity_v1';
   const MIN_WIN_RATE_DIGIT_KEY = 'pattern_intel_min_win_rate_digit_v1';
@@ -31892,38 +31892,31 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // Step-stop — the martingale ladder no longer escalates forever.
         // After this many CONSECUTIVE losing clusters within a single run
         // (see runsCompleted / martingaleStep below), the run gives up,
-        // resets to base stake, and counts as one finished run — instead
-        // of doubling/tripling the stake indefinitely until the balance
-        // is gone. Defaults to 3 steps.
+        // resets to base stake, and counts as one finished run. Set this
+        // to 1 for "no martingale, one loss and I'm done recovering" —
+        // that no longer forces a hard stop (see _finalizeCluster()): it
+        // just rests for Rest Cooldown like any other run boundary, then
+        // goes straight back to re-analysing the market/trigger digit for
+        // the next run. Defaults to 3 steps.
         maxMartingaleSteps: 3,
-        // Run cap — 0 means unlimited. A "run" is one full recovery cycle:
-        // it starts at base stake, and only ends (and counts as ONE run)
-        // once a cluster nets a win OR the step-stop above is hit — losing
-        // clusters that are still escalating do NOT count as separate runs.
-        // Once this many runs have completed, the bot stops itself. See
-        // start()/stop() and _finalizeCluster().
-        numberOfRuns: 10,
-        // Rest Cooldown — how long (seconds) the bot sits out after either
-        // (a) a run gives up via step-stop (max martingale steps hit), or
-        // (b) a full session's worth of runs (numberOfRuns) completes.
-        // A run that finishes on a WIN does not trigger this — it just
-        // keeps going straight into the next run (only the brief 5s
-        // anti-spam gap in cooldownUntil applies there). Defaults to 60s.
+        // Rest Cooldown — how long (seconds) the bot sits out after EVERY
+        // run boundary: a cluster nets a win, or a run gives up via
+        // step-stop (max martingale steps hit / no martingale). Either
+        // way it rests, then re-analyses the market and trigger digit
+        // fresh for the next run. Defaults to 60s.
         restCooldownSeconds: 60,
-        // Full Automation — replaces the old fixed Session Count cap.
-        // A SESSION is one full pass through numberOfRuns runs. Once a
-        // session's run target is hit, the bot rests for
-        // restCooldownSeconds, then:
-        //   ON  → always resets runsCompleted to 0 and starts the next
-        //         session automatically — exactly like Auto Pilot on
-        //         every other bot tab — looping cooldown → re-arm
-        //         indefinitely. The only things that stop it from here
-        //         are a manual Stop, or the Dashboard's master Take
-        //         Profit / Stop Loss gate firing and terminating every
-        //         engine at once.
-        //   OFF → rests once, then stops itself after this session
-        //         completes, same as every other bot with Auto Pilot
-        //         switched off. Press Start again when ready.
+        // Full Automation — this bot has no "number of runs" or session
+        // cap anymore. It just keeps firing run after run, resting Rest
+        // Cooldown between each one, for as long as this is ON:
+        //   ON  → every run boundary (win OR loss/step-stop) rests, then
+        //         automatically goes back to scanning for the next run's
+        //         trigger — no manual re-engage ever needed. The only
+        //         things that stop it are a manual Stop, or the
+        //         Dashboard's master Take Profit / Stop Loss gate firing
+        //         and terminating every engine at once.
+        //   OFF → rests once after the current run, then stops itself —
+        //         same as every other bot with Auto Pilot switched off.
+        //         Press Start again when ready for one more run.
         fullAutomation: true,
         // Parity Streak Break Engine params. A streak-length based
         // heuristic: armed automatically whenever the bot is running.
@@ -31957,15 +31950,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       delete this.config.scanAndRunBulk;
       delete this.config.reversalTriggerEnabled;
       delete this.config.parityStreakEnabled;
-      if (this.config.targetSessions != null && this.config.numberOfRuns == null) {
-        this.config.numberOfRuns = this.config.targetSessions;
-      }
       delete this.config.targetSessions;
-      // Session Count is gone — Full Automation (on/off) replaces it, see
-      // the config default above. Drop any old saved cap so it can never
-      // silently resurrect the "stop after N sessions" behavior.
+      // Number Of Runs / Session Count are both gone — Full Automation
+      // replaces them entirely, see the config default above.
+      // Drop any old saved values so they can never silently resurrect
+      // the old "stop after N runs/sessions" behavior.
+      delete this.config.numberOfRuns;
       delete this.config.sessionCount;
-      if (this.config.fullAutomation == null) this.config.fullAutomation = true;
+      // Full Automation is no longer an on/off choice — it's always on.
+      // This bot never waits for a manual re-engage: a win OR a loss
+      // (including step-stop / no-martingale, maxMartingaleSteps = 1)
+      // always rests for Rest Cooldown, then goes straight back to
+      // re-analysing the market/trigger digit and arms itself for the
+      // next run with no button press needed. Force it true unconditionally
+      // (not just when unset) so an old saved `false` can never bring back
+      // the "stops after one run" behavior.
+      this.config.fullAutomation = true;
       // Normalize any config saved before Differs/Rise-Fall were removed
       // from this bot's trade-type list.
       // Trade type is locked per-instance now (see this.tradeType above) —
@@ -31992,24 +31992,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this._processedContracts = new Set();
       // How many full RUNS have settled since the page loaded. A run only
       // finishes (and increments this) on a net win or a step-stop — see
-      // numberOfRuns / maxMartingaleSteps in config and _finalizeCluster().
+      // maxMartingaleSteps in config and _finalizeCluster(). Purely a
+      // lifetime counter now — nothing caps it, and it never resets on
+      // its own (only Reset Runs / Clear Stats touch it).
       this.runsCompleted = 0;
       // Consecutive losing clusters within the CURRENT run — reset to 0
       // whenever a run finishes (win or step-stop). Compared against
       // config.maxMartingaleSteps to decide when to give up escalating.
       this.martingaleStep = 0;
-      // How many full SESSIONS have completed since the page loaded (or
-      // since the last Reset Runs). A session finishes when runsCompleted
-      // hits config.numberOfRuns. Checked against config.fullAutomation to
-      // decide whether to auto-start another session after the rest
-      // cooldown (ON — loops forever), or stop for good (OFF). See
-      // _finalizeCluster() and _beginRestCooldown().
-      this.sessionsCompleted = 0;
       // Rest Cooldown runtime state — separate from the brief 5s
       // anti-spam `cooldownUntil` gate above. isCooldown blocks new
       // entries the same way, but is long-lived, user-visible (countdown
-      // + reason in the UI) and only entered on step-stop or session
-      // completion — see _beginRestCooldown()/_finalizeCluster().
+      // + reason in the UI) and is entered after EVERY run boundary — see
+      // _beginRestCooldown()/_finalizeCluster().
       this.isCooldown = false;
       this.cooldownRemaining = 0;
       this.cooldownReason = '';
@@ -32247,11 +32242,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     start() {
       if (this.running) return;
       this.running = true;
-      const n = parseInt(this.config.numberOfRuns, 10) || 0;
       const steps = Math.max(1, parseInt(this.config.maxMartingaleSteps, 10) || 3);
       const cd = Math.max(1, parseInt(this.config.restCooldownSeconds, 10) || 60);
       const fa = !!this.config.fullAutomation;
-      this.addLog('info', `▶ Bot started — ${n > 0 ? `target ${n} run${n === 1 ? '' : 's'}` : 'unlimited runs'} per session, step-stop after ${steps} martingale step${steps === 1 ? '' : 's'}, ${cd}s rest cooldown between sessions. Full Automation ${fa ? 'ON — will keep cooling down and re-arming into new sessions until the Dashboard Take Profit/Stop Loss gate stops it or you press Stop.' : 'OFF — will rest once after this session and then stop.'} Scanning and waiting for a trigger…`);
+      this.addLog('info', `▶ Bot started — step-stop after ${steps} martingale step${steps === 1 ? '' : 's'}, ${cd}s rest cooldown after every run. Full Automation ${fa ? 'ON — win or lose, it will keep cooling down and re-analysing the market/trigger digit for the next run until the Dashboard Take Profit/Stop Loss gate stops it or you press Stop.' : 'OFF — will rest once after this run and then stop.'} Scanning and waiting for a trigger…`);
       this._emit();
     }
     stop() {
@@ -32270,14 +32264,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // ── Rest Cooldown ────────────────────────────────────────────────────
     // A longer, user-visible rest period — distinct from the brief 5s
     // anti-spam `cooldownUntil` gate that already applies after every
-    // cluster. Now entered after EVERY run boundary (win or step-stop),
-    // not just step-stop/session-completion — see _finalizeCluster().
-    // `opts.newSession` decides what happens when the countdown reaches 0:
-    // start a fresh session (reset run/step counters), just resume
-    // scanning for the next run in the same session, or — `opts.stopAfter`
-    // — stop the bot outright instead of resuming (used when Max
-    // Martingale Steps = 1 turns a single loss into a hard stop).
-    _beginRestCooldown(reason, opts = {}) {
+    // cluster. Entered after EVERY run boundary — a cluster nets a win,
+    // OR the run gives up via step-stop (max martingale steps hit / no
+    // martingale) — see _finalizeCluster(). Stake/martingale step are
+    // already reset to base by the time this is called, so all that's
+    // left to decide, once the countdown reaches 0, is whether to keep
+    // going: Full Automation ON always resumes scanning for the next
+    // run's trigger; OFF stops the bot and waits for a manual Start.
+    _beginRestCooldown(reason) {
       const secs = Math.max(1, parseInt(this.config.restCooldownSeconds, 10) || 60);
       this.isCooldown = true;
       this.cooldownRemaining = secs;
@@ -32291,17 +32285,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           this._restCooldownTimer = null;
           this.isCooldown = false;
           this.cooldownReason = '';
-          if (opts.stopAfter) {
+          if (!this.running) {
+            // Stopped manually while resting — nothing more to do.
+          } else if (this.config.fullAutomation) {
+            this.addLog('info', '▶ Cooldown ended — re-analysing the market and trigger digit, waiting for the next signal…');
+          } else {
             this.running = false;
-            this.addLog('info', opts.stopMessage || '■ Cooldown ended — bot stopped (Max Martingale Steps = 1). Press Start when you want to try another run.');
-          } else if (opts.newSession && this.running) {
-            this.runsCompleted = 0;
-            this.martingaleStep = 0;
-            this.currentStake = this.config.stake;
-            this.recoveryMode = false;
-            this.addLog('info', `▶ Cooldown ended — Full Automation re-armed, starting session ${this.sessionsCompleted + 1}. Scanning and waiting for a trigger…`);
-          } else if (this.running) {
-            this.addLog('info', '▶ Cooldown ended — resuming scan for the next run.');
+            this.addLog('info', '■ Cooldown ended — bot stopped (Full Automation is OFF). Press Start when you want to run another one.');
           }
         }
         this._emit();
@@ -32388,48 +32378,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
       if (runFinished) {
         this.runsCompleted += 1;
-        const target = parseInt(this.config.numberOfRuns, 10) || 0;
-        const targetReached = target > 0 && this.runsCompleted >= target;
-
-        // FIX: Max Martingale Steps = 1 means "treat a single loss as a
-        // hard stop", not "step-stop this one run, then keep firing the
-        // rest of the session automatically" — rest, then actually stop
-        // the bot instead of pushing on into the remaining runs. This
-        // takes priority over the normal run-target / continue-session
-        // paths below.
-        if (runFinishedViaStepStop && maxSteps === 1) {
-          this.addLog('info', `🛑 Step-stop after a single loss (Max Martingale Steps = 1) — resting, then stopping. The remaining runs this session will NOT fire automatically; press Start again when ready.`);
-          this._beginRestCooldown(`step-stop after 1 loss (Max Martingale Steps = 1)`, { stopAfter: true });
-        } else if (targetReached) {
-          // A full session's worth of runs is done — rest, then either
-          // roll into the next session automatically (Full Automation ON,
-          // the "cycle" keeps looping cooldown → re-arm forever, same as
-          // Auto Pilot on every other bot tab) or stop for good (OFF).
-          this.sessionsCompleted += 1;
-          if (this.config.fullAutomation) {
-            this.addLog('info', `🏁 Session ${this.sessionsCompleted} complete (${target} run${target === 1 ? '' : 's'}). Full Automation is ON — resting, then re-arming into session ${this.sessionsCompleted + 1}.`);
-            this._beginRestCooldown(`session ${this.sessionsCompleted} complete`, { newSession: true });
-          } else {
-            this.addLog('info', `🏁 Session ${this.sessionsCompleted} complete (${target} run${target === 1 ? '' : 's'}). Full Automation is OFF — resting, then stopping.`);
-            this._beginRestCooldown(`session ${this.sessionsCompleted} complete`, {
-              stopAfter: true,
-              stopMessage: '■ Cooldown ended — bot stopped (Full Automation is OFF). Press Start when you want to run another session.',
-            });
-          }
-        } else {
-          // FIX: every run boundary — a WIN just as much as a step-stop
-          // loss — now rests for the full configured Rest Cooldown before
-          // the next run is allowed to start. Previously Rest Cooldown
-          // only ever fired on step-stop or session-completion, so e.g. a
-          // 5-runs-per-session bot would win run 1, wait only the brief
-          // 5s anti-spam gap below, and go straight back to scanning for
-          // run 2 — Rest Cooldown effectively never applied between
-          // individual runs, only at the very end.
-          const reason = runFinishedViaStepStop
-            ? `step-stop hit (${maxSteps}/${maxSteps} martingale steps)`
-            : `run ${this.runsCompleted}${target > 0 ? '/' + target : ''} won`;
-          this._beginRestCooldown(reason, { newSession: false });
-        }
+        // Every run boundary — a WIN just as much as a step-stop loss
+        // (including "no martingale" / Max Martingale Steps = 1) — rests
+        // for the full Rest Cooldown, then goes straight back to
+        // re-analysing the market and trigger digit for the next run.
+        // Full Automation decides what happens once that rest ends (see
+        // _beginRestCooldown): ON keeps this looping forever, OFF stops
+        // the bot after this one rest. Either way, a loss never forces a
+        // hard stop here — that used to happen specifically when Max
+        // Martingale Steps was 1, and no longer does.
+        const reason = runFinishedViaStepStop
+          ? `run ${this.runsCompleted} lost — step-stop hit (${maxSteps}/${maxSteps} martingale step${maxSteps === 1 ? '' : 's'})`
+          : `run ${this.runsCompleted} won`;
+        this._beginRestCooldown(reason);
       }
       this._emit();
     }
@@ -32934,8 +32895,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const isRunning = eng.running || eng.clusterActive;
       const pnl = (eng.stats && eng.stats.pnl) || 0;
       const pnlColor = pnl > 0 ? 'hsl(var(--win))' : pnl < 0 ? 'hsl(var(--loss))' : 'hsl(var(--muted-foreground))';
-      const runsLabel = `${eng.runsCompleted || 0}${eng.config.numberOfRuns > 0 ? '/' + eng.config.numberOfRuns : ''}`;
-      const sessionsLabel = ` · S${(eng.sessionsCompleted || 0) + 1}${eng.config.fullAutomation ? '' : ' (manual)'}`;
+      const runsLabel = `${eng.runsCompleted || 0}`;
+      const sessionsLabel = '';
       return `
         <button type="button" class="bt-side-tab ${active ? 'active' : ''}" data-tt="${t.id}" title="${t.label}">
           <span class="bt-side-dot ${eng.isCooldown ? 'off' : isRunning ? 'on' : 'off'}" style="${eng.isCooldown ? 'background:hsl(var(--accent))' : ''}"></span>
@@ -32976,46 +32937,37 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       <div class="cp-card" style="animation:bt-in .35s ease both .12s">
         <div class="cp-section-label">🎯 RUN CONTROL</div>
         <div class="cp-section-hint">
-          A RUN is one full cycle: base stake → (on a loss) martingale escalation → ends on either a win or the step-stop, and only THEN counts as one run. Set your targets, then press Start below. Leave Runs Per Session at 0 for unlimited.
+          A RUN is one full cycle: base stake → (on a loss) martingale escalation → ends on either a win or the step-stop, and only THEN counts as one run. Full Automation is always on — there's no run cap, it just keeps going run after run until you press Stop or the Dashboard's Take Profit/Stop Loss gate fires.
         </div>
         <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Runs Per Session (0 = ∞)</span><input class="cp-input" type="number" min="0" step="1" id="bt-numruns" value="${c.numberOfRuns || 0}"></div>
           <div class="cp-input-group"><span class="cp-input-label">Max Martingale Steps</span><input class="cp-input" type="number" min="1" step="1" id="bt-maxsteps" value="${c.maxMartingaleSteps || 3}"></div>
         </div>
         <div class="cp-progress-group">
           <div class="cp-progress-head">
-            <span class="cp-progress-label">Runs Completed This Session</span>
-            <button type="button" id="bt-resetruns" class="cp-reset-btn" title="Reset run/session counters">↺ Reset</button>
+            <span class="cp-progress-label">Runs Completed (lifetime)</span>
+            <button type="button" id="bt-resetruns" class="cp-reset-btn" title="Reset run counter">↺ Reset</button>
           </div>
-          <div class="cp-progress-bar"><div class="cp-progress-fill" style="width:${c.numberOfRuns > 0 ? Math.min(100, Math.round((eng.runsCompleted || 0) / c.numberOfRuns * 100)) : 0}%"></div></div>
           <div class="cp-progress-foot">
-            <span>${eng.runsCompleted || 0}${c.numberOfRuns > 0 ? ' / ' + c.numberOfRuns + ' runs' : ' runs (unlimited)'}</span>
+            <span>${eng.runsCompleted || 0} runs (unlimited)</span>
             <span style="color:${eng.martingaleStep > 0 ? 'hsl(var(--loss))' : 'hsl(var(--muted-foreground))'}">Step ${eng.martingaleStep || 0}/${c.maxMartingaleSteps || 3}</span>
           </div>
         </div>
       </div>
       <div class="cp-card" style="animation:bt-in .35s ease both .125s">
-        <div class="cp-section-label">😴 REST COOLDOWN &amp; FULL AUTOMATION</div>
+        <div class="cp-section-label">😴 REST COOLDOWN</div>
         <div class="cp-section-hint">
-          The bot rests for Rest Cooldown whenever a run step-stops (hits Max Martingale Steps) or a full session's Runs Per Session target is reached. With Full Automation ON, every session-completion rest auto-arms the next session — fresh stake and step counters — and the cycle keeps looping cooldown → re-arm on its own, exactly like Auto Pilot on the other bot tabs. It only stops when you press Stop, or when the Dashboard's master Take Profit / Stop Loss gate fires and halts every engine at once. Switch it OFF to rest once after the current session and then stop.
+          The bot rests for Rest Cooldown after EVERY run boundary — a win, or a loss that hits Max Martingale Steps (including Max Martingale Steps = 1, i.e. no martingale). Full Automation is always on: once the cooldown ends it re-analyses the market and trigger digit and arms itself for the next run automatically — no manual re-engage, ever. It only stops when you press Stop, or when the Dashboard's master Take Profit / Stop Loss gate fires and halts every engine at once.
         </div>
         <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Rest Cooldown (seconds)</span><input class="cp-input" type="number" min="1" step="1" id="bt-restcooldown" value="${c.restCooldownSeconds || 60}"></div>
-          <div class="cp-input-group" style="flex:1">
-            <span class="cp-input-label">Full Automation</span>
-            <div style="display:flex;align-items:center;justify-content:space-between;height:38px;padding:0 2px">
-              <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:${c.fullAutomation ? 'hsl(var(--win))' : 'hsl(var(--muted-foreground))'}">${c.fullAutomation ? 'ON — cooldown → re-arm' : 'OFF — stop after session'}</span>
-              <button class="titan-toggle ${c.fullAutomation ? 'on' : ''}" id="bt-fullauto" onclick="event.stopPropagation()"></button>
-            </div>
-          </div>
+          <div class="cp-input-group" style="flex:1"><span class="cp-input-label">Rest Cooldown (seconds)</span><input class="cp-input" type="number" min="1" step="1" id="bt-restcooldown" value="${c.restCooldownSeconds || 60}"></div>
         </div>
         <div class="cp-progress-group">
           <div class="cp-progress-head">
-            <span class="cp-progress-label">Sessions Completed</span>
+            <span class="cp-progress-label">Status</span>
             <span class="cp-status-pill ${eng.isCooldown ? 'resting' : ''}">${eng.isCooldown ? `😴 Resting · ${eng.cooldownRemaining}s` : '● Active'}</span>
           </div>
           <div class="cp-progress-foot">
-            <span>${eng.sessionsCompleted || 0} session${(eng.sessionsCompleted || 0) === 1 ? '' : 's'} completed — ${c.fullAutomation ? 'unlimited, running until Dashboard Take Profit/Stop Loss' : 'manual re-arm'}</span>
+            <span>Running until Stop or Dashboard Take Profit/Stop Loss</span>
           </div>
         </div>
       </div>
@@ -33058,7 +33010,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : eng.isCooldown ? `😴 RESTING (${eng.cooldownRemaining}s) — CLICK TO STOP` : eng.running ? '■ STOP BOT' : '▶ START BOT'}
       </button>
       <div class="hr-note">
-        <b>How it works:</b> set Stake, Martingale ×, Max Martingale Steps and Runs Per Session above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the parity streak trigger, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. A step-stop loss also triggers a Rest Cooldown before the next run. Once Runs Per Session is reached, the bot rests again and then auto-starts the next session, up to Session Count — after which it stops itself automatically.
+        <b>How it works:</b> set Stake, Martingale × and Max Martingale Steps above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the parity streak trigger, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. Either way it then rests for Rest Cooldown and automatically re-analyses the market and trigger digit for the next run — Full Automation is always on, so it just keeps going, run after run, until you press Stop or the Dashboard's Take Profit/Stop Loss gate fires.
       </div>`;
   }
 
@@ -33277,11 +33229,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (fireBtn && !fireBtn._bound) { fireBtn._bound = true; fireBtn.onclick = () => { if (eng.running) eng.stop(); else eng.start(); render(); }; }
 
     // ── Run Control ──────────────────────────────────────────────
-    const numRunsEl = el('bt-numruns', root);
-    if (numRunsEl && !numRunsEl._bound) {
-      numRunsEl._bound = true;
-      numRunsEl.onchange = (e) => { const v = parseInt(e.target.value, 10); eng.setConfig({ numberOfRuns: isNaN(v) || v < 0 ? 0 : v }); };
-    }
     const maxStepsEl = el('bt-maxsteps', root);
     if (maxStepsEl && !maxStepsEl._bound) {
       maxStepsEl._bound = true;
@@ -33296,12 +33243,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       restCooldownEl._bound = true;
       restCooldownEl.onchange = (e) => { const v = parseInt(e.target.value, 10); eng.setConfig({ restCooldownSeconds: isNaN(v) || v < 1 ? 60 : v }); };
     }
-    const fullAutoEl = el('bt-fullauto', root);
-    if (fullAutoEl && !fullAutoEl._bound) {
-      fullAutoEl._bound = true;
-      fullAutoEl.onclick = () => { eng.setConfig({ fullAutomation: !eng.config.fullAutomation }); render(); };
-    }
-
     // ── First-Tick Handling ──────────────────────────────────────────
     const ftModeEl = el('bt-firsttick-mode', root);
     if (ftModeEl && !ftModeEl._bound) {
