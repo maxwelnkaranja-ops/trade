@@ -713,6 +713,11 @@
           <span class="hub-tab-label">Bulk Trade</span>
           <span class="dot live" id="bulktrade-tab-dot" style="display:none"></span>
         </button>
+        <button type="button" class="hub-tab" data-app="oppbulk" data-label="Opp Bulk" title="Opp Bulk — same scanner as Bulk Trade, but every signal, entry and trigger digit is mirrored to the opposite side. Meant to be run alongside Bulk Trade so when one side is losing the other is taking the inverse bet">
+          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 6v10M6 11h10" stroke-opacity="0.5"/></svg></span>
+          <span class="hub-tab-label">Opp Bulk</span>
+          <span class="dot live" id="oppbulk-tab-dot" style="display:none"></span>
+        </button>
         <div class="hub-nav-label">Mean Reversion</div>
         <button type="button" class="hub-tab" data-app="risemr" data-label="Rise MR" title="Rise (Mean Reversion) — HIGHER-only ADX/Bollinger/RSI/Stochastic/ATR offset-barrier bot, split from Rise &amp; Fall MR">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l7-10 5 6 4-9"/><path d="M14 5h6v6"/></svg></span>
@@ -828,6 +833,9 @@
     </section>
     <section id="panel-bulktrade" class="app-panel" aria-label="Bulk Trade — AI Market Scanner">
       <div id="bulktrade-root" class="app-root"></div>
+    </section>
+    <section id="panel-oppbulk" class="app-panel" aria-label="Opp Bulk — Opposite-Side AI Market Scanner">
+      <div id="oppbulk-root" class="app-root"></div>
     </section>
 
     <section id="panel-risemr" class="app-panel" aria-label="Rise Mean Reversion dashboard">
@@ -20921,6 +20929,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // the Dashboard's merged totals (and count toward Take Profit / Take
     // Profit Reload via the master P&L gate, same as every other bot).
     bulktrade_evenodd: { label: 'Bulk Trade Bot (Even/Odd)', dot: 'hsl(var(--secondary))' },
+    // Opp Bulk — mirrors Bulk Trade's engine 1:1 (same class, own instance)
+    // but with every signal/entry/trigger inverted to the opposite side.
+    // Own id so its trades show up separately in the Dashboard's merged
+    // totals and count toward the master Take Profit / Stop Loss gate.
+    oppbulk_evenodd: { label: 'Opp Bulk Bot (Even/Odd)', dot: 'hsl(var(--loss))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -20937,7 +20950,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
     // Bulk Trade is a standalone module, not a TitanEngine — its stats
     // live directly on `.stats`, not `.state.stats`.
-    if (botId === 'bulktrade_evenodd') {
+    if ((botId === 'bulktrade_evenodd' || botId === 'oppbulk_evenodd')) {
       const st = engine.stats || { won: 0, lost: 0, pnl: 0 };
       return { trades: st.won + st.lost, win: st.won, loss: st.lost, profit: st.pnl };
     }
@@ -20948,7 +20961,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function isBotActive(engine, botId) {
     if (!engine) return false;
     if (botId === 'differ' || botId === 'hotrepeat') return engine.state.isArmed || engine.state.isRunning;
-    if (botId === 'bulktrade_evenodd') return !!(engine.clusterActive || engine.running);
+    if ((botId === 'bulktrade_evenodd' || botId === 'oppbulk_evenodd')) return !!(engine.clusterActive || engine.running);
     return engine.state.active || engine.state.isLocked;
   }
 
@@ -20957,7 +20970,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function getBotFlowStage(engine, botId) {
     const stage = { engaged: false, analysis: false, trading: false, result: null };
     if (!engine) return stage;
-    if (botId === 'bulktrade_evenodd') {
+    if ((botId === 'bulktrade_evenodd' || botId === 'oppbulk_evenodd')) {
       stage.engaged = isBotActive(engine, botId);
       stage.trading = !!engine.clusterActive;
       stage.analysis = stage.engaged && !stage.trading;
@@ -21927,7 +21940,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // gate (a separate BOT_IDS list below) already counted its P&L toward
     // the take-profit/stop-loss total. Added here so the visible dashboard
     // totals/journal finally match what the gate was already enforcing.
-    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd'];
+    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd', 'oppbulk_evenodd'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -27474,7 +27487,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // TERMINATE ALL, the tab dot, and the Trade Journal totals actually
     // reach it — previously there was no 'bulktrade' entry here at all,
     // so pressing ENGAGE ALL never started or stopped Bulk Trade.
-    'bulktrade_evenodd'];
+    // Opp Bulk is the same BulkTradeEngine class, inverted, run as its own
+    // instance/tab — needs the same treatment as Bulk Trade above.
+    'bulktrade_evenodd', 'oppbulk_evenodd'];
 
   // Differ's default cold-pick method (Echo) fires the instant it's armed
   // — that's the strategy, not a bug — but bundling it into a bulk
@@ -27500,12 +27515,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market', 'flipintell', 'bulktrade'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market', 'flipintell', 'bulktrade', 'oppbulk'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null };
+  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null, oppbulk_evenodd: null };
   // Shared "is this bot currently engaged?" check for Master Control
   // (ENGAGE ALL / TERMINATE ALL) — each bot family speaks a different
   // dialect of "on": Hot Repeat has isArmed/isRunning, the Bulk Trade
@@ -27514,7 +27529,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // .state.isLocked.
   function isMasterEngaged(eng, id) {
     if (id === 'hotrepeat') return eng.state.isArmed || eng.state.isRunning;
-    if (id === 'bulktrade_evenodd') return !!(eng.running || eng.clusterActive);
+    if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) return !!(eng.running || eng.clusterActive);
     return eng.state.active || eng.state.isLocked;
   }
   // Exposed so the Dashboard's Master Control "Stake" popup (defined in
@@ -27761,6 +27776,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (window.BulkTradePanel) window.BulkTradePanel.activate();
       return;
     }
+    if (id === 'oppbulk') {
+      if (window.OppBulkPanel) window.OppBulkPanel.activate();
+      return;
+    }
     if (id === 'differ') {
       const eng = ensureDifferEngine();
       if (!eng) return;
@@ -27808,6 +27827,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (activeApp === 'market' && id !== 'market' && window.MarketIntelPanel) window.MarketIntelPanel.deactivate();
     if (activeApp === 'flipintell' && id !== 'flipintell' && window.FlipIntellPanel) window.FlipIntellPanel.deactivate();
     if (activeApp === 'bulktrade' && id !== 'bulktrade' && window.BulkTradePanel) window.BulkTradePanel.deactivate();
+    if (activeApp === 'oppbulk' && id !== 'oppbulk' && window.OppBulkPanel) window.OppBulkPanel.deactivate();
     activeApp = id;
     try { localStorage.setItem('hub_active_app', id); } catch (e) { /* storage unavailable — tab still switches for this session */ }
     const activeBtn = document.querySelector(`.hub-tab[data-app="${id}"]`);
@@ -28178,7 +28198,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const s = eng.state;
       if (id === 'differ' || id === 'hotrepeat') {
         total += (s.totalProfit || 0);
-      } else if (id === 'bulktrade_evenodd') {
+      } else if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) {
         total += (eng.stats && typeof eng.stats.pnl === 'number' ? eng.stats.pnl : 0);
       } else {
         total += (s.stats && typeof s.stats.profit === 'number' ? s.stats.profit : 0);
@@ -28221,7 +28241,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           eng.addLog && eng.addLog('engine', 'TERMINATE', 'Force terminated by master control');
           eng.emit && eng.emit();
         } catch(_) {}
-      } else if (id === 'bulktrade_evenodd') {
+      } else if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) {
         // Bulk Trade isn't a TitanEngine instance (no .state) — forceStopTitan
         // would silently no-op on it. Stop it directly instead so the master
         // TP/SL gate can actually halt it, same as every other bot.
@@ -28323,7 +28343,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         if (id === 'differ' || id === 'hotrepeat') {
           eng.dispatch && eng.dispatch({ type: 'RESET_PNL_ONLY' });
           if (id === 'hotrepeat') eng.state.consecutiveLosses = 0;
-        } else if (id === 'bulktrade_evenodd') {
+        } else if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) {
           // Bulk Trade isn't a TitanEngine instance — it has no .state, so
           // the generic branch below would just create a dead `.state`
           // object nothing ever reads, leaving its real stats/stake/
@@ -28556,7 +28576,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
           }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
-        } else if (id === 'bulktrade_evenodd') {
+        } else if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) {
           // Bulk Trade's engine isn't a TitanEngine instance (no .state,
           // no toggleEngine) — it exposes a plain running flag and
           // start()/stop(), so ENGAGE ALL / TERMINATE ALL just calls
@@ -28726,6 +28746,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (id === 'differ') return ensureDifferEngine();
     if (id === 'hotrepeat') return ensureHotRepeatEngine();
     if (id === 'bulktrade_evenodd') return window.ensureBulkTradeEngine ? window.ensureBulkTradeEngine('evenodd') : null;
+    if (id === 'oppbulk_evenodd') return window.ensureOppBulkEngine ? window.ensureOppBulkEngine('evenodd') : null;
     return ensureTitanEngine(id);
   }
 
@@ -31714,6 +31735,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     getPrices(symbol) { return this.prices.get(symbol) || []; }
   }
 
+  // Bulk Trade and Opp Bulk both need the exact same 10-market tick feed —
+  // share one BulkTickSocket between them instead of opening a second
+  // identical public WebSocket connection.
+  let _sharedBulkTick = null;
+  function getSharedBulkTick() {
+    if (!_sharedBulkTick) _sharedBulkTick = new BulkTickSocket();
+    return _sharedBulkTick;
+  }
+
   // ── Signal math ─────────────────────────────────────────────────────
   // Plain proportion / z-score against the fair-generator baseline
   // (10% per digit, 50/50 for parity and tick direction). This is a
@@ -31812,6 +31842,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     return null;
   }
 
+  // ── Opp Bulk support ─────────────────────────────────────────────────
+  // Opp Bulk is the exact same engine/analysis as Bulk Trade, just with
+  // the final chosen side flipped to its opposite at the one place each
+  // trade type's contract_type is decided — the analysis (bestSignal),
+  // AND the auto-fire entry trigger (the parity-streak flip), both route
+  // through this so "opposite on everything" holds without duplicating
+  // any of the actual math above.
+  function flipContractType(ct) {
+    return ct === 'DIGITEVEN' ? 'DIGITODD'
+         : ct === 'DIGITODD' ? 'DIGITEVEN'
+         : ct === 'CALL' ? 'PUT'
+         : ct === 'PUT' ? 'CALL'
+         : ct;
+  }
+  function labelForContractType(ct) {
+    return ct === 'DIGITEVEN' ? 'Even' : ct === 'DIGITODD' ? 'Odd' : ct === 'CALL' ? 'Rise' : ct === 'PUT' ? 'Fall' : ct;
+  }
+
   const MIN_CONFIDENCE = 65; // qualifying bar — matches the "suitable market found" threshold
   // Bulk Trade is a single Even/Odd engine instance now (Over/Under was
   // removed) — kept keyed by trade type so an existing user's saved
@@ -31824,11 +31872,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   const configKeyFor = (tradeType) => 'bulktrade_config_' + tradeType;
 
   class BulkTradeEngine {
-    constructor(fixedTradeType) {
+    constructor(fixedTradeType, opts) {
       // Locked to Even/Odd — Over/Under has been removed from Bulk Trade.
       this.tradeType = 'evenodd';
-      this._configKey = configKeyFor(this.tradeType);
-      this.tick = new BulkTickSocket();
+      // Opp Bulk reuses this exact class — `invert` flips the final side
+      // chosen wherever a contract_type is decided (see _scan() below),
+      // and `botPrefix` keeps its config/localStorage/botId/journal keys
+      // entirely separate from Bulk Trade's, so the two run side by side
+      // as fully independent bots with their own stake, runs, martingale
+      // and P&L instead of sharing state.
+      this.invert = !!(opts && opts.invert);
+      this.botPrefix = (opts && opts.botPrefix) || 'bulktrade';
+      this._configKey = this.botPrefix + '_config_' + this.tradeType;
+      this.tick = getSharedBulkTick();
       this.config = Object.assign({
         tradeType: this.tradeType, stake: 5,
         martingaleMultiplier: 2.2, multiMarketScan: true,
@@ -31983,10 +32039,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // silently lost all their tuned settings back to hardcoded defaults.
         // The (harmless, now-unused) Over/Under-only fields like
         // predictionBeforeLoss/AfterLoss just come along for the ride.
-        const legacyRaw = localStorage.getItem(CONFIG_KEY_LEGACY);
-        if (legacyRaw) {
-          const legacy = JSON.parse(legacyRaw);
-          if (legacy) return legacy;
+        // Legacy pre-split config only ever belonged to Bulk Trade — Opp
+        // Bulk is a brand-new bot with no history to migrate, so it always
+        // starts from hardcoded defaults instead of silently inheriting
+        // Bulk Trade's tuned stake/martingale/run settings.
+        if (this.botPrefix === 'bulktrade') {
+          const legacyRaw = localStorage.getItem(CONFIG_KEY_LEGACY);
+          if (legacyRaw) {
+            const legacy = JSON.parse(legacyRaw);
+            if (legacy) return legacy;
+          }
         }
         return {};
       } catch (e) { return {}; }
@@ -32001,10 +32063,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // Dashboard reads via getBotStats/getBotJournal/isBotActive) and
       // nudge the Dashboard to re-render if it's the active tab — exactly
       // how every Titan-class bot's own onUpdate hook already behaves.
-      // Registered as 'bulktrade_evenodd' — see BOT_META/BOT_IDS in the
-      // Dashboard module, which is what makes its P&L count toward the
-      // master Take Profit / Take Profit Reload gate.
-      if (window.__BotEngines) window.__BotEngines['bulktrade_' + this.tradeType] = this;
+      // Registered as 'bulktrade_evenodd' (or 'oppbulk_evenodd' for the
+      // inverted instance) — see BOT_META/BOT_IDS in the Dashboard module,
+      // which is what makes its P&L count toward the master Take Profit /
+      // Take Profit Reload gate.
+      if (window.__BotEngines) window.__BotEngines[this.botPrefix + '_' + this.tradeType] = this;
       if (window.__queueDashboardRender) window.__queueDashboardRender();
     }
     addLog(kind, text) {
@@ -32034,8 +32097,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const c = this.config;
       let best = null;
       this._candidateMarkets().forEach((symbol) => {
-        const sig = computeSignal(c.tradeType, this.tick, symbol);
+        let sig = computeSignal(c.tradeType, this.tick, symbol);
         if (!sig) return;
+        // Opp Bulk: exact opposite of whatever Bulk Trade's analysis would
+        // pick on this market — same confidence/z-score/agreement reading
+        // (it's the same statistical read of the same ticks), just fired
+        // on the other side.
+        if (this.invert) sig = { ...sig, contractType: flipContractType(sig.contractType), label: labelForContractType(flipContractType(sig.contractType)) };
         const candidate = { symbol, ...sig };
         if (!best || candidate.confidence > best.confidence) best = candidate;
       });
@@ -32079,10 +32147,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         });
         this.parityStreak = bestPs;
         if (this.running && bestPs && bestPs.armedThisTick && !this.clusterActive && !this.isCooldown && Date.now() >= this.cooldownUntil) {
-          const flipType = bestPs.currentParity === 'even' ? 'DIGITODD' : 'DIGITEVEN';
+          // Bulk Trade's own pick (the "break" bet) — Opp Bulk flips this
+          // exact result to its opposite so its entry trigger digit fires
+          // on the other side of whatever Bulk Trade would have fired,
+          // rather than re-deriving its own (different) reading.
+          let flipType = bestPs.currentParity === 'even' ? 'DIGITODD' : 'DIGITEVEN';
+          if (this.invert) flipType = flipContractType(flipType);
           const flipSignal = {
             symbol: bestPs.symbol, contractType: flipType, barrier: null,
-            confidence: bestPs.breakProb, label: flipType === 'DIGITEVEN' ? 'Even (streak break)' : 'Odd (streak break)',
+            confidence: bestPs.breakProb, label: labelForContractType(flipType) + (this.invert ? ' (opp of streak break)' : ' (streak break)'),
           };
           this.addLog('info', `🎯 Streak break trigger fired on ${marketName(bestPs.symbol)} — ${bestPs.currentLength}-tick ${bestPs.currentParity} streak, ${bestPs.breakProb}% historical break rate (${bestPs.samples} samples) → betting ${flipSignal.label}.`);
           this._enterEntry(flipSignal);
@@ -32185,11 +32258,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // ── Rest Cooldown ────────────────────────────────────────────────────
     // A longer, user-visible rest period — distinct from the brief 5s
     // anti-spam `cooldownUntil` gate that already applies after every
-    // cluster. Only entered on the two events the person asked for: a run
-    // giving up via step-stop, or a full session's worth of runs
-    // completing. `opts.newSession` decides what happens when the
-    // countdown reaches 0: start a fresh session (reset run/step counters)
-    // or just resume scanning for the next run in the same session.
+    // cluster. Now entered after EVERY run boundary (win or step-stop),
+    // not just step-stop/session-completion — see _finalizeCluster().
+    // `opts.newSession` decides what happens when the countdown reaches 0:
+    // start a fresh session (reset run/step counters), just resume
+    // scanning for the next run in the same session, or — `opts.stopAfter`
+    // — stop the bot outright instead of resuming (used when Max
+    // Martingale Steps = 1 turns a single loss into a hard stop).
     _beginRestCooldown(reason, opts = {}) {
       const secs = Math.max(1, parseInt(this.config.restCooldownSeconds, 10) || 60);
       this.isCooldown = true;
@@ -32204,7 +32279,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           this._restCooldownTimer = null;
           this.isCooldown = false;
           this.cooldownReason = '';
-          if (opts.newSession && this.running) {
+          if (opts.stopAfter) {
+            this.running = false;
+            this.addLog('info', '■ Cooldown ended — bot stopped (Max Martingale Steps = 1). Press Start when you want to try another run.');
+          } else if (opts.newSession && this.running) {
             this.runsCompleted = 0;
             this.martingaleStep = 0;
             this.currentStake = this.config.stake;
@@ -32303,7 +32381,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const sessionTarget = Math.max(0, parseInt(this.config.sessionCount, 10) || 0);
         const targetReached = target > 0 && this.runsCompleted >= target;
 
-        if (targetReached) {
+        // FIX: Max Martingale Steps = 1 means "treat a single loss as a
+        // hard stop", not "step-stop this one run, then keep firing the
+        // rest of the session automatically" — rest, then actually stop
+        // the bot instead of pushing on into the remaining runs. This
+        // takes priority over the normal run-target / continue-session
+        // paths below.
+        if (runFinishedViaStepStop && maxSteps === 1) {
+          this.addLog('info', `🛑 Step-stop after a single loss (Max Martingale Steps = 1) — resting, then stopping. The remaining runs this session will NOT fire automatically; press Start again when ready.`);
+          this._beginRestCooldown(`step-stop after 1 loss (Max Martingale Steps = 1)`, { stopAfter: true });
+        } else if (targetReached) {
           // A full session's worth of runs is done — rest, then either
           // roll into the next session automatically or stop for good.
           this.sessionsCompleted += 1;
@@ -32315,11 +32402,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             this.addLog('info', `🏁🏁 All ${sessionTarget} session${sessionTarget === 1 ? '' : 's'} complete — automation finished, bot stopped. Reset Runs to start over.`);
             this.running = false;
           }
-        } else if (runFinishedViaStepStop) {
-          // Not at the session's run target yet, but this individual run
-          // gave up via step-stop — rest before trying the next run in the
-          // SAME session (no session increment, no counter reset).
-          this._beginRestCooldown(`step-stop hit (${maxSteps}/${maxSteps} martingale steps)`, { newSession: false });
+        } else {
+          // FIX: every run boundary — a WIN just as much as a step-stop
+          // loss — now rests for the full configured Rest Cooldown before
+          // the next run is allowed to start. Previously Rest Cooldown
+          // only ever fired on step-stop or session-completion, so e.g. a
+          // 5-runs-per-session bot would win run 1, wait only the brief
+          // 5s anti-spam gap below, and go straight back to scanning for
+          // run 2 — Rest Cooldown effectively never applied between
+          // individual runs, only at the very end.
+          const reason = runFinishedViaStepStop
+            ? `step-stop hit (${maxSteps}/${maxSteps} martingale steps)`
+            : `run ${this.runsCompleted}${target > 0 ? '/' + target : ''} won`;
+          this._beginRestCooldown(reason, { newSession: false });
         }
       }
       this._emit();
@@ -32382,7 +32477,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               }
               if (d.buy && d.buy.contract_id) {
                 _self._testContractIds.add(d.buy.contract_id);
-                window.HubContractRegistry && window.HubContractRegistry.claim(d.buy.contract_id, 'bulktrade');
+                window.HubContractRegistry && window.HubContractRegistry.claim(d.buy.contract_id, _self.botPrefix);
               }
               return;
             }
@@ -32394,7 +32489,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
               _self.ownContractIds.add(d.buy.contract_id);
               _self._clusterPending.add(d.buy.contract_id);
               _self._clusterStakeUsed += parseFloat(d.buy.buy_price) || _self.currentStake;
-              window.HubContractRegistry && window.HubContractRegistry.claim(d.buy.contract_id, 'bulktrade');
+              window.HubContractRegistry && window.HubContractRegistry.claim(d.buy.contract_id, _self.botPrefix);
             }
             return;
           }
@@ -32444,7 +32539,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                 const sig = _self._clusterSignal || {};
                 _self.journal.unshift({
                   id: (contractKey || Date.now().toString()) + Math.random().toString(36).slice(2, 5),
-                  contractId: contractKey, botId: 'bulktrade_' + _self.tradeType,
+                  contractId: contractKey, botId: _self.botPrefix + '_' + _self.tradeType,
                   time: new Date().toLocaleTimeString(), ts: Date.now(),
                   type: isWin ? 'win' : 'loss',
                   market: c.underlying || sig.symbol || null,
@@ -32478,6 +32573,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // rendered markup actually changed.
   function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
+  // Bulk Trade and Opp Bulk are both built from this one factory — same
+  // engine class, same UI, parameterized by `opts` so the two run as
+  // fully independent tabs/bots (own config keys, own DOM ids, own
+  // localStorage, own registration in window.__BotEngines) instead of
+  // sharing any state. opts: { prefix, invert, title, subtitle, ensureGlobalName }.
+  function createBulkPanel(opts) {
   // Bulk Trade runs a single Even/Odd engine (Over/Under was removed).
   const TRADE_TYPES = [
     { id: 'evenodd', label: 'Even / Odd', sub: 'Even vs odd digit pressure' },
@@ -32488,7 +32589,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   const engines = { evenodd: null };
   let activeSubTab = 'evenodd';
   try {
-    const saved = localStorage.getItem('bulktrade_active_subtab');
+    const saved = localStorage.getItem(opts.prefix + '_active_subtab');
     if (saved === 'evenodd') activeSubTab = saved;
   } catch (e) {}
   let mounted = false;
@@ -32499,12 +32600,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function ensureEngine(type) {
     const t = (type === 'evenodd') ? type : activeSubTab;
     if (!engines[t]) {
-      engines[t] = new BulkTradeEngine(t);
+      engines[t] = new BulkTradeEngine(t, { invert: opts.invert, botPrefix: opts.prefix });
       // Register immediately (not just on the instance's first _emit(),
       // which only happens after its first 2s scan tick) so ENGAGE ALL /
       // the Dashboard's Trade Journal can find a freshly-created engine
       // right away even if this tab has never been opened before.
-      if (window.__BotEngines) window.__BotEngines['bulktrade_' + t] = engines[t];
+      if (window.__BotEngines) window.__BotEngines[opts.prefix + '_' + t] = engines[t];
     }
     return engines[t];
   }
@@ -32512,7 +32613,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // can create/fetch either sub-engine on demand without having to know
   // anything about this module's internals — mirrors ensureBotEngine for
   // the TitanEngine-class bots.
-  window.ensureBulkTradeEngine = ensureEngine;
+  window[opts.ensureGlobalName] = ensureEngine;
   function el(id, root) { return (root || document).querySelector('#' + id); }
 
   const SELF_STYLE = (rootId) => `
@@ -32778,27 +32879,27 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function buildShell(root) {
     if (shellBuilt) return;
     root.innerHTML = `
-      ${SELF_STYLE('bulktrade-root')}
+      ${SELF_STYLE(opts.prefix + '-root')}
       <header class="glass-panel-glow" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-bottom:1px solid hsl(var(--primary)/0.15);border-radius:0;flex-shrink:0;position:relative">
         <div>
-          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700">BULK TRADE</h1>
-          <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">📡 AI MARKET SCANNER · CLUSTER EXECUTION · MULTI-STRATEGY</div>
+          <h1 class="font-display neon-text-primary" style="margin:0;font-size:1.1rem;letter-spacing:5px;font-family:'Orbitron',sans-serif;font-weight:700">${opts.title}</h1>
+          <div style="font-size:8px;letter-spacing:2px;color:hsl(var(--muted-foreground))">${opts.subtitle}</div>
         </div>
         <div style="flex:1"></div>
-        <div class="bt-scan-pill" id="bulktrade-scanpill"><span class="bt-scan-dot"></span><span id="bulktrade-scantext">SCANNING</span></div>
+        <div class="bt-scan-pill" id="${opts.prefix}-scanpill"><span class="bt-scan-dot"></span><span id="${opts.prefix}-scantext">SCANNING</span></div>
         <div class="rf-header-glow"></div>
       </header>
       <div class="bt-shell-row" style="display:flex;flex:1;min-height:0;overflow:hidden;">
-        <div class="bt-sidepanel" id="bulktrade-sidepanel"></div>
+        <div class="bt-sidepanel" id="${opts.prefix}-sidepanel"></div>
         <div class="benz-grid" style="flex:1;min-width:0;">
-          <div class="benz-col"><div class="benz-scroll" id="bulktrade-left"></div></div>
-          <div class="benz-col"><div class="benz-scroll" id="bulktrade-center"></div></div>
+          <div class="benz-col"><div class="benz-scroll" id="${opts.prefix}-left"></div></div>
+          <div class="benz-col"><div class="benz-scroll" id="${opts.prefix}-center"></div></div>
           <div class="benz-col">
             <div style="display:flex;gap:4px;padding:8px;border-bottom:1px solid hsl(var(--border)/0.4)">
               <button type="button" class="bt-right-tab" data-righttab="journal" style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;text-align:center;border-radius:10px;cursor:pointer">JOURNAL</button>
               <button type="button" class="bt-right-tab" data-righttab="log" style="flex:1;padding:8px;font-size:10px;font-weight:800;font-family:'Outfit',sans-serif;letter-spacing:2px;text-align:center;border-radius:10px;cursor:pointer">LOG</button>
             </div>
-            <div class="benz-scroll" id="bulktrade-right"></div>
+            <div class="benz-scroll" id="${opts.prefix}-right"></div>
           </div>
         </div>
       </div>`;
@@ -33096,28 +33197,28 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   }
 
   function render() {
-    const root = document.getElementById('bulktrade-root');
+    const root = document.getElementById(opts.prefix + '-root');
     if (!root) return;
     const eng = ensureEngine();
     const c = eng.config;
     const s = eng.bestSignal;
     buildShell(root);
     if (window.setHtmlIfChanged) {
-      window.setHtmlIfChanged(el('bulktrade-sidepanel', root), renderSidePanel());
-      window.setHtmlIfChanged(el('bulktrade-left', root), renderLeft(c, eng));
-      window.setHtmlIfChanged(el('bulktrade-center', root), renderCenter(c, eng, s));
-      window.setHtmlIfChanged(el('bulktrade-right', root), rightTab === 'journal' ? renderJournalTab(eng) : renderLog(eng));
+      window.setHtmlIfChanged(el(opts.prefix + '-sidepanel', root), renderSidePanel());
+      window.setHtmlIfChanged(el(opts.prefix + '-left', root), renderLeft(c, eng));
+      window.setHtmlIfChanged(el(opts.prefix + '-center', root), renderCenter(c, eng, s));
+      window.setHtmlIfChanged(el(opts.prefix + '-right', root), rightTab === 'journal' ? renderJournalTab(eng) : renderLog(eng));
     } else {
-      el('bulktrade-sidepanel', root).innerHTML = renderSidePanel();
-      el('bulktrade-left', root).innerHTML = renderLeft(c, eng);
-      el('bulktrade-center', root).innerHTML = renderCenter(c, eng, s);
-      el('bulktrade-right', root).innerHTML = rightTab === 'journal' ? renderJournalTab(eng) : renderLog(eng);
+      el(opts.prefix + '-sidepanel', root).innerHTML = renderSidePanel();
+      el(opts.prefix + '-left', root).innerHTML = renderLeft(c, eng);
+      el(opts.prefix + '-center', root).innerHTML = renderCenter(c, eng, s);
+      el(opts.prefix + '-right', root).innerHTML = rightTab === 'journal' ? renderJournalTab(eng) : renderLog(eng);
     }
     root.querySelectorAll('.bt-right-tab').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.righttab === rightTab);
     });
-    const pill = el('bulktrade-scanpill', root);
-    const pillText = el('bulktrade-scantext', root);
+    const pill = el(opts.prefix + '-scanpill', root);
+    const pillText = el(opts.prefix + '-scantext', root);
     if (pill && pillText) {
       pill.classList.remove('fire', 'signal');
       if (eng.clusterActive) { pill.classList.add('fire'); pillText.textContent = 'FIRING'; }
@@ -33134,7 +33235,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       btn._bound = true;
       btn.onclick = () => {
         activeSubTab = btn.dataset.tt;
-        try { localStorage.setItem('bulktrade_active_subtab', activeSubTab); } catch (e) {}
+        try { localStorage.setItem(opts.prefix + '_active_subtab', activeSubTab); } catch (e) {}
         render();
       };
     });
@@ -33228,7 +33329,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // convention every other bot tab on this hub already follows.
   }
 
-  window.BulkTradePanel = { activate, deactivate };
+  return { activate, deactivate };
+
+  }
+
+  window.BulkTradePanel = createBulkPanel({
+    prefix: 'bulktrade', invert: false, ensureGlobalName: 'ensureBulkTradeEngine',
+    title: 'BULK TRADE', subtitle: '📡 AI MARKET SCANNER · CLUSTER EXECUTION · MULTI-STRATEGY',
+  });
+  // Opp Bulk — identical engine/UI, mirrored: every analysis pick, entry
+  // and trigger digit fires on the exact opposite side of whatever Bulk
+  // Trade would have fired (see BulkTradeEngine's `invert` handling in
+  // _scan() above). Fully independent stake/runs/martingale/journal/P&L
+  // — its own tab, so when Bulk Trade is on a losing streak you can run
+  // this one alongside it taking the inverse bet.
+  window.OppBulkPanel = createBulkPanel({
+    prefix: 'oppbulk', invert: true, ensureGlobalName: 'ensureOppBulkEngine',
+    title: 'OPP BULK', subtitle: '🔁 OPPOSITE-SIDE SCANNER · MIRRORS BULK TRADE\u2019S ENTRIES · CLUSTER EXECUTION',
+  });
 })();
 </script>
 </body>
