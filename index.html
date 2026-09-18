@@ -31871,6 +31871,86 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   const CONFIG_KEY_LEGACY = 'bulktrade_config';
   const configKeyFor = (tradeType) => 'bulktrade_config_' + tradeType;
 
+  // ── TAG-TEAM PAIRING (Bulk Trade ⇄ Opp Bulk) ────────────────────────
+  // When BOTH bots are running they no longer just fire side by side —
+  // they take turns. Every bot starts armed (the "duel"). The first
+  // cluster to settle decides who leads: a net WIN makes that bot the
+  // leader, a net LOSS makes the other bot the leader. The non-leader is
+  // BENCHED (standby): still "running", but it cannot fire anything, so
+  // there is no double exposure. The leader keeps running with full
+  // automation (martingale, rest cooldown, repeat) until one of its
+  // clusters nets a LOSS — then it is benched and the partner is armed.
+  // And so on, back and forth, until you stop a bot or the Dashboard
+  // Take Profit / Stop Loss gate fires. Stopping either bot releases the
+  // other back to normal solo running. Toggle is shared by both tabs.
+  const TAGTEAM_KEY = 'bulkpair_tagteam';
+  const bulkPair = {
+    enabled: (() => { try { return localStorage.getItem(TAGTEAM_KEY) !== '0'; } catch (e) { return true; } })(),
+    leader: null, // botPrefix of the current leader, or null = duel (nobody decided yet)
+    _all() { const m = window.__BotEngines || {}; return [m.bulktrade_evenodd, m.oppbulk_evenodd].filter(Boolean); },
+    _partner(eng) { const m = window.__BotEngines || {}; return (eng.botPrefix === 'bulktrade' ? m.oppbulk_evenodd : m.bulktrade_evenodd) || null; },
+    _name(eng) { return eng.botPrefix === 'bulktrade' ? 'Bulk Trade' : 'Opp Bulk'; },
+    paired(eng) { const p = this._partner(eng); return this.enabled && !!p && !!p.running && !!eng.running; },
+    setEnabled(v) {
+      this.enabled = !!v;
+      try { localStorage.setItem(TAGTEAM_KEY, this.enabled ? '1' : '0'); } catch (e) {}
+      this.leader = null;
+      this._all().forEach((e) => {
+        e.standby = false;
+        e.addLog('info', this.enabled ? '🤝 Tag-Team ON — when both bulk bots run they take turns: the one that loses is benched, the winner runs.' : '🤝 Tag-Team OFF — both bulk bots run independently again.');
+      });
+    },
+    status(eng) {
+      if (!this.enabled) return 'off';
+      if (!eng.running) return 'idle';
+      const p = this._partner(eng);
+      if (!p || !p.running) return 'solo';
+      if (this.leader === null) return 'duel';
+      return this.leader === eng.botPrefix ? 'leader' : 'benched';
+    },
+    onStart(eng) {
+      if (!this.enabled) return;
+      const p = this._partner(eng);
+      if (!p || !p.running) return;
+      if (this.leader === p.botPrefix) {
+        eng.standby = true;
+        eng.addLog('info', `💤 Tag-Team: ${this._name(p)} is already leading — ${this._name(eng)} is benched until it loses.`);
+      } else {
+        eng.standby = false;
+        this.leader = null;
+        eng.addLog('info', '⚔ Tag-Team: both bulk bots armed — the first cluster to settle decides who leads.');
+      }
+    },
+    onStop(eng) {
+      eng.standby = false;
+      const p = this._partner(eng);
+      this.leader = null;
+      if (p && p.standby) {
+        p.standby = false;
+        p.addLog('info', `▶ Tag-Team: ${this._name(eng)} stopped — ${this._name(p)} is armed again and running solo.`);
+      }
+    },
+    onClusterSettled(eng, netWin) {
+      if (!this.paired(eng)) return;
+      const p = this._partner(eng);
+      if (this.leader === null) {
+        this._setLeader(netWin ? eng : p, `${this._name(eng)}'s cluster ${netWin ? 'won' : 'lost'}`);
+      } else if (this.leader === eng.botPrefix && !netWin) {
+        this._setLeader(p, `${this._name(eng)} lost its cluster`);
+      }
+      // A benched bot's own in-flight cluster settling never changes the leader.
+    },
+    _setLeader(eng, why) {
+      const p = this._partner(eng);
+      this.leader = eng.botPrefix;
+      eng.standby = false;
+      if (p) { p.standby = true; p._skipArmed = false; p._skipSignal = null; }
+      eng.addLog('win', `👑 Tag-Team: ${why} → ${this._name(eng)} is armed and runs with full automation.`);
+      if (p) p.addLog('info', `💤 Tag-Team: ${why} → ${this._name(p)} is disarmed until ${this._name(eng)} loses.`);
+    },
+  };
+  window.__BulkPair = bulkPair;
+
   class BulkTradeEngine {
     constructor(fixedTradeType, opts) {
       // Locked to Even/Odd — Over/Under has been removed from Bulk Trade.
@@ -32013,6 +32093,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // qualifying trigger. Deliberately NOT persisted to localStorage —
       // reloading the page should never silently resume live trading.
       this.running = false;
+      // Tag-Team: true = benched by the Bulk Trade ⇄ Opp Bulk pairing (see
+      // bulkPair above). Still 'running', but can't fire anything.
+      this.standby = false;
       // Live snapshots of the two advanced entry blocks, recomputed every
       // scan tick in _scan() below, purely for the UI + their own
       // (independent, opt-in) auto-fire path.
@@ -32092,7 +32175,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // waiting for, so fire unconditionally on the signal snapshot taken
       // at arm time rather than re-checking whether the trigger is still
       // armed right now.
-      if (this._skipArmed && this._skipSignal && !this.clusterActive && this.running) {
+      if (this.standby && this._skipArmed) { this._skipArmed = false; this._skipSignal = null; }
+      if (this._skipArmed && this._skipSignal && !this.clusterActive && this.running && !this.standby) {
         const sig = this._skipSignal;
         this._skipArmed = false;
         this._skipSignal = null;
@@ -32153,7 +32237,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           }
         });
         this.parityStreak = bestPs;
-        if (this.running && bestPs && bestPs.armedThisTick && !this.clusterActive && !this.isCooldown && Date.now() >= this.cooldownUntil) {
+        if (this.running && !this.standby && bestPs && bestPs.armedThisTick && !this.clusterActive && !this.isCooldown && Date.now() >= this.cooldownUntil) {
           // Bulk Trade's own pick (the "break" bet) — Opp Bulk flips this
           // exact result to its opposite so its entry trigger digit fires
           // on the other side of whatever Bulk Trade would have fired,
@@ -32177,6 +32261,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // calling fireCluster() directly, so Normal / Test Stake / Skip Tick
     // apply uniformly everywhere a cluster could fire.
     _enterEntry(signal) {
+      if (this.standby) return; // Tag-Team: benched — the partner bot is leading
       const mode = this.config.firstTickMode || 'normal';
       if (mode === 'skip') {
         if (this._skipArmed) return; // already waiting for the force-fire tick — ignore re-arms in the meantime
@@ -32242,6 +32327,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     start() {
       if (this.running) return;
       this.running = true;
+      bulkPair.onStart(this);
       const steps = Math.max(1, parseInt(this.config.maxMartingaleSteps, 10) || 3);
       const cd = Math.max(1, parseInt(this.config.restCooldownSeconds, 10) || 60);
       const fa = !!this.config.fullAutomation;
@@ -32255,8 +32341,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.isCooldown = false;
       this.cooldownRemaining = 0;
       this.cooldownReason = '';
-      if (!this.running) { this._emit(); return; }
+      if (!this.running) { bulkPair.onStop(this); this._emit(); return; }
       this.running = false;
+      bulkPair.onStop(this);
       this.addLog('info', '■ Bot stopped.');
       this._emit();
     }
@@ -32300,6 +32387,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
 
     fireCluster(signal) {
+      if (this.standby) { this.addLog('info', '💤 Benched by Tag-Team — cluster not fired.'); return; }
       if (!this.socketT || this.socketT.readyState !== WebSocket.OPEN) {
         this.addLog('loss', 'ERROR: Trading socket not connected. Sync your API token first.');
         return;
@@ -32392,6 +32480,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           : `run ${this.runsCompleted} won`;
         this._beginRestCooldown(reason);
       }
+      // Tag-Team: hand the baton over if the leader just lost (or decide the
+      // opening duel). Runs AFTER stake/martingale state is updated above.
+      bulkPair.onClusterSettled(this, netWin);
       this._emit();
     }
     resetRuns() {
@@ -32912,6 +33003,41 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }).join('');
   }
 
+  // Tag-Team card — shared setting, same toggle in both Bulk Trade and
+  // Opp Bulk tabs, plus a live readout of who is leading right now.
+  function renderTagTeamCard(eng) {
+    const st = bulkPair.status(eng);
+    const partnerName = eng.botPrefix === 'bulktrade' ? 'Opp Bulk' : 'Bulk Trade';
+    const map = {
+      off:    ['OFF',          'muted',  'Both bulk bots run independently.'],
+      idle:   ['IDLE',         'muted',  'Start this bot (and ' + partnerName + ') to begin taking turns.'],
+      solo:   ['SOLO',         'muted',  partnerName + ' is not running — this bot runs normally until you start it too.'],
+      duel:   ['⚔ DUEL',       'accent', 'Both armed. The first cluster to settle decides who leads.'],
+      leader: ['👑 LEADING',   'win',    'Armed with full automation. Benches itself the moment a cluster nets a loss.'],
+      benched:['💤 BENCHED',   'loss',   'Disarmed — ' + partnerName + ' is leading. Re-armed as soon as it loses a cluster.'],
+    };
+    const [tag, tone, text] = map[st];
+    const col = tone === 'win' ? 'var(--win)' : tone === 'loss' ? 'var(--loss)' : tone === 'accent' ? 'var(--accent)' : 'var(--muted-foreground)';
+    return `
+      <div class="cp-card" style="animation:bt-in .35s ease both .11s">
+        <div class="cp-section-label">🤝 TAG-TEAM WITH ${partnerName.toUpperCase()}</div>
+        <div class="cp-section-hint">
+          When Bulk Trade and Opp Bulk are both running, only one fires at a time. The one whose cluster nets a loss is disarmed and the winner keeps running with full automation until it loses — then they swap. Same setting in both tabs.
+        </div>
+        <div class="cp-toggle-row" style="margin-bottom:8px">
+          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Tag-Team Mode</span>
+          <button class="titan-toggle ${bulkPair.enabled ? 'on' : ''}" id="bt-tagteam" onclick="event.stopPropagation()"></button>
+        </div>
+        <div class="cp-progress-group">
+          <div class="cp-progress-head">
+            <span class="cp-progress-label">This bot</span>
+            <span class="cp-status-pill" style="background:hsl(${col}/0.12);border-color:hsl(${col}/0.4);color:hsl(${col})">${tag}</span>
+          </div>
+          <div class="cp-progress-foot"><span style="font-weight:500;font-size:10px;color:hsl(var(--muted-foreground))">${text}</span></div>
+        </div>
+      </div>`;
+  }
+
   function renderLeft(c, eng) {
     return `
       <div class="cp-card" style="animation:bt-in .35s ease both .05s">
@@ -32934,6 +33060,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <button class="titan-toggle ${c.multiMarketScan ? 'on' : ''}" id="bt-multiscan" onclick="event.stopPropagation()"></button>
         </div>
       </div>
+      ${renderTagTeamCard(eng)}
       <div class="cp-card" style="animation:bt-in .35s ease both .12s">
         <div class="cp-section-label">🎯 RUN CONTROL</div>
         <div class="cp-section-hint">
@@ -32964,7 +33091,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div class="cp-progress-group">
           <div class="cp-progress-head">
             <span class="cp-progress-label">Status</span>
-            <span class="cp-status-pill ${eng.isCooldown ? 'resting' : ''}">${eng.isCooldown ? `😴 Resting · ${eng.cooldownRemaining}s` : '● Active'}</span>
+            <span class="cp-status-pill ${eng.isCooldown ? 'resting' : ''}">${eng.isCooldown ? `😴 Resting · ${eng.cooldownRemaining}s` : eng.standby ? '💤 Benched' : '● Active'}</span>
           </div>
           <div class="cp-progress-foot">
             <span>Running until Stop or Dashboard Take Profit/Stop Loss</span>
@@ -33007,7 +33134,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
       <button type="button" class="cp-engage-btn ${eng.running || eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
-        ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : eng.isCooldown ? `😴 RESTING (${eng.cooldownRemaining}s) — CLICK TO STOP` : eng.running ? '■ STOP BOT' : '▶ START BOT'}
+        ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : eng.isCooldown ? `😴 RESTING (${eng.cooldownRemaining}s) — CLICK TO STOP` : eng.running ? (eng.standby ? '■ STOP BOT (benched)' : '■ STOP BOT') : '▶ START BOT'}
       </button>
       <div class="hr-note">
         <b>How it works:</b> set Stake, Martingale × and Max Martingale Steps above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the parity streak trigger, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. Either way it then rests for Rest Cooldown and automatically re-analyses the market and trigger digit for the next run — Full Automation is always on, so it just keeps going, run after run, until you press Stop or the Dashboard's Take Profit/Stop Loss gate fires.
@@ -33043,7 +33170,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .08s">
         <div class="cp-section-label" style="justify-content:space-between">
           <span>PARITY STREAK BREAK ENGINE</span>
-          <span class="bt-adv-status"><span class="bt-adv-dot ${eng.running ? 'on' : 'off'}"></span>${eng.running ? 'WAITING FOR TRIGGER' : 'BOT STOPPED'}</span>
+          <span class="bt-adv-status"><span class="bt-adv-dot ${eng.running && !eng.standby ? 'on' : 'off'}"></span>${eng.running ? (eng.standby ? 'BENCHED · PARTNER LEADS' : 'WAITING FOR TRIGGER') : 'BOT STOPPED'}</span>
         </div>
         <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px">
           Tracks how long runs of consecutive same-parity digits usually last, then bets on the flip once the live streak reaches a length that has historically broken most often.
@@ -33225,6 +33352,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (marketEl && !marketEl._bound) { marketEl._bound = true; marketEl.onchange = (e) => eng.setConfig({ selectedMarket: e.target.value }); }
     const multiscanEl = el('bt-multiscan', root);
     if (multiscanEl && !multiscanEl._bound) { multiscanEl._bound = true; multiscanEl.onclick = () => { eng.setConfig({ multiMarketScan: !eng.config.multiMarketScan }); render(); }; }
+    const tagTeamEl = el('bt-tagteam', root);
+    if (tagTeamEl && !tagTeamEl._bound) { tagTeamEl._bound = true; tagTeamEl.onclick = () => { bulkPair.setEnabled(!bulkPair.enabled); render(); }; }
     const fireBtn = el('bt-fire', root);
     if (fireBtn && !fireBtn._bound) { fireBtn._bound = true; fireBtn.onclick = () => { if (eng.running) eng.stop(); else eng.start(); render(); }; }
 
