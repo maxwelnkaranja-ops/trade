@@ -31717,7 +31717,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           if (d.msg_type !== 'tick' || !d.tick) return;
           const symbol = d.tick.symbol, quote = d.tick.quote;
           if (!this.digits.has(symbol)) return;
-          const qs = quote.toFixed(2);
+          // The contract settles on the last digit at the MARKET'S OWN decimal
+          // places (pip_size), not always 2. Reading it at 2dp gave the wrong
+          // digit on any market that quotes 3-4 decimals, so every parity/
+          // digit statistic (and the trigger digit) was computed on the wrong
+          // number and didn't line up with how the trade actually settled.
+          const dp = Number.isInteger(d.tick.pip_size) ? d.tick.pip_size : 2;
+          const qs = quote.toFixed(dp);
           const digit = parseInt(qs[qs.length - 1], 10);
           const da = this.digits.get(symbol); da.push(digit); if (da.length > 200) da.shift();
           const pa = this.prices.get(symbol); pa.push(quote); if (pa.length > 200) pa.shift();
@@ -31850,6 +31856,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // AND the auto-fire entry trigger (the parity-streak flip), both route
   // through this so "opposite on everything" holds without duplicating
   // any of the actual math above.
+  // ── GATE PIPELINE HELPERS ──────────────────────────────────────────
+  const oppParity = (p) => (p === 'even' ? 'odd' : 'even');
+  // Gate 2 — Trigger Terminal. For each digit 0-9 in the market's recent
+  // history: every time that digit printed, was the NEXT tick the side we
+  // want to bet? The digit with the best follow-through (and enough samples)
+  // becomes the trigger digit.
+  function readTriggerTerminal(digits, hist, side, minSamples, minRate) {
+    const h = digits.slice(-hist);
+    const cells = Array.from({ length: 10 }, (_, d) => ({ digit: d, n: 0, hits: 0, rate: 0 }));
+    for (let i = 0; i < h.length - 1; i++) {
+      const cell = cells[h[i]];
+      cell.n += 1;
+      if ((h[i + 1] % 2 === 0 ? 'even' : 'odd') === side) cell.hits += 1;
+    }
+    cells.forEach((cl) => { cl.rate = cl.n ? Math.round((cl.hits / cl.n) * 100) : 0; });
+    const ok = cells.filter((cl) => cl.n >= minSamples && cl.rate >= minRate).sort((a, b) => b.rate - a.rate || b.n - a.n);
+    return { cells, trigger: ok[0] || null, side };
+  }
+
   function flipContractType(ct) {
     return ct === 'DIGITEVEN' ? 'DIGITODD'
          : ct === 'DIGITODD' ? 'DIGITEVEN'
@@ -31935,19 +31960,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (!this.paired(eng)) return;
       const p = this._partner(eng);
       if (this.leader === null) {
-        this._setLeader(netWin ? eng : p, `${this._name(eng)}'s cluster ${netWin ? 'won' : 'lost'}`);
+        this._setLeader(netWin ? eng : p, `${this._name(eng)}'s cluster ${netWin ? 'won' : 'lost'}`, netWin ? null : eng);
       } else if (this.leader === eng.botPrefix && !netWin) {
-        this._setLeader(p, `${this._name(eng)} lost its cluster`);
+        this._setLeader(p, `${this._name(eng)} lost its cluster`, eng);
       }
       // A benched bot's own in-flight cluster settling never changes the leader.
     },
-    _setLeader(eng, why) {
+    _setLeader(eng, why, from) {
       const p = this._partner(eng);
       this.leader = eng.botPrefix;
       eng.standby = false;
-      if (p) { p.standby = true; p._skipArmed = false; p._skipSignal = null; }
+      if (p) { p.standby = true; p._skipArmed = false; p._skipSignal = null; p._hunt = null; }
       eng.addLog('win', `👑 Tag-Team: ${why} → ${this._name(eng)} is armed and runs with full automation.`);
       if (p) p.addLog('info', `💤 Tag-Team: ${why} → ${this._name(p)} is disarmed until ${this._name(eng)} loses.`);
+      // The bot taking over does NOT jump straight in: fresh analysis, its own
+      // Gate 1 pick (not the market the other bot just lost on), its own trigger digit.
+      if (from) eng.beginHandoff(from._clusterSignal && from._clusterSignal.symbol);
     },
   };
   window.__BulkPair = bulkPair;
@@ -32008,7 +32036,18 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // streak must be at least this long. entryCooldownSeconds: quiet
         // time after every cluster before another can fire (this is what
         // stops a losing cluster from being chased seconds later).
-        minStreakLength: 4, entryCooldownSeconds: 45,
+        entryCooldownSeconds: 45,
+        // Two-gate entry pipeline (see _gateScan / _onTick).
+        //  Gate 1 (market scan): trendWindow ticks decide each market's
+        //   trend; a market needs >= minTrendPct of one parity to qualify.
+        //  Gate 2 (trigger terminal): histWindow ticks are read to find the
+        //   trigger digit — needs >= triggerMinSamples occurrences and a
+        //   >= triggerMinRate follow-through to be trusted.
+        //  handoffAnalysisSeconds: fresh-analysis pause when the partner
+        //   bot takes over after the other one loses (Tag-Team).
+        trendWindow: 30, minTrendPct: 60,
+        histWindow: 150, triggerMinSamples: 8, triggerMinRate: 60,
+        handoffAnalysisSeconds: 15,
         // Parity Streak Break Engine params. A streak-length based
         // heuristic: armed automatically whenever the bot is running.
         parityStreakLookback: 150, parityStreakThreshold: 60,
@@ -32128,7 +32167,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this._testContractIds = new Set();
 
       this._onChange = null; // set by the UI
-      this._psPrev = {};     // per-market previous streak state, for edge detection in _onTick()
+      // Gate pipeline state. _hunt = the currently locked (market, side,
+      // trigger digit) waiting for its digit; null = still scanning.
+      this._hunt = null;
+      this._avoidSymbol = null;   // market the partner just lost on — skipped on the first hunt after a handoff
+      this._analysisUntil = 0;    // fresh-analysis pause end (handoff)
+      this.gates = { ranked: [], term: null };
+      // Predicted (from history) vs actual results of trades this terminal fired.
+      this.tStats = { clusters: 0, cWins: 0, contracts: 0, hits: 0, pred: 0 };
       this._initTrading();
       this.tick.onTick((sym) => { try { this._onTick(sym); } catch (e) {} });
       this.scanTimer = setInterval(() => this._scan(), 2000);
@@ -32225,85 +32271,133 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // from the normal "Scan & Run Bulk Trade" confidence gate.
       this.reversalTrigger = null;
       this.parityStreak = null;
-      if (c.tradeType === 'evenodd') {
-        // Scan every candidate market for its OWN streak-break setup rather
-        // than only ever checking the one market that happened to win the
-        // unrelated short/long-window dominance race above (evenOddSignal's
-        // "best" is a trend-following pick — a totally different heuristic
-        // from this mean-reversion one, so the two can legitimately point
-        // at different markets, or even opposite directions, on any given
-        // scan). Picking the strongest armed streak anywhere on the board
-        // means this trigger actually fires on the best mean-reversion
-        // setup available instead of being hostage to trend-scoring.
-        const lookback = Math.max(20, parseInt(c.parityStreakLookback, 10) || 150);
-        const thresholdPct = Math.max(1, parseInt(c.parityStreakThreshold, 10) || 60);
-        const minSamples = Math.max(1, parseInt(c.parityStreakMinSamples, 10) || 3);
-        let bestPs = null;
-        this._candidateMarkets().forEach((symbol) => {
-          const digits = this.tick.getDigits(symbol);
-          const ps = computeParityStreak(digits, lookback, thresholdPct, minSamples);
-          if (!ps) return;
-          const candidate = { ...ps, symbol, ticks: digits.length, warm: digits.length >= Math.min(lookback, 200) };
-          // Display ranking only (the UI shows the most interesting market):
-          // fully warmed-up beats warming, then armed beats unarmed, then
-          // higher break rate, then more samples. NOTHING is fired from
-          // here any more — see _onTick().
-          const better = !bestPs
-            || (candidate.warm && !bestPs.warm)
-            || (candidate.warm === bestPs.warm && candidate.armedThisTick && !bestPs.armedThisTick)
-            || (candidate.warm === bestPs.warm && candidate.armedThisTick === bestPs.armedThisTick
-                && (candidate.breakProb > bestPs.breakProb
-                    || (candidate.breakProb === bestPs.breakProb && candidate.samples > bestPs.samples)));
-          if (better) bestPs = candidate;
-        });
-        this.parityStreak = bestPs;
-      }
+      if (c.tradeType === 'evenodd') this._gateScan();
       this._emit();
     }
 
-    // ── ENTRY TRIGGER (runs on every incoming tick, per market) ─────────
-    // Why this replaced the old 2-second "level" check inside _scan():
-    //  • The old check fired whenever ANY of 10 markets looked "armed".
-    //    With a 150-tick window, a streak length seen ~5-20 times shows a
-    //    60%+ break rate by pure chance very often, so some market was
-    //    armed nearly all the time and clusters fired every ~9 seconds —
-    //    i.e. it wasn't really waiting for anything.
-    //  • It could fire on a history of only 20 ticks after page load.
-    //  • After a losing cluster it re-fired on the same still-"armed"
-    //    setup 5 seconds later, at the escalated stake.
-    // Now a cluster only fires when ALL of these hold on the tick that just
-    // arrived: the market has a full lookback window of ticks (warm-up); this
-    // tick extended a same-parity streak to a NEW length (a fresh event, not a
-    // state that stays true); that length is >= Min Streak Length; its
-    // historical break rate/sample count clear the thresholds; and the quiet
-    // time since the last cluster has passed.
-    _onTick(symbol) {
-      if (this.config.tradeType !== 'evenodd') return;
+    // ══ TWO-GATE ENTRY PIPELINE ═══════════════════════════════════════
+    // Nothing fires unless it passes BOTH gates, in order:
+    //   GATE 1 · MARKET SCAN  — every market with a full history window is
+    //     scored on its live parity trend; the best one is locked.
+    //       Bulk Trade (REVERSAL):    picks the most stretched trend and will
+    //                                 bet AGAINST it.
+    //       Opp Bulk (CONTINUATION):  picks the steadiest trend (short and
+    //                                 long window agree) and bets WITH it.
+    //     Two different readings of the market — not one bot flipped.
+    //   GATE 2 · TRIGGER TERMINAL — on the locked market, the history is
+    //     read to find the trigger digit: the digit after which the next
+    //     tick has most often been the side we want. The bot then waits for
+    //     that digit to print and fires on it, so the 1-tick contract is
+    //     the tick right after the trigger.
+    // After every cluster (win or loss) the hunt starts over from Gate 1.
+    // After a Tag-Team handoff the taking-over bot does a fresh analysis
+    // and skips the market the partner just lost on.
+    _gateCfg() {
       const c = this.config;
-      const lookback = Math.max(20, parseInt(c.parityStreakLookback, 10) || 150);
-      const thresholdPct = Math.max(1, parseInt(c.parityStreakThreshold, 10) || 60);
-      const minSamples = Math.max(1, parseInt(c.parityStreakMinSamples, 10) || 3);
-      const digits = this.tick.getDigits(symbol);
-      const ps = computeParityStreak(digits, lookback, thresholdPct, minSamples);
-      const pv = this._psPrev[symbol];
-      this._psPrev[symbol] = ps ? { parity: ps.currentParity, len: ps.currentLength } : null;
-      if (!ps || !pv) return;
-      if (!this.running || this.standby) return;
-      if (!this._candidateMarkets().includes(symbol)) return;
-      if (digits.length < Math.min(lookback, 200)) return; // warm-up: full window required
-      if (this.clusterActive || this._testInFlight || this._skipArmed || this.isCooldown || Date.now() < this.cooldownUntil) return;
-      const fresh = pv.parity === ps.currentParity && ps.currentLength === pv.len + 1;
-      const minLen = Math.max(2, parseInt(c.minStreakLength, 10) || 4);
-      if (!fresh || !ps.armedThisTick || ps.currentLength < minLen) return;
-      // Bulk Trade bets the break; Opp Bulk flips that to its opposite.
-      let flipType = ps.currentParity === 'even' ? 'DIGITODD' : 'DIGITEVEN';
-      if (this.invert) flipType = flipContractType(flipType);
-      const flipSignal = {
-        symbol, contractType: flipType, barrier: null,
-        confidence: ps.breakProb, label: labelForContractType(flipType) + (this.invert ? ' (opp of streak break)' : ' (streak break)'),
+      const ho = parseInt(c.handoffAnalysisSeconds, 10);
+      return {
+        trendWin: Math.max(10, parseInt(c.trendWindow, 10) || 30),
+        minTrend: Math.min(95, Math.max(51, parseInt(c.minTrendPct, 10) || 60)),
+        hist: Math.min(200, Math.max(50, parseInt(c.histWindow, 10) || 150)),
+        trigSamples: Math.max(3, parseInt(c.triggerMinSamples, 10) || 8),
+        trigRate: Math.min(95, Math.max(51, parseInt(c.triggerMinRate, 10) || 60)),
+        handoff: isNaN(ho) ? 15 : Math.max(0, ho),
       };
-      this.addLog('info', `🎯 Fresh trigger on ${marketName(symbol)} — streak just reached ${ps.currentLength}× ${ps.currentParity}, ${ps.breakProb}% historical break rate (${ps.samples} samples) → betting ${flipSignal.label}.`);
-      this._enterEntry(flipSignal);
+    }
+    gatePhase() {
+      const now = Date.now();
+      if (!this.running) return { key: 'stopped', text: 'BOT STOPPED' };
+      if (this.standby) return { key: 'benched', text: 'BENCHED · PARTNER LEADS' };
+      if (this.clusterActive) return { key: 'flight', text: 'CLUSTER IN FLIGHT' };
+      if (this.isCooldown) return { key: 'rest', text: `RESTING ${this.cooldownRemaining}s` };
+      if (now < this.cooldownUntil) return { key: 'quiet', text: `QUIET TIME ${Math.ceil((this.cooldownUntil - now) / 1000)}s` };
+      if (now < this._analysisUntil) return { key: 'analysing', text: `FRESH ANALYSIS ${Math.ceil((this._analysisUntil - now) / 1000)}s` };
+      if (this._hunt) return { key: 'waiting', text: `GATE 2 · WAITING FOR A ${this._hunt.trigger.digit}` };
+      if (!(this.gates.ranked || []).some((r) => r.warm)) return { key: 'warming', text: 'WARMING UP' };
+      return { key: 'scanning', text: 'GATE 1 · SCANNING' };
+    }
+    beginHandoff(avoidSymbol) {
+      if (this.clusterActive) return; // already busy with its own cluster
+      const G = this._gateCfg();
+      this._hunt = null;
+      this._avoidSymbol = avoidSymbol || null;
+      this._analysisUntil = Date.now() + G.handoff * 1000;
+      this.addLog('info', `🔄 Handoff — taking over. Starting a FRESH analysis (${G.handoff}s), then Gate 1 scan → Gate 2 trigger digit → fire.${avoidSymbol ? ` It will not re-enter ${marketName(avoidSymbol)} on this first hunt.` : ''}`);
+    }
+    // Rank every candidate market for Gate 1 (also feeds the UI table).
+    _rankMarkets(G) {
+      const out = [];
+      this._candidateMarkets().forEach((symbol) => {
+        const digits = this.tick.getDigits(symbol);
+        const need = Math.max(G.hist, G.trendWin);
+        const e = { symbol, ticks: digits.length, need, warm: digits.length >= need, eligible: false, score: 0 };
+        if (digits.length >= G.trendWin) {
+          const w = digits.slice(-G.trendWin);
+          const ev = w.filter((d) => d % 2 === 0).length;
+          const dominant = ev * 2 >= w.length ? 'even' : 'odd';
+          const domPct = Math.round(((dominant === 'even' ? ev : w.length - ev) / w.length) * 100);
+          let streak = 1;
+          for (let i = digits.length - 1; i > 0; i--) { if (digits[i] % 2 === digits[i - 1] % 2) streak++; else break; }
+          const lw = digits.slice(-100);
+          const le = lw.filter((d) => d % 2 === 0).length;
+          const longDom = le * 2 >= lw.length ? 'even' : 'odd';
+          const longPct = Math.round(((longDom === 'even' ? le : lw.length - le) / lw.length) * 100);
+          e.dominant = dominant; e.domPct = domPct; e.streak = streak; e.longDom = longDom; e.longPct = longPct;
+          e.side = this.invert ? dominant : oppParity(dominant);
+          e.avoided = symbol === this._avoidSymbol;
+          e.eligible = e.warm && !e.avoided && domPct >= G.minTrend && (!this.invert || longDom === dominant);
+          e.score = this.invert ? domPct + longPct / 2 : domPct + Math.min(streak, 8);
+        }
+        out.push(e);
+      });
+      out.sort((x, y) => (Number(y.eligible) - Number(x.eligible)) || (y.score - x.score) || ((y.domPct || 0) - (x.domPct || 0)));
+      return out;
+    }
+    _gateScan() {
+      const G = this._gateCfg();
+      const now = Date.now();
+      const ranked = this._rankMarkets(G);
+      this.gates.ranked = ranked.slice(0, 6);
+      // Keep an existing lock only while its trend still stands.
+      if (this._hunt) {
+        const r = ranked.find((x) => x.symbol === this._hunt.symbol);
+        const ok = r && r.warm && r.dominant === this._hunt.dominant && r.domPct >= G.minTrend - 5 && (!this.invert || r.longDom === r.dominant);
+        if (!this.running || this.standby) this._hunt = null;
+        else if (!ok) { this.addLog('info', `↩ Gate 1: the trend on ${marketName(this._hunt.symbol)} faded — dropping the lock and re-scanning.`); this._hunt = null; }
+        else if (now - this._hunt.lockedAt > 180000) { this.addLog('info', `↩ Gate 2: no ${this._hunt.trigger.digit} appeared for 3 minutes — re-scanning all markets.`); this._hunt = null; }
+      }
+      const canHunt = this.running && !this.standby && !this.clusterActive && !this.isCooldown && !this._testInFlight && !this._skipArmed
+        && now >= this.cooldownUntil && now >= this._analysisUntil;
+      if (this._hunt || !canHunt) return;
+      // Gate 1 → Gate 2: walk the ranking, lock the first market whose history yields a trustworthy trigger digit.
+      this.gates.term = null;
+      for (const cand of ranked) {
+        if (!cand.eligible) break;
+        const term = readTriggerTerminal(this.tick.getDigits(cand.symbol), G.hist, cand.side, G.trigSamples, G.trigRate);
+        if (!this.gates.term) this.gates.term = { symbol: cand.symbol, ...term };
+        if (!term.trigger) continue;
+        this._hunt = { symbol: cand.symbol, dominant: cand.dominant, side: cand.side, domPct: cand.domPct, streak: cand.streak, trigger: term.trigger, term: { symbol: cand.symbol, ...term }, lockedAt: now };
+        this._avoidSymbol = null;
+        this.addLog('engine', `🔍 Gate 1 → ${marketName(cand.symbol)} locked (${cand.dominant.toUpperCase()} trend ${cand.domPct}%, ${cand.streak}× streak; ${this.invert ? 'continuation' : 'reversal'} mode). 🎯 Gate 2 → trigger digit ${term.trigger.digit}: after a ${term.trigger.digit} the next tick was ${cand.side.toUpperCase()} ${term.trigger.rate}% of the time (${term.trigger.hits}/${term.trigger.n} in the last ${G.hist} ticks). Waiting for a ${term.trigger.digit}…`);
+        return;
+      }
+    }
+    _onTick(symbol) {
+      const h = this._hunt;
+      if (!h || h.symbol !== symbol) return;
+      if (!this.running || this.standby || this.clusterActive || this._testInFlight || this._skipArmed) return;
+      if (this.isCooldown || Date.now() < this.cooldownUntil || Date.now() < this._analysisUntil) return;
+      const digits = this.tick.getDigits(symbol);
+      if (digits[digits.length - 1] !== h.trigger.digit) return;
+      const ct = h.side === 'even' ? 'DIGITEVEN' : 'DIGITODD';
+      const signal = {
+        symbol, contractType: ct, barrier: null,
+        confidence: h.trigger.rate, predRate: h.trigger.rate,
+        label: labelForContractType(ct) + (this.invert ? ' · continuation' : ' · reversal'),
+      };
+      this._hunt = null; // hunt consumed — the next one starts fresh from Gate 1
+      this.addLog('engine', `⚡ Trigger digit ${h.trigger.digit} just printed on ${marketName(symbol)} → firing ${signal.label}.`);
+      this._enterEntry(signal);
     }
 
     // ── FIRST-TICK HANDLING dispatcher ──────────────────────────────────
@@ -32378,6 +32472,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     start() {
       if (this.running) return;
       this.running = true;
+      this._hunt = null; this._avoidSymbol = null; this._analysisUntil = 0;
       bulkPair.onStart(this);
       const steps = Math.max(1, parseInt(this.config.maxMartingaleSteps, 10) || 3);
       const cd = Math.max(1, parseInt(this.config.restCooldownSeconds, 10) || 60);
@@ -32396,6 +32491,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.cooldownReason = '';
       if (!this.running) { bulkPair.onStop(this); this._emit(); return; }
       this.running = false;
+      this._hunt = null;
       bulkPair.onStop(this);
       this.addLog('info', '■ Bot stopped.');
       this._emit();
@@ -32479,6 +32575,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.stats.won += this._clusterWon;
       this.stats.lost += this._clusterLost;
       this.stats.pnl += this._clusterProfit;
+      {
+        const sg = this._clusterSignal || {};
+        if (typeof sg.predRate === 'number') {
+          const cn = this._clusterWon + this._clusterLost;
+          this.tStats.clusters += 1; this.tStats.cWins += netWin ? 1 : 0;
+          this.tStats.contracts += cn; this.tStats.hits += this._clusterWon; this.tStats.pred += sg.predRate * cn;
+        }
+      }
 
       // A RUN is the whole loss → martingale-escalation → recovery cycle,
       // not each individual cluster fire. It only finishes — and only
@@ -33196,18 +33300,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
       </div>
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .14s">
-        <div class="cp-section-label">🔀 PARITY STREAK BREAK ENGINE</div>
+        <div class="cp-section-label">🚪 ENTRY GATES</div>
         <div class="cp-section-hint">
-          This is the trigger the bot waits for. Tracks how long same-parity streaks usually run, then fires the flip once the live streak reaches a length that has historically broken most often — scanning every market on the board for whichever one has the strongest streak-break setup right now, then firing on that one. Min Samples filters out streak lengths that haven't happened often enough in the lookback window to trust yet. The bot only fires on a FRESH trigger — the tick where a streak first reaches a qualifying length — never just because a market still looks "armed", and only after the full lookback window has been collected. Min Streak Length and Wait Between Clusters throttle how often it can fire.
+          Every trade must pass two gates. <b>Gate 1</b> scans all markets and locks the best trend (${eng.invert ? 'Opp Bulk: the steadiest trend — it bets WITH it' : 'Bulk Trade: the most stretched trend — it bets AGAINST it'}). <b>Gate 2</b> reads that market's history for the trigger digit — the digit after which the next tick has most often gone the way we bet — and fires only when that digit prints. Nothing else fires a trade.
         </div>
         <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Streak Lookback (ticks)</span><input class="cp-input" type="number" min="20" step="5" id="bt-pslookback" value="${c.parityStreakLookback}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Break Threshold %</span><input class="cp-input" type="number" min="1" max="99" step="1" id="bt-psthreshold" value="${c.parityStreakThreshold}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Min Samples</span><input class="cp-input" type="number" min="1" max="50" step="1" id="bt-psminsamples" value="${c.parityStreakMinSamples ?? 5}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Trend Window (ticks)</span><input class="cp-input" type="number" min="10" max="200" step="5" id="bt-trendwin" value="${c.trendWindow ?? 30}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Min Trend %</span><input class="cp-input" type="number" min="51" max="95" step="1" id="bt-mintrend" value="${c.minTrendPct ?? 60}"></div>
         </div>
         <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Min Streak Length</span><input class="cp-input" type="number" min="2" max="12" step="1" id="bt-psminlen" value="${c.minStreakLength ?? 4}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">History Window (ticks)</span><input class="cp-input" type="number" min="50" max="200" step="10" id="bt-histwin" value="${c.histWindow ?? 150}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Trigger Min Samples</span><input class="cp-input" type="number" min="3" max="50" step="1" id="bt-trigsamples" value="${c.triggerMinSamples ?? 8}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Trigger Min Rate %</span><input class="cp-input" type="number" min="51" max="95" step="1" id="bt-trigrate" value="${c.triggerMinRate ?? 60}"></div>
+        </div>
+        <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Wait Between Clusters (s)</span><input class="cp-input" type="number" min="5" step="5" id="bt-entrycd" value="${c.entryCooldownSeconds ?? 45}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Handoff Analysis (s)</span><input class="cp-input" type="number" min="0" max="300" step="5" id="bt-handoff" value="${c.handoffAnalysisSeconds ?? 15}"></div>
         </div>
       </div>
       <button type="button" class="cp-engage-btn ${eng.running || eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
@@ -33283,26 +33391,67 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>`;
   }
 
+  function renderGates(c, eng) {
+    const ph = eng.gatePhase();
+    const g = eng.gates || {};
+    const h = eng._hunt;
+    const colMap = { waiting: '--win', scanning: '--accent', analysing: '--accent', warming: '--accent', flight: '--primary' };
+    const col = 'hsl(var(' + (colMap[ph.key] || '--muted-foreground') + '))';
+    const modeName = eng.invert ? 'CONTINUATION' : 'REVERSAL';
+    const modeDesc = eng.invert
+      ? 'Follows the steadiest trend — bets WITH the side that has been winning.'
+      : 'Fades the most stretched trend — bets AGAINST the side that has been winning.';
+    const rows = (g.ranked || []).map((r) => {
+      const locked = h && h.symbol === r.symbol;
+      const trend = r.dominant ? `${r.dominant.toUpperCase()} ${r.domPct}%` : '—';
+      const status = locked ? '🔒 LOCKED' : !r.warm ? `⏳ ${r.ticks}/${r.need}` : r.avoided ? '🚫 SKIPPED' : r.eligible ? '✓ ELIGIBLE' : 'weak trend';
+      const dim = !locked && !r.eligible;
+      return `<div style="display:grid;grid-template-columns:1.5fr 1fr .7fr 1.1fr;gap:6px;align-items:center;padding:6px 8px;border-radius:8px;margin-bottom:3px;font-family:'DM Mono',monospace;font-size:9.5px;${locked ? 'border:1px solid hsl(var(--win)/0.6);background:hsl(var(--win)/0.1);' : 'border:1px solid hsl(var(--border)/0.35);'}${dim ? 'opacity:.55;' : ''}">
+        <span style="font-weight:700">${marketName(r.symbol)}</span><span>${trend}</span><span>${r.streak ? r.streak + '×' : '—'}</span><span style="text-align:right;color:${locked ? 'hsl(var(--win))' : 'inherit'}">${status}</span></div>`;
+    }).join('');
+    const term = h ? h.term : g.term;
+    const trig = h ? h.trigger : (term && term.trigger);
+    const lastDigits = term ? eng.tick.getDigits(term.symbol) : [];
+    const lastDigit = lastDigits.length ? lastDigits[lastDigits.length - 1] : null;
+    const cells = term ? term.cells.map((cl) => {
+      const isT = trig && trig.digit === cl.digit;
+      return `<div style="text-align:center;padding:5px 0;border-radius:8px;border:1px solid ${isT ? 'hsl(var(--win))' : 'hsl(var(--border)/0.45)'};background:${isT ? 'hsl(var(--win)/0.15)' : 'transparent'};${lastDigit === cl.digit ? 'box-shadow:0 0 0 1.5px hsl(var(--accent));' : ''}">
+        <div style="font-size:13px;font-weight:800">${cl.digit}</div><div style="font-size:8px;color:hsl(var(--muted-foreground))">${cl.n ? cl.rate + '%' : '—'}</div><div style="font-size:7px;opacity:.6">n${cl.n}</div></div>`;
+    }).join('') : '';
+    const t = eng.tStats;
+    const record = t && t.clusters > 0
+      ? `Terminal record: <b>${t.cWins}/${t.clusters}</b> clusters won · contracts won <b>${Math.round((t.hits / t.contracts) * 100)}%</b> vs <b>${Math.round(t.pred / t.contracts)}%</b> the history predicted. If the actual rate keeps sitting well under the predicted one, that trigger digit isn't really predicting anything.`
+      : 'No trades fired from this terminal yet — once it trades, the predicted-vs-actual hit rate shows here.';
+    return `
+      <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both">
+        <div class="cp-section-label" style="justify-content:space-between">
+          <span>🚪 GATE 1 · MULTI-MARKET SCAN</span>
+          <span class="bt-adv-status" style="color:${col}"><span class="bt-adv-dot ${ph.key === 'stopped' || ph.key === 'benched' ? 'off' : 'on'}"></span>${ph.text}</span>
+        </div>
+        <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px"><b style="color:hsl(var(--foreground))">${modeName}</b> — ${modeDesc}</div>
+        ${rows || `<div style="text-align:center;padding:14px;opacity:.5;font-size:10.5px">Collecting ticks…</div>`}
+      </div>
+      <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .05s">
+        <div class="cp-section-label" style="justify-content:space-between">
+          <span>🎯 GATE 2 · TRIGGER TERMINAL</span>
+          <span class="bt-adv-status">${term ? marketName(term.symbol) : '—'}</span>
+        </div>
+        ${h
+          ? `<div style="display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;margin-bottom:10px">
+              <div style="font-size:38px;font-weight:900;line-height:1;color:hsl(var(--win))">${h.trigger.digit}</div>
+              <div style="font-size:10px;line-height:1.55;color:hsl(var(--muted-foreground))">When a <b style="color:hsl(var(--foreground))">${h.trigger.digit}</b> prints on ${marketName(h.symbol)}, fire <b style="color:hsl(var(--foreground))">${h.side.toUpperCase()}</b>. In the last ${eng.config.histWindow || 150} ticks the next tick was ${h.side.toUpperCase()} <b style="color:hsl(var(--foreground))">${h.trigger.rate}%</b> of the time (${h.trigger.hits}/${h.trigger.n}). Live last digit: <b style="color:hsl(var(--foreground))">${lastDigit ?? '—'}</b>.</div>
+            </div>`
+          : `<div style="font-size:10px;line-height:1.55;color:hsl(var(--muted-foreground));margin-bottom:10px">${term ? (term.trigger ? '' : `No digit on ${marketName(term.symbol)} has a trustworthy follow-through yet — Gate 1 keeps scanning for another market.`) : 'Waiting for Gate 1 to lock a market. No trigger digit is read until a market qualifies.'}</div>`}
+        ${cells ? `<div style="display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin-bottom:10px">${cells}</div><div style="font-size:8px;color:hsl(var(--muted-foreground));margin-bottom:8px">Each cell: digit · how often the NEXT tick was ${term.side.toUpperCase()} after it · sample count. Blue ring = live last digit.</div>` : ''}
+        <div style="font-size:9px;line-height:1.55;color:hsl(var(--muted-foreground));padding-top:8px;border-top:1px solid hsl(var(--border)/0.4)">${record}</div>
+      </div>`;
+  }
+
   function renderCenter(c, eng, s) {
     const qualified = !!(s && s.confidence >= MIN_CONFIDENCE);
     const pct = s ? s.confidence : 0;
     return `
-      <div class="cp-card" style="animation:bt-in .35s ease both;text-align:center">
-        <div class="cp-section-label" style="justify-content:center">${qualified ? '✓ SUITABLE MARKET FOUND' : eng.scanning ? 'SCANNING…' : 'STARTING SCANNER…'}</div>
-        <div class="bt-gauge ${qualified ? 'qualified' : 'scanning'}" style="--pct:${pct}">
-          <div class="bt-gauge-ring"></div>
-          <div class="bt-gauge-inner"><b>${pct}%</b><span>CONFIDENCE</span></div>
-        </div>
-        ${s
-          ? `<div style="font-size:11px;color:hsl(var(--muted-foreground));margin-bottom:12px">${marketName(s.symbol)} — ${esc(s.label)}</div>`
-          : `<div style="font-size:11px;color:hsl(var(--muted-foreground));margin-bottom:12px">Not enough ticks yet on the candidate market(s) — give it a few seconds.</div>`}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div class="rf-ind-card"><div class="rf-ind-val">${s ? s.z.toFixed(2) : '—'}</div><div class="rf-ind-label">Z-SCORE</div></div>
-          <div class="rf-ind-card"><div class="rf-ind-val">${s ? s.mtfAgree + '%' : '—'}</div><div class="rf-ind-label">MTF AGREE</div></div>
-        </div>
-      </div>
-      ${c.multiMarketScan ? renderScanGrid(c, eng) : ''}
-      ${renderParityStreakBlock(c, eng)}
+      ${renderGates(c, eng)}
       <div class="cp-card" style="animation:bt-in .35s ease both .1s">
         <div class="cp-section-label">SESSION STATS</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
@@ -33474,6 +33623,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (psLookbackEl && !psLookbackEl._bound) { psLookbackEl._bound = true; psLookbackEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 20) eng.setConfig({ parityStreakLookback: v }); }; }
     const psThresholdEl = el('bt-psthreshold', root);
     if (psThresholdEl && !psThresholdEl._bound) { psThresholdEl._bound = true; psThresholdEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 1 && v <= 99) eng.setConfig({ parityStreakThreshold: v }); }; }
+    [['bt-trendwin', 'trendWindow', 10, 200], ['bt-mintrend', 'minTrendPct', 51, 95], ['bt-histwin', 'histWindow', 50, 200],
+     ['bt-trigsamples', 'triggerMinSamples', 3, 50], ['bt-trigrate', 'triggerMinRate', 51, 95], ['bt-handoff', 'handoffAnalysisSeconds', 0, 300]].forEach(([id, key, lo, hi]) => {
+      const node = el(id, root);
+      if (node && !node._bound) { node._bound = true; node.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= lo && v <= hi) eng.setConfig({ [key]: v }); }; }
+    });
     const psMinLenEl = el('bt-psminlen', root);
     if (psMinLenEl && !psMinLenEl._bound) { psMinLenEl._bound = true; psMinLenEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 2 && v <= 12) eng.setConfig({ minStreakLength: v }); }; }
     const entryCdEl = el('bt-entrycd', root);
