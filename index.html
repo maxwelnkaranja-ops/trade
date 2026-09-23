@@ -713,11 +713,6 @@
           <span class="hub-tab-label">Bulk Trade</span>
           <span class="dot live" id="bulktrade-tab-dot" style="display:none"></span>
         </button>
-        <button type="button" class="hub-tab" data-app="oppbulk" data-label="Opp Bulk" title="Opp Bulk — same scanner as Bulk Trade, but every signal, entry and trigger digit is mirrored to the opposite side. Meant to be run alongside Bulk Trade so when one side is losing the other is taking the inverse bet">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 6v10M6 11h10" stroke-opacity="0.5"/></svg></span>
-          <span class="hub-tab-label">Opp Bulk</span>
-          <span class="dot live" id="oppbulk-tab-dot" style="display:none"></span>
-        </button>
         <div class="hub-nav-label">Mean Reversion</div>
         <button type="button" class="hub-tab" data-app="risemr" data-label="Rise MR" title="Rise (Mean Reversion) — HIGHER-only ADX/Bollinger/RSI/Stochastic/ATR offset-barrier bot, split from Rise &amp; Fall MR">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l7-10 5 6 4-9"/><path d="M14 5h6v6"/></svg></span>
@@ -835,10 +830,6 @@
     <section id="panel-bulktrade" class="app-panel" aria-label="Bulk Trade — AI Market Scanner">
       <div id="bulktrade-root" class="app-root"></div>
     </section>
-    <section id="panel-oppbulk" class="app-panel" aria-label="Opp Bulk — Opposite-Side AI Market Scanner">
-      <div id="oppbulk-root" class="app-root"></div>
-    </section>
-
     <section id="panel-risemr" class="app-panel" aria-label="Rise Mean Reversion dashboard">
       <div id="risemr-root" class="app-root"></div>
     </section>
@@ -20930,11 +20921,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // the Dashboard's merged totals (and count toward Take Profit / Take
     // Profit Reload via the master P&L gate, same as every other bot).
     bulktrade_evenodd: { label: 'Bulk Trade Bot (Even/Odd)', dot: 'hsl(var(--secondary))' },
-    // Opp Bulk — mirrors Bulk Trade's engine 1:1 (same class, own instance)
-    // but with every signal/entry/trigger inverted to the opposite side.
-    // Own id so its trades show up separately in the Dashboard's merged
-    // totals and count toward the master Take Profit / Stop Loss gate.
-    oppbulk_evenodd: { label: 'Opp Bulk Bot (Even/Odd)', dot: 'hsl(var(--loss))' },
   };
 
   function getBotJournal(engine, botId) {
@@ -20951,7 +20937,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
     // Bulk Trade is a standalone module, not a TitanEngine — its stats
     // live directly on `.stats`, not `.state.stats`.
-    if ((botId === 'bulktrade_evenodd' || botId === 'oppbulk_evenodd')) {
+    if (botId === 'bulktrade_evenodd') {
       const st = engine.stats || { won: 0, lost: 0, pnl: 0 };
       return { trades: st.won + st.lost, win: st.won, loss: st.lost, profit: st.pnl };
     }
@@ -20962,7 +20948,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function isBotActive(engine, botId) {
     if (!engine) return false;
     if (botId === 'differ' || botId === 'hotrepeat') return engine.state.isArmed || engine.state.isRunning;
-    if ((botId === 'bulktrade_evenodd' || botId === 'oppbulk_evenodd')) return !!(engine.clusterActive || engine.running);
+    if (botId === 'bulktrade_evenodd') return !!(engine.clusterActive || engine.running);
     return engine.state.active || engine.state.isLocked;
   }
 
@@ -20971,7 +20957,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function getBotFlowStage(engine, botId) {
     const stage = { engaged: false, analysis: false, trading: false, result: null };
     if (!engine) return stage;
-    if ((botId === 'bulktrade_evenodd' || botId === 'oppbulk_evenodd')) {
+    if (botId === 'bulktrade_evenodd') {
       stage.engaged = isBotActive(engine, botId);
       stage.trading = !!engine.clusterActive;
       stage.analysis = stage.engaged && !stage.trading;
@@ -21941,7 +21927,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // gate (a separate BOT_IDS list below) already counted its P&L toward
     // the take-profit/stop-loss total. Added here so the visible dashboard
     // totals/journal finally match what the gate was already enforcing.
-    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd', 'oppbulk_evenodd'];
+    const botIds = ['differ', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -27488,9 +27474,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // TERMINATE ALL, the tab dot, and the Trade Journal totals actually
     // reach it — previously there was no 'bulktrade' entry here at all,
     // so pressing ENGAGE ALL never started or stopped Bulk Trade.
-    // Opp Bulk is the same BulkTradeEngine class, inverted, run as its own
-    // instance/tab — needs the same treatment as Bulk Trade above.
-    'bulktrade_evenodd', 'oppbulk_evenodd'];
+    'bulktrade_evenodd'];
 
   // Differ's default cold-pick method (Echo) fires the instant it's armed
   // — that's the strategy, not a bug — but bundling it into a bulk
@@ -27516,12 +27500,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market', 'flipintell', 'bulktrade', 'oppbulk'];
+  const VALID_APPS = ['dashboard', 'hotrepeat', 'even', 'odd', 'nexus', 'under', 'meanrev', 'matches', 'risemr', 'fallmr', 'evenmr', 'oddmr', 'oldeven', 'oldodd', 'oldrisefall', 'fairbot', 'market', 'flipintell', 'bulktrade'];
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null, oppbulk_evenodd: null };
+  const engines = { hotrepeat: null, even: null, odd: null, nexus: null, under: null, meanrev: null, risemr: null, fallmr: null, evenmr: null, oddmr: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null };
   // Shared "is this bot currently engaged?" check for Master Control
   // (ENGAGE ALL / TERMINATE ALL) — each bot family speaks a different
   // dialect of "on": Hot Repeat has isArmed/isRunning, the Bulk Trade
@@ -27530,7 +27514,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // .state.isLocked.
   function isMasterEngaged(eng, id) {
     if (id === 'hotrepeat') return eng.state.isArmed || eng.state.isRunning;
-    if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) return !!(eng.running || eng.clusterActive);
+    if (id === 'bulktrade_evenodd') return !!(eng.running || eng.clusterActive);
     return eng.state.active || eng.state.isLocked;
   }
   // Exposed so the Dashboard's Master Control "Stake" popup (defined in
@@ -27777,10 +27761,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (window.BulkTradePanel) window.BulkTradePanel.activate();
       return;
     }
-    if (id === 'oppbulk') {
-      if (window.OppBulkPanel) window.OppBulkPanel.activate();
-      return;
-    }
     if (id === 'differ') {
       const eng = ensureDifferEngine();
       if (!eng) return;
@@ -27828,7 +27808,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (activeApp === 'market' && id !== 'market' && window.MarketIntelPanel) window.MarketIntelPanel.deactivate();
     if (activeApp === 'flipintell' && id !== 'flipintell' && window.FlipIntellPanel) window.FlipIntellPanel.deactivate();
     if (activeApp === 'bulktrade' && id !== 'bulktrade' && window.BulkTradePanel) window.BulkTradePanel.deactivate();
-    if (activeApp === 'oppbulk' && id !== 'oppbulk' && window.OppBulkPanel) window.OppBulkPanel.deactivate();
     activeApp = id;
     try { localStorage.setItem('hub_active_app', id); } catch (e) { /* storage unavailable — tab still switches for this session */ }
     const activeBtn = document.querySelector(`.hub-tab[data-app="${id}"]`);
@@ -28199,7 +28178,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const s = eng.state;
       if (id === 'differ' || id === 'hotrepeat') {
         total += (s.totalProfit || 0);
-      } else if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) {
+      } else if (id === 'bulktrade_evenodd') {
         total += (eng.stats && typeof eng.stats.pnl === 'number' ? eng.stats.pnl : 0);
       } else {
         total += (s.stats && typeof s.stats.profit === 'number' ? s.stats.profit : 0);
@@ -28242,7 +28221,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           eng.addLog && eng.addLog('engine', 'TERMINATE', 'Force terminated by master control');
           eng.emit && eng.emit();
         } catch(_) {}
-      } else if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) {
+      } else if (id === 'bulktrade_evenodd') {
         // Bulk Trade isn't a TitanEngine instance (no .state) — forceStopTitan
         // would silently no-op on it. Stop it directly instead so the master
         // TP/SL gate can actually halt it, same as every other bot.
@@ -28344,7 +28323,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         if (id === 'differ' || id === 'hotrepeat') {
           eng.dispatch && eng.dispatch({ type: 'RESET_PNL_ONLY' });
           if (id === 'hotrepeat') eng.state.consecutiveLosses = 0;
-        } else if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) {
+        } else if (id === 'bulktrade_evenodd') {
           // Bulk Trade isn't a TitanEngine instance — it has no .state, so
           // the generic branch below would just create a dead `.state`
           // object nothing ever reads, leaving its real stats/stake/
@@ -28577,7 +28556,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             }
           }
           if (!turnOn && (eng.state.isArmed || eng.state.isRunning)) { eng.abortTrades(); eng.disarmSystem(); }
-        } else if ((id === 'bulktrade_evenodd' || id === 'oppbulk_evenodd')) {
+        } else if (id === 'bulktrade_evenodd') {
           // Bulk Trade's engine isn't a TitanEngine instance (no .state,
           // no toggleEngine) — it exposes a plain running flag and
           // start()/stop(), so ENGAGE ALL / TERMINATE ALL just calls
@@ -28747,7 +28726,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (id === 'differ') return ensureDifferEngine();
     if (id === 'hotrepeat') return ensureHotRepeatEngine();
     if (id === 'bulktrade_evenodd') return window.ensureBulkTradeEngine ? window.ensureBulkTradeEngine('evenodd') : null;
-    if (id === 'oppbulk_evenodd') return window.ensureOppBulkEngine ? window.ensureOppBulkEngine('evenodd') : null;
     return ensureTitanEngine(id);
   }
 
@@ -31700,7 +31678,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.connected = false;
       this.reconnectTimer = null;
       this.digits = new Map(); this.prices = new Map();
-      MARKETS.forEach((s) => { this.digits.set(s, []); this.prices.set(s, []); });
+      // Epoch (seconds) of every stored tick + local arrival time of the last
+      // one: lets the bot audit which tick a trade really entered/settled on,
+      // and lets the UI show whether the price feed is actually live.
+      this.times = new Map(); this.lastAt = new Map();
+      MARKETS.forEach((s) => { this.digits.set(s, []); this.prices.set(s, []); this.times.set(s, []); });
       this.listeners = new Set();
       this.connect();
     }
@@ -31727,6 +31709,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           const digit = parseInt(qs[qs.length - 1], 10);
           const da = this.digits.get(symbol); da.push(digit); if (da.length > 200) da.shift();
           const pa = this.prices.get(symbol); pa.push(quote); if (pa.length > 200) pa.shift();
+          const ta = this.times.get(symbol); ta.push(Number(d.tick.epoch) || Math.floor(Date.now() / 1000)); if (ta.length > 200) ta.shift();
+          this.lastAt.set(symbol, Date.now());
           this.listeners.forEach((cb) => { try { cb(symbol); } catch (e) {} });
         } catch (e) {}
       };
@@ -31740,11 +31724,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     onTick(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
     getDigits(symbol) { return this.digits.get(symbol) || []; }
     getPrices(symbol) { return this.prices.get(symbol) || []; }
+    getTimes(symbol) { return this.times.get(symbol) || []; }
+    msSinceTick(symbol) { const t = this.lastAt.get(symbol); return t ? Date.now() - t : Infinity; }
   }
 
-  // Bulk Trade and Opp Bulk both need the exact same 10-market tick feed —
-  // share one BulkTickSocket between them instead of opening a second
-  // identical public WebSocket connection.
+  // Shared 10-market tick feed for Bulk Trade — a single BulkTickSocket
+  // singleton instead of opening a fresh public WebSocket connection
+  // every time the engine is (re)created.
   let _sharedBulkTick = null;
   function getSharedBulkTick() {
     if (!_sharedBulkTick) _sharedBulkTick = new BulkTickSocket();
@@ -31849,30 +31835,82 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     return null;
   }
 
-  // ── Opp Bulk support ─────────────────────────────────────────────────
-  // Opp Bulk is the exact same engine/analysis as Bulk Trade, just with
-  // the final chosen side flipped to its opposite at the one place each
-  // trade type's contract_type is decided — the analysis (bestSignal),
-  // AND the auto-fire entry trigger (the parity-streak flip), both route
-  // through this so "opposite on everything" holds without duplicating
-  // any of the actual math above.
   // ── GATE PIPELINE HELPERS ──────────────────────────────────────────
   const oppParity = (p) => (p === 'even' ? 'odd' : 'even');
   // Gate 2 — Trigger Terminal. For each digit 0-9 in the market's recent
   // history: every time that digit printed, was the NEXT tick the side we
   // want to bet? The digit with the best follow-through (and enough samples)
   // becomes the trigger digit.
-  function readTriggerTerminal(digits, hist, side, minSamples, minRate) {
+  // P(X >= k) for X ~ Binomial(n, 0.5): how likely ONE digit shows a
+  // follow-through this good by pure luck against a fair coin-flip baseline.
+  function binomTail(n, k) {
+    if (k <= 0) return 1;
+    if (k > n) return 0;
+    let pmf = Math.pow(0.5, n), tail = 0;
+    for (let i = 0; i <= n; i++) { if (i >= k) tail += pmf; pmf = pmf * (n - i) / (i + 1); }
+    return Math.min(1, tail);
+  }
+  // Wilson score lower bound for a binomial proportion — a much more
+  // reliable ranking metric than raw hit-rate when sample sizes differ,
+  // since a 7/8 (87%) read on 8 samples is mostly luck while a 55/85
+  // (65%) read on 85 samples is a real edge; raw rate alone ranks the
+  // first one higher, Wilson correctly ranks the second one higher.
+  function wilsonLowerBound(hits, n, z) {
+    if (!n) return 0;
+    const p = hits / n, z2 = z * z, denom = 1 + z2 / n;
+    const center = p + z2 / (2 * n);
+    const margin = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+    return Math.max(0, (center - margin) / denom);
+  }
+  // `lag` = which tick after the trigger the contract actually settles on
+  // (1 = the very next tick). The bot measures it from real settled contracts.
+  // `maxLuckPct` rejects a digit whose apparent edge is too likely to be a
+  // best-of-10 fluke (see the Sidak-corrected `luck` below) rather than a
+  // real relationship.
+  //
+  // A digit only qualifies as the entry trigger if it clears ALL of:
+  //   1. enough samples and a high enough raw rate (as before)
+  //   2. OUT-OF-SAMPLE CONSISTENCY — the window is split into an older and
+  //      a newer half; the edge must show up independently in BOTH halves
+  //      (whenever a half has enough samples to judge), not just be a
+  //      full-window average dragged up by one lucky streak in one half.
+  //      This is what actually answers "is it THIS digit, reliably, or did
+  //      one of THESE just look good by chance this one time?"
+  //   3. the Sidak-corrected luck estimate stays under the configured cap
+  // Ranking among digits that clear the bar is done by Wilson lower bound,
+  // not raw rate, so a well-sampled moderate edge beats a thin, lucky-looking one.
+  function readTriggerTerminal(digits, hist, side, minSamples, minRate, lag, maxLuckPct) {
+    const L = Math.max(1, Math.min(3, parseInt(lag, 10) || 1));
     const h = digits.slice(-hist);
-    const cells = Array.from({ length: 10 }, (_, d) => ({ digit: d, n: 0, hits: 0, rate: 0 }));
-    for (let i = 0; i < h.length - 1; i++) {
-      const cell = cells[h[i]];
-      cell.n += 1;
-      if ((h[i + 1] % 2 === 0 ? 'even' : 'odd') === side) cell.hits += 1;
+    const usable = Math.max(0, h.length - L);
+    const mid = Math.floor(usable / 2);
+    const mk = () => Array.from({ length: 10 }, (_, d) => ({ digit: d, n: 0, hits: 0 }));
+    const full = mk(), older = mk(), newer = mk();
+    for (let i = 0; i < usable; i++) {
+      const d = h[i];
+      const isHit = (h[i + L] % 2 === 0 ? 'even' : 'odd') === side;
+      full[d].n += 1; if (isHit) full[d].hits += 1;
+      const half = i < mid ? older : newer;
+      half[d].n += 1; if (isHit) half[d].hits += 1;
     }
-    cells.forEach((cl) => { cl.rate = cl.n ? Math.round((cl.hits / cl.n) * 100) : 0; });
-    const ok = cells.filter((cl) => cl.n >= minSamples && cl.rate >= minRate).sort((a, b) => b.rate - a.rate || b.n - a.n);
-    return { cells, trigger: ok[0] || null, side };
+    const HALF_MIN = 3; // below this, a half is too thin to judge either way
+    const cap = maxLuckPct == null ? 100 : maxLuckPct;
+    const cells = full.map((cl, d) => {
+      const rate = cl.n ? Math.round((cl.hits / cl.n) * 100) : 0;
+      const z = cl.n ? (cl.hits / cl.n - 0.5) / Math.sqrt(0.25 / cl.n) : 0;
+      const p = cl.n ? binomTail(cl.n, cl.hits) : 1;
+      const luck = cl.n ? Math.round((1 - Math.pow(1 - p, 10)) * 100) : 100;
+      const wilson = Math.round(wilsonLowerBound(cl.hits, cl.n, 1.645) * 100);
+      const oR = older[d].n >= HALF_MIN ? older[d].hits / older[d].n : null;
+      const nR = newer[d].n >= HALF_MIN ? newer[d].hits / newer[d].n : null;
+      const consistent = (oR == null || oR > 0.5) && (nR == null || nR > 0.5);
+      const qualifies = cl.n >= minSamples && rate >= minRate && consistent && luck <= cap;
+      return { digit: d, n: cl.n, hits: cl.hits, rate, z, p, luck, wilson, oR, nR, consistent, qualifies };
+    });
+    const ok = cells.filter((cl) => cl.qualifies).sort((a, b) => b.wilson - a.wilson || b.n - a.n);
+    const trigger = ok[0] || null;
+    const luck = trigger ? trigger.luck / 100 : null;
+    return { cells, trigger, ranked: ok.slice(0, 3), luck, side, lag: L, hist: h.length };
   }
 
   function flipContractType(ct) {
@@ -31897,99 +31935,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   const CONFIG_KEY_LEGACY = 'bulktrade_config';
   const configKeyFor = (tradeType) => 'bulktrade_config_' + tradeType;
 
-  // ── TAG-TEAM PAIRING (Bulk Trade ⇄ Opp Bulk) ────────────────────────
-  // When BOTH bots are running they no longer just fire side by side —
-  // they take turns. Every bot starts armed (the "duel"). The first
-  // cluster to settle decides who leads: a net WIN makes that bot the
-  // leader, a net LOSS makes the other bot the leader. The non-leader is
-  // BENCHED (standby): still "running", but it cannot fire anything, so
-  // there is no double exposure. The leader keeps running with full
-  // automation (martingale, rest cooldown, repeat) until one of its
-  // clusters nets a LOSS — then it is benched and the partner is armed.
-  // And so on, back and forth, until you stop a bot or the Dashboard
-  // Take Profit / Stop Loss gate fires. Stopping either bot releases the
-  // other back to normal solo running. Toggle is shared by both tabs.
-  const TAGTEAM_KEY = 'bulkpair_tagteam';
-  const bulkPair = {
-    enabled: (() => { try { return localStorage.getItem(TAGTEAM_KEY) !== '0'; } catch (e) { return true; } })(),
-    leader: null, // botPrefix of the current leader, or null = duel (nobody decided yet)
-    _all() { const m = window.__BotEngines || {}; return [m.bulktrade_evenodd, m.oppbulk_evenodd].filter(Boolean); },
-    _partner(eng) { const m = window.__BotEngines || {}; return (eng.botPrefix === 'bulktrade' ? m.oppbulk_evenodd : m.bulktrade_evenodd) || null; },
-    _name(eng) { return eng.botPrefix === 'bulktrade' ? 'Bulk Trade' : 'Opp Bulk'; },
-    paired(eng) { const p = this._partner(eng); return this.enabled && !!p && !!p.running && !!eng.running; },
-    setEnabled(v) {
-      this.enabled = !!v;
-      try { localStorage.setItem(TAGTEAM_KEY, this.enabled ? '1' : '0'); } catch (e) {}
-      this.leader = null;
-      this._all().forEach((e) => {
-        e.standby = false;
-        e.addLog('info', this.enabled ? '🤝 Tag-Team ON — when both bulk bots run they take turns: the one that loses is benched, the winner runs.' : '🤝 Tag-Team OFF — both bulk bots run independently again.');
-      });
-    },
-    status(eng) {
-      if (!this.enabled) return 'off';
-      if (!eng.running) return 'idle';
-      const p = this._partner(eng);
-      if (!p || !p.running) return 'solo';
-      if (this.leader === null) return 'duel';
-      return this.leader === eng.botPrefix ? 'leader' : 'benched';
-    },
-    onStart(eng) {
-      if (!this.enabled) return;
-      const p = this._partner(eng);
-      if (!p || !p.running) return;
-      if (this.leader === p.botPrefix) {
-        eng.standby = true;
-        eng.addLog('info', `💤 Tag-Team: ${this._name(p)} is already leading — ${this._name(eng)} is benched until it loses.`);
-      } else {
-        eng.standby = false;
-        this.leader = null;
-        eng.addLog('info', '⚔ Tag-Team: both bulk bots armed — the first cluster to settle decides who leads.');
-      }
-    },
-    onStop(eng) {
-      eng.standby = false;
-      const p = this._partner(eng);
-      this.leader = null;
-      if (p && p.standby) {
-        p.standby = false;
-        p.addLog('info', `▶ Tag-Team: ${this._name(eng)} stopped — ${this._name(p)} is armed again and running solo.`);
-      }
-    },
-    onClusterSettled(eng, netWin) {
-      if (!this.paired(eng)) return;
-      const p = this._partner(eng);
-      if (this.leader === null) {
-        this._setLeader(netWin ? eng : p, `${this._name(eng)}'s cluster ${netWin ? 'won' : 'lost'}`, netWin ? null : eng);
-      } else if (this.leader === eng.botPrefix && !netWin) {
-        this._setLeader(p, `${this._name(eng)} lost its cluster`, eng);
-      }
-      // A benched bot's own in-flight cluster settling never changes the leader.
-    },
-    _setLeader(eng, why, from) {
-      const p = this._partner(eng);
-      this.leader = eng.botPrefix;
-      eng.standby = false;
-      if (p) { p.standby = true; p._skipArmed = false; p._skipSignal = null; p._hunt = null; }
-      eng.addLog('win', `👑 Tag-Team: ${why} → ${this._name(eng)} is armed and runs with full automation.`);
-      if (p) p.addLog('info', `💤 Tag-Team: ${why} → ${this._name(p)} is disarmed until ${this._name(eng)} loses.`);
-      // The bot taking over does NOT jump straight in: fresh analysis, its own
-      // Gate 1 pick (not the market the other bot just lost on), its own trigger digit.
-      if (from) eng.beginHandoff(from._clusterSignal && from._clusterSignal.symbol);
-    },
-  };
-  window.__BulkPair = bulkPair;
-
   class BulkTradeEngine {
     constructor(fixedTradeType, opts) {
       // Locked to Even/Odd — Over/Under has been removed from Bulk Trade.
       this.tradeType = 'evenodd';
-      // Opp Bulk reuses this exact class — `invert` flips the final side
-      // chosen wherever a contract_type is decided (see _scan() below),
-      // and `botPrefix` keeps its config/localStorage/botId/journal keys
-      // entirely separate from Bulk Trade's, so the two run side by side
-      // as fully independent bots with their own stake, runs, martingale
-      // and P&L instead of sharing state.
+      // `invert` flips the final side chosen wherever a contract_type is
+      // decided (see _scan() below) — always false for the single Bulk
+      // Trade instance this hub now creates.
       this.invert = !!(opts && opts.invert);
       this.botPrefix = (opts && opts.botPrefix) || 'bulktrade';
       this._configKey = this.botPrefix + '_config_' + this.tradeType;
@@ -32041,13 +31993,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         //  Gate 1 (market scan): trendWindow ticks decide each market's
         //   trend; a market needs >= minTrendPct of one parity to qualify.
         //  Gate 2 (trigger terminal): histWindow ticks are read to find the
-        //   trigger digit — needs >= triggerMinSamples occurrences and a
-        //   >= triggerMinRate follow-through to be trusted.
-        //  handoffAnalysisSeconds: fresh-analysis pause when the partner
-        //   bot takes over after the other one loses (Tag-Team).
+        //   trigger digit — needs >= triggerMinSamples occurrences, a
+        //   >= triggerMinRate follow-through, the edge holding up in both
+        //   the older and newer half of the window independently, and a
+        //   Sidak-corrected luck estimate under maxTriggerLuckPct, to be trusted.
         trendWindow: 30, minTrendPct: 60,
         histWindow: 150, triggerMinSamples: 8, triggerMinRate: 60,
-        handoffAnalysisSeconds: 15,
+        maxTriggerLuckPct: 30,
         // Parity Streak Break Engine params. A streak-length based
         // heuristic: armed automatically whenever the bot is running.
         parityStreakLookback: 150, parityStreakThreshold: 60,
@@ -32148,8 +32100,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // qualifying trigger. Deliberately NOT persisted to localStorage —
       // reloading the page should never silently resume live trading.
       this.running = false;
-      // Tag-Team: true = benched by the Bulk Trade ⇄ Opp Bulk pairing (see
-      // bulkPair above). Still 'running', but can't fire anything.
+      // Unused now that Opp Bulk (and the Tag-Team pairing between the two
+      // bots) has been removed; kept so any lingering reads stay false.
       this.standby = false;
       // Live snapshots of the two advanced entry blocks, recomputed every
       // scan tick in _scan() below, purely for the UI + their own
@@ -32170,13 +32122,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // Gate pipeline state. _hunt = the currently locked (market, side,
       // trigger digit) waiting for its digit; null = still scanning.
       this._hunt = null;
-      this._avoidSymbol = null;   // market the partner just lost on — skipped on the first hunt after a handoff
-      this._analysisUntil = 0;    // fresh-analysis pause end (handoff)
-      this.gates = { ranked: [], term: null };
+      this.gates = { ranked: [], term: null, pick: null };
+      // Which tick after the trigger a contract settles on. Starts at the
+      // app's assumption (1) and is re-measured from real settled contracts.
+      this.settleLag = 1; this._lagObs = [];
+      this.lastEntry = null;   // audit snapshot: trigger -> orders -> confirm -> settle
+      this.entryHistory = [];  // last 10 finished entries
       // Predicted (from history) vs actual results of trades this terminal fired.
       this.tStats = { clusters: 0, cWins: 0, contracts: 0, hits: 0, pred: 0 };
       this._initTrading();
-      this.tick.onTick((sym) => { try { this._onTick(sym); } catch (e) {} });
+      this.tick.onTick((sym) => {
+        try { this._onTick(sym); }
+        catch (e) {
+          const now = Date.now();
+          if (!this._lastTickErrAt || now - this._lastTickErrAt > 5000) { this._lastTickErrAt = now; this.addLog('loss', 'Trigger handler error: ' + (e && e.message ? e.message : e)); }
+        }
+      });
       this.scanTimer = setInterval(() => this._scan(), 2000);
     }
     _loadConfig() {
@@ -32217,16 +32178,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // Dashboard reads via getBotStats/getBotJournal/isBotActive) and
       // nudge the Dashboard to re-render if it's the active tab — exactly
       // how every Titan-class bot's own onUpdate hook already behaves.
-      // Registered as 'bulktrade_evenodd' (or 'oppbulk_evenodd' for the
-      // inverted instance) — see BOT_META/BOT_IDS in the Dashboard module,
-      // which is what makes its P&L count toward the master Take Profit /
-      // Take Profit Reload gate.
+      // Registered as 'bulktrade_evenodd' — see BOT_META/BOT_IDS in the
+      // Dashboard module, which is what makes its P&L count toward the
+      // master Take Profit / Take Profit Reload gate.
       if (window.__BotEngines) window.__BotEngines[this.botPrefix + '_' + this.tradeType] = this;
       if (window.__queueDashboardRender) window.__queueDashboardRender();
     }
     addLog(kind, text) {
       this.log.unshift({ t: Date.now(), kind, text });
-      if (this.log.length > 30) this.log.length = 30;
+      if (this.log.length > 60) this.log.length = 60;
       this._emit();
     }
 
@@ -32240,13 +32200,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       // at arm time rather than re-checking whether the trigger is still
       // armed right now.
       if (this.standby && this._skipArmed) { this._skipArmed = false; this._skipSignal = null; }
-      if (this._skipArmed && this._skipSignal && !this.clusterActive && this.running && !this.standby) {
-        const sig = this._skipSignal;
-        this._skipArmed = false;
-        this._skipSignal = null;
-        this.addLog('engine', `▶ Skip-tick window passed — firing now (First-Tick Handling).`);
-        this.fireCluster(sig);
-        this._emit();
+      // Normal path is tick-driven (see _onTick). This poll is only a safety
+      // net if the feed went quiet for 4s+ after the entry tick was skipped.
+      if (this._skipArmed && this._skipSignal && !this.clusterActive && this.running && !this.standby && Date.now() - (this._skipAt || 0) >= 4000) {
+        this._fireSkipped('feed was quiet');
         return;
       }
       const c = this.config;
@@ -32254,10 +32211,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this._candidateMarkets().forEach((symbol) => {
         let sig = computeSignal(c.tradeType, this.tick, symbol);
         if (!sig) return;
-        // Opp Bulk: exact opposite of whatever Bulk Trade's analysis would
-        // pick on this market — same confidence/z-score/agreement reading
-        // (it's the same statistical read of the same ticks), just fired
-        // on the other side.
+        // `invert` flips the final pick to its opposite (always false for
+        // the single Bulk Trade instance this hub now creates).
         if (this.invert) sig = { ...sig, contractType: flipContractType(sig.contractType), label: labelForContractType(flipContractType(sig.contractType)) };
         const candidate = { symbol, ...sig };
         if (!best || candidate.confidence > best.confidence) best = candidate;
@@ -32278,30 +32233,24 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // ══ TWO-GATE ENTRY PIPELINE ═══════════════════════════════════════
     // Nothing fires unless it passes BOTH gates, in order:
     //   GATE 1 · MARKET SCAN  — every market with a full history window is
-    //     scored on its live parity trend; the best one is locked.
-    //       Bulk Trade (REVERSAL):    picks the most stretched trend and will
-    //                                 bet AGAINST it.
-    //       Opp Bulk (CONTINUATION):  picks the steadiest trend (short and
-    //                                 long window agree) and bets WITH it.
-    //     Two different readings of the market — not one bot flipped.
+    //     scored on its live parity trend; the best one is locked. Bulk
+    //     Trade is REVERSAL mode: it picks the most stretched trend and
+    //     bets AGAINST it continuing.
     //   GATE 2 · TRIGGER TERMINAL — on the locked market, the history is
     //     read to find the trigger digit: the digit after which the next
     //     tick has most often been the side we want. The bot then waits for
     //     that digit to print and fires on it, so the 1-tick contract is
     //     the tick right after the trigger.
     // After every cluster (win or loss) the hunt starts over from Gate 1.
-    // After a Tag-Team handoff the taking-over bot does a fresh analysis
-    // and skips the market the partner just lost on.
     _gateCfg() {
       const c = this.config;
-      const ho = parseInt(c.handoffAnalysisSeconds, 10);
       return {
         trendWin: Math.max(10, parseInt(c.trendWindow, 10) || 30),
         minTrend: Math.min(95, Math.max(51, parseInt(c.minTrendPct, 10) || 60)),
         hist: Math.min(200, Math.max(50, parseInt(c.histWindow, 10) || 150)),
         trigSamples: Math.max(3, parseInt(c.triggerMinSamples, 10) || 8),
         trigRate: Math.min(95, Math.max(51, parseInt(c.triggerMinRate, 10) || 60)),
-        handoff: isNaN(ho) ? 15 : Math.max(0, ho),
+        maxLuck: Math.min(100, Math.max(5, parseInt(c.maxTriggerLuckPct, 10) || 30)),
       };
     }
     gatePhase() {
@@ -32311,18 +32260,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (this.clusterActive) return { key: 'flight', text: 'CLUSTER IN FLIGHT' };
       if (this.isCooldown) return { key: 'rest', text: `RESTING ${this.cooldownRemaining}s` };
       if (now < this.cooldownUntil) return { key: 'quiet', text: `QUIET TIME ${Math.ceil((this.cooldownUntil - now) / 1000)}s` };
-      if (now < this._analysisUntil) return { key: 'analysing', text: `FRESH ANALYSIS ${Math.ceil((this._analysisUntil - now) / 1000)}s` };
       if (this._hunt) return { key: 'waiting', text: `GATE 2 · WAITING FOR A ${this._hunt.trigger.digit}` };
       if (!(this.gates.ranked || []).some((r) => r.warm)) return { key: 'warming', text: 'WARMING UP' };
       return { key: 'scanning', text: 'GATE 1 · SCANNING' };
-    }
-    beginHandoff(avoidSymbol) {
-      if (this.clusterActive) return; // already busy with its own cluster
-      const G = this._gateCfg();
-      this._hunt = null;
-      this._avoidSymbol = avoidSymbol || null;
-      this._analysisUntil = Date.now() + G.handoff * 1000;
-      this.addLog('info', `🔄 Handoff — taking over. Starting a FRESH analysis (${G.handoff}s), then Gate 1 scan → Gate 2 trigger digit → fire.${avoidSymbol ? ` It will not re-enter ${marketName(avoidSymbol)} on this first hunt.` : ''}`);
     }
     // Rank every candidate market for Gate 1 (also feeds the UI table).
     _rankMarkets(G) {
@@ -32343,9 +32283,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           const longDom = le * 2 >= lw.length ? 'even' : 'odd';
           const longPct = Math.round(((longDom === 'even' ? le : lw.length - le) / lw.length) * 100);
           e.dominant = dominant; e.domPct = domPct; e.streak = streak; e.longDom = longDom; e.longPct = longPct;
+          e.streakParity = digits[digits.length - 1] % 2 === 0 ? 'even' : 'odd';
           e.side = this.invert ? dominant : oppParity(dominant);
-          e.avoided = symbol === this._avoidSymbol;
-          e.eligible = e.warm && !e.avoided && domPct >= G.minTrend && (!this.invert || longDom === dominant);
+          e.eligible = e.warm && domPct >= G.minTrend && (!this.invert || longDom === dominant);
           e.score = this.invert ? domPct + longPct / 2 : domPct + Math.min(streak, 8);
         }
         out.push(e);
@@ -32367,38 +32307,143 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         else if (now - this._hunt.lockedAt > 180000) { this.addLog('info', `↩ Gate 2: no ${this._hunt.trigger.digit} appeared for 3 minutes — re-scanning all markets.`); this._hunt = null; }
       }
       const canHunt = this.running && !this.standby && !this.clusterActive && !this.isCooldown && !this._testInFlight && !this._skipArmed
-        && now >= this.cooldownUntil && now >= this._analysisUntil;
-      if (this._hunt || !canHunt) return;
-      // Gate 1 → Gate 2: walk the ranking, lock the first market whose history yields a trustworthy trigger digit.
-      this.gates.term = null;
+        && now >= this.cooldownUntil;
+      if (this._hunt) return;
+      // Gate 1 → Gate 2. The terminal is ALWAYS read (even while stopped, resting
+      // or in flight) so the pick can be observed; it only LOCKS when allowed.
+      this.gates.term = null; this.gates.pick = null;
       for (const cand of ranked) {
         if (!cand.eligible) break;
-        const term = readTriggerTerminal(this.tick.getDigits(cand.symbol), G.hist, cand.side, G.trigSamples, G.trigRate);
+        const term = readTriggerTerminal(this.tick.getDigits(cand.symbol), G.hist, cand.side, G.trigSamples, G.trigRate, this.settleLag, G.maxLuck);
         if (!this.gates.term) this.gates.term = { symbol: cand.symbol, ...term };
         if (!term.trigger) continue;
-        this._hunt = { symbol: cand.symbol, dominant: cand.dominant, side: cand.side, domPct: cand.domPct, streak: cand.streak, trigger: term.trigger, term: { symbol: cand.symbol, ...term }, lockedAt: now };
-        this._avoidSymbol = null;
-        this.addLog('engine', `🔍 Gate 1 → ${marketName(cand.symbol)} locked (${cand.dominant.toUpperCase()} trend ${cand.domPct}%, ${cand.streak}× streak; ${this.invert ? 'continuation' : 'reversal'} mode). 🎯 Gate 2 → trigger digit ${term.trigger.digit}: after a ${term.trigger.digit} the next tick was ${cand.side.toUpperCase()} ${term.trigger.rate}% of the time (${term.trigger.hits}/${term.trigger.n} in the last ${G.hist} ticks). Waiting for a ${term.trigger.digit}…`);
+        this.gates.pick = { cand, term: { symbol: cand.symbol, ...term } };
+        if (!canHunt) break;
+        this._hunt = this._mkHunt(cand, term, now);
+        this.addLog('engine', `🔍 Gate 1 → ${marketName(cand.symbol)} locked (${cand.dominant.toUpperCase()} trend ${cand.domPct}%, ${cand.streak}× streak; ${this.invert ? 'continuation' : 'reversal'} mode). 🎯 Gate 2 → ENTRY DIGIT ${term.trigger.digit}: at tick +${term.lag} after a ${term.trigger.digit} it was ${cand.side.toUpperCase()} ${term.trigger.rate}% of the time (${term.trigger.hits}/${term.trigger.n} in the last ${G.hist} ticks, consistent in both halves of that window; ${Math.round((term.luck || 0) * 100)}% chance of a digit this good by luck). Waiting for a ${term.trigger.digit}…`);
         return;
       }
     }
+    _mkHunt(cand, term, now) {
+      return {
+        symbol: cand.symbol, dominant: cand.dominant, side: cand.side, domPct: cand.domPct, streak: cand.streak,
+        streakParity: cand.streakParity, longDom: cand.longDom, longPct: cand.longPct, ticks: cand.ticks, need: cand.need,
+        trigger: term.trigger, term: { symbol: cand.symbol, ...term }, luck: term.luck, lag: term.lag, lockedAt: now,
+      };
+    }
+    // Human-readable "why did this qualify" checklist — used live by the UI
+    // and frozen into the audit snapshot at the moment of firing.
+    qualChecks(h) {
+      const G = this._gateCfg(), t = h.trigger, rows = [];
+      const up = (x) => String(x || '').toUpperCase();
+      rows.push({ state: h.ticks >= h.need ? 'pass' : 'fail', label: 'Market warmed up', value: `${h.ticks}/${h.need} ticks` });
+      rows.push({ state: h.domPct >= G.minTrend ? 'pass' : 'warn', label: `Gate 1 · ${up(h.dominant)} trend`, value: `${h.domPct}% of last ${G.trendWin} (need ${G.minTrend}%)` });
+      if (this.invert) rows.push({ state: h.longDom === h.dominant ? 'pass' : 'fail', label: 'Long window agrees', value: `${up(h.longDom)} ${h.longPct}% of last 100` });
+      rows.push({ state: 'info', label: 'Live streak', value: `${h.streak}× ${up(h.streakParity)} in a row` });
+      const lagWord = (h.lag || 1) === 1 ? 'next tick' : `tick +${h.lag}`;
+      rows.push({ state: t.n >= G.trigSamples ? 'pass' : 'fail', label: `Gate 2 · digit ${t.digit} samples`, value: `${t.n} (need ${G.trigSamples})` });
+      rows.push({ state: t.rate >= G.trigRate ? 'pass' : 'fail', label: `Gate 2 · ${lagWord} ${up(h.side)} after a ${t.digit}`, value: `${t.rate}% · ${t.hits}/${t.n} (need ${G.trigRate}%)` });
+      const lk = h.luck == null ? null : h.luck;
+      rows.push({ state: lk == null ? 'info' : lk <= 0.05 ? 'pass' : 'warn', label: 'Luck check (best of 10 digits)', value: lk == null ? '—' : `${Math.round(lk * 100)}% by chance · ${lk <= 0.05 ? 'notable' : lk <= 0.3 ? 'weak evidence' : 'looks like noise'}` });
+      rows.push({ state: this._lagObs.length ? 'pass' : 'info', label: 'Settlement alignment', value: `read at tick +${h.lag || 1} · ${this._lagObs.length ? 'measured on ' + this._lagObs.length + ' trade' + (this._lagObs.length === 1 ? '' : 's') : 'assumed until first trades settle'}` });
+      return rows;
+    }
+    _liveTrend(symbol) {
+      const G = this._gateCfg(), w = this.tick.getDigits(symbol).slice(-G.trendWin);
+      if (!w.length) return null;
+      const ev = w.filter((x) => x % 2 === 0).length;
+      const dominant = ev * 2 >= w.length ? 'even' : 'odd';
+      return { dominant, domPct: Math.round(((dominant === 'even' ? ev : w.length - ev) / w.length) * 100) };
+    }
+    _entryFor(sig) { const le = this.lastEntry; return (le && sig && sig.trigRecvAt && le.at === sig.trigRecvAt) ? le : null; }
+    _tradingLinkOk() {
+      const sk = (window.HubTradingSocket && window.HubTradingSocket.getSocket && window.HubTradingSocket.getSocket()) || this.socketT;
+      return !!sk && sk.readyState === WebSocket.OPEN;
+    }
+    // Always send on the CURRENT hub socket — the cached reference can go stale
+    // after a reconnect and would otherwise refuse a trade the link could take.
+    _sock() {
+      const sk = (window.HubTradingSocket && window.HubTradingSocket.getSocket && window.HubTradingSocket.getSocket()) || this.socketT;
+      this.socketT = sk;
+      return sk;
+    }
+    _fireSkipped(why) {
+      const sig = this._skipSignal;
+      this._skipArmed = false; this._skipSignal = null;
+      if (!sig) return;
+      this.addLog('engine', `▶ Skip-tick window passed (${why}) — firing now (First-Tick Handling).`);
+      this.fireCluster(sig);
+      this._emit();
+    }
+    // Learn which tick after the trigger contracts really settle on, from the
+    // settled contracts' own tick epochs (independent of feed arrival order).
+    _observeLag(exitLag) {
+      if (!(exitLag >= 1 && exitLag <= 3)) return;
+      this._lagObs.push(exitLag); if (this._lagObs.length > 5) this._lagObs.shift();
+      const counts = {}; this._lagObs.forEach((v) => { counts[v] = (counts[v] || 0) + 1; });
+      let mode = this.settleLag, best = 0;
+      Object.keys(counts).forEach((k) => { if (counts[k] > best) { best = counts[k]; mode = +k; } });
+      if (best >= 2 && mode !== this.settleLag) {
+        this.addLog('engine', `📐 Alignment: contracts are settling on tick +${mode} after the trigger (was reading +${this.settleLag}). Terminal statistics now read at +${mode}; re-scanning.`);
+        this.settleLag = mode; this._hunt = null;
+      }
+    }
+    _auditSettlement(c) {
+      const sig = this._clusterSignal, le = this._entryFor(sig);
+      if (!le || le.audit || !sig.trigEpoch) return;
+      const times = this.tick.getTimes(sig.symbol), gaps = [];
+      for (let i = Math.max(1, times.length - 20); i < times.length; i++) { const g = times[i] - times[i - 1]; if (g > 0) gaps.push(g); }
+      if (!gaps.length) return;
+      gaps.sort((a, b) => a - b);
+      const step = gaps[Math.floor(gaps.length / 2)];
+      const lagOf = (t) => (t > 0 ? Math.round((t - sig.trigEpoch) / step) : null);
+      const entryLag = lagOf(Number(c.entry_tick_time)), exitLag = lagOf(Number(c.exit_tick_time));
+      const lc = (v) => { const x = v == null ? '' : v.toString().trim(); return (x && /\d/.test(x.slice(-1))) ? parseInt(x.slice(-1), 10) : null; };
+      le.audit = { entryLag, exitLag, step };
+      le.entryDigit = lc(c.entry_tick_display_value) ?? lc(c.entry_tick);
+      le.exitDigit = lc(c.exit_tick_display_value) ?? lc(c.exit_tick);
+      if (exitLag != null) this._observeLag(exitLag);
+    }
     _onTick(symbol) {
+      // Skip-tick mode: the entry tick was skipped on purpose — fire on the very
+      // next tick of that market (the old 2s poll could land before that tick
+      // arrived, skipping nothing).
+      if (this._skipArmed && this._skipSignal && this._skipSignal.symbol === symbol) {
+        if (!this.running || this.standby) { this._skipArmed = false; this._skipSignal = null; }
+        else if (!this.clusterActive) this._fireSkipped('next tick printed');
+        return;
+      }
       const h = this._hunt;
       if (!h || h.symbol !== symbol) return;
+      if (this._onChange) this._onChange(); // keep the live tick tape in step with the feed
       if (!this.running || this.standby || this.clusterActive || this._testInFlight || this._skipArmed) return;
-      if (this.isCooldown || Date.now() < this.cooldownUntil || Date.now() < this._analysisUntil) return;
+      if (this.isCooldown || Date.now() < this.cooldownUntil) return;
       const digits = this.tick.getDigits(symbol);
       if (digits[digits.length - 1] !== h.trigger.digit) return;
+      // ENTRY MET — everything from here to the buy orders is synchronous.
+      const recvAt = Date.now();
+      const times = this.tick.getTimes(symbol);
       const ct = h.side === 'even' ? 'DIGITEVEN' : 'DIGITODD';
       const signal = {
         symbol, contractType: ct, barrier: null,
         confidence: h.trigger.rate, predRate: h.trigger.rate,
         label: labelForContractType(ct) + (this.invert ? ' · continuation' : ' · reversal'),
+        trigDigit: h.trigger.digit, trigEpoch: times.length ? times[times.length - 1] : null, trigRecvAt: recvAt,
+      };
+      const live = this._liveTrend(symbol);
+      this.lastEntry = {
+        at: recvAt, symbol, side: h.side, digit: h.trigger.digit, rate: h.trigger.rate, hits: h.trigger.hits, n: h.trigger.n,
+        luck: h.luck == null ? null : h.luck, lag: h.lag || 1, dominant: h.dominant, domPct: h.domPct, streak: h.streak,
+        liveDom: live && live.dominant, livePct: live && live.domPct, tail: digits.slice(-12),
+        mode: this.config.firstTickMode || 'normal', contracts: Math.max(1, parseInt(this.config.bulkContracts, 10) || 1),
+        stake: this.currentStake, invert: this.invert, checks: this.qualChecks(h), status: 'triggered',
+        sentMs: null, firstConfirmMs: null, orders: 0, confirmed: 0, rejected: 0, audit: null, result: null, err: null,
       };
       this._hunt = null; // hunt consumed — the next one starts fresh from Gate 1
-      this.addLog('engine', `⚡ Trigger digit ${h.trigger.digit} just printed on ${marketName(symbol)} → firing ${signal.label}.`);
+      this.addLog('engine', `⚡ ENTRY DIGIT ${h.trigger.digit} just printed on ${marketName(symbol)} → firing ${signal.label}.`);
       this._enterEntry(signal);
     }
+
 
     // ── FIRST-TICK HANDLING dispatcher ──────────────────────────────────
     // Every auto-fire entry point (both trigger engines above, plus the
@@ -32412,7 +32457,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         if (this._skipArmed) return; // already waiting for the force-fire tick — ignore re-arms in the meantime
         this._skipArmed = true;
         this._skipSignal = signal;
-        this.addLog('engine', '⏭ Entry met — skipping this tick per First-Tick Handling. Firing on the very next scan.');
+        this._skipAt = Date.now();
+        const lsk = this._entryFor(signal); if (lsk) lsk.status = 'skip-wait';
+        this.addLog('engine', '⏭ Entry met — skipping this tick per First-Tick Handling. Firing on the very next tick.');
         this._emit();
         return;
       }
@@ -32431,7 +32478,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // the signal outright and the engine goes back to scanning with no
     // cluster fired and no run/martingale step counted.
     _fireTestTrade(signal) {
-      if (!this.socketT || this.socketT.readyState !== WebSocket.OPEN) {
+      const skT = this._sock();
+      if (!skT || skT.readyState !== WebSocket.OPEN) {
         this.addLog('loss', 'ERROR: Trading socket not connected. Sync your API token first.');
         return;
       }
@@ -32447,6 +32495,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         currency: (window.HubStore.getState().currency) || 'USD',
       };
       if (signal.barrier !== null && signal.barrier !== undefined) params.barrier = signal.barrier;
+      const leT = this._entryFor(signal); if (leT) leT.status = 'probe';
       this.addLog('info', `🧪 Test stake $${stake.toFixed(2)} firing on the entry tick (${signal.label} on ${marketName(signal.symbol)}) — not counted toward Runs/stats. Real cluster fires only on a win.`);
       try {
         this.socketT.send(JSON.stringify({ buy: '1', price: stake, req_id: buyReqId, parameters: params }));
@@ -32472,8 +32521,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     start() {
       if (this.running) return;
       this.running = true;
-      this._hunt = null; this._avoidSymbol = null; this._analysisUntil = 0;
-      bulkPair.onStart(this);
+      this._hunt = null;
       const steps = Math.max(1, parseInt(this.config.maxMartingaleSteps, 10) || 3);
       const cd = Math.max(1, parseInt(this.config.restCooldownSeconds, 10) || 60);
       const fa = !!this.config.fullAutomation;
@@ -32489,10 +32537,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.isCooldown = false;
       this.cooldownRemaining = 0;
       this.cooldownReason = '';
-      if (!this.running) { bulkPair.onStop(this); this._emit(); return; }
+      if (!this.running) { this._emit(); return; }
       this.running = false;
       this._hunt = null;
-      bulkPair.onStop(this);
       this.addLog('info', '■ Bot stopped.');
       this._emit();
     }
@@ -32537,8 +32584,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
 
     fireCluster(signal) {
       if (this.standby) { this.addLog('info', '💤 Benched by Tag-Team — cluster not fired.'); return; }
-      if (!this.socketT || this.socketT.readyState !== WebSocket.OPEN) {
+      const skC = this._sock();
+      if (!skC || skC.readyState !== WebSocket.OPEN) {
         this.addLog('loss', 'ERROR: Trading socket not connected. Sync your API token first.');
+        const le0 = this._entryFor(signal); if (le0) { le0.status = 'failed'; le0.err = 'Trading socket not connected'; }
         return;
       }
       const c = this.config;
@@ -32564,11 +32613,22 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           this.socketT.send(JSON.stringify({ buy: '1', price: this.currentStake, req_id: buyReqId, parameters: params }));
         } catch (e) {}
       }
+      const leS = this._entryFor(signal);
+      if (leS) { leS.status = 'sent'; leS.sentMs = Date.now() - leS.at; leS.orders = n; leS.stake = this.currentStake; }
       this._emit();
     }
 
     _finalizeCluster() {
       const netWin = this._clusterProfit >= 0;
+      {
+        const le = this._entryFor(this._clusterSignal);
+        if (le) {
+          le.status = 'settled';
+          le.result = { won: this._clusterWon, lost: this._clusterLost, net: this._clusterProfit, netWin };
+          this.entryHistory.unshift({ at: le.at, symbol: le.symbol, digit: le.digit, side: le.side, rate: le.rate, netWin, won: this._clusterWon, lost: this._clusterLost, net: this._clusterProfit, latency: le.firstConfirmMs, entryLag: le.audit && le.audit.entryLag, exitLag: le.audit && le.audit.exitLag });
+          if (this.entryHistory.length > 10) this.entryHistory.length = 10;
+        }
+      }
       this.stats.stake += this._clusterStakeUsed;
       this.stats.payout += this._clusterStakeUsed + this._clusterProfit;
       this.stats.runs += this._clusterWon + this._clusterLost; // contract-level count, shown as "TRADES" in the UI
@@ -32643,9 +32703,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           : `run ${this.runsCompleted} won`;
         if (!runLimitHit) this._beginRestCooldown(reason);
       }
-      // Tag-Team: hand the baton over if the leader just lost (or decide the
-      // opening duel). Runs AFTER stake/martingale state is updated above.
-      bulkPair.onClusterSettled(this, netWin);
       if (runLimitHit) {
         this.addLog('info', `✅ Completed ${this.runsThisStart}/${Math.max(1, parseInt(this.config.numberOfRuns, 10) || 5)} runs (Full Automation OFF) — stopping.`);
         this.stop();
@@ -32669,6 +32726,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     clearStats() {
       this.stats = { stake: 0, payout: 0, runs: 0, lost: 0, won: 0, pnl: 0 };
       this.journal = [];
+      this.entryHistory = []; this.lastEntry = null;
       this._processedContracts = new Set();
       this.runsCompleted = 0;
       this.runsThisStart = 0;
@@ -32719,11 +32777,23 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             const mine = d.req_id != null && _self._pendingBuyReqIds.has(d.req_id);
             if (!mine) return;
             _self._pendingBuyReqIds.delete(d.req_id);
-            if (d.error) { _self.addLog('loss', `Buy error: ${d.error.message || d.error.code}`); return; }
+            if (d.error) {
+              _self.addLog('loss', `Buy error: ${d.error.message || d.error.code}`);
+              const leE = _self._entryFor(_self._clusterSignal); if (leE) { leE.rejected++; leE.err = d.error.message || d.error.code; }
+              return;
+            }
             if (d.buy && d.buy.contract_id) {
               _self.ownContractIds.add(d.buy.contract_id);
               _self._clusterPending.add(d.buy.contract_id);
               _self._clusterStakeUsed += parseFloat(d.buy.buy_price) || _self.currentStake;
+              const leB = _self._entryFor(_self._clusterSignal);
+              if (leB) {
+                leB.confirmed++;
+                if (leB.firstConfirmMs == null) {
+                  leB.firstConfirmMs = Date.now() - leB.at; leB.status = 'live';
+                  _self.addLog('engine', `📨 First order confirmed ${leB.firstConfirmMs} ms after the trigger tick (${leB.orders} orders left ${leB.sentMs} ms after it).`);
+                }
+              }
               window.HubContractRegistry && window.HubContractRegistry.claim(d.buy.contract_id, _self.botPrefix);
             }
             return;
@@ -32785,9 +32855,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
                   profit,
                   stake: parseFloat(c.buy_price) || _self.currentStake,
                   martingaleStep: _self.recoveryMode ? 1 : 0,
+                  triggerDigit: sig.trigDigit != null ? sig.trigDigit : null,
                 });
                 if (_self.journal.length > 200) _self.journal.length = 200;
               }
+              try { _self._auditSettlement(c); } catch (e) {}
               if (_self.clusterActive && _self._clusterPending.size === 0) _self._finalizeCluster();
             }
             _self._emit();
@@ -32808,11 +32880,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // rendered markup actually changed.
   function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
-  // Bulk Trade and Opp Bulk are both built from this one factory — same
-  // engine class, same UI, parameterized by `opts` so the two run as
-  // fully independent tabs/bots (own config keys, own DOM ids, own
-  // localStorage, own registration in window.__BotEngines) instead of
-  // sharing any state. opts: { prefix, invert, title, subtitle, ensureGlobalName }.
+  // Bulk Trade's tab/UI is built from this one factory (own config keys,
+  // own DOM ids, own localStorage, own registration in
+  // window.__BotEngines). opts: { prefix, invert, title, subtitle, ensureGlobalName }.
   function createBulkPanel(opts) {
   // Bulk Trade runs a single Even/Odd engine (Over/Under was removed).
   const TRADE_TYPES = [
@@ -33097,6 +33167,52 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       #${rootId} .bt-zone-pct { width:32px; text-align:right; font-size:9.5px; font-family:'DM Mono',monospace; flex-shrink:0; }
       #${rootId} .bt-zone-samples { font-size:7.5px; font-family:'DM Mono',monospace; color:hsl(var(--muted-foreground)/0.7); width:44px; text-align:right; flex-shrink:0; }
 
+      /* Trigger terminal */
+      #${rootId} .bt-term-hero { display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:center; padding:12px; margin-bottom:10px; border-radius:14px;
+        border:1px solid hsl(var(--win)/0.45); background:linear-gradient(135deg,hsl(var(--win)/0.10),hsl(var(--bg)/0.5)); }
+      #${rootId} .bt-term-hero.idle { border-color:hsl(var(--border)/0.4); background:hsl(var(--bg)/0.4); }
+      #${rootId} .bt-term-digit { width:70px; height:80px; border-radius:14px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+        background:hsl(var(--bg)); border:2px solid hsl(var(--win)); box-shadow:0 0 22px hsl(var(--win)/0.35); }
+      #${rootId} .bt-term-digit b { font-family:'Outfit',sans-serif; font-size:44px; font-weight:900; line-height:1; color:hsl(var(--win)); }
+      #${rootId} .bt-term-digit span { font-size:7px; letter-spacing:2px; color:hsl(var(--muted-foreground)); margin-top:4px; font-family:'DM Mono',monospace; }
+      #${rootId} .bt-term-hero.idle .bt-term-digit { border-color:hsl(var(--border)/0.5); box-shadow:none; }
+      #${rootId} .bt-term-hero.idle .bt-term-digit b { color:hsl(var(--muted-foreground)/0.6); }
+      #${rootId} .bt-term-desc { font-size:10px; line-height:1.6; color:hsl(var(--muted-foreground)); }
+      #${rootId} .bt-term-desc b { color:hsl(var(--foreground)); }
+      #${rootId} .bt-chip { display:inline-block; padding:2px 8px; border-radius:999px; font-family:'DM Mono',monospace; font-size:8.5px; font-weight:700; letter-spacing:1px; margin-bottom:5px; border:1px solid currentColor; }
+      #${rootId} .bt-term-sub { display:flex; justify-content:space-between; align-items:center; gap:8px; font-family:'Space Grotesk',sans-serif; font-size:8px; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:hsl(var(--muted-foreground)/0.8); margin:12px 0 4px; }
+      #${rootId} .bt-tape { display:flex; gap:4px; flex-wrap:wrap; margin:6px 0 4px; }
+      #${rootId} .bt-tape-chip { width:24px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:7px; font-family:'DM Mono',monospace; font-size:12px; font-weight:700; border:1px solid hsl(var(--border)/0.45); }
+      #${rootId} .bt-tape-chip.ev { color:hsl(var(--secondary)); background:hsl(var(--secondary)/0.08); }
+      #${rootId} .bt-tape-chip.od { color:hsl(var(--accent)); background:hsl(var(--accent)/0.08); }
+      #${rootId} .bt-tape-chip.trig { border-color:hsl(var(--win)); box-shadow:0 0 0 1px hsl(var(--win)); }
+      #${rootId} .bt-tape-chip.live { outline:2px solid hsl(var(--primary)/0.75); outline-offset:1px; }
+      #${rootId} .bt-chk { display:grid; grid-template-columns:16px 1fr auto; gap:8px; align-items:center; padding:5px 8px; margin-bottom:3px; border-radius:8px; font-family:'DM Mono',monospace; font-size:9.5px;
+        border:1px solid hsl(var(--border)/0.3); background:hsl(var(--bg)/0.4); }
+      #${rootId} .bt-chk .ic { font-weight:900; text-align:center; }
+      #${rootId} .bt-chk .vl { color:hsl(var(--muted-foreground)); text-align:right; }
+      #${rootId} .bt-chk.pass .ic { color:hsl(var(--win)); }
+      #${rootId} .bt-chk.fail { border-color:hsl(var(--loss)/0.45); }
+      #${rootId} .bt-chk.fail .ic { color:hsl(var(--loss)); }
+      #${rootId} .bt-chk.warn .ic { color:hsl(38 95% 55%); }
+      #${rootId} .bt-chk.info .ic { color:hsl(var(--muted-foreground)); }
+      #${rootId} .bt-dgrid { display:grid; grid-template-columns:repeat(10,1fr); gap:4px; margin-bottom:8px; }
+      #${rootId} .bt-dcell { position:relative; text-align:center; padding:5px 0 4px; min-height:56px; border-radius:8px; overflow:hidden; border:1px solid hsl(var(--border)/0.45); }
+      #${rootId} .bt-dcell > div { position:relative; z-index:1; }
+      #${rootId} .bt-dcell .bar { position:absolute; left:0; right:0; bottom:0; z-index:0; background:hsl(var(--primary)/0.2); }
+      #${rootId} .bt-dcell .base { position:absolute; left:0; right:0; bottom:50%; z-index:0; border-top:1px dashed hsl(var(--muted-foreground)/0.5); }
+      #${rootId} .bt-dcell .dg { font-size:13px; font-weight:800; } #${rootId} .bt-dcell .rt { font-size:8.5px; } #${rootId} .bt-dcell .sm { font-size:7px; opacity:.6; }
+      #${rootId} .bt-dcell.pass { border-color:hsl(var(--primary)/0.6); }
+      #${rootId} .bt-dcell.trig { border-color:hsl(var(--win)); background:hsl(var(--win)/0.12); }
+      #${rootId} .bt-dcell.trig .bar { background:hsl(var(--win)/0.35); }
+      #${rootId} .bt-dcell.live { box-shadow:0 0 0 1.5px hsl(var(--accent)); }
+      #${rootId} .bt-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(72px,1fr)); gap:6px; margin:8px 0; }
+      #${rootId} .bt-tile { background:hsl(var(--bg)/0.8); border:1px solid hsl(var(--border)/0.3); border-radius:10px; padding:7px 4px; text-align:center; }
+      #${rootId} .bt-tile b { display:block; font-family:'Outfit',sans-serif; font-size:13px; font-weight:900; }
+      #${rootId} .bt-tile span { font-size:7px; letter-spacing:1px; color:hsl(var(--muted-foreground)); font-family:'DM Mono',monospace; }
+      #${rootId} .bt-tile.good b { color:hsl(var(--win)); } #${rootId} .bt-tile.bad b { color:hsl(var(--loss)); } #${rootId} .bt-tile.warn b { color:hsl(38 95% 55%); }
+      #${rootId} .bt-hist-row { display:flex; align-items:center; gap:8px; padding:5px 8px; margin-bottom:3px; border-radius:8px; border:1px solid hsl(var(--border)/0.3); font-family:'DM Mono',monospace; font-size:9px; }
+
       /* Log rows */
       #${rootId} .bt-log-row {
         display:flex; gap:9px; padding:9px 10px; margin-bottom:7px; border-radius:10px;
@@ -33172,41 +33288,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }).join('');
   }
 
-  // Tag-Team card — shared setting, same toggle in both Bulk Trade and
-  // Opp Bulk tabs, plus a live readout of who is leading right now.
-  function renderTagTeamCard(eng) {
-    const st = bulkPair.status(eng);
-    const partnerName = eng.botPrefix === 'bulktrade' ? 'Opp Bulk' : 'Bulk Trade';
-    const map = {
-      off:    ['OFF',          'muted',  'Both bulk bots run independently.'],
-      idle:   ['IDLE',         'muted',  'Start this bot (and ' + partnerName + ') to begin taking turns.'],
-      solo:   ['SOLO',         'muted',  partnerName + ' is not running — this bot runs normally until you start it too.'],
-      duel:   ['⚔ DUEL',       'accent', 'Both armed. The first cluster to settle decides who leads.'],
-      leader: ['👑 LEADING',   'win',    'Armed with full automation. Benches itself the moment a cluster nets a loss.'],
-      benched:['💤 BENCHED',   'loss',   'Disarmed — ' + partnerName + ' is leading. Re-armed as soon as it loses a cluster.'],
-    };
-    const [tag, tone, text] = map[st];
-    const col = tone === 'win' ? 'var(--win)' : tone === 'loss' ? 'var(--loss)' : tone === 'accent' ? 'var(--accent)' : 'var(--muted-foreground)';
-    return `
-      <div class="cp-card" style="animation:bt-in .35s ease both .11s">
-        <div class="cp-section-label">🤝 TAG-TEAM WITH ${partnerName.toUpperCase()}</div>
-        <div class="cp-section-hint">
-          When Bulk Trade and Opp Bulk are both running, only one fires at a time. The one whose cluster nets a loss is disarmed and the winner keeps running with full automation until it loses — then they swap. Same setting in both tabs.
-        </div>
-        <div class="cp-toggle-row" style="margin-bottom:8px">
-          <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Tag-Team Mode</span>
-          <button class="titan-toggle ${bulkPair.enabled ? 'on' : ''}" id="bt-tagteam" onclick="event.stopPropagation()"></button>
-        </div>
-        <div class="cp-progress-group">
-          <div class="cp-progress-head">
-            <span class="cp-progress-label">This bot</span>
-            <span class="cp-status-pill" style="background:hsl(${col}/0.12);border-color:hsl(${col}/0.4);color:hsl(${col})">${tag}</span>
-          </div>
-          <div class="cp-progress-foot"><span style="font-weight:500;font-size:10px;color:hsl(var(--muted-foreground))">${text}</span></div>
-        </div>
-      </div>`;
-  }
-
   function renderLeft(c, eng) {
     return `
       <div class="cp-card" style="animation:bt-in .35s ease both .05s">
@@ -33229,7 +33310,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <button class="titan-toggle ${c.multiMarketScan ? 'on' : ''}" id="bt-multiscan" onclick="event.stopPropagation()"></button>
         </div>
       </div>
-      ${renderTagTeamCard(eng)}
       <div class="cp-card" style="animation:bt-in .35s ease both .12s">
         <div class="cp-section-label">🎯 RUN CONTROL</div>
         <div class="cp-section-hint">
@@ -33295,14 +33375,14 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           ${c.firstTickMode==='sacrifice'
             ? 'Fires a small test trade on the entry tick (not counted toward Runs/stats). WIN → real cluster at Stake $ fires immediately. LOSS → signal rejected, the cluster is skipped and the engine goes back to scouting.'
             : c.firstTickMode==='skip'
-            ? 'Entry tick is skipped (no cluster fired); the real cluster at Stake $ fires unconditionally on the very next scan cycle.'
+            ? 'Entry tick is skipped (no cluster fired); the real cluster at Stake $ fires unconditionally on the very next tick of that market.'
             : 'Every run fires the cluster normally from the entry tick — no probe or skip.'}
         </div>
       </div>
       <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .14s">
         <div class="cp-section-label">🚪 ENTRY GATES</div>
         <div class="cp-section-hint">
-          Every trade must pass two gates. <b>Gate 1</b> scans all markets and locks the best trend (${eng.invert ? 'Opp Bulk: the steadiest trend — it bets WITH it' : 'Bulk Trade: the most stretched trend — it bets AGAINST it'}). <b>Gate 2</b> reads that market's history for the trigger digit — the digit after which the next tick has most often gone the way we bet — and fires only when that digit prints. Nothing else fires a trade.
+          Every trade must pass two gates. <b>Gate 1</b> scans all markets and locks the most stretched trend (Bulk Trade bets AGAINST it). <b>Gate 2</b> reads that market's history for the trigger digit — the digit after which the next tick has most often gone the way we bet — and fires only when that digit prints. Nothing else fires a trade.
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Trend Window (ticks)</span><input class="cp-input" type="number" min="10" max="200" step="5" id="bt-trendwin" value="${c.trendWindow ?? 30}"></div>
@@ -33315,7 +33395,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Wait Between Clusters (s)</span><input class="cp-input" type="number" min="5" step="5" id="bt-entrycd" value="${c.entryCooldownSeconds ?? 45}"></div>
-          <div class="cp-input-group"><span class="cp-input-label">Handoff Analysis (s)</span><input class="cp-input" type="number" min="0" max="300" step="5" id="bt-handoff" value="${c.handoffAnalysisSeconds ?? 15}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Max Trigger Luck %</span><input class="cp-input" type="number" min="5" max="100" step="5" id="bt-maxluck" value="${c.maxTriggerLuckPct ?? 30}"></div>
+        </div>
+        <div class="cp-section-hint" style="margin-top:6px">
+          <b>Max Trigger Luck %</b> rejects a digit whose apparent edge is too likely to be a best-of-10 fluke (Sidak-corrected) rather than real. Lower = stricter, fewer but more trustworthy triggers. The digit must also hold up independently in both the older and newer half of the History Window — not just look good on average.
         </div>
       </div>
       <button type="button" class="cp-engage-btn ${eng.running || eng.clusterActive ? 'active' : ''}" id="bt-fire" ${eng.clusterActive ? 'disabled' : ''}>
@@ -33391,10 +33474,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       </div>`;
   }
 
+  const tickSecs = (sym) => (/^1HZ/.test(sym) ? 1 : 2);
+  const ago = (t) => { const x = Math.max(0, Math.round((Date.now() - t) / 1000)); return x < 60 ? x + 's ago' : Math.floor(x / 60) + 'm ' + (x % 60) + 's ago'; };
+  function renderTape(digits, trigDigit, n) {
+    const tail = digits.slice(-n);
+    return tail.map((d, i) => `<span class="bt-tape-chip ${d % 2 === 0 ? 'ev' : 'od'} ${trigDigit === d ? 'trig' : ''} ${i === tail.length - 1 ? 'live' : ''}">${d}</span>`).join('');
+  }
+  function renderChecks(rows) {
+    const ico = { pass: '✓', fail: '✗', warn: '!', info: '•' };
+    return rows.map((r) => `<div class="bt-chk ${r.state}"><span class="ic">${ico[r.state]}</span><span>${esc(r.label)}</span><span class="vl">${esc(r.value)}</span></div>`).join('');
+  }
+
   function renderGates(c, eng) {
     const ph = eng.gatePhase();
     const g = eng.gates || {};
+    const G = eng._gateCfg();
     const h = eng._hunt;
+    const pick = !h && g.pick ? eng._mkHunt(g.pick.cand, g.pick.term, null) : null;
+    const view = h || pick;                       // what the terminal is showing right now
+    const term = view ? view.term : g.term;
     const colMap = { waiting: '--win', scanning: '--accent', analysing: '--accent', warming: '--accent', flight: '--primary' };
     const col = 'hsl(var(' + (colMap[ph.key] || '--muted-foreground') + '))';
     const modeName = eng.invert ? 'CONTINUATION' : 'REVERSAL';
@@ -33409,21 +33507,80 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       return `<div style="display:grid;grid-template-columns:1.5fr 1fr .7fr 1.1fr;gap:6px;align-items:center;padding:6px 8px;border-radius:8px;margin-bottom:3px;font-family:'DM Mono',monospace;font-size:9.5px;${locked ? 'border:1px solid hsl(var(--win)/0.6);background:hsl(var(--win)/0.1);' : 'border:1px solid hsl(var(--border)/0.35);'}${dim ? 'opacity:.55;' : ''}">
         <span style="font-weight:700">${marketName(r.symbol)}</span><span>${trend}</span><span>${r.streak ? r.streak + '×' : '—'}</span><span style="text-align:right;color:${locked ? 'hsl(var(--win))' : 'inherit'}">${status}</span></div>`;
     }).join('');
-    const term = h ? h.term : g.term;
-    const trig = h ? h.trigger : (term && term.trigger);
-    const lastDigits = term ? eng.tick.getDigits(term.symbol) : [];
-    const lastDigit = lastDigits.length ? lastDigits[lastDigits.length - 1] : null;
-    const cells = term ? term.cells.map((cl) => {
-      const isT = trig && trig.digit === cl.digit;
-      return `<div style="text-align:center;padding:5px 0;border-radius:8px;border:1px solid ${isT ? 'hsl(var(--win))' : 'hsl(var(--border)/0.45)'};background:${isT ? 'hsl(var(--win)/0.15)' : 'transparent'};${lastDigit === cl.digit ? 'box-shadow:0 0 0 1.5px hsl(var(--accent));' : ''}">
-        <div style="font-size:13px;font-weight:800">${cl.digit}</div><div style="font-size:8px;color:hsl(var(--muted-foreground))">${cl.n ? cl.rate + '%' : '—'}</div><div style="font-size:7px;opacity:.6">n${cl.n}</div></div>`;
-    }).join('') : '';
+
+    const sym = term ? term.symbol : null;
+    const digits = sym ? eng.tick.getDigits(sym) : [];
+    const lastDigit = digits.length ? digits[digits.length - 1] : null;
+    const trig = view ? view.trigger : null;
+    const linkOk = eng._tradingLinkOk();
+    const feedMs = sym ? eng.tick.msSinceTick(sym) : Infinity;
+    const feedOk = eng.tick.connected && feedMs < 5000;
+
+    // ── hero: THE ENTRY DIGIT ──
+    let hero;
+    if (view) {
+      const sideLbl = labelForContractType(view.side === 'even' ? 'DIGITEVEN' : 'DIGITODD').toUpperCase();
+      const lagWord = (view.lag || 1) === 1 ? 'next tick' : `tick +${view.lag}`;
+      const chipTxt = h ? `🔒 LOCKED · WAITING FOR A ${trig.digit}` : eng.running ? `👁 CANDIDATE · ${ph.text}` : '👁 PREVIEW · BOT NOT STARTED';
+      const chipCol = h ? 'var(--win)' : 'var(--accent)';
+      hero = `<div class="bt-term-hero">
+        <div class="bt-term-digit"><b>${trig.digit}</b><span>ENTRY DIGIT</span></div>
+        <div>
+          <div class="bt-chip" style="color:hsl(${chipCol})">${chipTxt}</div>
+          <div class="bt-term-desc">Buys <b>${eng.config.bulkContracts}× ${sideLbl}</b> at <b>$${eng.currentStake.toFixed(2)}</b> the instant a <b>${trig.digit}</b> prints on <b>${marketName(view.symbol)}</b>. After a ${trig.digit}, the ${lagWord} was ${sideLbl} <b>${trig.rate}%</b> of the time (${trig.hits}/${trig.n} in the last ${term.hist} ticks) — holds up in both halves of that window, Wilson-confidence floor ${trig.wilson}%, ~${trig.luck}% chance this is a best-of-10 fluke. ${h ? 'Locked ' + ago(h.lockedAt) + '.' : ''}</div>
+        </div></div>`;
+    } else {
+      hero = `<div class="bt-term-hero idle">
+        <div class="bt-term-digit"><b>–</b><span>ENTRY DIGIT</span></div>
+        <div><div class="bt-chip" style="color:hsl(var(--muted-foreground))">NO ENTRY DIGIT YET</div>
+        <div class="bt-term-desc">${term ? `No digit on ${marketName(term.symbol)} clears ≥${G.trigSamples} samples, ≥${G.trigRate}% follow-through, holds up in both halves of the window, and ≤${G.maxLuck}% luck estimate — Gate 1 keeps scanning for another market.` : 'Waiting for Gate 1 to find a market whose trend qualifies. The entry digit is read from that market\'s history.'}</div></div></div>`;
+    }
+
+    // ── live tape ──
+    let tape = '';
+    if (term) {
+      let since = '—';
+      if (trig) { const k = digits.slice().reverse().findIndex((d) => d === trig.digit); since = k < 0 ? '>' + digits.length : String(k); }
+      const gap = trig && trig.n ? (term.hist - (view.lag || 1)) / trig.n : null;
+      tape = `<div class="bt-term-sub"><span>LIVE TICKS · ${marketName(term.symbol)}</span>
+          <span style="color:hsl(var(${feedOk ? '--win' : '--loss'}))">${feedOk ? '● FEED LIVE · ' + (feedMs / 1000).toFixed(1) + 's' : '● FEED ' + (eng.tick.connected ? 'STALE' : 'OFFLINE')}</span></div>
+        <div class="bt-tape">${renderTape(digits, trig ? trig.digit : null, 16)}</div>
+        <div style="font-size:8.5px;line-height:1.55;color:hsl(var(--muted-foreground))">${trig ? `Last <b style="color:hsl(var(--foreground))">${trig.digit}</b> printed <b style="color:hsl(var(--foreground))">${since}</b> tick(s) ago · it prints about every <b style="color:hsl(var(--foreground))">${gap ? gap.toFixed(1) : '—'}</b> ticks (~${gap ? Math.round(gap * tickSecs(term.symbol)) : '—'}s). ` : ''}<span style="color:hsl(var(--secondary))">■ even</span> · <span style="color:hsl(var(--accent))">■ odd</span> · green ring = entry digit · blue outline = newest tick.</div>`;
+    }
+
+    // ── why it qualified ──
+    let why = '';
+    if (view) {
+      const checks = eng.qualChecks(view).slice();
+      checks.push({ state: feedOk ? 'pass' : 'fail', label: 'Price feed', value: feedOk ? 'live' : 'no fresh ticks' });
+      checks.push({ state: linkOk ? 'pass' : 'fail', label: 'Trading link', value: linkOk ? 'connected — orders leave on the entry tick' : 'NOT connected — sync API token' });
+      checks.push({ state: ph.key === 'waiting' ? 'pass' : 'warn', label: 'Armed to fire', value: ph.text });
+      why = `<div class="bt-term-sub"><span>WHY IT QUALIFIED</span></div>${renderChecks(checks)}`;
+    }
+
+    // ── digit heat grid ──
+    let grid = '';
+    if (term) {
+      const cells = term.cells.map((cl) => {
+        const isT = trig && trig.digit === cl.digit;
+        const halfTxt = cl.oR == null && cl.nR == null ? 'not enough samples yet'
+          : `older half ${cl.oR == null ? '—' : Math.round(cl.oR * 100) + '%'} · newer half ${cl.nR == null ? '—' : Math.round(cl.nR * 100) + '%'}`;
+        return `<div class="bt-dcell ${isT ? 'trig' : cl.qualifies ? 'pass' : ''} ${lastDigit === cl.digit ? 'live' : ''}" title="After a ${cl.digit}: ${term.side.toUpperCase()} ${cl.hits}/${cl.n} · Wilson floor ${cl.wilson}% · luck ${cl.luck}% · ${halfTxt}">
+          <div class="bar" style="height:${cl.n ? cl.rate : 0}%"></div><div class="base"></div>
+          <div class="dg">${cl.digit}</div><div class="rt">${cl.n ? cl.rate + '%' : '—'}</div><div class="sm">${cl.hits}/${cl.n}</div></div>`;
+      }).join('');
+      const ranking = (term.ranked || []).map((r, k) => `#${k + 1} <b style="color:hsl(var(--foreground))">${r.digit}</b> ${r.rate}% (${r.hits}/${r.n}, Wilson ${r.wilson}%, luck ${r.luck}%)`).join(' · ');
+      grid = `<div class="bt-term-sub"><span>DIGIT FOLLOW-THROUGH · ${term.side.toUpperCase()} AT TICK +${term.lag}</span></div>
+        <div class="bt-dgrid">${cells}</div>
+        <div style="font-size:8px;line-height:1.55;color:hsl(var(--muted-foreground));margin-bottom:8px">Each cell: digit · how often the tick after it was ${term.side.toUpperCase()} · hits/samples. Bar height = rate; dashed line = 50% coin-flip. Green = entry digit, blue border = also clears samples/rate/half-window-consistency/luck-cap, ring = newest tick.${ranking ? '<br>Ranking (by Wilson confidence floor, not raw rate): ' + ranking : ''}</div>`;
+    }
+
     const t = eng.tStats;
     const record = t && t.clusters > 0
       ? `Terminal record: <b>${t.cWins}/${t.clusters}</b> clusters won · contracts won <b>${Math.round((t.hits / t.contracts) * 100)}%</b> vs <b>${Math.round(t.pred / t.contracts)}%</b> the history predicted. If the actual rate keeps sitting well under the predicted one, that trigger digit isn't really predicting anything.`
       : 'No trades fired from this terminal yet — once it trades, the predicted-vs-actual hit rate shows here.';
     return `
-      <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both">
+      <div class="cp-card bt-adv-card">
         <div class="cp-section-label" style="justify-content:space-between">
           <span>🚪 GATE 1 · MULTI-MARKET SCAN</span>
           <span class="bt-adv-status" style="color:${col}"><span class="bt-adv-dot ${ph.key === 'stopped' || ph.key === 'benched' ? 'off' : 'on'}"></span>${ph.text}</span>
@@ -33431,19 +33588,58 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         <div style="font-size:9px;color:hsl(var(--muted-foreground));line-height:1.5;margin-bottom:10px"><b style="color:hsl(var(--foreground))">${modeName}</b> — ${modeDesc}</div>
         ${rows || `<div style="text-align:center;padding:14px;opacity:.5;font-size:10.5px">Collecting ticks…</div>`}
       </div>
-      <div class="cp-card bt-adv-card" style="animation:bt-in .35s ease both .05s">
+      <div class="cp-card bt-adv-card">
         <div class="cp-section-label" style="justify-content:space-between">
           <span>🎯 GATE 2 · TRIGGER TERMINAL</span>
           <span class="bt-adv-status">${term ? marketName(term.symbol) : '—'}</span>
         </div>
-        ${h
-          ? `<div style="display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;margin-bottom:10px">
-              <div style="font-size:38px;font-weight:900;line-height:1;color:hsl(var(--win))">${h.trigger.digit}</div>
-              <div style="font-size:10px;line-height:1.55;color:hsl(var(--muted-foreground))">When a <b style="color:hsl(var(--foreground))">${h.trigger.digit}</b> prints on ${marketName(h.symbol)}, fire <b style="color:hsl(var(--foreground))">${h.side.toUpperCase()}</b>. In the last ${eng.config.histWindow || 150} ticks the next tick was ${h.side.toUpperCase()} <b style="color:hsl(var(--foreground))">${h.trigger.rate}%</b> of the time (${h.trigger.hits}/${h.trigger.n}). Live last digit: <b style="color:hsl(var(--foreground))">${lastDigit ?? '—'}</b>.</div>
-            </div>`
-          : `<div style="font-size:10px;line-height:1.55;color:hsl(var(--muted-foreground));margin-bottom:10px">${term ? (term.trigger ? '' : `No digit on ${marketName(term.symbol)} has a trustworthy follow-through yet — Gate 1 keeps scanning for another market.`) : 'Waiting for Gate 1 to lock a market. No trigger digit is read until a market qualifies.'}</div>`}
-        ${cells ? `<div style="display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin-bottom:10px">${cells}</div><div style="font-size:8px;color:hsl(var(--muted-foreground));margin-bottom:8px">Each cell: digit · how often the NEXT tick was ${term.side.toUpperCase()} after it · sample count. Blue ring = live last digit.</div>` : ''}
+        ${hero}${tape}${why}${grid}
         <div style="font-size:9px;line-height:1.55;color:hsl(var(--muted-foreground));padding-top:8px;border-top:1px solid hsl(var(--border)/0.4)">${record}</div>
+      </div>
+      ${renderLastEntry(eng)}`;
+  }
+
+  // Frozen snapshot of the most recent entry: what fired, why it qualified,
+  // how fast the orders went out, which ticks the contracts entered/settled on.
+  function renderLastEntry(eng) {
+    const le = eng.lastEntry;
+    if (!le) return `<div class="cp-card bt-adv-card"><div class="cp-section-label">🧾 LAST ENTRY AUDIT</div>
+      <div style="font-size:9.5px;color:hsl(var(--muted-foreground));line-height:1.6">Nothing has fired yet. When the entry digit prints, this card freezes the analysis that qualified it, times the orders, and checks which ticks the contracts entered and settled on.</div></div>`;
+    const sideLbl = le.side.toUpperCase();
+    const stMap = { triggered: ['TRIGGERED', '--accent'], 'skip-wait': ['SKIPPING 1 TICK', '--accent'], probe: ['TEST STAKE OUT', '--accent'], sent: ['ORDERS SENT', '--primary'], live: ['IN FLIGHT', '--primary'], failed: ['NOT SENT', '--loss'],
+      settled: [le.result && le.result.netWin ? 'WON' : 'LOST', le.result && le.result.netWin ? '--win' : '--loss'] };
+    const [stTxt, stCol] = stMap[le.status] || ['—', '--muted-foreground'];
+    const au = le.audit;
+    const tile = (label, val, tone) => `<div class="bt-tile ${tone || ''}"><b>${val}</b><span>${label}</span></div>`;
+    const sentTone = le.mode !== 'normal' ? '' : le.sentMs == null ? '' : le.sentMs <= 250 ? 'good' : 'warn';
+    const confTone = le.firstConfirmMs == null ? '' : le.firstConfirmMs <= 700 ? 'good' : 'warn';
+    const entTone = !au || au.entryLag == null ? '' : au.entryLag === 1 ? 'good' : 'warn';
+    const exTone = !au || au.exitLag == null ? '' : au.exitLag === le.lag ? 'good' : 'warn';
+    const tiles = tile('ORDERS SENT', le.sentMs == null ? '…' : le.sentMs + ' ms', sentTone)
+      + tile('1ST CONFIRM', le.firstConfirmMs == null ? (le.status === 'failed' ? '✗' : '…') : le.firstConfirmMs + ' ms', confTone)
+      + tile('ENTRY TICK', au && au.entryLag != null ? '+' + au.entryLag : '…', entTone)
+      + tile('EXIT TICK', au && au.exitLag != null ? '+' + au.exitLag : '…', exTone);
+    const notes = [];
+    if (le.mode !== 'normal') notes.push(`First-Tick mode is <b>${le.mode}</b>, so orders intentionally left later than the trigger tick.`);
+    if (au && au.entryLag > 1) notes.push('<b style="color:hsl(38 95% 55%)">Entry tick came later than the very next tick — the buy was slow, so the trade did not line up with the trigger.</b>');
+    if (au && au.exitLag != null && au.exitLag !== le.lag) notes.push(`Contracts settled on tick +${au.exitLag}, but the statistic was read at +${le.lag}. The terminal recalibrates after two consistent trades.`);
+    if (le.err) notes.push(`<b style="color:hsl(var(--loss))">${esc(le.err)}</b>`);
+    const res = le.result ? `Result: <b>${le.result.won}/${le.result.won + le.result.lost}</b> contracts won · net <b style="color:hsl(var(--${le.result.net >= 0 ? 'win' : 'loss'}))">${le.result.net >= 0 ? '+' : ''}${le.result.net.toFixed(2)}</b>${le.entryDigit != null ? ` · entry digit ${le.entryDigit} → exit digit ${le.exitDigit != null ? le.exitDigit : '?'}` : ''}` : `${le.confirmed}/${le.orders} orders confirmed${le.rejected ? ', ' + le.rejected + ' rejected' : ''}…`;
+    const hist = (eng.entryHistory || []).map((e) => `<div class="bt-hist-row"><span style="opacity:.6">${new Date(e.at).toLocaleTimeString()}</span>
+      <b style="color:hsl(var(--win))">${e.digit}</b><span>${e.side.toUpperCase()}</span><span style="opacity:.7;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${marketName(e.symbol)}</span>
+      <span style="opacity:.6">${e.latency != null ? e.latency + 'ms' : ''}</span>
+      <b style="color:hsl(var(--${e.netWin ? 'win' : 'loss'}))">${e.netWin ? 'W' : 'L'} ${e.won}/${e.won + e.lost}</b></div>`).join('');
+    return `
+      <div class="cp-card bt-adv-card">
+        <div class="cp-section-label" style="justify-content:space-between"><span>🧾 LAST ENTRY AUDIT</span><span class="bt-chip" style="color:hsl(var(${stCol}));margin:0">${stTxt}</span></div>
+        <div style="font-size:10px;line-height:1.6;color:hsl(var(--muted-foreground))">${new Date(le.at).toLocaleTimeString()} · <b style="color:hsl(var(--foreground))">${marketName(le.symbol)}</b> · entry digit <b style="color:hsl(var(--win))">${le.digit}</b> printed → ${le.contracts}× <b style="color:hsl(var(--foreground))">${sideLbl}</b> at $${le.stake.toFixed(2)}</div>
+        <div class="bt-tape">${renderTape(le.tail, le.digit, 12)}</div>
+        <div style="font-size:9px;line-height:1.6;color:hsl(var(--muted-foreground))">Qualified on: ${le.dominant.toUpperCase()} trend ${le.domPct}% (${le.liveDom ? le.liveDom.toUpperCase() + ' ' + le.livePct + '% at the moment of firing' : ''}) · follow-through ${le.rate}% (${le.hits}/${le.n}) · luck check ${le.luck == null ? '—' : Math.round(le.luck * 100) + '%'} · ${le.streak}× streak.</div>
+        <div class="bt-tiles">${tiles}</div>
+        <div style="font-size:9px;line-height:1.6;color:hsl(var(--muted-foreground))">${res}</div>
+        ${notes.map((n) => `<div style="font-size:8.5px;line-height:1.55;margin-top:5px;color:hsl(var(--muted-foreground))">${n}</div>`).join('')}
+        <details style="margin-top:8px"><summary style="cursor:pointer;font-size:8.5px;letter-spacing:1.5px;color:hsl(var(--primary))">FROZEN QUALIFICATION CHECKLIST</summary><div style="margin-top:6px">${renderChecks(le.checks || [])}</div></details>
+        ${hist ? `<div class="bt-term-sub"><span>RECENT ENTRIES</span></div>${hist}` : ''}
       </div>`;
   }
 
@@ -33470,11 +33666,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function renderLog(eng) {
     if (!eng.log.length) return `<div style="text-align:center;padding:30px;opacity:0.4;font-size:11px;letter-spacing:3px">NO ACTIVITY YET</div>`;
     return eng.log.map((l) => {
-      const barColor = l.kind === 'win' ? 'hsl(var(--win))' : l.kind === 'loss' ? 'hsl(var(--loss))' : 'hsl(var(--primary))';
+      const barColor = l.kind === 'win' ? 'hsl(var(--win))' : l.kind === 'loss' ? 'hsl(var(--loss))' : l.kind === 'engine' ? 'hsl(var(--accent))' : 'hsl(var(--primary))';
       return `<div class="bt-log-row">
         <div class="bt-log-bar" style="background:${barColor}"></div>
         <div class="bt-log-body">
-          <div class="bt-log-time">${new Date(l.t).toLocaleTimeString()}</div>
+          <div class="bt-log-time">${new Date(l.t).toLocaleTimeString()}.${String(l.t % 1000).padStart(3, '0')}</div>
           <div class="bt-log-text">${esc(l.text)}</div>
         </div>
       </div>`;
@@ -33505,6 +33701,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             <span class="jnl-time">${j.time}</span>
             <span class="${isWin ? 'jnl-win-tag' : 'jnl-loss-tag'}">${isWin ? '▲ WIN' : '▼ LOSS'}</span>
             ${chip}
+            ${j.triggerDigit != null ? `<span class="jnl-ct-pill" title="Entry digit that triggered this cluster" style="background:hsl(var(--win)/0.1);color:hsl(var(--win));border:1.5px solid hsl(var(--win)/0.35)">TRIG ${j.triggerDigit}</span>` : ''}
             ${j.market ? `<span style="font-size:8px;font-family:'DM Mono',monospace;color:hsl(var(--muted-foreground)/0.5)">${marketName(j.market)}</span>` : ''}
           </div>
           <div class="jnl-pnl ${j.type}">${pl}</div>
@@ -33547,6 +33744,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (pill && pillText) {
       pill.classList.remove('fire', 'signal');
       if (eng.clusterActive) { pill.classList.add('fire'); pillText.textContent = 'FIRING'; }
+      else if (eng.running && eng._hunt) { pill.classList.add('signal'); pillText.textContent = `WAITING · ENTRY DIGIT ${eng._hunt.trigger.digit}`; }
       else if (s && s.confidence >= MIN_CONFIDENCE) { pill.classList.add('signal'); pillText.textContent = 'SIGNAL'; }
       else { pillText.textContent = 'SCANNING'; }
     }
@@ -33579,8 +33777,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (marketEl && !marketEl._bound) { marketEl._bound = true; marketEl.onchange = (e) => eng.setConfig({ selectedMarket: e.target.value }); }
     const multiscanEl = el('bt-multiscan', root);
     if (multiscanEl && !multiscanEl._bound) { multiscanEl._bound = true; multiscanEl.onclick = () => { eng.setConfig({ multiMarketScan: !eng.config.multiMarketScan }); render(); }; }
-    const tagTeamEl = el('bt-tagteam', root);
-    if (tagTeamEl && !tagTeamEl._bound) { tagTeamEl._bound = true; tagTeamEl.onclick = () => { bulkPair.setEnabled(!bulkPair.enabled); render(); }; }
     const fireBtn = el('bt-fire', root);
     if (fireBtn && !fireBtn._bound) { fireBtn._bound = true; fireBtn.onclick = () => { if (eng.running) eng.stop(); else eng.start(); render(); }; }
 
@@ -33624,7 +33820,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const psThresholdEl = el('bt-psthreshold', root);
     if (psThresholdEl && !psThresholdEl._bound) { psThresholdEl._bound = true; psThresholdEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 1 && v <= 99) eng.setConfig({ parityStreakThreshold: v }); }; }
     [['bt-trendwin', 'trendWindow', 10, 200], ['bt-mintrend', 'minTrendPct', 51, 95], ['bt-histwin', 'histWindow', 50, 200],
-     ['bt-trigsamples', 'triggerMinSamples', 3, 50], ['bt-trigrate', 'triggerMinRate', 51, 95], ['bt-handoff', 'handoffAnalysisSeconds', 0, 300]].forEach(([id, key, lo, hi]) => {
+     ['bt-trigsamples', 'triggerMinSamples', 3, 50], ['bt-trigrate', 'triggerMinRate', 51, 95], ['bt-maxluck', 'maxTriggerLuckPct', 5, 100]].forEach(([id, key, lo, hi]) => {
       const node = el(id, root);
       if (node && !node._bound) { node._bound = true; node.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= lo && v <= hi) eng.setConfig({ [key]: v }); }; }
     });
@@ -33665,16 +33861,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   window.BulkTradePanel = createBulkPanel({
     prefix: 'bulktrade', invert: false, ensureGlobalName: 'ensureBulkTradeEngine',
     title: 'BULK TRADE', subtitle: '📡 AI MARKET SCANNER · CLUSTER EXECUTION · MULTI-STRATEGY',
-  });
-  // Opp Bulk — identical engine/UI, mirrored: every analysis pick, entry
-  // and trigger digit fires on the exact opposite side of whatever Bulk
-  // Trade would have fired (see BulkTradeEngine's `invert` handling in
-  // _scan() above). Fully independent stake/runs/martingale/journal/P&L
-  // — its own tab, so when Bulk Trade is on a losing streak you can run
-  // this one alongside it taking the inverse bet.
-  window.OppBulkPanel = createBulkPanel({
-    prefix: 'oppbulk', invert: true, ensureGlobalName: 'ensureOppBulkEngine',
-    title: 'OPP BULK', subtitle: '🔁 OPPOSITE-SIDE SCANNER · MIRRORS BULK TRADE\u2019S ENTRIES · CLUSTER EXECUTION',
   });
 })();
 </script>
