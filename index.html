@@ -31733,9 +31733,79 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // every time the engine is (re)created.
   let _sharedBulkTick = null;
   function getSharedBulkTick() {
-    if (!_sharedBulkTick) _sharedBulkTick = new BulkTickSocket();
+    if (!_sharedBulkTick) {
+      _sharedBulkTick = new BulkTickSocket();
+      // Accumulate every tick from every market into the persistent bias
+      // tracker, regardless of which trade type/tab is active — the
+      // longer the page stays open the more trustworthy the long-run
+      // even/odd read gets.
+      _sharedBulkTick.onTick((symbol) => {
+        const d = _sharedBulkTick.getDigits(symbol);
+        if (d.length) window.BiasTracker.record(symbol, d[d.length - 1]);
+      });
+    }
     return _sharedBulkTick;
   }
+
+  // ── Persistent Even/Odd Bias Tracker ────────────────────────────────
+  // Gate 1's old logic only ever looked at the last ~150-200 live ticks
+  // (BulkTickSocket caps its buffer at 200), which is far too small a
+  // sample to tell a real structural digit bias apart from noise — a
+  // 60% even reading over 30 ticks is well inside normal variance for a
+  // fair 50/50 generator. This tracker keeps a running, persistent
+  // (survives reloads, accumulates for as long as the page has ever been
+  // open) count of even/odd ticks PER MARKET in localStorage, independent
+  // of the live tick buffer, so "is this market actually biased toward
+  // even/odd" can be answered from thousands of ticks instead of dozens.
+  // Used by Direction Mode (Even Only / Odd Only) below as the gate that
+  // decides whether a market is even eligible to trade a fixed side —
+  // instead of assuming a live streak will revert (gambler's fallacy),
+  // fixed-direction mode only trades a market once its accumulated
+  // history shows a statistically real lean that way.
+  window.BiasTracker = (function () {
+    const KEY = 'bulktrade_bias_stats_v1';
+    const SAVE_EVERY_MS = 4000;
+    let stats = {};
+    let dirty = false, lastSave = 0;
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) stats = JSON.parse(raw) || {};
+    } catch (e) { stats = {}; }
+    function save(force) {
+      const now = Date.now();
+      if (!dirty || (!force && now - lastSave < SAVE_EVERY_MS)) return;
+      try { localStorage.setItem(KEY, JSON.stringify(stats)); lastSave = now; dirty = false; } catch (e) {}
+    }
+    function record(symbol, digit) {
+      const s = stats[symbol] || (stats[symbol] = { n: 0, even: 0 });
+      s.n++; if (digit % 2 === 0) s.even++;
+      dirty = true; save(false);
+    }
+    // Wilson lower bound for "this market is biased toward `side`",
+    // reusing the same 90%-confidence z used elsewhere in this file.
+    function wilsonLB(hits, n, z) {
+      if (!n) return 0;
+      const p = hits / n, z2 = z * z, denom = 1 + z2 / n;
+      const center = p + z2 / (2 * n);
+      const margin = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+      return Math.max(0, (center - margin) / denom);
+    }
+    function stat(symbol) {
+      const s = stats[symbol] || { n: 0, even: 0 };
+      const evenPct = s.n ? s.even / s.n : 0.5;
+      return {
+        n: s.n, evenPct, oddPct: 1 - evenPct,
+        evenLB: wilsonLB(s.even, s.n, 1.645),
+        oddLB: wilsonLB(s.n - s.even, s.n, 1.645),
+      };
+    }
+    function reset(symbol) {
+      if (symbol) delete stats[symbol]; else stats = {};
+      dirty = true; save(true);
+    }
+    return { record, stat, reset, flush: () => save(true) };
+  })();
+  window.addEventListener('beforeunload', () => { try { window.BiasTracker.flush(); } catch (e) {} });
 
   // ── Signal math ─────────────────────────────────────────────────────
   // Plain proportion / z-score against the fair-generator baseline
@@ -31879,7 +31949,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   //   3. the Sidak-corrected luck estimate stays under the configured cap
   // Ranking among digits that clear the bar is done by Wilson lower bound,
   // not raw rate, so a well-sampled moderate edge beats a thin, lucky-looking one.
-  function readTriggerTerminal(digits, hist, side, minSamples, minRate, lag, maxLuckPct) {
+  // familyMult = how many markets are being scanned this cycle (1 when
+  // multiMarketScan is off). The luck estimate below corrects for "best
+  // digit out of 10 on ONE market" — with multiMarketScan on, the real
+  // search is "best digit out of 10, across every one of these markets",
+  // i.e. up to 10× more independent looks at the data. Not correcting for
+  // that let a digit's apparent edge look far more significant than it
+  // really was, which is exactly the kind of overfitting that backtests
+  // clean and decays fast once live (see the brainstorm notes above the
+  // Direction Mode config for the full explanation).
+  function readTriggerTerminal(digits, hist, side, minSamples, minRate, lag, maxLuckPct, familyMult) {
+    const fam = Math.max(1, parseInt(familyMult, 10) || 1);
     const L = Math.max(1, Math.min(3, parseInt(lag, 10) || 1));
     const h = digits.slice(-hist);
     const usable = Math.max(0, h.length - L);
@@ -31899,7 +31979,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const rate = cl.n ? Math.round((cl.hits / cl.n) * 100) : 0;
       const z = cl.n ? (cl.hits / cl.n - 0.5) / Math.sqrt(0.25 / cl.n) : 0;
       const p = cl.n ? binomTail(cl.n, cl.hits) : 1;
-      const luck = cl.n ? Math.round((1 - Math.pow(1 - p, 10)) * 100) : 100;
+      const luck = cl.n ? Math.round((1 - Math.pow(1 - p, 10 * fam)) * 100) : 100;
       const wilson = Math.round(wilsonLowerBound(cl.hits, cl.n, 1.645) * 100);
       const oR = older[d].n >= HALF_MIN ? older[d].hits / older[d].n : null;
       const nR = newer[d].n >= HALF_MIN ? newer[d].hits / newer[d].n : null;
@@ -32021,6 +32101,26 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // armed (Bulk Trade scans on a 2s poll rather than raw ticks, so
         // that poll cycle is this engine's "tick" for this purpose).
         firstTickMode: 'normal', firstTickStake: 0.35,
+        // Direction Mode — 'auto' keeps the original reversal behaviour
+        // (Gate 1 bets against whichever parity is currently stretched,
+        // side can be either even or odd trade to trade). 'even' / 'odd'
+        // locks every entry to that single side and swaps Gate 1's
+        // eligibility test from "is the live streak stretched" to "does
+        // this market's PERSISTENT, accumulated tick history actually
+        // lean this way" — see biasMinSamples/biasMinLB and _rankMarkets().
+        // This only trades a market once real accumulated evidence
+        // supports it, instead of assuming any streak will revert.
+        directionMode: 'auto',
+        // How many accumulated ticks (from BiasTracker, NOT the live
+        // 200-tick buffer) a market needs before its long-run even/odd
+        // read is trusted enough to gate a fixed-direction entry.
+        biasMinSamples: 300,
+        // Wilson lower-bound (%, at 90% confidence) the accumulated
+        // even/odd rate must clear, in favor of directionMode's side,
+        // for a market to be eligible at all in fixed-direction mode.
+        // 50 = "any lean, however slight, that survives the confidence
+        // interval"; raise it to demand a bigger, more convincing bias.
+        biasMinLB: 51,
       }, this._loadConfig());
       // Trade type can never be overridden by saved/legacy config — this
       // instance's slot decides it, permanently.
@@ -32251,6 +32351,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         trigSamples: Math.max(3, parseInt(c.triggerMinSamples, 10) || 8),
         trigRate: Math.min(95, Math.max(51, parseInt(c.triggerMinRate, 10) || 60)),
         maxLuck: Math.min(100, Math.max(5, parseInt(c.maxTriggerLuckPct, 10) || 30)),
+        // Direction Mode — 'auto' | 'even' | 'odd'. See config comment.
+        dir: (c.directionMode === 'even' || c.directionMode === 'odd') ? c.directionMode : 'auto',
+        biasMinSamples: Math.max(50, parseInt(c.biasMinSamples, 10) || 300),
+        biasMinLB: Math.min(90, Math.max(50, parseInt(c.biasMinLB, 10) || 51)),
+        // Family size for the luck correction — how many independent
+        // markets are being searched this cycle.
+        familyMult: this._candidateMarkets().length,
       };
     }
     gatePhase() {
@@ -32265,6 +32372,20 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       return { key: 'scanning', text: 'GATE 1 · SCANNING' };
     }
     // Rank every candidate market for Gate 1 (also feeds the UI table).
+    // Two different eligibility tests depending on Direction Mode:
+    //   'auto'        → original behaviour: bet AGAINST whichever parity
+    //                   is currently stretched over trendWindow ticks
+    //                   (reversal), gated on how stretched it is right now.
+    //   'even'/'odd'  → fixed side. Eligibility no longer cares whether
+    //                   the live window looks stretched — that's a
+    //                   streak-reversal assumption that doesn't apply
+    //                   here. Instead the market must show a REAL,
+    //                   persistent lean toward the fixed side across its
+    //                   full accumulated tick history (BiasTracker), with
+    //                   enough samples and a Wilson lower bound clearing
+    //                   biasMinLB. A market with no accumulated evidence
+    //                   of a lean simply isn't eligible in fixed mode —
+    //                   it's excluded rather than traded on a guess.
     _rankMarkets(G) {
       const out = [];
       this._candidateMarkets().forEach((symbol) => {
@@ -32284,9 +32405,26 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           const longPct = Math.round(((longDom === 'even' ? le : lw.length - le) / lw.length) * 100);
           e.dominant = dominant; e.domPct = domPct; e.streak = streak; e.longDom = longDom; e.longPct = longPct;
           e.streakParity = digits[digits.length - 1] % 2 === 0 ? 'even' : 'odd';
-          e.side = this.invert ? dominant : oppParity(dominant);
-          e.eligible = e.warm && domPct >= G.minTrend && (!this.invert || longDom === dominant);
-          e.score = this.invert ? domPct + longPct / 2 : domPct + Math.min(streak, 8);
+
+          const bias = window.BiasTracker.stat(symbol);
+          e.bias = bias;
+
+          if (G.dir === 'auto') {
+            e.side = this.invert ? dominant : oppParity(dominant);
+            e.eligible = e.warm && domPct >= G.minTrend && (!this.invert || longDom === dominant);
+            e.score = this.invert ? domPct + longPct / 2 : domPct + Math.min(streak, 8);
+          } else {
+            // Fixed direction — side never changes, eligibility comes from
+            // the persistent bias check instead of the live streak.
+            e.side = G.dir;
+            const lb = G.dir === 'even' ? bias.evenLB : bias.oddLB;
+            const pct = Math.round((G.dir === 'even' ? bias.evenPct : bias.oddPct) * 100);
+            e.biasLBPct = Math.round(lb * 100); e.biasPct = pct; e.biasN = bias.n;
+            e.eligible = e.warm && bias.n >= G.biasMinSamples && e.biasLBPct >= G.biasMinLB;
+            // Rank eligible fixed-direction markets by how strong/well
+            // sampled the accumulated lean is, not by live streak.
+            e.score = e.biasLBPct + Math.min(bias.n / 200, 5);
+          }
         }
         out.push(e);
       });
@@ -32298,12 +32436,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const now = Date.now();
       const ranked = this._rankMarkets(G);
       this.gates.ranked = ranked.slice(0, 6);
-      // Keep an existing lock only while its trend still stands.
+      // Keep an existing lock only while its qualification still stands —
+      // for 'auto' that means the live trend hasn't faded; for a fixed
+      // direction it means the persistent bias check still holds (that
+      // can only change slowly, but a lock shouldn't outlive it either).
       if (this._hunt) {
         const r = ranked.find((x) => x.symbol === this._hunt.symbol);
-        const ok = r && r.warm && r.dominant === this._hunt.dominant && r.domPct >= G.minTrend - 5 && (!this.invert || r.longDom === r.dominant);
+        const ok = G.dir === 'auto'
+          ? (r && r.warm && r.dominant === this._hunt.dominant && r.domPct >= G.minTrend - 5 && (!this.invert || r.longDom === r.dominant))
+          : (r && r.warm && r.side === this._hunt.side && r.eligible);
         if (!this.running || this.standby) this._hunt = null;
-        else if (!ok) { this.addLog('info', `↩ Gate 1: the trend on ${marketName(this._hunt.symbol)} faded — dropping the lock and re-scanning.`); this._hunt = null; }
+        else if (!ok) { this.addLog('info', `↩ Gate 1: ${marketName(this._hunt.symbol)} no longer qualifies — dropping the lock and re-scanning.`); this._hunt = null; }
         else if (now - this._hunt.lockedAt > 180000) { this.addLog('info', `↩ Gate 2: no ${this._hunt.trigger.digit} appeared for 3 minutes — re-scanning all markets.`); this._hunt = null; }
       }
       const canHunt = this.running && !this.standby && !this.clusterActive && !this.isCooldown && !this._testInFlight && !this._skipArmed
@@ -32314,13 +32457,16 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.gates.term = null; this.gates.pick = null;
       for (const cand of ranked) {
         if (!cand.eligible) break;
-        const term = readTriggerTerminal(this.tick.getDigits(cand.symbol), G.hist, cand.side, G.trigSamples, G.trigRate, this.settleLag, G.maxLuck);
+        const term = readTriggerTerminal(this.tick.getDigits(cand.symbol), G.hist, cand.side, G.trigSamples, G.trigRate, this.settleLag, G.maxLuck, G.familyMult);
         if (!this.gates.term) this.gates.term = { symbol: cand.symbol, ...term };
         if (!term.trigger) continue;
         this.gates.pick = { cand, term: { symbol: cand.symbol, ...term } };
         if (!canHunt) break;
         this._hunt = this._mkHunt(cand, term, now);
-        this.addLog('engine', `🔍 Gate 1 → ${marketName(cand.symbol)} locked (${cand.dominant.toUpperCase()} trend ${cand.domPct}%, ${cand.streak}× streak; ${this.invert ? 'continuation' : 'reversal'} mode). 🎯 Gate 2 → ENTRY DIGIT ${term.trigger.digit}: at tick +${term.lag} after a ${term.trigger.digit} it was ${cand.side.toUpperCase()} ${term.trigger.rate}% of the time (${term.trigger.hits}/${term.trigger.n} in the last ${G.hist} ticks, consistent in both halves of that window; ${Math.round((term.luck || 0) * 100)}% chance of a digit this good by luck). Waiting for a ${term.trigger.digit}…`);
+        const gate1Desc = G.dir === 'auto'
+          ? `(${cand.dominant.toUpperCase()} trend ${cand.domPct}%, ${cand.streak}× streak; ${this.invert ? 'continuation' : 'reversal'} mode)`
+          : `(Direction Mode: ${G.dir.toUpperCase()} ONLY — accumulated bias ${cand.biasPct}% over ${cand.biasN} ticks, lower bound ${cand.biasLBPct}%)`;
+        this.addLog('engine', `🔍 Gate 1 → ${marketName(cand.symbol)} locked ${gate1Desc}. 🎯 Gate 2 → ENTRY DIGIT ${term.trigger.digit}: at tick +${term.lag} after a ${term.trigger.digit} it was ${cand.side.toUpperCase()} ${term.trigger.rate}% of the time (${term.trigger.hits}/${term.trigger.n} in the last ${G.hist} ticks, consistent in both halves of that window; ${Math.round((term.luck || 0) * 100)}% chance of a digit this good by luck, corrected for scanning ${G.familyMult} market${G.familyMult === 1 ? '' : 's'}). Waiting for a ${term.trigger.digit}…`);
         return;
       }
     }
@@ -32328,6 +32474,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       return {
         symbol: cand.symbol, dominant: cand.dominant, side: cand.side, domPct: cand.domPct, streak: cand.streak,
         streakParity: cand.streakParity, longDom: cand.longDom, longPct: cand.longPct, ticks: cand.ticks, need: cand.need,
+        biasPct: cand.biasPct, biasLBPct: cand.biasLBPct, biasN: cand.biasN,
         trigger: term.trigger, term: { symbol: cand.symbol, ...term }, luck: term.luck, lag: term.lag, lockedAt: now,
       };
     }
@@ -32337,14 +32484,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       const G = this._gateCfg(), t = h.trigger, rows = [];
       const up = (x) => String(x || '').toUpperCase();
       rows.push({ state: h.ticks >= h.need ? 'pass' : 'fail', label: 'Market warmed up', value: `${h.ticks}/${h.need} ticks` });
-      rows.push({ state: h.domPct >= G.minTrend ? 'pass' : 'warn', label: `Gate 1 · ${up(h.dominant)} trend`, value: `${h.domPct}% of last ${G.trendWin} (need ${G.minTrend}%)` });
-      if (this.invert) rows.push({ state: h.longDom === h.dominant ? 'pass' : 'fail', label: 'Long window agrees', value: `${up(h.longDom)} ${h.longPct}% of last 100` });
-      rows.push({ state: 'info', label: 'Live streak', value: `${h.streak}× ${up(h.streakParity)} in a row` });
+      if (G.dir === 'auto') {
+        rows.push({ state: h.domPct >= G.minTrend ? 'pass' : 'warn', label: `Gate 1 · ${up(h.dominant)} trend`, value: `${h.domPct}% of last ${G.trendWin} (need ${G.minTrend}%)` });
+        if (this.invert) rows.push({ state: h.longDom === h.dominant ? 'pass' : 'fail', label: 'Long window agrees', value: `${up(h.longDom)} ${h.longPct}% of last 100` });
+        rows.push({ state: 'info', label: 'Live streak', value: `${h.streak}× ${up(h.streakParity)} in a row` });
+      } else {
+        rows.push({ state: h.biasLBPct >= G.biasMinLB ? 'pass' : 'fail', label: `Gate 1 · Direction Mode ${up(G.dir)} — persistent bias`, value: `${h.biasPct}% ${up(G.dir)} over ${h.biasN} accumulated ticks, lower bound ${h.biasLBPct}% (need ${G.biasMinLB}%, min ${G.biasMinSamples} ticks)` });
+        rows.push({ state: 'info', label: 'Live streak (reference only)', value: `${h.streak}× ${up(h.streakParity)} in a row — not used to gate fixed-direction entries` });
+      }
       const lagWord = (h.lag || 1) === 1 ? 'next tick' : `tick +${h.lag}`;
       rows.push({ state: t.n >= G.trigSamples ? 'pass' : 'fail', label: `Gate 2 · digit ${t.digit} samples`, value: `${t.n} (need ${G.trigSamples})` });
       rows.push({ state: t.rate >= G.trigRate ? 'pass' : 'fail', label: `Gate 2 · ${lagWord} ${up(h.side)} after a ${t.digit}`, value: `${t.rate}% · ${t.hits}/${t.n} (need ${G.trigRate}%)` });
       const lk = h.luck == null ? null : h.luck;
-      rows.push({ state: lk == null ? 'info' : lk <= 0.05 ? 'pass' : 'warn', label: 'Luck check (best of 10 digits)', value: lk == null ? '—' : `${Math.round(lk * 100)}% by chance · ${lk <= 0.05 ? 'notable' : lk <= 0.3 ? 'weak evidence' : 'looks like noise'}` });
+      rows.push({ state: lk == null ? 'info' : lk <= 0.05 ? 'pass' : 'warn', label: `Luck check (best of 10 digits × ${G.familyMult} market${G.familyMult === 1 ? '' : 's'})`, value: lk == null ? '—' : `${Math.round(lk * 100)}% by chance · ${lk <= 0.05 ? 'notable' : lk <= 0.3 ? 'weak evidence' : 'looks like noise'}` });
       rows.push({ state: this._lagObs.length ? 'pass' : 'info', label: 'Settlement alignment', value: `read at tick +${h.lag || 1} · ${this._lagObs.length ? 'measured on ' + this._lagObs.length + ' trade' + (this._lagObs.length === 1 ? '' : 's') : 'assumed until first trades settle'}` });
       return rows;
     }
@@ -33288,6 +33440,32 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }).join('');
   }
 
+  // Small live readout of the persistent bias tracker for whichever
+  // markets are in scope, sorted by lower-bound strength — lets the
+  // person actually see the evidence Direction Mode is gating on instead
+  // of trusting it blindly.
+  function renderBiasReadout(c, eng) {
+    const dir = c.directionMode;
+    const symbols = c.multiMarketScan ? MARKETS : [c.selectedMarket];
+    const rows = symbols.map((symbol) => {
+      const s = window.BiasTracker.stat(symbol);
+      const pct = Math.round((dir === 'even' ? s.evenPct : s.oddPct) * 100);
+      const lb = Math.round((dir === 'even' ? s.evenLB : s.oddLB) * 100);
+      const ok = s.n >= (eng.config.biasMinSamples || 300) && lb >= (eng.config.biasMinLB || 51);
+      return { symbol, n: s.n, pct, lb, ok };
+    }).sort((a, b) => b.lb - a.lb);
+    return `
+      <div style="margin-top:8px;font-family:'DM Mono',monospace;font-size:10px;color:hsl(var(--muted-foreground))">
+        <div style="display:flex;justify-content:space-between;padding:2px 0;opacity:.7"><span>MARKET</span><span>${dir.toUpperCase()} % · LB · N</span></div>
+        ${rows.map((r) => `
+          <div style="display:flex;justify-content:space-between;padding:2px 0;color:${r.ok ? 'hsl(var(--win))' : 'inherit'}">
+            <span>${marketName(r.symbol)}${r.ok ? ' ✓' : ''}</span>
+            <span>${r.pct}% · ${r.lb}% · ${r.n}</span>
+          </div>`).join('')}
+        <div style="opacity:.6;margin-top:4px">Accumulates for as long as this page has been open — the longer it runs, the more the lower bound (LB) can be trusted. Only rows marked ✓ are eligible to trade right now.</div>
+      </div>`;
+  }
+
   function renderLeft(c, eng) {
     return `
       <div class="cp-card" style="animation:bt-in .35s ease both .05s">
@@ -33309,6 +33487,28 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           <span style="font-family:'DM Mono',monospace;font-size:10.5px;color:hsl(var(--foreground))">Multi-Market Scan</span>
           <button class="titan-toggle ${c.multiMarketScan ? 'on' : ''}" id="bt-multiscan" onclick="event.stopPropagation()"></button>
         </div>
+      </div>
+      <div class="cp-card" style="animation:bt-in .35s ease both .11s">
+        <div class="cp-section-label">🎯 DIRECTION MODE</div>
+        <div class="cp-section-hint">
+          Auto keeps the original behaviour: bets against whichever parity is currently stretched (either side can trade). Even/Odd Only locks every entry to one side, but ONLY trades a market once its full accumulated tick history shows a real, statistically-backed lean that way — a live streak alone is never enough in fixed mode.
+        </div>
+        <div class="cp-input-row">
+          <div class="cp-input-group" style="flex:1">
+            <span class="cp-input-label">Mode</span>
+            <select class="cp-input" id="bt-dirmode">
+              <option value="auto" ${(!c.directionMode || c.directionMode === 'auto') ? 'selected' : ''}>Auto (reversal, either side)</option>
+              <option value="even" ${c.directionMode === 'even' ? 'selected' : ''}>Even Only</option>
+              <option value="odd" ${c.directionMode === 'odd' ? 'selected' : ''}>Odd Only</option>
+            </select>
+          </div>
+        </div>
+        ${c.directionMode === 'even' || c.directionMode === 'odd' ? `
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Min accumulated ticks</span><input class="cp-input" type="number" step="10" min="50" id="bt-biasminn" value="${c.biasMinSamples}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Min lean (Wilson LB %)</span><input class="cp-input" type="number" step="1" min="50" max="90" id="bt-biasminlb" value="${c.biasMinLB}"></div>
+        </div>
+        ${renderBiasReadout(c, eng)}` : ''}
       </div>
       <div class="cp-card" style="animation:bt-in .35s ease both .12s">
         <div class="cp-section-label">🎯 RUN CONTROL</div>
@@ -33405,7 +33605,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         ${eng.clusterActive ? '⏳ CLUSTER IN FLIGHT…' : eng.isCooldown ? `😴 RESTING (${eng.cooldownRemaining}s) — CLICK TO STOP` : eng.running ? (eng.standby ? '■ STOP BOT (benched)' : '■ STOP BOT') : '▶ START BOT'}
       </button>
       <div class="hr-note">
-        <b>How it works:</b> set Stake, Martingale × and Max Martingale Steps above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}, waits for the parity streak trigger, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. Either way it then rests for Rest Cooldown and waits for the next fresh trigger. With Full Automation ON it keeps going until you press Stop or the Dashboard's Take Profit/Stop Loss gate fires; with it OFF it stops after the Number Of Runs you set.
+        <b>How it works:</b> set Stake, Martingale × and Max Martingale Steps above, then press Start. The bot scans ${c.multiMarketScan ? 'all 10 markets' : marketName(c.selectedMarket)}${(c.directionMode === 'even' || c.directionMode === 'odd') ? `, but under Direction Mode = ${c.directionMode.toUpperCase()} ONLY it only considers a market once its full accumulated tick history shows a real lean that way (see the readout above) — a live streak is not enough on its own` : ', reversing against whichever parity is currently stretched'}, waits for the entry-digit trigger, then fires a cluster of ${c.bulkContracts} contracts. A losing cluster escalates the stake and tries again, up to Max Martingale Steps — either a win or hitting that step limit ends the run and resets to base stake. Either way it then rests for Rest Cooldown and waits for the next fresh trigger. With Full Automation ON it keeps going until you press Stop or the Dashboard's Take Profit/Stop Loss gate fires; with it OFF it stops after the Number Of Runs you set.
       </div>`;
   }
 
@@ -33777,6 +33977,25 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (marketEl && !marketEl._bound) { marketEl._bound = true; marketEl.onchange = (e) => eng.setConfig({ selectedMarket: e.target.value }); }
     const multiscanEl = el('bt-multiscan', root);
     if (multiscanEl && !multiscanEl._bound) { multiscanEl._bound = true; multiscanEl.onclick = () => { eng.setConfig({ multiMarketScan: !eng.config.multiMarketScan }); render(); }; }
+
+    // ── Direction Mode ────────────────────────────────────────────
+    const dirModeEl = el('bt-dirmode', root);
+    if (dirModeEl && !dirModeEl._bound) {
+      dirModeEl._bound = true;
+      dirModeEl.onchange = (e) => {
+        // Switching direction mid-hunt would leave a lock pointed at the
+        // wrong side's trigger terminal — drop it and let Gate 1 re-lock
+        // fresh under the new mode.
+        eng._hunt = null;
+        eng.setConfig({ directionMode: e.target.value });
+        render();
+      };
+    }
+    const biasMinNEl = el('bt-biasminn', root);
+    if (biasMinNEl && !biasMinNEl._bound) { biasMinNEl._bound = true; biasMinNEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 50) eng.setConfig({ biasMinSamples: v }); }; }
+    const biasMinLBEl = el('bt-biasminlb', root);
+    if (biasMinLBEl && !biasMinLBEl._bound) { biasMinLBEl._bound = true; biasMinLBEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 50 && v <= 90) eng.setConfig({ biasMinLB: v }); }; }
+
     const fireBtn = el('bt-fire', root);
     if (fireBtn && !fireBtn._bound) { fireBtn._bound = true; fireBtn.onclick = () => { if (eng.running) eng.stop(); else eng.start(); render(); }; }
 
