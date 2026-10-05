@@ -14305,6 +14305,7 @@ window.NexusStrategies=exports;
       this.onUpdate = null;
 
       this.config = this.loadConfig();
+      this._initOverZero();
       // Hard-exclusion sibling collision check (see ENGINE_SIBLING_MAP) —
       // runs once, right here at construction, so a freshly-built engine
       // never even STARTS on the same market as its sibling. This matters
@@ -14819,6 +14820,97 @@ window.NexusStrategies=exports;
       return (v != null && !isNaN(v) && v > 0) ? v : this.config.stake;
     }
 
+    // A typed Stake $ must always win immediately. The Stake Addition boost
+    // (sessionStakeOverride) is read BEFORE config.stake in getEffectiveStake(),
+    // so any code path that only did setConfig({stake}) left the old boosted
+    // value (e.g. $10) in force. This clears the boost and resyncs the live
+    // base stake in one place.
+    setBaseStake(v) {
+      if (isNaN(v) || v <= 0) return;
+      this.sessionStakeOverride = null;
+      this._riskSessionActive = false;
+      this._riskSessionStake = null;
+      this.setConfig({ stake: v });
+      if (this.state && !this.state.inRecovery && !(this.state.martingaleStep > 0)) {
+        this.state = { ...this.state, currentStake: v };
+      }
+    }
+
+    // ══ OVER ZERO — rebuilt Over bot (nexus tab only) ═══════════════════
+    // Base trade: OVER 0 (wins on any digit but 0, ~90%). After a loss the
+    // normal martingale chain recovers on OVER ozRecBarrier (default 5),
+    // then the next session is back on OVER 0. Entry is its own system:
+    //   GATES   — every enabled gate must pass (zero frequency, zero-quiet
+    //             distance, low-digit clustering).
+    //   TRIGGER — then one trigger fires the trade: 'burst' (a run of
+    //             high-ish digits) or 'afterzero' (clean ticks after a 0).
+    get isOverZero() {
+      return this.mode === 'over' && this.id === 'nexus' && this.config.ozEnabled !== false;
+    }
+    _initOverZero() {
+      if (!(this.mode === 'over' && this.id === 'nexus')) return;
+      const c = this.config;
+      const d = {
+        ozEnabled: true, ozRecBarrier: 5,
+        ozWindow: 50, ozGateZero: true, ozZeroPctMax: 8,
+        ozGateQuiet: true, ozQuiet: 4,
+        ozGateLow: true, ozLowShareMax: 30,
+        ozTriggerMode: 'burst', ozTrigRun: 3, ozTrigMin: 2,
+        ozAfterZeroGap: 4, ozArmWindow: 20,
+      };
+      Object.keys(d).forEach((k) => { if (c[k] === undefined) c[k] = d[k]; });
+      this._enforceOverZero();
+    }
+    _enforceOverZero() {
+      const c = this.config;
+      if (!(this.mode === 'over' && this.id === 'nexus')) return;
+      if (c.ozEnabled === false) return;
+      const rb = parseInt(c.ozRecBarrier, 10);
+      c.ozRecBarrier = isNaN(rb) ? 5 : Math.max(0, Math.min(8, rb));
+      c.overBarrier = 0;
+      c.recoveryBarrier = c.ozRecBarrier;
+      c.smartRecovery = false; c.alternatingRecovery = false; c.alternatingRecoveryB = false;
+      c.alternatingRecoveryC = false; c.alternatingRecoveryR = false;
+      c.barrierShuffle = false; c.recBarrierShuffle = false; c.altEntryEnabled = false;
+    }
+    _analyzeOverZero(history, fullHistory, tickPeriod) {
+      const base = this.T.analyzeDigits(history, tickPeriod, 0, false);
+      const c = this.config;
+      const num = (v, dflt) => { const n = parseFloat(v); return isNaN(n) ? dflt : n; };
+      const win = Math.max(20, Math.min(200, Math.round(num(c.ozWindow, 50))));
+      const data = fullHistory.slice(-win);
+      const n = data.length;
+      const zeroPct = n ? (data.filter((d) => d === 0).length / n) * 100 : 0;
+      let sinceZero = 0;
+      for (let i = fullHistory.length - 1; i >= 0 && fullHistory[i] !== 0; i--) sinceZero++;
+      const last20 = fullHistory.slice(-20);
+      const lowShare = last20.length ? (last20.filter((d) => d <= 1).length / last20.length) * 100 : 0;
+      const ready = n >= 20;
+      const zMax = num(c.ozZeroPctMax, 8), qMin = Math.max(0, Math.round(num(c.ozQuiet, 4))), lMax = num(c.ozLowShareMax, 30);
+      const gates = [
+        { id: 'zero', label: 'Zero freq', enabled: c.ozGateZero !== false, ok: zeroPct <= zMax, detail: `0 = ${zeroPct.toFixed(1)}% of ${n} (max ${zMax}%)` },
+        { id: 'quiet', label: 'Zero quiet', enabled: c.ozGateQuiet !== false, ok: sinceZero >= qMin, detail: `${sinceZero} ticks since last 0 (min ${qMin})` },
+        { id: 'low', label: 'Low-digit cluster', enabled: c.ozGateLow !== false, ok: lowShare <= lMax, detail: `0/1 = ${lowShare.toFixed(0)}% of last ${last20.length} (max ${lMax}%)` },
+      ];
+      const gatesOk = gates.every((g) => !g.enabled || g.ok);
+      let trigger;
+      if (c.ozTriggerMode === 'afterzero') {
+        const gap = Math.max(1, Math.round(num(c.ozAfterZeroGap, 4)));
+        const arm = Math.max(gap, Math.round(num(c.ozArmWindow, 20)));
+        const seenZero = sinceZero < fullHistory.length;
+        const ok = seenZero && sinceZero >= gap && sinceZero <= arm;
+        trigger = { mode: 'afterzero', ok, detail: seenZero ? `${sinceZero} clean ticks since a 0 (fires ${gap}–${arm})` : 'no 0 seen yet' };
+      } else {
+        const run = Math.max(1, Math.round(num(c.ozTrigRun, 3)));
+        const min = Math.max(1, Math.min(9, Math.round(num(c.ozTrigMin, 2))));
+        const tail = fullHistory.slice(-run);
+        const ok = tail.length >= run && tail.every((d) => d >= min);
+        trigger = { mode: 'burst', ok, detail: `last ${run} digits ${ok ? 'all' : 'not all'} ≥ ${min} [${tail.join(',')}]` };
+      }
+      const overZero = { ready, gates, gatesOk, trigger, zeroPct, sinceZero, lowShare, canEnter: ready && gatesOk && trigger.ok };
+      return { ...base, overZero };
+    }
+
     // The martingale stop-step actually in effect for the CURRENT session.
     // Stake Addition's boosted "Risk Session" (this._riskSessionActive)
     // trades at an intentionally higher stake than normal — letting the
@@ -14970,6 +15062,14 @@ window.NexusStrategies=exports;
 
     setConfig(partial) {
       this.config = { ...this.config, ...partial };
+      if (this.mode === 'over' && this.id === 'nexus') {
+        if (partial.ozEnabled === false) { this.config.overBarrier = 3; this.config.recoveryBarrier = 4; }
+        else if (this.config.ozEnabled !== false) {
+          if (partial.recoveryBarrier !== undefined && partial.ozRecBarrier === undefined) this.config.ozRecBarrier = partial.recoveryBarrier;
+          this._enforceOverZero();
+        }
+        if (this.scanner && this.scanner.setBarrier) this.scanner.setBarrier(this.config.overBarrier, false);
+      }
       // Belt-and-braces: Even/Odd has no strategy picker or Reversal
       // Trigger engine anymore, so nothing (including a stray old
       // localStorage value) can push it back into either.
@@ -15140,7 +15240,8 @@ window.NexusStrategies=exports;
         const history = fullHistory.slice(-tickPeriod);
         // Over 3 runs on the green/red-bar market-condition analysis instead
         // of streak counting — no streak to compute or gate on here at all.
-        const isOver3 = this.mode === 'over' && this.config.overBarrier === 3;
+        const isOverZero = this.isOverZero;
+        const isOver3 = !isOverZero && this.mode === 'over' && this.config.overBarrier === 3;
         // Under's own vice-versa version of Over 3, gated the same way —
         // only kicks in at Under's own default barrier (7) — so Under gets
         // the same quality of enhanced entry gate Over gets, without you
@@ -15151,7 +15252,13 @@ window.NexusStrategies=exports;
         const isOddStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'odd';
         const isEvenStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'even';
         let streak = 0;
-        if (isOver3) {
+        if (isOverZero) {
+          // Clean run: consecutive trailing digits that are NOT 0 (wins at Over 0).
+          for (let i = fullHistory.length - 1; i >= 0; i--) {
+            if (fullHistory[i] > 0) streak++;
+            else break;
+          }
+        } else if (isOver3) {
           // Under-zone (digit ≤ 3) streak — mean-reversion setup: wait for
           // a run of under-zone digits, then fire OVER once it ends
           // specifically on digit 1 or 3 (not 0 or 2), gated first by the
@@ -15253,6 +15360,9 @@ window.NexusStrategies=exports;
           // socket already — exactly the macro window this strategy wants)
           // rather than any bot-local buffer.
           result = window.EvenOddReversionAnalyzer.analyze(fullHistory, this.config);
+          this.analysis = result;
+        } else if (isOverZero) {
+          result = this._analyzeOverZero(history, fullHistory, tickPeriod);
           this.analysis = result;
         } else if (isOver3) {
           result = this.T.analyzeOver3Condition(history, tickPeriod, this.config.minStreak, this.config.minSignal);
@@ -15571,7 +15681,7 @@ window.NexusStrategies=exports;
         }
         const health = this.socket.getHealth(market);
         if (health && health.longTerm === 'POOR') { this.emit(); return; }
-        if (this.config.altEntryEnabled) {
+        if (this.config.altEntryEnabled && !isOverZero) {
           // ── ALT ENTRY ENGINE (Reversal Trigger) ───────────────────
           // Completely separate from every branch below. Two jobs:
           //  1) Cross-check the market: a 50-tick dominance read on
@@ -15647,6 +15757,35 @@ window.NexusStrategies=exports;
               ? 'Alt: learning reversal digit — need more samples'
               : `Alt: armed — waiting for digit ${rev.digit} (${Math.round(rev.reversalRate * 100)}%)`;
           }
+        } else if (isOverZero) {
+          // ── OVER ZERO: gates → trigger → fire OVER 0 ───────────────────
+          const oz = (result && result.overZero) || {};
+          if (oz.canEnter) {
+            this._over3WaitStart = null;
+            this.strategyPhase = 'firing';
+            this.strategyWaitReason = `ENTRY — gates passed + trigger hit (${oz.trigger.detail}) → OVER ${this.config.overBarrier}`;
+            this.addLog('win', 'ENTRY', this.strategyWaitReason);
+            this.startChainExecution();
+            setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
+          } else {
+            this.strategyPhase = 'waiting';
+            const failed = (oz.gates || []).find((g) => g.enabled && !g.ok);
+            this.strategyWaitReason = !oz.ready ? 'Over Zero: collecting ticks…'
+              : failed ? `GATE ✗ ${failed.label}: ${failed.detail}`
+              : `Gates ✓ — waiting for trigger: ${oz.trigger.detail}`;
+            if (!this._over3WaitStart) this._over3WaitStart = Date.now();
+            if (Date.now() - this._over3WaitStart > 120000) {
+              const best = this.pickMarketViaTerminal(this.config.selectedMarket, {});
+              if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
+                this.addLog('engine', 'MARKET', `⏱ Over Zero: no entry here in 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
+                this.setConfig({ selectedMarket: best.symbol });
+                this.changeMarket(best.symbol);
+              }
+              this._over3WaitStart = Date.now();
+            }
+          }
+          this.emit();
+          return;
         } else if (isOver3) {
           // New hybrid trigger: min percentage gate → wait for an
           // under-zone (≤3) streak of Min Streak length → fire OVER the
@@ -16320,7 +16459,7 @@ window.NexusStrategies=exports;
           // STEP 4 DEEP RECOVERY: for a 4-loss cap, the third recovery trade is
           // downgraded to the safest edge barrier (OVER 0 / UNDER 9) to improve
           // survival before the final fourth step.
-          if (st.martingaleStep === 3 && cfg.martingaleStopStep === 4) {
+          if (st.martingaleStep === 3 && cfg.martingaleStopStep === 4 && !this.isOverZero) {
             contractType = baseCT; barrierValue = this.isUnderMode ? 9 : 0;
             this.addLog('engine', 'SHIELD', `🛡 STEP 4 DEEP RECOVERY: ${baseWord} ${barrierValue} SHIELD ACTIVE`);
           }
@@ -17847,6 +17986,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     nextEl.onchange = (e) => {
       const v = parseFloat(e.target.value);
       engine.setConfig({ stakeAdditionNextStake: (!isNaN(v) && v > 0) ? v : null });
+      if (engine._riskSessionActive && !isNaN(v) && v > 0) {
+        engine.sessionStakeOverride = v;
+        engine._riskSessionStake = v;
+      }
+      if (rerender) rerender();
     };
   }
   // Win-streak requirement field is locked to 1 (disabled) — no onchange
@@ -19245,6 +19389,36 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     });
   }
 
+  function ozLiveHtml(oz) {
+    if (!oz || !oz.gates) return '<span style="opacity:.6">Collecting ticks…</span>';
+    const row = (ok, text, off) => `<div style="color:${off ? 'hsl(var(--muted-foreground))' : ok ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${off ? '○' : ok ? '✓' : '✗'} ${text}</div>`;
+    return oz.gates.map((g) => row(g.ok, `${g.label}: ${g.detail}`, !g.enabled)).join('')
+      + row(oz.trigger.ok, `Trigger (${oz.trigger.mode}): ${oz.trigger.detail}`, false)
+      + `<div style="margin-top:4px;font-weight:900;color:${oz.canEnter ? 'hsl(var(--win))' : 'hsl(var(--foreground)/0.7)'}">${oz.canEnter ? '▶ READY TO FIRE' : 'WAITING'}</div>`;
+  }
+
+  function renderOverZeroPanel(engine, rootId, snap) {
+    const c = snap.config;
+    const oz = snap.analysis && snap.analysis.overZero;
+    const num = (k, label, step) => `<div class="cp-input-group"><span class="cp-input-label">${label}</span><input class="cp-input" type="number" step="${step || 1}" min="0" id="${rootId}-oz-${k}" value="${c[k]}"></div>`;
+    const gsel = (k, label) => `<div class="cp-input-group"><span class="cp-input-label">${label}</span><select class="cp-input" id="${rootId}-oz-${k}" style="font-size:11px"><option value="on" ${c[k] !== false ? 'selected' : ''}>ON</option><option value="off" ${c[k] === false ? 'selected' : ''}>OFF</option></select></div>`;
+    const burst = c.ozTriggerMode !== 'afterzero';
+    return `
+      <div class="cp-section-label">Over Zero · Base <span style="color:hsl(var(--primary));font-weight:900">OVER 0 (90% win)</span> · Recovery <span style="color:hsl(var(--primary));font-weight:900">OVER ${c.recoveryBarrier}</span> (set below)</div>
+      <div style="padding:10px;border-radius:12px;background:hsl(var(--primary)/0.06);border:1px solid hsl(var(--primary)/0.25);margin-bottom:12px">
+        <div class="cp-section-label" style="margin-top:0">🚧 Gate Entries — all enabled gates must pass</div>
+        <div class="cp-input-row">${num('ozWindow', 'Window (ticks)')}${gsel('ozGateZero', 'Zero-freq gate')}${num('ozZeroPctMax', 'Max 0 %', 0.5)}</div>
+        <div class="cp-input-row" style="margin-top:8px">${gsel('ozGateQuiet', 'Zero-quiet gate')}${num('ozQuiet', 'Min ticks since 0')}${gsel('ozGateLow', 'Low-digit gate')}</div>
+        <div class="cp-input-row" style="margin-top:8px">${num('ozLowShareMax', 'Max 0/1 % (last 20)')}</div>
+        <div class="cp-section-label" style="margin-top:12px">🎯 Trigger Entry — fires once gates pass</div>
+        <div class="cp-input-row">
+          <div class="cp-input-group"><span class="cp-input-label">Trigger</span><select class="cp-input" id="${rootId}-oz-ozTriggerMode" style="font-size:11px"><option value="burst" ${burst ? 'selected' : ''}>Burst — run of high digits</option><option value="afterzero" ${!burst ? 'selected' : ''}>After-zero — clean ticks after a 0</option></select></div>
+          ${burst ? num('ozTrigRun', 'Run length') + num('ozTrigMin', 'Each digit ≥') : num('ozAfterZeroGap', 'Fire after N ticks') + num('ozArmWindow', 'Arm window (ticks)')}
+        </div>
+        <div id="${rootId}-oz-live" style="margin-top:10px;font-size:10px;font-family:'DM Mono',monospace;line-height:1.5">${ozLiveHtml(oz)}</div>
+      </div>`;
+  }
+
   function renderCenterConfig(engine, rootId, snap) {
     const { config: c, state: s, pendingTrade } = snap;
     const isOver = engine.mode === 'over';
@@ -19258,6 +19432,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const os = (snap.analysis && snap.analysis.oddStrategy) || {};
     const markets = engine.T.MARKETS.map((m) => `<option value="${m.symbol}" ${m.symbol === c.selectedMarket ? 'selected' : ''}>${m.name}</option>`).join('');
     const winChance = isOver ? (9 - c.overBarrier) * 10 : isUnder ? c.overBarrier * 10 : 50;
+    const isOZ = isOver && !!engine.isOverZero;
+    const ozPanelHtml = isOZ ? renderOverZeroPanel(engine, rootId, snap) : '';
 
     const cpStreak = s.streak || 0;
     const cpRuns = s.currentRuns || 0;
@@ -19328,7 +19504,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       <div class="cp-section-label">Market</div>
       <select class="cp-input" id="${rootId}-market" style="margin-bottom:12px;font-size:11px">${markets}</select>
 
-      ${isOU ? `
+      ${isOZ ? ozPanelHtml : isOU ? `
       <div class="cp-section-label">${isUnder ? 'Under' : 'Over'} Barrier · Win ${winChance}% · <span style="color:hsl(var(--primary));font-weight:900">Active: ${c.overBarrier}</span></div>
       <div id="${rootId}-barriers" style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-bottom:14px">
         ${(isUnder ? [1,2,3,4,5,6,7,8,9] : [0,1,2,3,4,5,6,7,8]).map(b=>`<button class="cp-barrier-btn ${b===c.overBarrier?'selected':''}" data-barrier="${b}" style="
@@ -19463,7 +19639,17 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
 
         <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
-        ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) ? (engine.id.endsWith('_intel') ? `
+        ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) ? (isOZ ? `
+        <div class="cp-mart-card selected" style="cursor:default">
+          <div class="cp-mart-card-row">
+            <span class="cp-mart-card-icon">🛡</span>
+            <div class="cp-mart-card-body">
+              <div class="cp-mart-card-title">Over Zero recovery (locked)</div>
+              <div class="cp-mart-card-desc">Loss on OVER 0 → martingale on OVER ${c.recoveryBarrier} until a win, then straight back to OVER 0. Alt/Smart flip patterns are disabled for this bot.</div>
+            </div>
+            <span class="cp-mart-card-dot"></span>
+          </div>
+        </div>` : engine.id.endsWith('_intel') ? `
         <div class="cp-mart-card selected" style="cursor:default">
           <div class="cp-mart-card-row">
             <span class="cp-mart-card-icon">🧠</span>
@@ -19719,7 +19905,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     };
     // Recovery barrier dropdown (over mode) — instant
     const recBarrierSel = el(`${rootId}-rec-barrier-sel`);
-    if (recBarrierSel) recBarrierSel.onchange = (e) => { engine.setConfig({ recoveryBarrier: parseInt(e.target.value) }); };
+    if (recBarrierSel) recBarrierSel.onchange = (e) => { const v = parseInt(e.target.value); engine.setConfig({ recoveryBarrier: v, ozRecBarrier: v }); };
+    // Over Zero panel — gates / trigger fields
+    if (engine.isOverZero) {
+      const numKeys = ['ozWindow','ozZeroPctMax','ozQuiet','ozLowShareMax','ozTrigRun','ozTrigMin','ozAfterZeroGap','ozArmWindow'];
+      numKeys.forEach((k) => { const inp = el(`${rootId}-oz-${k}`); if (inp) inp.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) engine.setConfig({ [k]: v }); }; });
+      ['ozGateZero','ozGateQuiet','ozGateLow'].forEach((k) => { const sel = el(`${rootId}-oz-${k}`); if (sel) sel.onchange = (e) => engine.setConfig({ [k]: e.target.value === 'on' }); });
+      const modeSel = el(`${rootId}-oz-ozTriggerMode`);
+      if (modeSel) modeSel.onchange = (e) => { engine.setConfig({ ozTriggerMode: e.target.value }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
+    }
     // Recovery mode cards — instant (binary switches, not numeric)
     ['plain','altA','altB','altC','altR','smart'].forEach(mode => {
       const card = el(`${rootId}-rmode-${mode}`);
@@ -20636,6 +20830,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (runs) runs.textContent = s.currentRuns;
     const reason = el(`${rootId}-wait-reason`);
     if (reason) reason.textContent = strategyWaitReason || (s.active ? 'Scanning for entry…' : 'Engine offline');
+    const ozLive = el(`${rootId}-oz-live`);
+    if (ozLive && snap.analysis && snap.analysis.overZero) ozLive.innerHTML = ozLiveHtml(snap.analysis.overZero);
     const fa = el(`${rootId}-flow-analyze`);
     const fw = el(`${rootId}-flow-wait`);
     const ff = el(`${rootId}-flow-fire`);
@@ -27072,7 +27268,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (id === 'differ' || id === 'hotrepeat') {
       eng.dispatch({ type: 'SET_STAKE', value: v });
     } else {
-      eng.setConfig({ stake: v });
+      if (eng.setBaseStake) eng.setBaseStake(v); else eng.setConfig({ stake: v });
     }
     try { eng.saveConfig(); } catch (e) { console.error(`[Hub] stake save error (${id}):`, e); }
   }
@@ -27433,6 +27629,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     }
     saveAutoConfig(id, cfg);
     const eng = intelEngine(id);
+    if (eng && field === 'stake' && eng.setBaseStake) eng.setBaseStake(cfg.stake);
     if (eng && eng.state.active) {
       eng.setConfig({
         stake: cfg.stake, targetRuns: cfg.runs, martingaleEnabled: cfg.martingale,
@@ -27454,6 +27651,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function applyAutoConfigToEngine(id, cfg) {
     const eng = intelEngine(id);
     if (!eng) return;
+    if (eng.setBaseStake) eng.setBaseStake(cfg.stake);
     eng.setConfig({
       stake: cfg.stake, targetRuns: cfg.runs, autoPilot: true, martingaleEnabled: !!cfg.martingale,
       martingaleStopStep: cfg.martingaleStep,
