@@ -14838,7 +14838,7 @@ window.NexusStrategies=exports;
 
     // ══ OVER ZERO — rebuilt Over bot (nexus tab only) ═══════════════════
     // Base trade: OVER 0 (wins on any digit but 0, ~90%). After a loss the
-    // normal martingale chain recovers on OVER ozRecBarrier (default 5),
+    // gated martingale chain recovers on OVER ozRecBarrier (default 1),
     // then the next session is back on OVER 0. Entry is its own system:
     //   GATES   — every enabled gate must pass (zero frequency, zero-quiet
     //             distance, low-digit clustering).
@@ -14851,14 +14851,33 @@ window.NexusStrategies=exports;
       if (!(this.mode === 'over' && this.id === 'nexus')) return;
       const c = this.config;
       const d = {
-        ozEnabled: true, ozRecBarrier: 5,
+        ozEnabled: true, ozRecBarrier: 1,
         ozWindow: 50, ozGateZero: true, ozZeroPctMax: 8,
         ozGateQuiet: true, ozQuiet: 4,
         ozGateLow: true, ozLowShareMax: 30,
         ozTriggerMode: 'burst', ozTrigRun: 3, ozTrigMin: 2,
         ozAfterZeroGap: 4, ozArmWindow: 20,
+        // ── Gated OVER 1 recovery (own entry + own trigger digits) ──
+        // After an OVER 0 loss the bot no longer fires the next martingale
+        // step blindly. It holds the escalated stake, re-analyses the
+        // market on EVERY tick with gates that recompute from live data
+        // (no fixed thresholds), and only fires OVER ozRecBarrier once the
+        // recovery-only trigger prints.
+        ozRecGated: true,       // master switch for the hold-and-wait behaviour
+        ozRecWindow: 60,        // rolling window the dynamic gates are measured over
+        ozRecTol: 0.5,          // z-score tolerance above fair-share (lower = stricter)
+        ozRecMinWait: 3,        // ticks of fresh post-loss data required before any fire
+        ozRecEntryDigits: '0,1',        // ENTRY digits: a print of one of these arms the setup
+        ozRecTrigDigits: '4,5,6,7,8,9', // TRIGGER digits: the rebound run must be made of these
+        ozRecTrigRun: 2,        // how many trigger digits in a row fire the trade
+        ozRecArmWindow: 12,     // setup stays armed this many ticks after the entry digit
+        ozRecGateIntel: true,   // consult Market Intel's live score for this market
+        ozRecRotateSec: 90,     // no recovery entry for this long → rotate market (state kept)
       };
       Object.keys(d).forEach((k) => { if (c[k] === undefined) c[k] = d[k]; });
+      // One-time migration: older saved configs carry the old OVER 5
+      // recovery barrier. Upgrade it to OVER 1 exactly once.
+      if (c.ozRecVer !== 2) { c.ozRecBarrier = 1; c.ozRecVer = 2; }
       this._enforceOverZero();
     }
     _enforceOverZero() {
@@ -14866,7 +14885,7 @@ window.NexusStrategies=exports;
       if (!(this.mode === 'over' && this.id === 'nexus')) return;
       if (c.ozEnabled === false) return;
       const rb = parseInt(c.ozRecBarrier, 10);
-      c.ozRecBarrier = isNaN(rb) ? 5 : Math.max(0, Math.min(8, rb));
+      c.ozRecBarrier = isNaN(rb) ? 1 : Math.max(0, Math.min(8, rb));
       c.overBarrier = 0;
       c.recoveryBarrier = c.ozRecBarrier;
       c.smartRecovery = false; c.alternatingRecovery = false; c.alternatingRecoveryB = false;
@@ -14908,7 +14927,120 @@ window.NexusStrategies=exports;
         trigger = { mode: 'burst', ok, detail: `last ${run} digits ${ok ? 'all' : 'not all'} ≥ ${min} [${tail.join(',')}]` };
       }
       const overZero = { ready, gates, gatesOk, trigger, zeroPct, sinceZero, lowShare, canEnter: ready && gatesOk && trigger.ok };
+      // While a recovery chain is open, also run the recovery-only analysis
+      // (its own gates + trigger) so the tick handler and the panel see it.
+      if (this.state && this.state.inRecovery && c.ozRecGated !== false) {
+        overZero.rec = this._analyzeOverZeroRecovery(fullHistory);
+      }
       return { ...base, overZero };
+    }
+
+    // ── OVER ZERO RECOVERY ANALYSIS ───────────────────────────────────
+    // Runs on every tick while a recovery chain is open. Every threshold is
+    // DERIVED from live data each tick — nothing here is a fixed number you
+    // tuned once:
+    //   • Danger-digit frequency gate: share of losing digits (0..barrier)
+    //     over the rolling window must sit within `tol` standard errors of
+    //     the fair share. The allowed cap moves with window size and barrier.
+    //   • Drift gate: the last-20 share of losing digits must not be running
+    //     hotter than this market's own long-run share (≤200 ticks).
+    //   • Cluster-spacing gate: the last two losing digits must be separated
+    //     by at least half THIS market's own average gap between losing
+    //     digits — bunched-up 0/1s (a hot spell) block the trade.
+    //   • Market Intel gate: the market's live fitness score must stay within
+    //     85% of the best market the Terminal currently sees.
+    // TRIGGER (recovery-only digits): an ENTRY digit prints (default 0/1 —
+    // the digits that just beat the bot), then a run of TRIGGER digits
+    // (default 4-9) follows inside the arm window. That rebound is the shot.
+    _parseDigitSet(str, fallback) {
+      const out = new Set(String(str == null ? '' : str).split(/[^0-9]+/).filter((x) => x !== '').map((x) => parseInt(x, 10)).filter((n) => n >= 0 && n <= 9));
+      return out.size ? out : new Set(fallback);
+    }
+    _analyzeOverZeroRecovery(fullHistory) {
+      const c = this.config;
+      const num = (v, dflt) => { const n = parseFloat(v); return isNaN(n) ? dflt : n; };
+      const barrier = Math.max(0, Math.min(8, Math.round(num(c.ozRecBarrier, 1))));
+      const losingN = barrier + 1;                   // digits 0..barrier lose OVER barrier
+      const pFair = losingN / 10;
+      const win = Math.max(30, Math.min(200, Math.round(num(c.ozRecWindow, 60))));
+      const tol = Math.max(0, num(c.ozRecTol, 0.5));
+      const data = fullHistory.slice(-win);
+      const n = data.length;
+      const longData = fullHistory.slice(-200);
+      const losing = (d) => d <= barrier;
+      const share = n ? data.filter(losing).length / n : 0;
+      const se = Math.sqrt(pFair * (1 - pFair) / Math.max(n, 1));
+      const cap = pFair + tol * se;                  // dynamic ceiling (moves with window + barrier)
+      const longShare = longData.length ? longData.filter(losing).length / longData.length : pFair;
+      const last20 = fullHistory.slice(-20);
+      const shortShare = last20.length ? last20.filter(losing).length / last20.length : 0;
+      const se20 = Math.sqrt(Math.max(longShare, pFair) * (1 - Math.max(longShare, pFair)) / 20);
+      const driftCap = Math.max(longShare, pFair) + tol * se20;
+      // Cluster spacing: clean ticks between the LAST TWO losing digits. The
+      // required spacing is half this market's own average gap, so a hot
+      // market must show real separation and a calm one is barely asked.
+      // (Deliberately NOT "time since the last 0/1" — the rebound trigger
+      // needs a 0/1 to have printed recently, so those two would contradict.)
+      let lastIdx = -1, prevIdx = -1;
+      for (let i = fullHistory.length - 1; i >= 0; i--) {
+        if (losing(fullHistory[i])) { if (lastIdx < 0) lastIdx = i; else { prevIdx = i; break; } }
+      }
+      const spacing = (lastIdx >= 0 && prevIdx >= 0) ? (lastIdx - prevIdx - 1) : null;
+      const losingCount = data.filter(losing).length;
+      const avgGap = n / Math.max(1, losingCount);
+      const needQuiet = Math.max(1, Math.min(6, Math.round(avgGap * 0.5)));
+      // Ticks of fresh data since the losing trade settled
+      const sinceLoss = this._ozRecTicks || 0;
+      const minWait = Math.max(0, Math.round(num(c.ozRecMinWait, 3)));
+      const ready = n >= 30;
+
+      const gates = [
+        { id: 'wait', label: 'Post-loss analysis', enabled: true, ok: sinceLoss >= minWait, detail: `${sinceLoss}/${minWait} fresh ticks since the loss` },
+        { id: 'freq', label: `Dynamic 0-${barrier} freq`, enabled: true, ok: share <= cap, detail: `${(share * 100).toFixed(1)}% of ${n} ≤ live cap ${(cap * 100).toFixed(1)}% (fair ${(pFair * 100).toFixed(0)}% +${tol}σ)` },
+        { id: 'drift', label: 'Drift (short vs long)', enabled: true, ok: shortShare <= driftCap, detail: `last 20: ${(shortShare * 100).toFixed(0)}% ≤ ${(driftCap * 100).toFixed(0)}% (market baseline ${(longShare * 100).toFixed(0)}%)` },
+        { id: 'quiet', label: 'Cluster spacing', enabled: true, ok: spacing === null || spacing >= needQuiet, detail: spacing === null ? `no 0-${barrier} pair yet — clear` : `${spacing} clean ticks between last two 0-${barrier} (needs ${needQuiet} = ½ this market's avg gap ${avgGap.toFixed(1)})` },
+      ];
+
+      // Market Intel gate (optional, skipped cleanly when the Terminal is off)
+      let intel = { id: 'intel', label: 'Market Intel', enabled: false, ok: true, detail: 'Terminal off — skipped' };
+      if (c.ozRecGateIntel !== false) {
+        try {
+          const mit = window.MarketIntelTerminal;
+          if (mit && mit.isActive && mit.isActive()) {
+            const m = mit.getMatrix([this.id]).find((x) => x.botType === this.id);
+            const ranked = (m && m.ranked) || [];
+            const cur = ranked.find((r) => r.symbol === c.selectedMarket);
+            const top = ranked.reduce((b, r) => (r.metrics && r.metrics.ready && (!b || r.score > b.score)) ? r : b, null);
+            if (cur && cur.metrics && cur.metrics.ready && top) {
+              const floor = top.score * 0.85;
+              intel = { id: 'intel', label: 'Market Intel', enabled: true, ok: cur.score >= floor, detail: `score ${Math.round(cur.score)} vs best ${Math.round(top.score)} (needs ≥ ${Math.round(floor)})` };
+            } else intel.detail = 'Terminal still warming up — skipped';
+          }
+        } catch (e) { /* Terminal unavailable — gate skipped */ }
+      }
+      gates.push(intel);
+      const gatesOk = gates.every((g) => !g.enabled || g.ok);
+
+      // TRIGGER — recovery-only entry digits + trigger digits
+      const entrySet = this._parseDigitSet(c.ozRecEntryDigits, [0, 1]);
+      const trigSet = this._parseDigitSet(c.ozRecTrigDigits, [4, 5, 6, 7, 8, 9]);
+      const run = Math.max(1, Math.min(6, Math.round(num(c.ozRecTrigRun, 2))));
+      const arm = Math.max(run, Math.round(num(c.ozRecArmWindow, 12)));
+      let sinceEntry = 0, seenEntry = false;
+      for (let i = fullHistory.length - 1; i >= 0; i--) {
+        if (entrySet.has(fullHistory[i])) { seenEntry = true; break; }
+        sinceEntry++;
+      }
+      const tail = fullHistory.slice(-run);
+      const tailOk = tail.length >= run && tail.every((d) => trigSet.has(d));
+      const armed = seenEntry && sinceEntry >= run && sinceEntry <= arm;
+      const trigger = {
+        mode: 'rebound', ok: armed && tailOk,
+        detail: !seenEntry ? `waiting for entry digit [${[...entrySet].join(',')}]`
+          : !armed ? `entry digit ${sinceEntry} ticks ago (arm window ${run}–${arm})`
+          : `entry digit ${sinceEntry} ticks ago · last ${run} [${tail.join(',')}] ${tailOk ? '✓ all' : '✗ not all'} in [${[...trigSet].join(',')}]`,
+      };
+      return { barrier, ready, gates, gatesOk, trigger, sinceLoss, canEnter: ready && gatesOk && trigger.ok, share, cap, longShare };
     }
 
     // The martingale stop-step actually in effect for the CURRENT session.
@@ -15252,6 +15384,7 @@ window.NexusStrategies=exports;
         const isOddStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'odd';
         const isEvenStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'even';
         let streak = 0;
+        if (isOverZero && this.state.inRecovery && !this.state.isLocked) this._ozRecTicks = (this._ozRecTicks || 0) + 1;
         if (isOverZero) {
           // Clean run: consecutive trailing digits that are NOT 0 (wins at Over 0).
           for (let i = fullHistory.length - 1; i >= 0; i--) {
@@ -15760,6 +15893,42 @@ window.NexusStrategies=exports;
         } else if (isOverZero) {
           // ── OVER ZERO: gates → trigger → fire OVER 0 ───────────────────
           const oz = (result && result.overZero) || {};
+          if (this.state.inRecovery && this.config.ozRecGated !== false) {
+            // ── OVER ZERO RECOVERY: dynamic gates → rebound trigger → OVER <rec barrier> ──
+            const rz = oz.rec || {};
+            if (rz.canEnter) {
+              this._ozRecWaitStart = null;
+              this.strategyPhase = 'firing';
+              this.strategyWaitReason = `RECOVERY ENTRY — gates passed + trigger (${rz.trigger.detail}) → OVER ${this.config.recoveryBarrier}`;
+              this.addLog('win', 'REC-ENTRY', this.strategyWaitReason);
+              this.startChainExecution();
+              setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
+            } else {
+              this.strategyPhase = 'waiting';
+              const failed = (rz.gates || []).find((g) => g.enabled && !g.ok);
+              this.strategyWaitReason = !rz.ready ? 'Recovery: collecting ticks…'
+                : failed ? `REC GATE ✗ ${failed.label}: ${failed.detail}`
+                : `REC gates ✓ — waiting for trigger: ${rz.trigger.detail}`;
+              // Stalled on this market: rotate to the best-scoring one but KEEP the
+              // martingale step/stake — only where we look changes, not the recovery.
+              if (!this._ozRecWaitStart) this._ozRecWaitStart = Date.now();
+              const rotMs = Math.max(20, parseFloat(this.config.ozRecRotateSec) || 90) * 1000;
+              if (Date.now() - this._ozRecWaitStart > rotMs) {
+                const best = this.pickMarketViaTerminal(this.config.selectedMarket, {});
+                if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
+                  this.addLog('engine', 'MARKET', `⏱ Recovery: no clean entry on ${this.config.selectedMarket} in ${Math.round(rotMs / 1000)}s — moving to ${best.symbol} (step ${this.state.martingaleStep} + stake kept).`);
+                  this._ozRecTicks = 0;
+                  this._ozRecWaitStart = Date.now();
+                  this.setConfig({ selectedMarket: best.symbol });
+                  this.changeMarket(best.symbol);
+                  return;
+                }
+                this._ozRecWaitStart = Date.now();
+              }
+            }
+            this.emit();
+            return;
+          }
           if (oz.canEnter) {
             this._over3WaitStart = null;
             this.strategyPhase = 'firing';
@@ -17216,6 +17385,20 @@ window.NexusStrategies=exports;
           // WIN target reached → cooldown before next session
           this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE! Entering cooldown.`);
           this.completeSession(true);
+        } else if (st.inRecovery && this.isOverZero && cfg.ozRecGated !== false) {
+          // ── OVER ZERO: do NOT jump straight into the recovery trade ──
+          // Keep the escalated stake + martingale step, but release the lock
+          // so the tick handler re-analyses the market every tick with the
+          // dynamic recovery gates and fires OVER <recovery barrier> only
+          // when the recovery-only entry digit → trigger digits sequence
+          // prints (see _analyzeOverZeroRecovery).
+          this._ozRecTicks = 0;
+          this._ozRecWaitStart = Date.now();
+          this.executionGuard = false;
+          this.state = { ...this.state, isLocked: false };
+          this.strategyPhase = 'waiting';
+          this.strategyWaitReason = `Loss on step ${st.martingaleStep} — holding $${st.currentStake.toFixed(2)}; analysing before OVER ${cfg.ozRecBarrier}…`;
+          this.addLog('engine', 'REC-HOLD', `⏸ Loss — NOT firing recovery yet. Holding step ${st.martingaleStep} @ $${st.currentStake.toFixed(2)} while dynamic gates + trigger are analysed for OVER ${cfg.ozRecBarrier}.`);
         } else if (st.inRecovery) {
           // Still in recovery (loss, not at max step) → keep trading on martingale, NO cooldown
           const recMode = cfg.smartRecovery ? 'SMART' : cfg.alternatingRecovery ? 'ALT-A' : cfg.alternatingRecoveryB ? 'ALT-B' : cfg.alternatingRecoveryC ? 'ALT-C' : cfg.alternatingRecoveryR ? 'ALT-R' : 'PLAIN';
@@ -19392,6 +19575,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   function ozLiveHtml(oz) {
     if (!oz || !oz.gates) return '<span style="opacity:.6">Collecting ticks…</span>';
     const row = (ok, text, off) => `<div style="color:${off ? 'hsl(var(--muted-foreground))' : ok ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${off ? '○' : ok ? '✓' : '✗'} ${text}</div>`;
+    if (oz.rec) {
+      const r = oz.rec;
+      return `<div style="font-weight:900;color:hsl(var(--primary));margin-bottom:4px">🔄 RECOVERY — gated OVER ${r.barrier} (live, re-measured every tick)</div>`
+        + r.gates.map((g) => row(g.ok, `${g.label}: ${g.detail}`, !g.enabled)).join('')
+        + row(r.trigger.ok, `Trigger (rebound): ${r.trigger.detail}`, false)
+        + `<div style="margin-top:4px;font-weight:900;color:${r.canEnter ? 'hsl(var(--win))' : 'hsl(var(--foreground)/0.7)'}">${r.canEnter ? `▶ FIRING OVER ${r.barrier}` : 'HOLDING — no recovery trade until every gate + trigger pass'}</div>`;
+    }
     return oz.gates.map((g) => row(g.ok, `${g.label}: ${g.detail}`, !g.enabled)).join('')
       + row(oz.trigger.ok, `Trigger (${oz.trigger.mode}): ${oz.trigger.detail}`, false)
       + `<div style="margin-top:4px;font-weight:900;color:${oz.canEnter ? 'hsl(var(--win))' : 'hsl(var(--foreground)/0.7)'}">${oz.canEnter ? '▶ READY TO FIRE' : 'WAITING'}</div>`;
@@ -19403,6 +19593,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const num = (k, label, step) => `<div class="cp-input-group"><span class="cp-input-label">${label}</span><input class="cp-input" type="number" step="${step || 1}" min="0" id="${rootId}-oz-${k}" value="${c[k]}"></div>`;
     const gsel = (k, label) => `<div class="cp-input-group"><span class="cp-input-label">${label}</span><select class="cp-input" id="${rootId}-oz-${k}" style="font-size:11px"><option value="on" ${c[k] !== false ? 'selected' : ''}>ON</option><option value="off" ${c[k] === false ? 'selected' : ''}>OFF</option></select></div>`;
     const burst = c.ozTriggerMode !== 'afterzero';
+    const txt = (k, label) => `<div class="cp-input-group"><span class="cp-input-label">${label}</span><input class="cp-input" type="text" id="${rootId}-oz-${k}" value="${c[k] == null ? '' : c[k]}" placeholder="e.g. 0,1" style="font-size:11px"></div>`;
     return `
       <div class="cp-section-label">Over Zero · Base <span style="color:hsl(var(--primary));font-weight:900">OVER 0 (90% win)</span> · Recovery <span style="color:hsl(var(--primary));font-weight:900">OVER ${c.recoveryBarrier}</span> (set below)</div>
       <div style="padding:10px;border-radius:12px;background:hsl(var(--primary)/0.06);border:1px solid hsl(var(--primary)/0.25);margin-bottom:12px">
@@ -19416,6 +19607,15 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           ${burst ? num('ozTrigRun', 'Run length') + num('ozTrigMin', 'Each digit ≥') : num('ozAfterZeroGap', 'Fire after N ticks') + num('ozArmWindow', 'Arm window (ticks)')}
         </div>
         <div id="${rootId}-oz-live" style="margin-top:10px;font-size:10px;font-family:'DM Mono',monospace;line-height:1.5">${ozLiveHtml(oz)}</div>
+      </div>
+      <div style="padding:10px;border-radius:12px;background:hsl(var(--secondary)/0.06);border:1px solid hsl(var(--secondary)/0.3);margin-bottom:12px">
+        <div class="cp-section-label" style="margin-top:0">🔄 Gated Recovery — after a loss, analyse → wait → fire OVER ${c.recoveryBarrier}</div>
+        <div class="cp-input-row">${gsel('ozRecGated', 'Hold after loss')}${gsel('ozRecGateIntel', 'Market Intel gate')}${num('ozRecMinWait', 'Min fresh ticks')}</div>
+        <div class="cp-input-row" style="margin-top:8px">${num('ozRecWindow', 'Dynamic window')}${num('ozRecTol', 'Tolerance (σ)', 0.1)}${num('ozRecRotateSec', 'Rotate after (s)')}</div>
+        <div class="cp-section-label" style="margin-top:12px">🎯 Recovery entry + trigger digits (separate from OVER 0)</div>
+        <div class="cp-input-row">${txt('ozRecEntryDigits', 'Entry digits (arm)')}${txt('ozRecTrigDigits', 'Trigger digits')}</div>
+        <div class="cp-input-row" style="margin-top:8px">${num('ozRecTrigRun', 'Trigger run')}${num('ozRecArmWindow', 'Arm window (ticks)')}</div>
+        <div style="margin-top:8px;font-size:10px;opacity:.7;line-height:1.5">Gate limits are not fixed numbers — each tick they are recomputed from this market's live digit stats (fair-share ± tolerance σ, short-vs-long drift, ½ the market's own average gap, Market Intel score vs the best market). Live readout above switches to the recovery gates whenever a recovery is open.</div>
       </div>`;
   }
 
@@ -19645,7 +19845,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
             <span class="cp-mart-card-icon">🛡</span>
             <div class="cp-mart-card-body">
               <div class="cp-mart-card-title">Over Zero recovery (locked)</div>
-              <div class="cp-mart-card-desc">Loss on OVER 0 → martingale on OVER ${c.recoveryBarrier} until a win, then straight back to OVER 0. Alt/Smart flip patterns are disabled for this bot.</div>
+              <div class="cp-mart-card-desc">Loss on OVER 0 → hold the escalated stake, analyse with live dynamic gates, wait for the recovery trigger, then martingale on OVER ${c.recoveryBarrier} until a win and back to OVER 0. Alt/Smart flip patterns are disabled for this bot.</div>
             </div>
             <span class="cp-mart-card-dot"></span>
           </div>
@@ -19908,9 +20108,10 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (recBarrierSel) recBarrierSel.onchange = (e) => { const v = parseInt(e.target.value); engine.setConfig({ recoveryBarrier: v, ozRecBarrier: v }); };
     // Over Zero panel — gates / trigger fields
     if (engine.isOverZero) {
-      const numKeys = ['ozWindow','ozZeroPctMax','ozQuiet','ozLowShareMax','ozTrigRun','ozTrigMin','ozAfterZeroGap','ozArmWindow'];
+      const numKeys = ['ozWindow','ozZeroPctMax','ozQuiet','ozLowShareMax','ozTrigRun','ozTrigMin','ozAfterZeroGap','ozArmWindow','ozRecMinWait','ozRecWindow','ozRecTol','ozRecRotateSec','ozRecTrigRun','ozRecArmWindow'];
+      ['ozRecEntryDigits','ozRecTrigDigits'].forEach((k) => { const inp = el(`${rootId}-oz-${k}`); if (inp) inp.onchange = (e) => { const v = String(e.target.value || '').replace(/[^0-9,\s]/g, '').trim(); if (v) engine.setConfig({ [k]: v }); else e.target.value = engine.config[k]; }; });
       numKeys.forEach((k) => { const inp = el(`${rootId}-oz-${k}`); if (inp) inp.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) engine.setConfig({ [k]: v }); }; });
-      ['ozGateZero','ozGateQuiet','ozGateLow'].forEach((k) => { const sel = el(`${rootId}-oz-${k}`); if (sel) sel.onchange = (e) => engine.setConfig({ [k]: e.target.value === 'on' }); });
+      ['ozGateZero','ozGateQuiet','ozGateLow','ozRecGated','ozRecGateIntel'].forEach((k) => { const sel = el(`${rootId}-oz-${k}`); if (sel) sel.onchange = (e) => engine.setConfig({ [k]: e.target.value === 'on' }); });
       const modeSel = el(`${rootId}-oz-ozTriggerMode`);
       if (modeSel) modeSel.onchange = (e) => { engine.setConfig({ ozTriggerMode: e.target.value }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
     }
