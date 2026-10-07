@@ -4,6 +4,217 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Benz Club — Unified Trading Hub</title>
+  <style id="benz-bulk-skin">
+/* ══════════════════════════════════════════════════════════════════════
+   BULK TRADE SKIN — one shared look for every bot panel and Even Intel.
+   Bulk Trade's visual language (glass cards with a lit top edge, spaced
+   Space-Grotesk section labels with a trailing rule, mono inputs, sheened
+   engage button, beacon status dots, tile + bar readouts, glowing title)
+   applied to Even / Odd / Matches / Old Even / Old Odd / Higher-Lower and
+   the Even Intel auto-trader cards. Pure presentation: no ids, handlers or
+   layout metrics are touched, so behaviour is unchanged.
+   ══════════════════════════════════════════════════════════════════════ */
+@keyframes bk-glow   { 0%,100%{box-shadow:0 0 16px hsl(var(--primary)/0.12)} 50%{box-shadow:0 0 32px hsl(var(--primary)/0.28)} }
+@keyframes bk-sheen  { 0%{transform:translateX(-120%) skewX(-15deg)} 100%{transform:translateX(220%) skewX(-15deg)} }
+@keyframes bk-beacon { 0%,100%{box-shadow:0 0 0 0 hsl(var(--primary)/.7)} 50%{box-shadow:0 0 0 5px hsl(var(--primary)/0)} }
+@keyframes bk-beacon-win  { 0%,100%{box-shadow:0 0 0 0 hsl(var(--win)/.7)} 50%{box-shadow:0 0 0 5px hsl(var(--win)/0)} }
+@keyframes bk-beacon-warn { 0%,100%{box-shadow:0 0 0 0 hsl(38 95% 55%/.7)} 50%{box-shadow:0 0 0 5px hsl(38 95% 55%/0)} }
+@keyframes bk-header-sweep { 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
+@keyframes bk-title-glow { 0%,100%{text-shadow:0 0 10px hsl(var(--primary)/0.4)} 50%{text-shadow:0 0 22px hsl(var(--primary)/0.75),0 0 6px hsl(var(--secondary)/0.5)} }
+@keyframes bk-entry-flash { 0%{background:hsl(var(--primary)/0.14)} 100%{background:transparent} }
+
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) h1.font-display { animation: bk-title-glow 3.2s ease-in-out infinite; }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .rf-header-glow {
+  background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.5), hsl(var(--secondary)/0.4), transparent);
+  background-size: 200% 100%; animation: bk-header-sweep 5s linear infinite;
+  height: 2px; width: 100%; position: absolute; bottom: 0; left: 0;
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────── */
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-card {
+  background: linear-gradient(150deg, hsl(var(--card)/0.92), hsl(var(--bg-soft)/0.7));
+  border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 16px; margin-bottom: 14px;
+  position: relative; overflow: hidden; backdrop-filter: blur(10px);
+  box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
+  transition: border-color .2s, box-shadow .2s;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-card:hover { border-color: hsl(var(--border-bright)/0.6); }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.35) 40%, hsl(var(--secondary)/0.25) 65%, transparent);
+}
+
+/* ── Section labels / hints / inputs ───────────────────────────────── */
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-section-label {
+  font-family: 'Space Grotesk', sans-serif !important; font-size: 9px; font-weight: 800;
+  letter-spacing: 3px; text-transform: uppercase; color: hsl(var(--muted-foreground)/0.7);
+  display: flex; align-items: center; gap: 8px;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-section-label::after {
+  content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, hsl(var(--primary)/0.2), transparent);
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-section-hint { font-size: 9.5px; color: hsl(var(--muted-foreground)); line-height: 1.65; }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-input-label {
+  font-family: 'Space Grotesk', sans-serif !important; font-size: 8px; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase; color: hsl(var(--primary)/0.75);
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-input {
+  background: hsl(var(--bg)/0.75) !important; border: 1px solid hsl(var(--border)/0.5) !important;
+  border-radius: 11px !important; color: hsl(var(--foreground)) !important;
+  font-family: 'DM Mono', monospace !important; font-weight: 500 !important;
+  backdrop-filter: blur(6px) !important; transition: border-color .18s, box-shadow .18s;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-input:focus {
+  border-color: hsl(var(--primary)/0.55) !important; box-shadow: 0 0 0 3px hsl(var(--primary)/0.10) !important;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) select.cp-input option { background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-toggle-row {
+  background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px; transition: background .16s, border-color .16s;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-toggle-row:hover { background: hsl(var(--card)/0.5); border-color: hsl(var(--border)/0.5); }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-mart-card { border-radius: 12px; transition: border-color .18s, background .18s, transform .18s; }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-mart-card:not(.selected):hover { transform: translateY(-1px); border-color: hsl(var(--primary)/0.35); }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-mart-card.selected { box-shadow: 0 0 18px hsl(var(--primary)/0.12), inset 0 1px 0 hsl(255 100% 100%/0.04); }
+
+/* ── Progress / pills / reset ──────────────────────────────────────── */
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-progress-group { background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px; }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-progress-bar { height: 7px; border-radius: 999px; background: hsl(var(--border)/0.25); overflow: hidden; }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-progress-fill { border-radius: 999px; background: hsl(var(--primary)/0.7); transition: width .5s cubic-bezier(.34,1.2,.64,1); }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-status-pill {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;
+  font-family: 'DM Mono', monospace; font-size: 9.5px; font-weight: 600; letter-spacing: .5px;
+  background: hsl(var(--win)/0.12); border: 1px solid hsl(var(--win)/0.35); color: hsl(var(--win)); white-space: nowrap;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-status-pill.resting {
+  background: hsl(var(--accent)/0.14); border-color: hsl(var(--accent)/0.4); color: hsl(var(--accent)); animation: bk-beacon 1.8s ease-in-out infinite;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .rf-ind-card,
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .stat-card {
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .rf-ind-card:hover,
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .stat-card:hover {
+  transform: translateY(-2px); border-color: hsl(var(--primary)/0.4); box-shadow: 0 4px 14px hsl(0 0% 0%/0.25);
+}
+
+/* ── Engage button: sheen sweep + amber live glow ──────────────────── */
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-engage-btn {
+  font-family: 'Space Grotesk', sans-serif !important; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+  border-radius: 14px; position: relative; overflow: hidden;
+  transition: all .22s cubic-bezier(.34,1.56,.64,1);
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-engage-btn::before {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 35%; left: 0;
+  background: linear-gradient(90deg, transparent, hsl(255 100% 100%/0.16), transparent);
+  animation: bk-sheen 2.8s ease-in-out infinite; pointer-events: none;
+}
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-engage-btn:hover:not(:disabled) { transform: translateY(-2px); }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-engage-btn:active:not(:disabled) { transform: scale(.97); }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .cp-engage-btn.active {
+  background: linear-gradient(135deg, hsl(38 95% 55%/0.14), hsl(38 95% 55%/0.05));
+  border-color: hsl(38 95% 55%/0.4); color: hsl(38 95% 60%);
+  box-shadow: 0 4px 20px hsl(38 95% 55%/0.15); animation: bk-glow 3s ease-in-out infinite;
+}
+
+/* ── Journal: new entries flash in like Bulk Trade's log ───────────── */
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .journal-list > :first-child { animation: bk-entry-flash 1.4s ease-out 1; }
+html body :is(#even-root,#odd-root,#matches-root,#oldeven-root,#oldodd-root,#oldrisefall-root) .jnl-header-card {
+  background: linear-gradient(150deg, hsl(var(--card)/0.92), hsl(var(--bg-soft)/0.7));
+  border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
+}
+
+/* ══ EVEN INTEL / Auto-Trader cards (Market Intel tab) ════════════════ */
+html body .mit-auto-card {
+  background: linear-gradient(150deg, hsl(var(--card)/0.92), hsl(var(--bg-soft)/0.7)) !important;
+  border: 1px solid hsl(var(--border)/0.5); border-radius: 16px; padding: 16px;
+  backdrop-filter: blur(10px); box-shadow: 0 2px 12px hsl(0 0% 0%/0.2), inset 0 1px 0 hsl(255 100% 100%/0.04);
+  transition: border-color .2s, box-shadow .2s;
+}
+html body .mit-auto-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary)/0.35) 40%, hsl(var(--secondary)/0.25) 65%, transparent);
+}
+html body .mit-auto-card:hover { border-color: hsl(var(--border-bright)/0.6); }
+html body .mit-auto-card.live { border-color: hsl(var(--win)/0.5); box-shadow: 0 0 24px hsl(var(--win)/0.12), inset 0 1px 0 hsl(255 100% 100%/0.05); }
+html body .mit-auto-card-icon { border-radius: 10px; background: hsl(var(--primary)/0.10); border: 1px solid hsl(var(--primary)/0.25); }
+html body .mit-auto-card-name { font-family: 'Outfit', sans-serif; font-weight: 900; font-size: 13px; letter-spacing: .3px; }
+html body .mit-auto-card.live .mit-auto-card-name { animation: bk-title-glow 3.2s ease-in-out infinite; }
+html body .mit-auto-card-dot { width: 8px; height: 8px; }
+html body .mit-auto-card.live .mit-auto-card-dot { animation: bk-beacon-win 1.8s ease-in-out infinite; }
+html body .mit-auto-card-desc { font-size: 9.5px; opacity: .6; line-height: 1.65; }
+html body .mit-auto-field label {
+  font-family: 'Space Grotesk', sans-serif; font-size: 8px; font-weight: 700; letter-spacing: 1.5px; opacity: 1; color: hsl(var(--primary)/0.75);
+}
+html body .mit-auto-field input {
+  background: hsl(var(--bg)/0.75); border: 1px solid hsl(var(--border)/0.5); border-radius: 11px; color: hsl(var(--foreground));
+  font-family: 'DM Mono', monospace; font-weight: 500; padding: 8px 10px; transition: border-color .18s, box-shadow .18s;
+}
+html body .mit-auto-field input:focus { border-color: hsl(var(--primary)/0.55); box-shadow: 0 0 0 3px hsl(var(--primary)/0.10); outline: none; }
+html body .mit-auto-card-toggle {
+  position: relative; overflow: hidden; border-radius: 12px; padding: 10px 18px;
+  font-family: 'Space Grotesk', sans-serif; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; font-size: 10px;
+  border: 1px solid hsl(var(--primary)/0.3); color: hsl(var(--primary));
+  background: linear-gradient(135deg, hsl(var(--primary)/0.08), hsl(var(--primary)/0.04));
+  transition: all .22s cubic-bezier(.34,1.56,.64,1);
+}
+html body .mit-auto-card-toggle::before {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 35%; left: 0;
+  background: linear-gradient(90deg, transparent, hsl(255 100% 100%/0.16), transparent); animation: bk-sheen 2.8s ease-in-out infinite; pointer-events: none;
+}
+html body .mit-auto-card-toggle:hover { transform: translateY(-2px); border-color: hsl(var(--primary)/0.55); }
+html body .mit-auto-card-toggle:active { transform: scale(.97); }
+html body .mit-auto-card-toggle.on {
+  background: linear-gradient(135deg, hsl(38 95% 55%/0.14), hsl(38 95% 55%/0.05)); border-color: hsl(38 95% 55%/0.4); color: hsl(38 95% 60%);
+  box-shadow: 0 4px 20px hsl(38 95% 55%/0.15); animation: bk-glow 3s ease-in-out infinite;
+}
+html body .mit-auto-mart-toggle { border-radius: 10px; font-family: 'Space Grotesk', sans-serif; font-weight: 800; letter-spacing: 1.5px; }
+html body .mit-auto-status { background: hsl(var(--bg)/0.4); border: 1px solid hsl(var(--border)/0.3); border-radius: 12px; padding: 10px 12px; }
+html body .mit-auto-jtitle { font-family: 'Space Grotesk', sans-serif; font-size: 9px; letter-spacing: 3px; font-weight: 800; opacity: .7; display: flex; align-items: center; gap: 8px; }
+html body .mit-auto-jtitle::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, hsl(var(--primary)/0.2), transparent); }
+html body .mit-auto-jrow { border-radius: 8px; padding: 5px 8px; font-family: 'DM Mono', monospace; }
+html body .mit-auto-journal > .mit-auto-jrow:first-child { animation: bk-entry-flash 1.4s ease-out 1; }
+html body .mit-auto-topnote { border-radius: 12px; font-family: 'DM Mono', monospace; line-height: 1.65; }
+
+/* Bulk-Trade-style readout parts used by the Intel status block */
+html body .bk-pill-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+html body .bk-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  font-family: 'DM Mono', monospace; font-size: 9.5px; font-weight: 700; letter-spacing: .6px;
+  background: hsl(var(--primary)/0.12); border: 1px solid hsl(var(--primary)/0.35); color: hsl(var(--primary));
+}
+html body .bk-pill .bk-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: bk-beacon 1.8s ease-in-out infinite; }
+html body .bk-pill.trading { background: hsl(var(--win)/0.12); border-color: hsl(var(--win)/0.35); color: hsl(var(--win)); }
+html body .bk-pill.trading .bk-dot { animation-name: bk-beacon-win; }
+html body .bk-pill.rest { background: hsl(38 95% 55%/0.12); border-color: hsl(38 95% 55%/0.4); color: hsl(38 95% 60%); }
+html body .bk-pill.rest .bk-dot { animation-name: bk-beacon-warn; }
+html body .bk-pill.idle { background: hsl(var(--muted-foreground)/0.10); border-color: hsl(var(--muted-foreground)/0.3); color: hsl(var(--muted-foreground)); }
+html body .bk-pill.idle .bk-dot { animation: none; opacity: .5; }
+html body .bk-pill.rec { background: hsl(var(--accent)/0.14); border-color: hsl(var(--accent)/0.4); color: hsl(var(--accent)); }
+html body .bk-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+html body .bk-tile {
+  background: hsl(var(--bg)/0.8); border: 1px solid hsl(var(--border)/0.3); border-radius: 10px; padding: 8px 4px; text-align: center;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+html body .bk-tile:hover { transform: translateY(-2px); border-color: hsl(var(--primary)/0.4); box-shadow: 0 4px 14px hsl(0 0% 0%/0.25); }
+html body .bk-tile b { display: block; font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 900; line-height: 1.1; font-variant-numeric: tabular-nums; }
+html body .bk-tile b small { font-size: 8px; opacity: .6; margin: 0 3px 0 1px; font-weight: 700; }
+html body .bk-tile b.pos { color: hsl(var(--win)); } html body .bk-tile b.neg { color: hsl(var(--loss)); }
+html body .bk-tile span { display: block; font-size: 7.5px; font-family: 'DM Mono', monospace; letter-spacing: 1px; color: hsl(var(--muted-foreground)); margin-top: 3px; }
+html body .bk-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+html body .bk-bar-name { width: 92px; flex-shrink: 0; font-size: 9.5px; font-family: 'DM Mono', monospace; color: hsl(var(--muted-foreground)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body .bk-bar { flex: 1; height: 6px; border-radius: 99px; background: hsl(var(--border)/0.25); overflow: hidden; }
+html body .bk-bar-fill { height: 100%; border-radius: 99px; background: hsl(var(--primary)/0.55); transition: width .6s cubic-bezier(.34,1.2,.64,1); }
+html body .bk-bar-fill.qual { background: hsl(var(--win)); box-shadow: 0 0 8px hsl(var(--win)/0.5); }
+html body .bk-bar-fill.run { background: hsl(var(--secondary, var(--primary))/0.75); }
+html body .bk-bar-pct { width: 34px; flex-shrink: 0; text-align: right; font-size: 9.5px; font-family: 'DM Mono', monospace; color: hsl(var(--muted-foreground)); }
+html body .bk-bar-pct.qual { color: hsl(var(--win)); font-weight: 700; }
+html body .bk-pill-row + .bk-note { margin-top: -2px; }
+html body .bk-note { font-family: 'DM Mono', monospace; font-size: 9px; line-height: 1.6; color: hsl(var(--muted-foreground)); margin-top: 6px; padding-top: 6px; border-top: 1px solid hsl(var(--border)/0.3); }
+html body .bk-note b { color: hsl(var(--primary)); }
+@media (prefers-reduced-motion: reduce) {
+  html body .cp-engage-btn::before, html body .mit-auto-card-toggle::before { animation: none; }
+}
+</style>
   </head>
 <body>
   <div id="file-protocol-banner" style="display:none;background:#7a1f1f;color:#fff;padding:10px 16px;font-family:DM Mono',monospace;font-size:12px;text-align:center;line-height:1.5">
@@ -668,11 +879,6 @@
           <span class="hub-tab-label">Odd</span>
           <span class="dot live"></span>
         </button>
-        <button type="button" class="hub-tab" data-app="nexus" data-label="Over" title="Nexus Profit Finder — Over">
-          <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5-6 5 6"/></svg></span>
-          <span class="hub-tab-label">Over</span>
-          <span class="dot live"></span>
-        </button>
         <button type="button" class="hub-tab" data-app="matches" data-label="Matches" title="Matches — digit prediction bot">
           <span class="hub-tab-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.5" fill="currentColor"/></svg></span>
           <span class="hub-tab-label">Matches</span>
@@ -751,10 +957,6 @@
 
     <section id="panel-odd" class="app-panel" aria-label="Odd dashboard">
       <div id="odd-root" class="app-root"></div>
-    </section>
-
-    <section id="panel-nexus" class="app-panel" aria-label="Over dashboard">
-      <div id="nexus-root" class="app-root"></div>
     </section>
 
     <section id="panel-matches" class="app-panel" aria-label="Matches dashboard">
@@ -941,13 +1143,13 @@
 .benz-col .journal-digits { font-size: 12px !important; }
 
 /* Titan right panel journal entries bigger */
-#even-root .journal-entry, #odd-root .journal-entry, #nexus-root .journal-entry, #under-root .journal-entry {
+#even-root .journal-entry, #odd-root .journal-entry, #under-root .journal-entry {
   padding: 0 !important;
   min-height: 0 !important;
   font-size: 12px !important;
   gap: 0 !important;
 }
-#even-root .journal-entry span, #odd-root .journal-entry span, #nexus-root .journal-entry span, #under-root .journal-entry span {
+#even-root .journal-entry span, #odd-root .journal-entry span, #under-root .journal-entry span {
   font-size: 12px !important;
 }
 
@@ -7664,7 +7866,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 }
 
 /* ── CLEAR BUTTON ── */
-#even-root-clear, #odd-root-clear, #nexus-root-clear, #under-root-clear, [id$="-clear"] {
+#even-root-clear, #odd-root-clear, #under-root-clear, [id$="-clear"] {
   background: hsl(var(--loss) / 0.04) !important;
   border-color: hsl(var(--loss) / 0.22) !important;
   color: hsl(var(--loss) / 0.7) !important;
@@ -7790,7 +7992,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .journal-entry,
 #even-root  .jnl-entry, #even-root  .journal-entry,
 #odd-root   .jnl-entry, #odd-root   .journal-entry,
-#nexus-root .jnl-entry, #nexus-root .journal-entry,
 #under-root .jnl-entry, #under-root .journal-entry,
 #risemr-root .jnl-entry, #risemr-root .journal-entry,
 #fallmr-root .jnl-entry, #fallmr-root .journal-entry,
@@ -7806,7 +8007,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-top-row,
 #even-root  .jnl-top-row,
 #odd-root   .jnl-top-row,
-#nexus-root .jnl-top-row,
 #under-root .jnl-top-row,
 #risemr-root .jnl-top-row,
 #fallmr-root .jnl-top-row,
@@ -7823,7 +8023,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-digit-row,
 #even-root  .jnl-digit-row,
 #odd-root   .jnl-digit-row,
-#nexus-root .jnl-digit-row,
 #under-root .jnl-digit-row,
 #risemr-root .jnl-digit-row,
 #fallmr-root .jnl-digit-row,
@@ -7841,7 +8040,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-badge,
 #even-root  .jnl-badge,
 #odd-root   .jnl-badge,
-#nexus-root .jnl-badge,
 #under-root .jnl-badge,
 #risemr-root .jnl-badge,
 #fallmr-root .jnl-badge,
@@ -7858,7 +8056,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-pnl,
 #even-root  .jnl-pnl,
 #odd-root   .jnl-pnl,
-#nexus-root .jnl-pnl,
 #under-root .jnl-pnl,
 #risemr-root .jnl-pnl,
 #fallmr-root .jnl-pnl,
@@ -7875,7 +8072,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-exit-digit,
 #even-root  .jnl-exit-digit,
 #odd-root   .jnl-exit-digit,
-#nexus-root .jnl-exit-digit,
 #under-root .jnl-exit-digit,
 #risemr-root .jnl-exit-digit,
 #fallmr-root .jnl-exit-digit,
@@ -7896,7 +8092,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-time,
 #even-root  .jnl-time,
 #odd-root   .jnl-time,
-#nexus-root .jnl-time,
 #under-root .jnl-time,
 #risemr-root .jnl-time,
 #fallmr-root .jnl-time,
@@ -7909,7 +8104,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-win-tag, #differ-right .jnl-loss-tag,
 #even-root  .jnl-win-tag,  #even-root  .jnl-loss-tag,
 #odd-root   .jnl-win-tag,  #odd-root   .jnl-loss-tag,
-#nexus-root .jnl-win-tag,  #nexus-root .jnl-loss-tag,
 #under-root .jnl-win-tag,  #under-root .jnl-loss-tag,
 #risemr-root .jnl-win-tag, #risemr-root .jnl-loss-tag,
 #fallmr-root .jnl-win-tag, #fallmr-root .jnl-loss-tag,
@@ -7922,7 +8116,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-ct-pill,
 #even-root  .jnl-ct-pill,
 #odd-root   .jnl-ct-pill,
-#nexus-root .jnl-ct-pill,
 #under-root .jnl-ct-pill,
 #risemr-root .jnl-ct-pill,
 #fallmr-root .jnl-ct-pill,
@@ -7935,7 +8128,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-entry-digit,
 #even-root  .jnl-entry-digit,
 #odd-root   .jnl-entry-digit,
-#nexus-root .jnl-entry-digit,
 #under-root .jnl-entry-digit,
 #risemr-root .jnl-entry-digit,
 #fallmr-root .jnl-entry-digit,
@@ -7948,7 +8140,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-arrow,
 #even-root  .jnl-arrow,
 #odd-root   .jnl-arrow,
-#nexus-root .jnl-arrow,
 #under-root .jnl-arrow,
 #risemr-root .jnl-arrow,
 #fallmr-root .jnl-arrow,
@@ -7963,7 +8154,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .jnl-entry::before,
 #even-root  .jnl-entry::before,
 #odd-root   .jnl-entry::before,
-#nexus-root .jnl-entry::before,
 #under-root .jnl-entry::before,
 #risemr-root .jnl-entry::before,
 #fallmr-root .jnl-entry::before,
@@ -7979,7 +8169,6 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
 #differ-right .journal-list,
 #even-root  .journal-list,
 #odd-root   .journal-list,
-#nexus-root .journal-list,
 #under-root .journal-list,
 #risemr-root .journal-list,
 #fallmr-root .journal-list,
@@ -8405,7 +8594,7 @@ html.void .ahub-strategy-btn.active { background: rgba(255,255,255,0.07) !import
     // A bot can still be armed/configured when disabled, but its engage
     // action is blocked until this is checked again.
     botEnabled: (() => {
-      const defaults = { differ: true, even: true, odd: true, nexus: true, under: true };
+      const defaults = { differ: true, even: true, odd: true, under: true };
       try {
         const saved = JSON.parse(load('hub_bot_enabled', 'null'));
         return saved ? { ...defaults, ...saved } : defaults;
@@ -9785,32 +9974,6 @@ window.MarketIntelTerminal = (function () {
     };
   }
 
-  // Over/Under — scored at the standard barrier-4 split (Over 4: digits
-  // 5-9, Under 4: digits 0-3; digit 4 is the push zone, matching Deriv's
-  // default). A bot armed with a different barrier will see a slightly
-  // different real edge than this reference score shows — this registry
-  // scores a representative barrier, not each armed instance's own one,
-  // since the matrix is evaluated independent of any specific bot config.
-  // Wiring per-instance barriers through would mean passing `opts.barrier`
-  // from the bot's own getRecommendation() call — worth doing once
-  // Over/Under get real rotation logic (see note below).
-  function overUnderFitness(favorHigh) {
-    const side = favorHigh ? [5, 6, 7, 8, 9] : [0, 1, 2, 3];
-    const sideName = favorHigh ? 'high-half (5-9)' : 'low-half (0-3)';
-    return function (m) {
-      if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
-      const sideMass = side.reduce((a, d) => a + m.weightedPct[d], 0);
-      const baseline = favorHigh ? 50 : 40; // 5 digits vs 4 digits of "no-edge" mass
-      let score = 50 + (sideMass - baseline) * 1.3;
-      const reasons = [`${sideName} mass ${sideMass.toFixed(1)}%`, 'scored at reference barrier 4 — not this bot\u2019s configured barrier'];
-      const hotOnSide = m.hotDigits.filter((d) => side.includes(d)).length;
-      const coldOffSide = m.coldDigits.filter((d) => !side.includes(d)).length;
-      if (hotOnSide || coldOffSide) { score += hotOnSide * 4 + coldOffSide * 4; reasons.push(`${hotOnSide} hot-in-range / ${coldOffSide} cold-out-of-range digits`); }
-      if (m.velocitySpike) { score -= 10; reasons.push('tick velocity spike'); }
-      return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
-    };
-  }
-
   // Fallback for any bot ID that hasn't gotten a real fitness fn yet.
   function parityFitness(m) {
     if (!m.ready) return { score: 0, reasons: ['warming up — collecting ticks'] };
@@ -9855,7 +10018,6 @@ window.MarketIntelTerminal = (function () {
   registerFitness('odd', evenOddFitness(false));
   registerFitness('oldeven', evenOddFitness(true));
   registerFitness('oldodd', evenOddFitness(false));
-  registerFitness('nexus', overUnderFitness(true));   // Nexus tab = "Over"
   registerFitness('matches', matchesFitness);
   // Intel Auto-Trader runs its own fully-separate engine instances (see
   // ensureTitanEngine's `_intel` handling) so they never touch the
@@ -11938,7 +12100,7 @@ window.NexusTrading = exports;
         // NOTE: without a hard timeout fallback here, a failed FIRST
         // connection attempt (error/close before onopen ever fires) left
         // this promise unresolved forever — every engine sharing this
-        // socket (nexus/under/meanrev/risemr/fallmr/matches/oldrisefall)
+        // socket (under/meanrev/risemr/fallmr/matches/oldrisefall)
         // does `await globalSocket.connect()` before starting its scanner
         // or subscribing to any market, so a single bad first attempt
         // permanently froze all of them at startup with no digits, no
@@ -14305,7 +14467,6 @@ window.NexusStrategies=exports;
       this.onUpdate = null;
 
       this.config = this.loadConfig();
-      this._initOverZero();
       // Hard-exclusion sibling collision check (see ENGINE_SIBLING_MAP) —
       // runs once, right here at construction, so a freshly-built engine
       // never even STARTS on the same market as its sibling. This matters
@@ -14836,213 +14997,6 @@ window.NexusStrategies=exports;
       }
     }
 
-    // ══ OVER ZERO — rebuilt Over bot (nexus tab only) ═══════════════════
-    // Base trade: OVER 0 (wins on any digit but 0, ~90%). After a loss the
-    // gated martingale chain recovers on OVER ozRecBarrier (default 1),
-    // then the next session is back on OVER 0. Entry is its own system:
-    //   GATES   — every enabled gate must pass (zero frequency, zero-quiet
-    //             distance, low-digit clustering).
-    //   TRIGGER — then one trigger fires the trade: 'burst' (a run of
-    //             high-ish digits) or 'afterzero' (clean ticks after a 0).
-    get isOverZero() {
-      return this.mode === 'over' && this.id === 'nexus' && this.config.ozEnabled !== false;
-    }
-    _initOverZero() {
-      if (!(this.mode === 'over' && this.id === 'nexus')) return;
-      const c = this.config;
-      const d = {
-        ozEnabled: true, ozRecBarrier: 1,
-        ozWindow: 50, ozGateZero: true, ozZeroPctMax: 8,
-        ozGateQuiet: true, ozQuiet: 4,
-        ozGateLow: true, ozLowShareMax: 30,
-        ozTriggerMode: 'burst', ozTrigRun: 3, ozTrigMin: 2,
-        ozAfterZeroGap: 4, ozArmWindow: 20,
-        // ── Gated OVER 1 recovery (own entry + own trigger digits) ──
-        // After an OVER 0 loss the bot no longer fires the next martingale
-        // step blindly. It holds the escalated stake, re-analyses the
-        // market on EVERY tick with gates that recompute from live data
-        // (no fixed thresholds), and only fires OVER ozRecBarrier once the
-        // recovery-only trigger prints.
-        ozRecGated: true,       // master switch for the hold-and-wait behaviour
-        ozRecWindow: 60,        // rolling window the dynamic gates are measured over
-        ozRecTol: 0.5,          // z-score tolerance above fair-share (lower = stricter)
-        ozRecMinWait: 3,        // ticks of fresh post-loss data required before any fire
-        ozRecEntryDigits: '0,1',        // ENTRY digits: a print of one of these arms the setup
-        ozRecTrigDigits: '4,5,6,7,8,9', // TRIGGER digits: the rebound run must be made of these
-        ozRecTrigRun: 2,        // how many trigger digits in a row fire the trade
-        ozRecArmWindow: 12,     // setup stays armed this many ticks after the entry digit
-        ozRecGateIntel: true,   // consult Market Intel's live score for this market
-        ozRecRotateSec: 90,     // no recovery entry for this long → rotate market (state kept)
-      };
-      Object.keys(d).forEach((k) => { if (c[k] === undefined) c[k] = d[k]; });
-      // One-time migration: older saved configs carry the old OVER 5
-      // recovery barrier. Upgrade it to OVER 1 exactly once.
-      if (c.ozRecVer !== 2) { c.ozRecBarrier = 1; c.ozRecVer = 2; }
-      this._enforceOverZero();
-    }
-    _enforceOverZero() {
-      const c = this.config;
-      if (!(this.mode === 'over' && this.id === 'nexus')) return;
-      if (c.ozEnabled === false) return;
-      const rb = parseInt(c.ozRecBarrier, 10);
-      c.ozRecBarrier = isNaN(rb) ? 1 : Math.max(0, Math.min(8, rb));
-      c.overBarrier = 0;
-      c.recoveryBarrier = c.ozRecBarrier;
-      c.smartRecovery = false; c.alternatingRecovery = false; c.alternatingRecoveryB = false;
-      c.alternatingRecoveryC = false; c.alternatingRecoveryR = false;
-      c.barrierShuffle = false; c.recBarrierShuffle = false; c.altEntryEnabled = false;
-    }
-    _analyzeOverZero(history, fullHistory, tickPeriod) {
-      const base = this.T.analyzeDigits(history, tickPeriod, 0, false);
-      const c = this.config;
-      const num = (v, dflt) => { const n = parseFloat(v); return isNaN(n) ? dflt : n; };
-      const win = Math.max(20, Math.min(200, Math.round(num(c.ozWindow, 50))));
-      const data = fullHistory.slice(-win);
-      const n = data.length;
-      const zeroPct = n ? (data.filter((d) => d === 0).length / n) * 100 : 0;
-      let sinceZero = 0;
-      for (let i = fullHistory.length - 1; i >= 0 && fullHistory[i] !== 0; i--) sinceZero++;
-      const last20 = fullHistory.slice(-20);
-      const lowShare = last20.length ? (last20.filter((d) => d <= 1).length / last20.length) * 100 : 0;
-      const ready = n >= 20;
-      const zMax = num(c.ozZeroPctMax, 8), qMin = Math.max(0, Math.round(num(c.ozQuiet, 4))), lMax = num(c.ozLowShareMax, 30);
-      const gates = [
-        { id: 'zero', label: 'Zero freq', enabled: c.ozGateZero !== false, ok: zeroPct <= zMax, detail: `0 = ${zeroPct.toFixed(1)}% of ${n} (max ${zMax}%)` },
-        { id: 'quiet', label: 'Zero quiet', enabled: c.ozGateQuiet !== false, ok: sinceZero >= qMin, detail: `${sinceZero} ticks since last 0 (min ${qMin})` },
-        { id: 'low', label: 'Low-digit cluster', enabled: c.ozGateLow !== false, ok: lowShare <= lMax, detail: `0/1 = ${lowShare.toFixed(0)}% of last ${last20.length} (max ${lMax}%)` },
-      ];
-      const gatesOk = gates.every((g) => !g.enabled || g.ok);
-      let trigger;
-      if (c.ozTriggerMode === 'afterzero') {
-        const gap = Math.max(1, Math.round(num(c.ozAfterZeroGap, 4)));
-        const arm = Math.max(gap, Math.round(num(c.ozArmWindow, 20)));
-        const seenZero = sinceZero < fullHistory.length;
-        const ok = seenZero && sinceZero >= gap && sinceZero <= arm;
-        trigger = { mode: 'afterzero', ok, detail: seenZero ? `${sinceZero} clean ticks since a 0 (fires ${gap}–${arm})` : 'no 0 seen yet' };
-      } else {
-        const run = Math.max(1, Math.round(num(c.ozTrigRun, 3)));
-        const min = Math.max(1, Math.min(9, Math.round(num(c.ozTrigMin, 2))));
-        const tail = fullHistory.slice(-run);
-        const ok = tail.length >= run && tail.every((d) => d >= min);
-        trigger = { mode: 'burst', ok, detail: `last ${run} digits ${ok ? 'all' : 'not all'} ≥ ${min} [${tail.join(',')}]` };
-      }
-      const overZero = { ready, gates, gatesOk, trigger, zeroPct, sinceZero, lowShare, canEnter: ready && gatesOk && trigger.ok };
-      // While a recovery chain is open, also run the recovery-only analysis
-      // (its own gates + trigger) so the tick handler and the panel see it.
-      if (this.state && this.state.inRecovery && c.ozRecGated !== false) {
-        overZero.rec = this._analyzeOverZeroRecovery(fullHistory);
-      }
-      return { ...base, overZero };
-    }
-
-    // ── OVER ZERO RECOVERY ANALYSIS ───────────────────────────────────
-    // Runs on every tick while a recovery chain is open. Every threshold is
-    // DERIVED from live data each tick — nothing here is a fixed number you
-    // tuned once:
-    //   • Danger-digit frequency gate: share of losing digits (0..barrier)
-    //     over the rolling window must sit within `tol` standard errors of
-    //     the fair share. The allowed cap moves with window size and barrier.
-    //   • Drift gate: the last-20 share of losing digits must not be running
-    //     hotter than this market's own long-run share (≤200 ticks).
-    //   • Cluster-spacing gate: the last two losing digits must be separated
-    //     by at least half THIS market's own average gap between losing
-    //     digits — bunched-up 0/1s (a hot spell) block the trade.
-    //   • Market Intel gate: the market's live fitness score must stay within
-    //     85% of the best market the Terminal currently sees.
-    // TRIGGER (recovery-only digits): an ENTRY digit prints (default 0/1 —
-    // the digits that just beat the bot), then a run of TRIGGER digits
-    // (default 4-9) follows inside the arm window. That rebound is the shot.
-    _parseDigitSet(str, fallback) {
-      const out = new Set(String(str == null ? '' : str).split(/[^0-9]+/).filter((x) => x !== '').map((x) => parseInt(x, 10)).filter((n) => n >= 0 && n <= 9));
-      return out.size ? out : new Set(fallback);
-    }
-    _analyzeOverZeroRecovery(fullHistory) {
-      const c = this.config;
-      const num = (v, dflt) => { const n = parseFloat(v); return isNaN(n) ? dflt : n; };
-      const barrier = Math.max(0, Math.min(8, Math.round(num(c.ozRecBarrier, 1))));
-      const losingN = barrier + 1;                   // digits 0..barrier lose OVER barrier
-      const pFair = losingN / 10;
-      const win = Math.max(30, Math.min(200, Math.round(num(c.ozRecWindow, 60))));
-      const tol = Math.max(0, num(c.ozRecTol, 0.5));
-      const data = fullHistory.slice(-win);
-      const n = data.length;
-      const longData = fullHistory.slice(-200);
-      const losing = (d) => d <= barrier;
-      const share = n ? data.filter(losing).length / n : 0;
-      const se = Math.sqrt(pFair * (1 - pFair) / Math.max(n, 1));
-      const cap = pFair + tol * se;                  // dynamic ceiling (moves with window + barrier)
-      const longShare = longData.length ? longData.filter(losing).length / longData.length : pFair;
-      const last20 = fullHistory.slice(-20);
-      const shortShare = last20.length ? last20.filter(losing).length / last20.length : 0;
-      const se20 = Math.sqrt(Math.max(longShare, pFair) * (1 - Math.max(longShare, pFair)) / 20);
-      const driftCap = Math.max(longShare, pFair) + tol * se20;
-      // Cluster spacing: clean ticks between the LAST TWO losing digits. The
-      // required spacing is half this market's own average gap, so a hot
-      // market must show real separation and a calm one is barely asked.
-      // (Deliberately NOT "time since the last 0/1" — the rebound trigger
-      // needs a 0/1 to have printed recently, so those two would contradict.)
-      let lastIdx = -1, prevIdx = -1;
-      for (let i = fullHistory.length - 1; i >= 0; i--) {
-        if (losing(fullHistory[i])) { if (lastIdx < 0) lastIdx = i; else { prevIdx = i; break; } }
-      }
-      const spacing = (lastIdx >= 0 && prevIdx >= 0) ? (lastIdx - prevIdx - 1) : null;
-      const losingCount = data.filter(losing).length;
-      const avgGap = n / Math.max(1, losingCount);
-      const needQuiet = Math.max(1, Math.min(6, Math.round(avgGap * 0.5)));
-      // Ticks of fresh data since the losing trade settled
-      const sinceLoss = this._ozRecTicks || 0;
-      const minWait = Math.max(0, Math.round(num(c.ozRecMinWait, 3)));
-      const ready = n >= 30;
-
-      const gates = [
-        { id: 'wait', label: 'Post-loss analysis', enabled: true, ok: sinceLoss >= minWait, detail: `${sinceLoss}/${minWait} fresh ticks since the loss` },
-        { id: 'freq', label: `Dynamic 0-${barrier} freq`, enabled: true, ok: share <= cap, detail: `${(share * 100).toFixed(1)}% of ${n} ≤ live cap ${(cap * 100).toFixed(1)}% (fair ${(pFair * 100).toFixed(0)}% +${tol}σ)` },
-        { id: 'drift', label: 'Drift (short vs long)', enabled: true, ok: shortShare <= driftCap, detail: `last 20: ${(shortShare * 100).toFixed(0)}% ≤ ${(driftCap * 100).toFixed(0)}% (market baseline ${(longShare * 100).toFixed(0)}%)` },
-        { id: 'quiet', label: 'Cluster spacing', enabled: true, ok: spacing === null || spacing >= needQuiet, detail: spacing === null ? `no 0-${barrier} pair yet — clear` : `${spacing} clean ticks between last two 0-${barrier} (needs ${needQuiet} = ½ this market's avg gap ${avgGap.toFixed(1)})` },
-      ];
-
-      // Market Intel gate (optional, skipped cleanly when the Terminal is off)
-      let intel = { id: 'intel', label: 'Market Intel', enabled: false, ok: true, detail: 'Terminal off — skipped' };
-      if (c.ozRecGateIntel !== false) {
-        try {
-          const mit = window.MarketIntelTerminal;
-          if (mit && mit.isActive && mit.isActive()) {
-            const m = mit.getMatrix([this.id]).find((x) => x.botType === this.id);
-            const ranked = (m && m.ranked) || [];
-            const cur = ranked.find((r) => r.symbol === c.selectedMarket);
-            const top = ranked.reduce((b, r) => (r.metrics && r.metrics.ready && (!b || r.score > b.score)) ? r : b, null);
-            if (cur && cur.metrics && cur.metrics.ready && top) {
-              const floor = top.score * 0.85;
-              intel = { id: 'intel', label: 'Market Intel', enabled: true, ok: cur.score >= floor, detail: `score ${Math.round(cur.score)} vs best ${Math.round(top.score)} (needs ≥ ${Math.round(floor)})` };
-            } else intel.detail = 'Terminal still warming up — skipped';
-          }
-        } catch (e) { /* Terminal unavailable — gate skipped */ }
-      }
-      gates.push(intel);
-      const gatesOk = gates.every((g) => !g.enabled || g.ok);
-
-      // TRIGGER — recovery-only entry digits + trigger digits
-      const entrySet = this._parseDigitSet(c.ozRecEntryDigits, [0, 1]);
-      const trigSet = this._parseDigitSet(c.ozRecTrigDigits, [4, 5, 6, 7, 8, 9]);
-      const run = Math.max(1, Math.min(6, Math.round(num(c.ozRecTrigRun, 2))));
-      const arm = Math.max(run, Math.round(num(c.ozRecArmWindow, 12)));
-      let sinceEntry = 0, seenEntry = false;
-      for (let i = fullHistory.length - 1; i >= 0; i--) {
-        if (entrySet.has(fullHistory[i])) { seenEntry = true; break; }
-        sinceEntry++;
-      }
-      const tail = fullHistory.slice(-run);
-      const tailOk = tail.length >= run && tail.every((d) => trigSet.has(d));
-      const armed = seenEntry && sinceEntry >= run && sinceEntry <= arm;
-      const trigger = {
-        mode: 'rebound', ok: armed && tailOk,
-        detail: !seenEntry ? `waiting for entry digit [${[...entrySet].join(',')}]`
-          : !armed ? `entry digit ${sinceEntry} ticks ago (arm window ${run}–${arm})`
-          : `entry digit ${sinceEntry} ticks ago · last ${run} [${tail.join(',')}] ${tailOk ? '✓ all' : '✗ not all'} in [${[...trigSet].join(',')}]`,
-      };
-      return { barrier, ready, gates, gatesOk, trigger, sinceLoss, canEnter: ready && gatesOk && trigger.ok, share, cap, longShare };
-    }
-
     // The martingale stop-step actually in effect for the CURRENT session.
     // Stake Addition's boosted "Risk Session" (this._riskSessionActive)
     // trades at an intentionally higher stake than normal — letting the
@@ -15097,7 +15051,7 @@ window.NexusStrategies=exports;
     // 'oldeven' each carry their own residency/penalty/allocation state
     // even though they share the exact same fitness fn and TitanEngine
     // class, and the same is true for every other pair here (odd/oldodd,
-    // even/evenmr, nexus/under, meanrev/risemr/fallmr, etc).
+    // even/evenmr, meanrev/risemr/fallmr, etc).
     // Live market this bot's hard-exclusion sibling (if any — see
     // ENGINE_SIBLING_MAP) is currently sitting on, read straight off the
     // real engine instance so this is always the true, current answer and
@@ -15194,14 +15148,6 @@ window.NexusStrategies=exports;
 
     setConfig(partial) {
       this.config = { ...this.config, ...partial };
-      if (this.mode === 'over' && this.id === 'nexus') {
-        if (partial.ozEnabled === false) { this.config.overBarrier = 3; this.config.recoveryBarrier = 4; }
-        else if (this.config.ozEnabled !== false) {
-          if (partial.recoveryBarrier !== undefined && partial.ozRecBarrier === undefined) this.config.ozRecBarrier = partial.recoveryBarrier;
-          this._enforceOverZero();
-        }
-        if (this.scanner && this.scanner.setBarrier) this.scanner.setBarrier(this.config.overBarrier, false);
-      }
       // Belt-and-braces: Even/Odd has no strategy picker or Reversal
       // Trigger engine anymore, so nothing (including a stray old
       // localStorage value) can push it back into either.
@@ -15372,8 +15318,7 @@ window.NexusStrategies=exports;
         const history = fullHistory.slice(-tickPeriod);
         // Over 3 runs on the green/red-bar market-condition analysis instead
         // of streak counting — no streak to compute or gate on here at all.
-        const isOverZero = this.isOverZero;
-        const isOver3 = !isOverZero && this.mode === 'over' && this.config.overBarrier === 3;
+        const isOver3 = this.mode === 'over' && this.config.overBarrier === 3;
         // Under's own vice-versa version of Over 3, gated the same way —
         // only kicks in at Under's own default barrier (7) — so Under gets
         // the same quality of enhanced entry gate Over gets, without you
@@ -15384,14 +15329,7 @@ window.NexusStrategies=exports;
         const isOddStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'odd';
         const isEvenStrat = this.mode === 'evenodd' && this.fixedTradeMode === 'even';
         let streak = 0;
-        if (isOverZero && this.state.inRecovery && !this.state.isLocked) this._ozRecTicks = (this._ozRecTicks || 0) + 1;
-        if (isOverZero) {
-          // Clean run: consecutive trailing digits that are NOT 0 (wins at Over 0).
-          for (let i = fullHistory.length - 1; i >= 0; i--) {
-            if (fullHistory[i] > 0) streak++;
-            else break;
-          }
-        } else if (isOver3) {
+        if (isOver3) {
           // Under-zone (digit ≤ 3) streak — mean-reversion setup: wait for
           // a run of under-zone digits, then fire OVER once it ends
           // specifically on digit 1 or 3 (not 0 or 2), gated first by the
@@ -15493,9 +15431,6 @@ window.NexusStrategies=exports;
           // socket already — exactly the macro window this strategy wants)
           // rather than any bot-local buffer.
           result = window.EvenOddReversionAnalyzer.analyze(fullHistory, this.config);
-          this.analysis = result;
-        } else if (isOverZero) {
-          result = this._analyzeOverZero(history, fullHistory, tickPeriod);
           this.analysis = result;
         } else if (isOver3) {
           result = this.T.analyzeOver3Condition(history, tickPeriod, this.config.minStreak, this.config.minSignal);
@@ -15814,7 +15749,7 @@ window.NexusStrategies=exports;
         }
         const health = this.socket.getHealth(market);
         if (health && health.longTerm === 'POOR') { this.emit(); return; }
-        if (this.config.altEntryEnabled && !isOverZero) {
+        if (this.config.altEntryEnabled) {
           // ── ALT ENTRY ENGINE (Reversal Trigger) ───────────────────
           // Completely separate from every branch below. Two jobs:
           //  1) Cross-check the market: a 50-tick dominance read on
@@ -15890,71 +15825,6 @@ window.NexusStrategies=exports;
               ? 'Alt: learning reversal digit — need more samples'
               : `Alt: armed — waiting for digit ${rev.digit} (${Math.round(rev.reversalRate * 100)}%)`;
           }
-        } else if (isOverZero) {
-          // ── OVER ZERO: gates → trigger → fire OVER 0 ───────────────────
-          const oz = (result && result.overZero) || {};
-          if (this.state.inRecovery && this.config.ozRecGated !== false) {
-            // ── OVER ZERO RECOVERY: dynamic gates → rebound trigger → OVER <rec barrier> ──
-            const rz = oz.rec || {};
-            if (rz.canEnter) {
-              this._ozRecWaitStart = null;
-              this.strategyPhase = 'firing';
-              this.strategyWaitReason = `RECOVERY ENTRY — gates passed + trigger (${rz.trigger.detail}) → OVER ${this.config.recoveryBarrier}`;
-              this.addLog('win', 'REC-ENTRY', this.strategyWaitReason);
-              this.startChainExecution();
-              setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
-            } else {
-              this.strategyPhase = 'waiting';
-              const failed = (rz.gates || []).find((g) => g.enabled && !g.ok);
-              this.strategyWaitReason = !rz.ready ? 'Recovery: collecting ticks…'
-                : failed ? `REC GATE ✗ ${failed.label}: ${failed.detail}`
-                : `REC gates ✓ — waiting for trigger: ${rz.trigger.detail}`;
-              // Stalled on this market: rotate to the best-scoring one but KEEP the
-              // martingale step/stake — only where we look changes, not the recovery.
-              if (!this._ozRecWaitStart) this._ozRecWaitStart = Date.now();
-              const rotMs = Math.max(20, parseFloat(this.config.ozRecRotateSec) || 90) * 1000;
-              if (Date.now() - this._ozRecWaitStart > rotMs) {
-                const best = this.pickMarketViaTerminal(this.config.selectedMarket, {});
-                if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
-                  this.addLog('engine', 'MARKET', `⏱ Recovery: no clean entry on ${this.config.selectedMarket} in ${Math.round(rotMs / 1000)}s — moving to ${best.symbol} (step ${this.state.martingaleStep} + stake kept).`);
-                  this._ozRecTicks = 0;
-                  this._ozRecWaitStart = Date.now();
-                  this.setConfig({ selectedMarket: best.symbol });
-                  this.changeMarket(best.symbol);
-                  return;
-                }
-                this._ozRecWaitStart = Date.now();
-              }
-            }
-            this.emit();
-            return;
-          }
-          if (oz.canEnter) {
-            this._over3WaitStart = null;
-            this.strategyPhase = 'firing';
-            this.strategyWaitReason = `ENTRY — gates passed + trigger hit (${oz.trigger.detail}) → OVER ${this.config.overBarrier}`;
-            this.addLog('win', 'ENTRY', this.strategyWaitReason);
-            this.startChainExecution();
-            setTimeout(() => { this.strategyPhase = 'idle'; this.emit(); }, 2000);
-          } else {
-            this.strategyPhase = 'waiting';
-            const failed = (oz.gates || []).find((g) => g.enabled && !g.ok);
-            this.strategyWaitReason = !oz.ready ? 'Over Zero: collecting ticks…'
-              : failed ? `GATE ✗ ${failed.label}: ${failed.detail}`
-              : `Gates ✓ — waiting for trigger: ${oz.trigger.detail}`;
-            if (!this._over3WaitStart) this._over3WaitStart = Date.now();
-            if (Date.now() - this._over3WaitStart > 120000) {
-              const best = this.pickMarketViaTerminal(this.config.selectedMarket, {});
-              if (best && best.symbol && best.symbol !== this.config.selectedMarket) {
-                this.addLog('engine', 'MARKET', `⏱ Over Zero: no entry here in 2 min — rotating to ${best.symbol} (score: ${best.score || '?'}%)`);
-                this.setConfig({ selectedMarket: best.symbol });
-                this.changeMarket(best.symbol);
-              }
-              this._over3WaitStart = Date.now();
-            }
-          }
-          this.emit();
-          return;
         } else if (isOver3) {
           // New hybrid trigger: min percentage gate → wait for an
           // under-zone (≤3) streak of Min Streak length → fire OVER the
@@ -16628,7 +16498,7 @@ window.NexusStrategies=exports;
           // STEP 4 DEEP RECOVERY: for a 4-loss cap, the third recovery trade is
           // downgraded to the safest edge barrier (OVER 0 / UNDER 9) to improve
           // survival before the final fourth step.
-          if (st.martingaleStep === 3 && cfg.martingaleStopStep === 4 && !this.isOverZero) {
+          if (st.martingaleStep === 3 && cfg.martingaleStopStep === 4) {
             contractType = baseCT; barrierValue = this.isUnderMode ? 9 : 0;
             this.addLog('engine', 'SHIELD', `🛡 STEP 4 DEEP RECOVERY: ${baseWord} ${barrierValue} SHIELD ACTIVE`);
           }
@@ -17385,20 +17255,6 @@ window.NexusStrategies=exports;
           // WIN target reached → cooldown before next session
           this.addLog('win', 'ENGINE', `TARGET ${cfg.targetRuns} RUNS COMPLETE! Entering cooldown.`);
           this.completeSession(true);
-        } else if (st.inRecovery && this.isOverZero && cfg.ozRecGated !== false) {
-          // ── OVER ZERO: do NOT jump straight into the recovery trade ──
-          // Keep the escalated stake + martingale step, but release the lock
-          // so the tick handler re-analyses the market every tick with the
-          // dynamic recovery gates and fires OVER <recovery barrier> only
-          // when the recovery-only entry digit → trigger digits sequence
-          // prints (see _analyzeOverZeroRecovery).
-          this._ozRecTicks = 0;
-          this._ozRecWaitStart = Date.now();
-          this.executionGuard = false;
-          this.state = { ...this.state, isLocked: false };
-          this.strategyPhase = 'waiting';
-          this.strategyWaitReason = `Loss on step ${st.martingaleStep} — holding $${st.currentStake.toFixed(2)}; analysing before OVER ${cfg.ozRecBarrier}…`;
-          this.addLog('engine', 'REC-HOLD', `⏸ Loss — NOT firing recovery yet. Holding step ${st.martingaleStep} @ $${st.currentStake.toFixed(2)} while dynamic gates + trigger are analysed for OVER ${cfg.ozRecBarrier}.`);
         } else if (st.inRecovery) {
           // Still in recovery (loss, not at max step) → keep trading on martingale, NO cooldown
           const recMode = cfg.smartRecovery ? 'SMART' : cfg.alternatingRecovery ? 'ALT-A' : cfg.alternatingRecoveryB ? 'ALT-B' : cfg.alternatingRecoveryC ? 'ALT-C' : cfg.alternatingRecoveryR ? 'ALT-R' : 'PLAIN';
@@ -19572,53 +19428,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     });
   }
 
-  function ozLiveHtml(oz) {
-    if (!oz || !oz.gates) return '<span style="opacity:.6">Collecting ticks…</span>';
-    const row = (ok, text, off) => `<div style="color:${off ? 'hsl(var(--muted-foreground))' : ok ? 'hsl(var(--win))' : 'hsl(var(--loss))'}">${off ? '○' : ok ? '✓' : '✗'} ${text}</div>`;
-    if (oz.rec) {
-      const r = oz.rec;
-      return `<div style="font-weight:900;color:hsl(var(--primary));margin-bottom:4px">🔄 RECOVERY — gated OVER ${r.barrier} (live, re-measured every tick)</div>`
-        + r.gates.map((g) => row(g.ok, `${g.label}: ${g.detail}`, !g.enabled)).join('')
-        + row(r.trigger.ok, `Trigger (rebound): ${r.trigger.detail}`, false)
-        + `<div style="margin-top:4px;font-weight:900;color:${r.canEnter ? 'hsl(var(--win))' : 'hsl(var(--foreground)/0.7)'}">${r.canEnter ? `▶ FIRING OVER ${r.barrier}` : 'HOLDING — no recovery trade until every gate + trigger pass'}</div>`;
-    }
-    return oz.gates.map((g) => row(g.ok, `${g.label}: ${g.detail}`, !g.enabled)).join('')
-      + row(oz.trigger.ok, `Trigger (${oz.trigger.mode}): ${oz.trigger.detail}`, false)
-      + `<div style="margin-top:4px;font-weight:900;color:${oz.canEnter ? 'hsl(var(--win))' : 'hsl(var(--foreground)/0.7)'}">${oz.canEnter ? '▶ READY TO FIRE' : 'WAITING'}</div>`;
-  }
-
-  function renderOverZeroPanel(engine, rootId, snap) {
-    const c = snap.config;
-    const oz = snap.analysis && snap.analysis.overZero;
-    const num = (k, label, step) => `<div class="cp-input-group"><span class="cp-input-label">${label}</span><input class="cp-input" type="number" step="${step || 1}" min="0" id="${rootId}-oz-${k}" value="${c[k]}"></div>`;
-    const gsel = (k, label) => `<div class="cp-input-group"><span class="cp-input-label">${label}</span><select class="cp-input" id="${rootId}-oz-${k}" style="font-size:11px"><option value="on" ${c[k] !== false ? 'selected' : ''}>ON</option><option value="off" ${c[k] === false ? 'selected' : ''}>OFF</option></select></div>`;
-    const burst = c.ozTriggerMode !== 'afterzero';
-    const txt = (k, label) => `<div class="cp-input-group"><span class="cp-input-label">${label}</span><input class="cp-input" type="text" id="${rootId}-oz-${k}" value="${c[k] == null ? '' : c[k]}" placeholder="e.g. 0,1" style="font-size:11px"></div>`;
-    return `
-      <div class="cp-section-label">Over Zero · Base <span style="color:hsl(var(--primary));font-weight:900">OVER 0 (90% win)</span> · Recovery <span style="color:hsl(var(--primary));font-weight:900">OVER ${c.recoveryBarrier}</span> (set below)</div>
-      <div style="padding:10px;border-radius:12px;background:hsl(var(--primary)/0.06);border:1px solid hsl(var(--primary)/0.25);margin-bottom:12px">
-        <div class="cp-section-label" style="margin-top:0">🚧 Gate Entries — all enabled gates must pass</div>
-        <div class="cp-input-row">${num('ozWindow', 'Window (ticks)')}${gsel('ozGateZero', 'Zero-freq gate')}${num('ozZeroPctMax', 'Max 0 %', 0.5)}</div>
-        <div class="cp-input-row" style="margin-top:8px">${gsel('ozGateQuiet', 'Zero-quiet gate')}${num('ozQuiet', 'Min ticks since 0')}${gsel('ozGateLow', 'Low-digit gate')}</div>
-        <div class="cp-input-row" style="margin-top:8px">${num('ozLowShareMax', 'Max 0/1 % (last 20)')}</div>
-        <div class="cp-section-label" style="margin-top:12px">🎯 Trigger Entry — fires once gates pass</div>
-        <div class="cp-input-row">
-          <div class="cp-input-group"><span class="cp-input-label">Trigger</span><select class="cp-input" id="${rootId}-oz-ozTriggerMode" style="font-size:11px"><option value="burst" ${burst ? 'selected' : ''}>Burst — run of high digits</option><option value="afterzero" ${!burst ? 'selected' : ''}>After-zero — clean ticks after a 0</option></select></div>
-          ${burst ? num('ozTrigRun', 'Run length') + num('ozTrigMin', 'Each digit ≥') : num('ozAfterZeroGap', 'Fire after N ticks') + num('ozArmWindow', 'Arm window (ticks)')}
-        </div>
-        <div id="${rootId}-oz-live" style="margin-top:10px;font-size:10px;font-family:'DM Mono',monospace;line-height:1.5">${ozLiveHtml(oz)}</div>
-      </div>
-      <div style="padding:10px;border-radius:12px;background:hsl(var(--secondary)/0.06);border:1px solid hsl(var(--secondary)/0.3);margin-bottom:12px">
-        <div class="cp-section-label" style="margin-top:0">🔄 Gated Recovery — after a loss, analyse → wait → fire OVER ${c.recoveryBarrier}</div>
-        <div class="cp-input-row">${gsel('ozRecGated', 'Hold after loss')}${gsel('ozRecGateIntel', 'Market Intel gate')}${num('ozRecMinWait', 'Min fresh ticks')}</div>
-        <div class="cp-input-row" style="margin-top:8px">${num('ozRecWindow', 'Dynamic window')}${num('ozRecTol', 'Tolerance (σ)', 0.1)}${num('ozRecRotateSec', 'Rotate after (s)')}</div>
-        <div class="cp-section-label" style="margin-top:12px">🎯 Recovery entry + trigger digits (separate from OVER 0)</div>
-        <div class="cp-input-row">${txt('ozRecEntryDigits', 'Entry digits (arm)')}${txt('ozRecTrigDigits', 'Trigger digits')}</div>
-        <div class="cp-input-row" style="margin-top:8px">${num('ozRecTrigRun', 'Trigger run')}${num('ozRecArmWindow', 'Arm window (ticks)')}</div>
-        <div style="margin-top:8px;font-size:10px;opacity:.7;line-height:1.5">Gate limits are not fixed numbers — each tick they are recomputed from this market's live digit stats (fair-share ± tolerance σ, short-vs-long drift, ½ the market's own average gap, Market Intel score vs the best market). Live readout above switches to the recovery gates whenever a recovery is open.</div>
-      </div>`;
-  }
-
   function renderCenterConfig(engine, rootId, snap) {
     const { config: c, state: s, pendingTrade } = snap;
     const isOver = engine.mode === 'over';
@@ -19632,8 +19441,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     const os = (snap.analysis && snap.analysis.oddStrategy) || {};
     const markets = engine.T.MARKETS.map((m) => `<option value="${m.symbol}" ${m.symbol === c.selectedMarket ? 'selected' : ''}>${m.name}</option>`).join('');
     const winChance = isOver ? (9 - c.overBarrier) * 10 : isUnder ? c.overBarrier * 10 : 50;
-    const isOZ = isOver && !!engine.isOverZero;
-    const ozPanelHtml = isOZ ? renderOverZeroPanel(engine, rootId, snap) : '';
 
     const cpStreak = s.streak || 0;
     const cpRuns = s.currentRuns || 0;
@@ -19704,7 +19511,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       <div class="cp-section-label">Market</div>
       <select class="cp-input" id="${rootId}-market" style="margin-bottom:12px;font-size:11px">${markets}</select>
 
-      ${isOZ ? ozPanelHtml : isOU ? `
+      ${isOU ? `
       <div class="cp-section-label">${isUnder ? 'Under' : 'Over'} Barrier · Win ${winChance}% · <span style="color:hsl(var(--primary));font-weight:900">Active: ${c.overBarrier}</span></div>
       <div id="${rootId}-barriers" style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-bottom:14px">
         ${(isUnder ? [1,2,3,4,5,6,7,8,9] : [0,1,2,3,4,5,6,7,8]).map(b=>`<button class="cp-barrier-btn ${b===c.overBarrier?'selected':''}" data-barrier="${b}" style="
@@ -19839,17 +19646,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
 
         <div class="cp-section-label" style="margin-top:4px">Recovery Mode</div>
-        ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) ? (isOZ ? `
-        <div class="cp-mart-card selected" style="cursor:default">
-          <div class="cp-mart-card-row">
-            <span class="cp-mart-card-icon">🛡</span>
-            <div class="cp-mart-card-body">
-              <div class="cp-mart-card-title">Over Zero recovery (locked)</div>
-              <div class="cp-mart-card-desc">Loss on OVER 0 → hold the escalated stake, analyse with live dynamic gates, wait for the recovery trigger, then martingale on OVER ${c.recoveryBarrier} until a win and back to OVER 0. Alt/Smart flip patterns are disabled for this bot.</div>
-            </div>
-            <span class="cp-mart-card-dot"></span>
-          </div>
-        </div>` : engine.id.endsWith('_intel') ? `
+        ${(engine.mode === 'evenodd' || engine.isEvenOddMRMode || isOU) ? (engine.id.endsWith('_intel') ? `
         <div class="cp-mart-card selected" style="cursor:default">
           <div class="cp-mart-card-row">
             <span class="cp-mart-card-icon">🧠</span>
@@ -20105,16 +19902,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     };
     // Recovery barrier dropdown (over mode) — instant
     const recBarrierSel = el(`${rootId}-rec-barrier-sel`);
-    if (recBarrierSel) recBarrierSel.onchange = (e) => { const v = parseInt(e.target.value); engine.setConfig({ recoveryBarrier: v, ozRecBarrier: v }); };
-    // Over Zero panel — gates / trigger fields
-    if (engine.isOverZero) {
-      const numKeys = ['ozWindow','ozZeroPctMax','ozQuiet','ozLowShareMax','ozTrigRun','ozTrigMin','ozAfterZeroGap','ozArmWindow','ozRecMinWait','ozRecWindow','ozRecTol','ozRecRotateSec','ozRecTrigRun','ozRecArmWindow'];
-      ['ozRecEntryDigits','ozRecTrigDigits'].forEach((k) => { const inp = el(`${rootId}-oz-${k}`); if (inp) inp.onchange = (e) => { const v = String(e.target.value || '').replace(/[^0-9,\s]/g, '').trim(); if (v) engine.setConfig({ [k]: v }); else e.target.value = engine.config[k]; }; });
-      numKeys.forEach((k) => { const inp = el(`${rootId}-oz-${k}`); if (inp) inp.onchange = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) engine.setConfig({ [k]: v }); }; });
-      ['ozGateZero','ozGateQuiet','ozGateLow','ozRecGated','ozRecGateIntel'].forEach((k) => { const sel = el(`${rootId}-oz-${k}`); if (sel) sel.onchange = (e) => engine.setConfig({ [k]: e.target.value === 'on' }); });
-      const modeSel = el(`${rootId}-oz-ozTriggerMode`);
-      if (modeSel) modeSel.onchange = (e) => { engine.setConfig({ ozTriggerMode: e.target.value }); renderCenterConfig(engine, rootId, engine.getSnapshot()); };
-    }
+    if (recBarrierSel) recBarrierSel.onchange = (e) => { const v = parseInt(e.target.value); engine.setConfig({ recoveryBarrier: v }); };
     // Recovery mode cards — instant (binary switches, not numeric)
     ['plain','altA','altB','altC','altR','smart'].forEach(mode => {
       const card = el(`${rootId}-rmode-${mode}`);
@@ -21031,8 +20819,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     if (runs) runs.textContent = s.currentRuns;
     const reason = el(`${rootId}-wait-reason`);
     if (reason) reason.textContent = strategyWaitReason || (s.active ? 'Scanning for entry…' : 'Engine offline');
-    const ozLive = el(`${rootId}-oz-live`);
-    if (ozLive && snap.analysis && snap.analysis.overZero) ozLive.innerHTML = ozLiveHtml(snap.analysis.overZero);
     const fa = el(`${rootId}-flow-analyze`);
     const fw = el(`${rootId}-flow-wait`);
     const ff = el(`${rootId}-flow-fire`);
@@ -21257,7 +21043,6 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         differ: { label: 'Differ Bot', dot: 'hsl(var(--primary))' },
     even: { label: 'Even Bot', dot: 'hsl(var(--win))' },
     odd: { label: 'Odd Bot', dot: 'hsl(var(--primary-2))' },
-    nexus: { label: 'Over Bot', dot: 'hsl(var(--accent))' },
     matches: { label: 'Matches Bot', dot: 'hsl(var(--win))' },
     oldeven: { label: 'Even Bot (Old)', dot: 'hsl(var(--win))' },
     oldodd: { label: 'Odd Bot (Old)', dot: 'hsl(var(--primary-2))' },
@@ -22280,7 +22065,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // gate (a separate BOT_IDS list below) already counted its P&L toward
     // the take-profit/stop-loss total. Added here so the visible dashboard
     // totals/journal finally match what the gate was already enforcing.
-    const botIds = ['differ', 'even', 'odd', 'nexus', 'matches', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd'];
+    const botIds = ['differ', 'even', 'odd', 'matches', 'oldeven', 'oldodd', 'oldrisefall', 'bulktrade_evenodd'];
 
     let allEntries = [];
     let totalProfit = 0, totalWin = 0, totalLoss = 0, wonUSD = 0, lostUSD = 0;
@@ -26141,7 +25926,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // Master Control — ENGAGE ALL / TERMINATE ALL, the P&L gate, tab dots,
   // and the stake widget all silently skipped it. It's included now.
   const BOT_IDS
- = ['differ', 'even', 'odd', 'nexus', 'matches', 'oldeven', 'oldodd', 'oldrisefall',
+ = ['differ', 'even', 'odd', 'matches', 'oldeven', 'oldodd', 'oldrisefall',
     // Intel Auto-Trader bots (even_intel/matches_intel) — fully separate
     // TitanEngine instances (see ensureTitanEngine's isIntelVariant
     // handling) that were entirely missing from this list, which is why
@@ -26190,12 +25975,19 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     { v: 'light',    i: '⚪', label: 'Arctic'   },
   ];
 
-  const VALID_APPS = ['dashboard', 'even', 'odd', 'nexus', 'matches', 'oldeven', 'oldodd', 'oldrisefall', 'market', 'bulktrade'];
+  const VALID_APPS = ['dashboard', 'even', 'odd', 'matches', 'oldeven', 'oldodd', 'oldrisefall', 'market', 'bulktrade'];
+  // The Over (nexus) bot was removed — drop anything it persisted, once.
+  try {
+    if (!localStorage.getItem('hub_nexus_purged')) {
+      Object.keys(localStorage).filter((k) => /(^|[_-])nexus([_-]|$)/i.test(k) && !/^hub_nexus_purged$/.test(k)).forEach((k) => localStorage.removeItem(k));
+      localStorage.setItem('hub_nexus_purged', '1');
+    }
+  } catch (e) { /* storage unavailable — nothing to purge */ }
   let activeApp = localStorage.getItem('hub_active_app');
   if (!VALID_APPS.includes(activeApp)) activeApp = 'dashboard';
   let dashboardEl = null;
   let dashRenderQueued = false;
-  const engines = { even: null, odd: null, nexus: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null };
+  const engines = { even: null, odd: null, oldeven: null, oldodd: null, oldrisefall: null, bulktrade_evenodd: null };
   // Shared "is this bot currently engaged?" check for Master Control
   // (ENGAGE ALL / TERMINATE ALL) — each bot family speaks a different
   // dialect of "on": Hot Repeat has isArmed/isRunning, the Bulk Trade
@@ -26216,7 +26008,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // can still nudge a live Dashboard re-render on every scan tick/trade,
   // exactly like every Titan-class bot's own onUpdate hook does.
   window.__queueDashboardRender = queueDashboardRender;
-  const titanBuilt = { even: false, odd: false, nexus: false, oldeven: false, oldodd: false, oldrisefall: false };
+  const titanBuilt = { even: false, odd: false, oldeven: false, oldodd: false, oldrisefall: false };
 
   function queueDashboardRender() {
     if (dashRenderQueued) return;
@@ -26263,9 +26055,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // ids are driven from.
     const isIntelVariant = id === 'even_intel' || id === 'odd_intel' || id === 'matches_intel';
     const baseId = isIntelVariant ? id.replace(/_intel$/, '') : id;
-    const isOver = baseId === 'nexus';
     const isUnder = baseId === 'under';
-    const isOU = isOver || isUnder;
+    const isOU = isUnder;
     const isRiseFall = baseId === 'oldrisefall';
     // Rise MR and Fall MR are the same 'meanrev' mode/pipeline as Rise & Fall
     // MR — they share its socket, scanner, and UI module — but each is
@@ -27388,7 +27179,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   // when this button is pressed, across every tab at once.
   function saveAllSettings() {
     let savedAny = false;
-    ['even', 'odd', 'nexus', 'matches', 'oldeven', 'oldodd', 'oldrisefall'].forEach((id) => {
+    ['even', 'odd', 'matches', 'oldeven', 'oldodd', 'oldrisefall'].forEach((id) => {
       const eng = engines[id];
       if (eng && typeof eng.saveConfig === 'function') {
         try { eng.saveConfig(); savedAny = true; } catch (e) { console.error(`[Hub] ${id} save error:`, e); }
@@ -27582,12 +27373,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     // which tab is active — ticks/digits (and journal/stats tracking) should
     // be live the moment the page loads, not only after a tab is opened.
     // Trading sockets inside each engine still only open once a token is set
-    // in Settings. This used to only cover even/odd/nexus/under, which meant
+    // in Settings. This used to only cover even/odd/under, which meant
     // risefall/meanrev/matches had no engine instance (and so no
     // stats/journal) until their tab was opened at least once — including
     // them here fixes that.
     try {
-      ['even', 'odd', 'nexus', 'matches', 'oldeven', 'oldodd', 'oldrisefall']
+      ['even', 'odd', 'matches', 'oldeven', 'oldodd', 'oldrisefall']
         .forEach((id) => { try { ensureTitanEngine(id); } catch (e) { console.error(`[Hub] ensureTitanEngine(${id}) error:`, e); } });
     } catch(e) { console.error('[Hub] ensureTitanEngine error:', e); }
     // Intel Auto-Trader engines (even_intel/odd_intel/matches_intel) — see
@@ -27689,13 +27480,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   const BOT_META = {
     even:        { label: 'Even Omega',        icon: '🎯', status: 'auto' },
     odd:         { label: 'Odd Omega',         icon: '🎯', status: 'auto' },
-    nexus:       { label: 'Over (Nexus)',      icon: '📈', status: 'auto' },
     oldeven:     { label: 'Even Omega (Old)',  icon: '🎯', status: 'auto' },
     oldodd:      { label: 'Odd Omega (Old)',   icon: '🎯', status: 'auto' },
     matches:     { label: 'Matches',           icon: '🔢', status: 'auto' },
     oldrisefall: { label: 'Higher/Lower (Old)', icon: '📊', status: 'proxy' },
   };
-  const BOT_ORDER = ['even', 'odd', 'nexus', 'oldeven', 'oldodd', 'matches', 'oldrisefall'];
+  const BOT_ORDER = ['even', 'odd', 'oldeven', 'oldodd', 'matches', 'oldrisefall'];
   const STATUS_LABEL = { auto: 'auto-rotates', proxy: 'auto-rotates (generic proxy score)' };
 
   // ── Intel Auto-Trader ───────────────────────────────────────────────
@@ -27995,7 +27785,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       if (!eng) {
         statusHtml = `<div class="mit-auto-status-row"><span>Status</span><b>not loaded yet</b></div>`;
       } else if (!active) {
-        statusHtml = `<div class="mit-auto-status-row"><span>Status</span><b>idle — press Start</b></div>`;
+        statusHtml = `<div class="bk-pill-row"><span class="bk-pill idle"><i class="bk-dot"></i>IDLE</span></div><div class="bk-note">Press <b>START</b> — this bot scans for its pattern, then trades.</div>`;
       } else {
         const s = eng.state, c = eng.config;
         const wl = `${(s.stats && s.stats.win) || 0}W / ${(s.stats && s.stats.loss) || 0}L`;
@@ -28003,14 +27793,23 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         const pnlStr = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`;
         const info = autoBotScoreInfo(mit, id, c.selectedMarket);
         const scoreStr = info ? `${info.score}/100` : 'warming up';
-        const phaseLabel = s.isLocked ? (eng._isSacrificeTrade ? '🧪 test trade' : 'trading') : s.isCooldown ? 'cooldown' : 'watching for a pattern';
+        const phaseKey = s.isLocked ? 'trading' : s.isCooldown ? 'rest' : 'scan';
+        const phaseText = s.isLocked ? (eng._isSacrificeTrade ? 'TEST TRADE' : 'TRADING') : s.isCooldown ? 'COOLDOWN' : 'SCANNING';
+        const recPill = s.inRecovery ? `<span class="bk-pill rec">🔄 RECOVERY · STEP ${s.martingaleStep || 0}</span>` : '';
+        const tgt = Math.max(1, c.targetRuns || 1), cur = s.currentRuns || 0;
+        const runsPct = Math.min(100, Math.round((cur / tgt) * 100));
+        const scorePct = info ? Math.max(0, Math.min(100, Math.round(info.score))) : 0;
+        const qual = scorePct >= 65 ? ' qual' : '';
         statusHtml = `
-          <div class="mit-auto-status-row"><span>Market</span><b>${esc(c.selectedMarket || '—')} (score ${scoreStr})</b></div>
-          <div class="mit-auto-status-row"><span>Phase</span><b>${phaseLabel}</b></div>
-          <div class="mit-auto-status-row"><span>Run</span><b>${s.currentRuns || 0} / ${c.targetRuns || 1}</b></div>
-          <div class="mit-auto-status-row"><span>Stake</span><b>$${(s.currentStake || c.stake).toFixed(2)}</b></div>
-          <div class="mit-auto-status-row"><span>Result</span><b>${wl} (${pnlStr})</b></div>
-          ${info && info.reason ? `<div class="mit-auto-reason">Pattern: ${esc(info.reason)}</div>` : ''}`;
+          <div class="bk-pill-row"><span class="bk-pill ${phaseKey}"><i class="bk-dot"></i>${phaseText}</span>${recPill}</div>
+          <div class="bk-tiles">
+            <div class="bk-tile"><b class="${pnl >= 0 ? 'pos' : 'neg'}">${pnlStr}</b><span>P&amp;L</span></div>
+            <div class="bk-tile"><b>${(s.stats && s.stats.win) || 0}<small>W</small>${(s.stats && s.stats.loss) || 0}<small>L</small></b><span>RECORD</span></div>
+            <div class="bk-tile"><b>$${(s.currentStake || c.stake).toFixed(2)}</b><span>STAKE</span></div>
+          </div>
+          <div class="bk-bar-row"><span class="bk-bar-name" title="${esc(c.selectedMarket || '')}">${esc(c.selectedMarket || '—')}</span><div class="bk-bar"><div class="bk-bar-fill${qual}" style="width:${scorePct}%"></div></div><span class="bk-bar-pct${qual}">${info ? scorePct : '…'}</span></div>
+          <div class="bk-bar-row"><span class="bk-bar-name">Run ${cur}/${tgt}</span><div class="bk-bar"><div class="bk-bar-fill run" style="width:${runsPct}%"></div></div><span class="bk-bar-pct">${runsPct}%</span></div>
+          ${info && info.reason ? `<div class="bk-note"><b>Pattern</b> · ${esc(info.reason)}</div>` : ''}`;
       }
       setIfChanged(statusEl, statusHtml);
 
@@ -28793,7 +28592,7 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
   const RECOVERY_LABELS = Object.assign({}, BOT_META, {
     even_intel: { label: 'Even (Intel)' }, matches_intel: { label: 'Matches (Intel)' },
   });
-  const RECOVERY_BOT_IDS = ['even', 'odd', 'oldeven', 'oldodd', 'nexus', 'oldrisefall', 'matches', 'even_intel', 'matches_intel'];
+  const RECOVERY_BOT_IDS = ['even', 'odd', 'oldeven', 'oldodd', 'oldrisefall', 'matches', 'even_intel', 'matches_intel'];
   let recoveryFilterBotId = 'all';
 
   function recoveryLabel(id) { return (RECOVERY_LABELS[id] || {}).label || id; }
@@ -30017,6 +29816,12 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         // time after every cluster before another can fire (this is what
         // stops a losing cluster from being chased seconds later).
         entryCooldownSeconds: 45,
+        // Recovery Wait — the quiet time after a LOSING cluster that is still
+        // escalating (martingale step). Recovery used to inherit the full
+        // entryCooldownSeconds (45s) on EVERY step, so a 3-step recovery
+        // spent over two minutes just waiting. Fresh entries (after a win /
+        // run boundary) still use the long Wait Between Clusters.
+        recoveryCooldownSeconds: 3,
         // Two-gate entry pipeline (see _gateScan / _onTick).
         //  Gate 1 (market scan): trendWindow ticks decide each market's
         //   trend; a market needs >= minTrendPct of one parity to qualify.
@@ -30401,11 +30206,27 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
           : (r && r.warm && r.side === this._hunt.side && r.eligible);
         if (!this.running || this.standby) this._hunt = null;
         else if (!ok) { this.addLog('info', `↩ Gate 1: ${marketName(this._hunt.symbol)} no longer qualifies — dropping the lock and re-scanning.`); this._hunt = null; }
-        else if (now - this._hunt.lockedAt > 180000) { this.addLog('info', `↩ Gate 2: no ${this._hunt.trigger.digit} appeared for 3 minutes — re-scanning all markets.`); this._hunt = null; }
+        else if (now - this._hunt.lockedAt > (this._hunt.isRecoveryLock ? 45000 : 180000)) { this.addLog('info', `↩ Gate 2: no ${this._hunt.trigger.digit} appeared for 3 minutes — re-scanning all markets.`); this._hunt = null; }
       }
       const canHunt = this.running && !this.standby && !this.clusterActive && !this.isCooldown && !this._testInFlight && !this._skipArmed
         && now >= this.cooldownUntil;
       if (this._hunt) return;
+      // RECOVERY FAST-PATH — while a martingale recovery is open, retry the
+      // SAME market/side that just lost on every scan (instead of a one-shot
+      // attempt at settle time that fell back to a slow all-market re-scan
+      // whenever its entry digit wasn't live at that exact instant).
+      if (this.recoveryMode && this._lastHunt && canHunt) {
+        const lh = this._lastHunt;
+        const rr = ranked.find((x) => x.symbol === lh.symbol);
+        if (rr && rr.warm) {
+          const rterm = readTriggerTerminal(this.tick.getDigits(lh.symbol), G.hist, lh.side, G.trigSamples, G.trigRate, this.settleLag, G.maxLuck, G.familyMult);
+          if (rterm.trigger) {
+            this._hunt = { ...lh, trigger: rterm.trigger, term: { symbol: lh.symbol, ...rterm }, luck: rterm.luck, lag: rterm.lag, lockedAt: now, isRecoveryLock: true };
+            this.addLog('engine', `🔁 Recovery re-locked on ${marketName(lh.symbol)} (${lh.side.toUpperCase()}) — waiting for ENTRY DIGIT ${rterm.trigger.digit} to fire step ${this.martingaleStep} at $${this.currentStake.toFixed(2)}.`);
+            return;
+          }
+        }
+      }
       // Gate 1 → Gate 2. The terminal is ALWAYS read (even while stopped, resting
       // or in flight) so the pick can be observed; it only LOCKS when allowed.
       this.gates.term = null; this.gates.pick = null;
@@ -30518,6 +30339,11 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         if (!this.running || this.standby) { this._skipArmed = false; this._skipSignal = null; }
         else if (!this.clusterActive) this._fireSkipped('next tick printed');
         return;
+      }
+      if (this.recoveryMode && this.config.tradeType === 'evenodd' && !this._hunt && this.running && !this.standby && !this.clusterActive && !this.isCooldown
+        && Date.now() >= this.cooldownUntil && Date.now() - (this._lastRecScanAt || 0) >= 1000) {
+        this._lastRecScanAt = Date.now();
+        try { this._gateScan(); } catch (e) { /* the 2s poll will retry */ }
       }
       const h = this._hunt;
       if (!h || h.symbol !== symbol) return;
@@ -30813,7 +30639,13 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
       this.clusterActive = false;
       // Quiet time before the next cluster can fire — configurable, so a
       // losing cluster is never chased a few seconds later.
-      this.cooldownUntil = Date.now() + Math.max(5, parseInt(this.config.entryCooldownSeconds, 10) || 45) * 1000;
+      // Recovery steps get the short Recovery Wait; only fresh entries wait
+      // the full Wait Between Clusters (see recoveryCooldownSeconds above).
+      const _recWaitRaw = parseInt(this.config.recoveryCooldownSeconds, 10);
+      const _recWait = Math.max(1, isNaN(_recWaitRaw) ? 3 : _recWaitRaw);
+      this.cooldownUntil = Date.now() + (this.recoveryMode
+        ? _recWait
+        : Math.max(5, parseInt(this.config.entryCooldownSeconds, 10) || 45)) * 1000;
 
       let runLimitHit = false;
       if (runFinished) {
@@ -31575,6 +31407,9 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
         </div>
         <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Wait Between Clusters (s)</span><input class="cp-input" type="number" min="5" step="5" id="bt-entrycd" value="${c.entryCooldownSeconds ?? 45}"></div>
+          <div class="cp-input-group"><span class="cp-input-label">Recovery Wait (s)</span><input class="cp-input" type="number" min="1" step="1" id="bt-reccd" value="${c.recoveryCooldownSeconds ?? 3}"></div>
+        </div>
+        <div class="cp-input-row">
           <div class="cp-input-group"><span class="cp-input-label">Max Trigger Luck %</span><input class="cp-input" type="number" min="5" max="100" step="5" id="bt-maxluck" value="${c.maxTriggerLuckPct ?? 30}"></div>
         </div>
         <div class="cp-section-hint" style="margin-top:6px">
@@ -32025,6 +31860,8 @@ window.bindStakeAdditionTerminal = function bindStakeAdditionTerminal(engine, ro
     });
     const psMinLenEl = el('bt-psminlen', root);
     if (psMinLenEl && !psMinLenEl._bound) { psMinLenEl._bound = true; psMinLenEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 2 && v <= 12) eng.setConfig({ minStreakLength: v }); }; }
+    const recCdEl = el('bt-reccd', root);
+    if (recCdEl && !recCdEl._bound) { recCdEl._bound = true; recCdEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 1) eng.setConfig({ recoveryCooldownSeconds: v }); }; }
     const entryCdEl = el('bt-entrycd', root);
     if (entryCdEl && !entryCdEl._bound) { entryCdEl._bound = true; entryCdEl.onchange = (e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 5) eng.setConfig({ entryCooldownSeconds: v }); }; }
     const psMinSamplesEl = el('bt-psminsamples', root);
